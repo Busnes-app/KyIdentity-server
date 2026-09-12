@@ -262,9 +262,11 @@ type RemoteAccount struct {
 	Active                                       bool
 }
 
-// Bounded trims every target-supplied text field to remoteTextLimit runes.
+// Bounded trims every target-supplied text field to RemoteTextLimit runes. IDs are
+// never trimmed: a truncated identifier would be stored and later resolved as a
+// different resource, so the listing rejects overlong ones instead.
 func (a RemoteAccount) Bounded() RemoteAccount {
-	a.ID, a.ExternalID, a.UserName, a.DisplayName, a.Email = boundRemoteText(a.ID), boundRemoteText(a.ExternalID), boundRemoteText(a.UserName), boundRemoteText(a.DisplayName), boundRemoteText(a.Email)
+	a.UserName, a.DisplayName, a.Email = boundRemoteText(a.UserName), boundRemoteText(a.DisplayName), boundRemoteText(a.Email)
 	return a
 }
 
@@ -273,7 +275,7 @@ type RemoteGroup struct {
 }
 
 func (g RemoteGroup) Bounded() RemoteGroup {
-	g.ID, g.ExternalID, g.DisplayName = boundRemoteText(g.ID), boundRemoteText(g.ExternalID), boundRemoteText(g.DisplayName)
+	g.DisplayName = boundRemoteText(g.DisplayName)
 	return g
 }
 
@@ -316,15 +318,15 @@ type DriftReport struct {
 
 const driftSample = 100
 
-// remoteTextLimit bounds any target-supplied text kept in memory or in a report.
-const remoteTextLimit = 128
+// RemoteTextLimit bounds any target-supplied text kept in memory or in a report.
+const RemoteTextLimit = 128
 
 func boundRemoteText(s string) string {
-	if utf8.RuneCountInString(s) <= remoteTextLimit {
+	if utf8.RuneCountInString(s) <= RemoteTextLimit {
 		return s
 	}
 	runes := []rune(s)
-	return string(runes[:remoteTextLimit])
+	return string(runes[:RemoteTextLimit])
 }
 
 func appendDrift(list *[]DriftEntry, count *int, e DriftEntry) {

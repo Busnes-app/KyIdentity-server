@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,5 +219,72 @@ func TestReconcileJobUnsupportedForSuiteWebhook(t *testing.T) {
 	}
 	if _, err := s.ClaimReconcileJob(time.Minute); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReconcileJobRejectsOverlongRemoteIDs(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	revoked := &store.User{ID: uuid.NewString(), Username: "revoked", DisplayName: "revoked", Email: "revoked@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	adopted := &store.User{ID: uuid.NewString(), Username: "adopted", DisplayName: "adopted", Email: "adopted@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	for _, x := range []*store.User{revoked, adopted} {
+		if err := s.CreateUser(x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, x := range []*store.User{u, revoked} {
+		if err := s.SetAppAssignment(app.ID, "users", x.ID, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	drain(t, e)
+	if err := s.SetAppAssignment(app.ID, "users", revoked.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	// adopted has access but no mapping yet: a complete repair would link it to
+	// whatever the target lists under its externalId.
+	if err := s.SetAppAssignment(app.ID, "users", adopted.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The target reactivates the revoked account and lists a 140-rune id next to
+	// another id that is exactly its first 128 runes.
+	long := strings.Repeat("é", 140)
+	prefix := string([]rune(long)[:128])
+	remote.mu.Lock()
+	for id, r := range remote.users {
+		if r.ExternalID == revoked.ID {
+			r.Active = true
+			remote.users[id] = r
+		}
+	}
+	remote.users[long] = scim.User{ID: long, ExternalID: adopted.ID, UserName: "adopted", Active: true}
+	remote.users[prefix] = scim.User{ID: prefix, ExternalID: "nobody", UserName: "other", Active: true}
+	remote.mu.Unlock()
+
+	report := runJob(t, e, s, sys.ID, "repair")
+	if report.Complete || report.Repaired || report.ListingError == "" {
+		t.Fatalf("overlong id accepted: %+v", report)
+	}
+	if remoteID, started, err := s.SCIMUserLink(sys.ID, adopted.ID); err != nil || started || remoteID != "" {
+		t.Fatalf("linked through a truncated id: %q %v %v", remoteID, started, err)
+	}
+	pending, err := s.GetPendingSyncEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range pending {
+		if ev.UserID == revoked.ID {
+			t.Fatalf("deactivation queued from an incomplete run: %+v", ev)
+		}
 	}
 }

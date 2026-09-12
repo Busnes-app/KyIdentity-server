@@ -307,7 +307,7 @@ func TestReconcileReportBoundsRemoteText(t *testing.T) {
 		t.Fatalf("%+v", report)
 	}
 	for _, e := range report.Orphaned {
-		if utf8.RuneCountInString(e.Username) > remoteTextLimit {
+		if utf8.RuneCountInString(e.Username) > RemoteTextLimit {
 			t.Fatalf("unbounded remote username retained: %d runes", utf8.RuneCountInString(e.Username))
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Busness-app/ky-primitives/scim"
 	"github.com/Busness-app/kysignon-server/internal/store"
@@ -35,8 +36,8 @@ type listedResource struct {
 }
 
 // listSCIMCollection reads a whole collection page by page. Any page that fails, a total
-// that changes underneath the walk, a short page, or duplicate IDs makes the listing
-// incomplete; the caller then records what it saw and infers nothing destructive.
+// that changes underneath the walk, a short page, or a duplicate or overlong ID makes
+// the listing incomplete; the caller then records what it saw and infers nothing destructive.
 func (e *Engine) listSCIMCollection(ctx context.Context, c *scim.Client, collection string) ([]listedResource, error) {
 	if err := validateSCIMConfig(c.BaseURL, c.Token); err != nil {
 		return nil, err
@@ -77,7 +78,7 @@ func (e *Engine) listSCIMCollection(ctx context.Context, c *scim.Client, collect
 			return out, fmt.Errorf("%w: collection exceeds %d resources", scim.ErrMalformedResponse, listingMax)
 		}
 		for _, r := range page.Resources {
-			if r.ID == "" || seen[r.ID] {
+			if r.ID == "" || seen[r.ID] || utf8.RuneCountInString(r.ID) > store.RemoteTextLimit || utf8.RuneCountInString(r.ExternalID) > store.RemoteTextLimit {
 				return out, scim.ErrMalformedResponse
 			}
 			seen[r.ID] = true
