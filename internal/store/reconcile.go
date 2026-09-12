@@ -465,7 +465,8 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 		switch {
 		case !linked:
 			// Written through a disputed mapping, a repair could reach the wrong account.
-		case wanted && (!remote.Active || remote.UserName != u.Username || remote.DisplayName != u.DisplayName || remote.Email != u.Email):
+		// The listing is bounded, so compare against equally bounded local values.
+		case wanted && (!remote.Active || remote.UserName != boundRemoteText(u.Username) || remote.DisplayName != boundRemoteText(u.DisplayName) || remote.Email != boundRemoteText(u.Email)):
 			appendDrift(&report.Stale, &report.StaleCount, DriftEntry{ID: u.ID, Username: u.Username, Reason: "attributes differ"})
 			if repair {
 				payload, err := scimUserPayload(u, true)

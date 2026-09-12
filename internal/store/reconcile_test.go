@@ -411,3 +411,35 @@ func TestRetryProvisioningRequeuesDesiredState(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReconcileDriftComparesBoundedText(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	app := provisioningFixture(t, s, "target")
+	u := createTestUserNamed(t, s, "long")
+	u.DisplayName = strings.Repeat("é", 200)
+	if err := s.UpdateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	if _, err := s.db.Exec(`DELETE FROM account_sync_events`); err != nil {
+		t.Fatal(err)
+	}
+	// The target holds exactly what was delivered; only the listing is bounded.
+	listing := RemoteListing{Supported: true, Complete: true, Users: []RemoteAccount{
+		RemoteAccount{ID: "r-long", ExternalID: u.ID, UserName: u.Username, DisplayName: u.DisplayName, Email: u.Email, Active: true}.Bounded(),
+	}}
+	report, err := s.ReconcileDrift("target", listing, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.StaleCount != 0 {
+		t.Fatalf("bounded listing reported stale: %+v", report)
+	}
+	if got := pendingFor(t, s, "target", u.ID); len(got) != 0 {
+		t.Fatal("false stale queued a repair", got)
+	}
+}
