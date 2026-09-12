@@ -39,14 +39,14 @@ func TestSyncDeliveryRecoveryRequiresStepUpAndConfirmation(t *testing.T) {
 	}
 	// A local credential failure exercises the failed probe without sending a token
 	// to an external service. Its error/credential text must never enter audit details.
-	if err := db.ConfigureSystem(sys.ID, "suite_webhook", "scim", "sensitive-credential-fixture", false, nil); err != nil {
+	if err := db.ConfigureSystem(sys.ID, "suite_webhook", "scim", "sensitive-credential-fixture", false, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	rr = adminRequest(t, srv, "POST", base+"/"+events[0].ClaimToken+"/read-back", cookie, "")
 	if rr.Code != 502 {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
-	if err := db.ConfigureSystem(sys.ID, "scim", "suite_webhook", "", false, nil); err != nil {
+	if err := db.ConfigureSystem(sys.ID, "scim", "suite_webhook", "", false, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	path := base + "/" + events[0].ClaimToken + "/resume"

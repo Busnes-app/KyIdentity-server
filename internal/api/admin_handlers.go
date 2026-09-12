@@ -995,6 +995,8 @@ func (h *AdminHandler) ConfigureSystem(w http.ResponseWriter, r *http.Request) {
 		SystemType  string `json:"systemType"`
 		BearerToken string `json:"bearerToken"`
 		Groups      *bool  `json:"groups"`
+		// ReconcileHours schedules repair reconciliation; omitted keeps the current value.
+		ReconcileHours *int `json:"reconcileHours"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
 		http.Error(w, `{"error":"invalid_request"}`, 400)
@@ -1014,9 +1016,13 @@ func (h *AdminHandler) ConfigureSystem(w http.ResponseWriter, r *http.Request) {
 	if req.Groups != nil {
 		groups = *req.Groups
 	}
+	hours := sys.ReconcileHours
+	if req.ReconcileHours != nil {
+		hours = *req.ReconcileHours
+	}
 	admin := GetUserFromContext(r.Context())
-	event := h.audit.Prepare("admin.system_configured", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"systemName": sys.Name, "systemType": req.SystemType, "groups": groups})
-	if err = h.syncEngine.ReviewSystem(sys, req.SystemType, req.BearerToken, groups, event.Row); err != nil {
+	event := h.audit.Prepare("admin.system_configured", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"systemName": sys.Name, "systemType": req.SystemType, "groups": groups, "reconcileHours": hours})
+	if err = h.syncEngine.ReviewSystem(sys, req.SystemType, req.BearerToken, groups, hours, event.Row); err != nil {
 		protocol := req.SystemType
 		if protocol != "scim" && protocol != "suite_webhook" {
 			protocol = "invalid"

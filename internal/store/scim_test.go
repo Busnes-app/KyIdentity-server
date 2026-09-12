@@ -74,7 +74,7 @@ func TestSCIMConfigurationAuditRollback(t *testing.T) {
 	if _, err := s.db.Exec(`CREATE TRIGGER reject_scim_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
 		t.Fatal(err)
 	}
-	err := s.ConfigureSystem(sys.ID, "custom", "scim", "replacement", false, &AuditEvent{ID: "audit", Action: "admin.system_configured"})
+	err := s.ConfigureSystem(sys.ID, "custom", "scim", "replacement", false, 0, &AuditEvent{ID: "audit", Action: "admin.system_configured"})
 	if err == nil {
 		t.Fatal("configuration succeeded without audit")
 	}

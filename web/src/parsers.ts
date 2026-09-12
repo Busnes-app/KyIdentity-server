@@ -22,6 +22,11 @@ import type {
   OAuthClient,
   PairedSystem,
   Passkey,
+  ProvisioningRow,
+  ProvisioningEvent,
+  ReconcileJob,
+  DriftReport,
+  DriftEntry,
   User,
 } from './types';
 import type { BeginLogin, BeginRegistration } from './webauthn';
@@ -261,6 +266,7 @@ export function parsePairedSystems(value: unknown): PairedSystem[] {
       lastSyncedAt: optStr(s, 'lastSyncedAt'),
       createdAt: optStr(s, 'createdAt') ?? '',
       groupsEnabled: bool(s, 'groupsEnabled'),
+      reconcileHours: s.reconcileHours === undefined ? 0 : directoryCount(s, 'reconcileHours'),
     };
   });
 }
@@ -558,4 +564,43 @@ export function parseSyncReadBack(value: unknown): string {
       return `Matching remote user ${str(row, 'remoteId')} was observed. Inspect its attributes in the receiving service.`;
     default: return fail('read-back state');
   }
+}
+
+function parseProvisioningEvent(value: unknown): ProvisioningEvent {
+  const e = obj(value, 'a provisioning event');
+  return { type: str(e, 'type'), status: oneOf(e, 'status', ['pending', 'delivered', 'failed']), error: optStr(e, 'error'),
+    attempts: directoryCount(e, 'attempts'), nextAttemptAt: optStr(e, 'nextAttemptAt'), updatedAt: str(e, 'updatedAt') };
+}
+export function parseProvisioningPage(value: unknown): DirectoryPage<ProvisioningRow> {
+  return directoryPage(value, 'users', item => {
+    const u = obj(item, 'a provisioning row');
+    return { userId: str(u, 'userId'), username: str(u, 'username'), displayName: str(u, 'displayName'),
+      desired: requiredBool(u, 'desired'), recorded: requiredBool(u, 'recorded'), acknowledged: requiredBool(u, 'acknowledged'),
+      observed: oneOf(u, 'observed', ['', 'present_active', 'present_inactive', 'absent', 'unsupported']), observedAt: optStr(u, 'observedAt'),
+      revision: directoryCount(u, 'revision'), blocked: requiredBool(u, 'blocked'),
+      lastEvent: u.lastEvent == null ? undefined : parseProvisioningEvent(u.lastEvent) };
+  });
+}
+
+function parseDriftEntry(value: unknown): DriftEntry {
+  const e = obj(value, 'a drift entry');
+  return { id: str(e, 'id'), username: optStr(e, 'username'), reason: str(e, 'reason') };
+}
+function parseDriftReport(value: unknown): DriftReport {
+  const r = obj(value, 'a drift report');
+  return { supported: requiredBool(r, 'supported'), complete: requiredBool(r, 'complete'), repaired: requiredBool(r, 'repaired'),
+    listedUsers: directoryCount(r, 'listedUsers'), unrelated: directoryCount(r, 'unrelated'),
+    missingCount: directoryCount(r, 'missingCount'), staleCount: directoryCount(r, 'staleCount'), orphanedCount: directoryCount(r, 'orphanedCount'),
+    missing: list(r.missing, parseDriftEntry), stale: list(r.stale, parseDriftEntry), orphaned: list(r.orphaned, parseDriftEntry),
+    groupsRequeued: directoryCount(r, 'groupsRequeued'), groupsOrphaned: directoryCount(r, 'groupsOrphaned'), listingError: optStr(r, 'listingError') };
+}
+export function parseReconcileJob(value: unknown): ReconcileJob {
+  const j = obj(obj(value, 'a reconcile job response').job, 'a reconcile job');
+  return { id: str(j, 'id'), systemId: str(j, 'systemId'), kind: oneOf(j, 'kind', ['preview', 'repair']),
+    status: oneOf(j, 'status', ['queued', 'running', 'done', 'failed']), requestedBy: str(j, 'requestedBy'),
+    attempts: directoryCount(j, 'attempts'), createdAt: str(j, 'createdAt'), startedAt: optStr(j, 'startedAt'), finishedAt: optStr(j, 'finishedAt'),
+    error: optStr(j, 'error'), result: j.result == null ? undefined : parseDriftReport(j.result) };
+}
+export function parseReconcileJobs(value: unknown): ReconcileJob[] {
+  return list(obj(value, 'a reconcile jobs response').jobs, job => parseReconcileJob({ job }));
 }

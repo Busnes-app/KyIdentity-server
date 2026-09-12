@@ -293,15 +293,15 @@ func (e *Engine) TestSystem(ctx context.Context, sys *store.PairedSystem) error 
 // ReviewSystem permits an explicit choice for legacy custom connectors, token
 // replacement for SCIM, and the SCIM group-delivery flag. An established SCIM connector
 // keeps its token when none is supplied. Suite protocols cannot be switched or deliver groups.
-func (e *Engine) ReviewSystem(sys *store.PairedSystem, kind, token string, groups bool, audit *store.AuditEvent) error {
+func (e *Engine) ReviewSystem(sys *store.PairedSystem, kind, token string, groups bool, reconcileHours int, audit *store.AuditEvent) error {
 	if kind != "scim" && kind != "suite_webhook" {
 		return errors.New("choose scim or suite_webhook")
 	}
 	if supportedSystemType(sys.SystemType) && sys.SystemType != kind {
 		return errors.New("an established connector cannot change protocol")
 	}
-	if groups && kind != "scim" {
-		return errors.New("group delivery requires a generic SCIM connector")
+	if (groups || reconcileHours > 0) && kind != "scim" {
+		return errors.New("group delivery and reconciliation require a generic SCIM connector")
 	}
 	encrypted := sys.HMACSecretEncrypted
 	if kind == "scim" && (token != "" || sys.SystemType != "scim") {
@@ -316,5 +316,5 @@ func (e *Engine) ReviewSystem(sys *store.PairedSystem, kind, token string, group
 	} else if kind != "scim" && token != "" {
 		return errors.New("suite webhook retains its existing signing secret")
 	}
-	return e.store.ConfigureSystem(sys.ID, sys.SystemType, kind, encrypted, groups, audit)
+	return e.store.ConfigureSystem(sys.ID, sys.SystemType, kind, encrypted, groups, reconcileHours, audit)
 }

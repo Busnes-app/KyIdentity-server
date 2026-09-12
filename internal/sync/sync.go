@@ -563,6 +563,7 @@ func (e *Engine) StartWorker(ctx context.Context) {
 	defer ticker.Stop()
 	reconcile := time.NewTicker(time.Minute)
 	defer reconcile.Stop()
+	go e.reconcileWorker(ctx)
 
 	for {
 		select {
@@ -571,6 +572,9 @@ func (e *Engine) StartWorker(ctx context.Context) {
 		case <-reconcile.C:
 			if err := e.store.ReconcileProvisioning(); err != nil && ctx.Err() == nil {
 				log.Printf("provisioning reconcile failed: %v", err)
+			}
+			if err := e.store.ScheduleReconcileJobs(time.Now().UTC()); err != nil && ctx.Err() == nil {
+				log.Printf("reconciliation scheduling failed: %v", err)
 			}
 		case <-ticker.C:
 			if err := e.DispatchPendingEvents(ctx); err != nil && ctx.Err() == nil {

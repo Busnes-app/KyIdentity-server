@@ -50,6 +50,8 @@ type PairedSystem struct {
 	CreatedAt           time.Time  `json:"createdAt"`
 	// GroupsEnabled delivers SCIM Groups; only generic SCIM connectors may opt in.
 	GroupsEnabled bool `json:"groupsEnabled"`
+	// ReconcileHours schedules a repair reconciliation at this interval; 0 disables it.
+	ReconcileHours int `json:"reconcileHours"`
 }
 
 type AccountSyncEvent struct {

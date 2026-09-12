@@ -22,8 +22,11 @@ var ErrLastActiveAdmin = errors.New("cannot remove the last active administrator
 
 // New opens the SQLite database and creates the schema.
 func New(dbPath string) (*Store, error) {
-	// Enable WAL mode, busy timeout, and foreign keys in DSN
-	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)", dbPath)
+	// Enable WAL mode, busy timeout, and foreign keys in DSN. Transactions begin
+	// IMMEDIATE: a deferred transaction that reads and then writes cannot wait out a
+	// concurrent writer and fails with SQLITE_BUSY at the upgrade instead, which the
+	// dispatcher, the reconcile worker and request handlers would otherwise hit.
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_txlock=immediate", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
@@ -371,7 +374,10 @@ func (s *Store) migrate() error {
 	if err := s.migrateEnrollmentPolicy(); err != nil {
 		return err
 	}
-	return s.migrateProvisioning()
+	if err := s.migrateProvisioning(); err != nil {
+		return err
+	}
+	return s.migrateReconcile()
 }
 
 // migrateSyncEventLease adds the delivery lease column to pre-existing databases.
@@ -984,9 +990,9 @@ func (s *Store) CreatePairedSystem(ps *PairedSystem) error {
 }
 
 func (s *Store) GetPairedSystemByID(id string) (*PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled FROM paired_systems WHERE id = ?`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems WHERE id = ?`
 	ps := &PairedSystem{}
-	err := s.db.QueryRow(query, id).Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled)
+	err := s.db.QueryRow(query, id).Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -994,7 +1000,7 @@ func (s *Store) GetPairedSystemByID(id string) (*PairedSystem, error) {
 }
 
 func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled FROM paired_systems ORDER BY created_at ASC`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems ORDER BY created_at ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -1004,7 +1010,7 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 	var systems []PairedSystem
 	for rows.Next() {
 		var ps PairedSystem
-		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled); err != nil {
+		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours); err != nil {
 			return nil, err
 		}
 		systems = append(systems, ps)
@@ -1013,7 +1019,7 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 }
 
 func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled FROM paired_systems WHERE status != 'disabled' ORDER BY created_at ASC`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems WHERE status != 'disabled' ORDER BY created_at ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -1023,7 +1029,7 @@ func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
 	var systems []PairedSystem
 	for rows.Next() {
 		var ps PairedSystem
-		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled); err != nil {
+		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours); err != nil {
 			return nil, err
 		}
 		systems = append(systems, ps)

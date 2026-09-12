@@ -1,4 +1,5 @@
 import { SyncDeliveries } from './SyncDeliveries';
+import { ProvisioningState } from './ProvisioningState';
 import React, { useEffect, useState } from 'react';
 import { PairedSystem } from '../types';
 import { apiJson, apiRequest, errorMessage } from '../api';
@@ -54,6 +55,7 @@ const PRESET_METADATA: Record<
 
 export const AdminSystems: React.FC = () => {
   const [deliverySystem, setDeliverySystem] = useState<PairedSystem | null>(null);
+  const [provisioningSystem, setProvisioningSystem] = useState<PairedSystem | null>(null);
   const [systems, setSystems] = useState<PairedSystem[]>([]);
 
   // Modal State
@@ -67,6 +69,7 @@ export const AdminSystems: React.FC = () => {
   const [callbackUrl, setCallbackUrl] = useState('');
   const [bearerToken, setBearerToken] = useState('');
   const [groups, setGroups] = useState(false);
+  const [reconcileHours, setReconcileHours] = useState(0);
   const [editing, setEditing] = useState<PairedSystem | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -110,7 +113,7 @@ export const AdminSystems: React.FC = () => {
       if (editing) {
         const path = `/api/admin/systems/${editing.id}/connection`;
         const grant = await requestGrant(`Update the connection for '${editing.name}'?`, `PUT ${path}`);
-        await apiRequest(path, { method: 'PUT', stepUpToken: grant, body: JSON.stringify({ systemType, bearerToken, groups }) });
+        await apiRequest(path, { method: 'PUT', stepUpToken: grant, body: JSON.stringify({ systemType, bearerToken, groups, reconcileHours }) });
         handleCloseModal();
         return;
       }
@@ -154,6 +157,7 @@ export const AdminSystems: React.FC = () => {
     setEditing(null);
     setBearerToken('');
     setGroups(false);
+    setReconcileHours(0);
     setCreatedToken(null);
     fetchSystems();
   };
@@ -194,7 +198,7 @@ export const AdminSystems: React.FC = () => {
   const openConnection = (s: PairedSystem) => {
     setEditing(s); setSystemType(s.systemType === 'scim' ? 'scim' : '');
     setTargetName(s.name); setCallbackUrl(s.callbackUrl); setDescription(s.description ?? ''); setIconUrl(s.iconUrl ?? '');
-    setBearerToken(''); setGroups(s.groupsEnabled); setCreatedToken(null); setFormError(null); setShowPairModal(true);
+    setBearerToken(''); setGroups(s.groupsEnabled); setReconcileHours(s.reconcileHours); setCreatedToken(null); setFormError(null); setShowPairModal(true);
   };
   const testConnection = async (s: PairedSystem) => {
     try {
@@ -217,6 +221,7 @@ export const AdminSystems: React.FC = () => {
       </div>
 
       {deliverySystem && <SyncDeliveries key={deliverySystem.id} system={deliverySystem} onClose={() => setDeliverySystem(null)} />}
+      {provisioningSystem && <ProvisioningState key={provisioningSystem.id} system={provisioningSystem} onClose={() => setProvisioningSystem(null)} />}
       <div className="table-card">
         <table className="admin-table">
           <thead>
@@ -314,6 +319,7 @@ export const AdminSystems: React.FC = () => {
                     <div className="action-buttons-wrap">
                       {(needsReview(s) || s.systemType === 'scim') && <button className="secondary-btn sm" onClick={() => openConnection(s)}>{needsReview(s) ? 'Review connection' : 'Connection settings'}</button>}
                       <button className="secondary-btn sm" onClick={() => setDeliverySystem(s)}>Deliveries</button>
+                      <button className="secondary-btn sm" onClick={() => setProvisioningSystem(s)}>Provisioning</button>
                       {s.systemType === 'scim' && <button className="secondary-btn sm" onClick={() => testConnection(s)}>Test connection</button>}
                       <button
                         className="secondary-btn sm"
@@ -465,6 +471,11 @@ export const AdminSystems: React.FC = () => {
                 {systemType === 'scim' && <div className="form-group">
                   <label><input type="checkbox" checked={groups} onChange={(e) => setGroups(e.target.checked)} /> Deliver SCIM Groups: assigned groups and their in-scope members</label>
                   <span className="muted">Only for targets that support the Groups resource. Turning this off leaves remote groups in place.</span>
+                </div>}
+                {systemType === 'scim' && <div className="form-group">
+                  <label className="form-label" htmlFor="scim-reconcile">Scheduled repair every N hours (0 = off)</label>
+                  <input id="scim-reconcile" className="form-input" type="number" min={0} max={720} step={1} value={reconcileHours} onChange={(e) => setReconcileHours(Math.min(720, Math.max(0, Math.trunc(Number(e.target.value) || 0))))} />
+                  <span className="muted">Each run lists the target's Users (and Groups when enabled), compares managed accounts with effective access, and queues repairs. An incomplete listing never deactivates anyone.</span>
                 </div>}
                 <div className="alert-box info sm" style={{ marginBottom: '1.25rem' }}>
                   <Key size={14} />

@@ -343,7 +343,7 @@ func TestGroupDeliveryFollowsAssignmentsAndMembers(t *testing.T) {
 	if got := pendingFor(t, s, "target", g.ID); len(got) != 0 {
 		t.Fatal("group queued without capability", got)
 	}
-	if err := s.ConfigureSystem("target", "scim", "scim", "secret", true, nil); err != nil {
+	if err := s.ConfigureSystem("target", "scim", "scim", "secret", true, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", g.ID); len(got) != 1 || got[0].Type != "group.updated" {

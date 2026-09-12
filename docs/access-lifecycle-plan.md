@@ -14,7 +14,7 @@ merged as GitHub PR #31) and 06b (group-specific requirements, merged as GitHub 
 PR07 merged as GitHub PR #33 with CI passed and both findings resolved.
 PR08 is split into 08a (resource ordering and uncertain-write recovery, merged as
 GitHub PR #34) and 08b (assignment-aware desired state, revisions and group delivery,
-implemented on feat/provisioning-access).
+merged as GitHub PR #35). PR09 is implemented on feat/provisioning-reconciliation.
 PRs 09–23 and D1–D4 remain planned.
 PR33 review limitations remain: truncated input omitted frontend source; the reviewer
 performed no dynamic real-target SCIM exercise. It was not an exhaustive whole-PR audit.
@@ -339,6 +339,10 @@ Depends on: 07, 08. Touch: sync worker, admin system view, durable reconciliatio
 
 Acceptance: detect missing, stale and orphaned managed accounts, ignore unrelated remote
 accounts, repair safely, and never deactivate users from an incomplete listing.
+
+Implementation: leased `sync_reconcile_jobs`, paginated Users/Groups listing that fails
+closed on any inconsistency, per-user desired/queued/acknowledged/observed rows,
+targeted retry, scheduled repair per connector; README.md "Reconciliation".
 
 ### PR 10 — Session inventory and scoped revocation
 

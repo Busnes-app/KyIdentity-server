@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	stdsync "sync"
@@ -27,6 +28,11 @@ type fakeSCIM struct {
 	next   int
 	// putStatus, when set, is answered to every Group PUT without applying it.
 	putStatus int
+	// failPage, when set, answers 500 to that unfiltered listing page (1-based).
+	failPage int
+	pages    int
+	// pageDelay slows every unfiltered listing page.
+	pageDelay time.Duration
 }
 
 func newFakeSCIM() *fakeSCIM {
@@ -47,6 +53,51 @@ func (f *fakeSCIM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	external := strings.TrimSuffix(strings.TrimPrefix(r.URL.Query().Get("filter"), `externalId eq "`), `"`)
 	switch {
+	case r.Method == "GET" && id == "" && r.URL.Query().Get("filter") == "":
+		// Unfiltered listing: stable order, honours startIndex/count, optionally fails a page.
+		f.pages++
+		if f.pages == f.failPage {
+			w.WriteHeader(500)
+			return
+		}
+		if f.pageDelay > 0 {
+			f.mu.Unlock()
+			time.Sleep(f.pageDelay)
+			f.mu.Lock()
+		}
+		var all []any
+		if collection == "Users" {
+			ids := make([]string, 0, len(f.users))
+			for id := range f.users {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			for _, id := range ids {
+				all = append(all, f.users[id])
+			}
+		} else {
+			ids := make([]string, 0, len(f.groups))
+			for id := range f.groups {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			for _, id := range ids {
+				all = append(all, f.groups[id])
+			}
+		}
+		start, _ := strconv.Atoi(r.URL.Query().Get("startIndex"))
+		count, _ := strconv.Atoi(r.URL.Query().Get("count"))
+		if start < 1 {
+			start = 1
+		}
+		if count < 1 || count > 2 {
+			count = 2 // Small pages force multi-page walks in tests.
+		}
+		page := []any{}
+		for i := start - 1; i < len(all) && len(page) < count; i++ {
+			page = append(page, all[i])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"totalResults": len(all), "startIndex": start, "itemsPerPage": len(page), "Resources": page})
 	case r.Method == "GET" && id == "" && collection == "Users":
 		found := []scim.User{}
 		for _, u := range f.users {
@@ -269,10 +320,10 @@ func TestGenericSCIMGroupDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ReviewSystem(sys, "scim", "", true, nil); err != nil {
+	if err := e.ReviewSystem(sys, "scim", "", true, 0, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ReviewSystem(&store.PairedSystem{ID: sys.ID, SystemType: "suite_webhook"}, "suite_webhook", "", true, nil); err == nil {
+	if err := e.ReviewSystem(&store.PairedSystem{ID: sys.ID, SystemType: "suite_webhook"}, "suite_webhook", "", true, 0, nil); err == nil {
 		t.Fatal("suite connector accepted group delivery")
 	}
 	sys, _ = s.GetPairedSystemByID(sys.ID)
@@ -353,7 +404,7 @@ func groupFixture(t *testing.T) (*Engine, *store.Store, *fakeSCIM, *store.Group,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ReviewSystem(sys, "scim", "", true, nil); err != nil {
+	if err := e.ReviewSystem(sys, "scim", "", true, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	app := appRecordFor(t, s, sys.ID)

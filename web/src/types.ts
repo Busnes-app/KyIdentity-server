@@ -25,6 +25,8 @@ export interface PairedSystem {
   lastSyncedAt?: string;
   createdAt: string;
   groupsEnabled: boolean;
+  /** Scheduled repair interval; 0 = off. Only meaningful for SCIM. */
+  reconcileHours: number;
 }
 
 export interface NativeDevice {
@@ -195,3 +197,24 @@ export interface AppAccessUser {
 }
 export interface AppAccessGroup { id: string; name: string; assigned: boolean }
 export interface AppAccessPage extends DirectoryPage<AppAccessUser> { app: AppRecord; losingAccess: number; gainingAccess: number }
+
+export type ObservedState = '' | 'present_active' | 'present_inactive' | 'absent' | 'unsupported';
+export interface ProvisioningEvent {
+  type: string; status: 'pending' | 'delivered' | 'failed'; error?: string; attempts: number; nextAttemptAt?: string; updatedAt: string;
+}
+export interface ProvisioningRow {
+  userId: string; username: string; displayName: string;
+  desired: boolean; recorded: boolean; acknowledged: boolean;
+  observed: ObservedState; observedAt?: string; revision: number; blocked: boolean; lastEvent?: ProvisioningEvent;
+}
+export interface DriftEntry { id: string; username?: string; reason: string }
+export interface DriftReport {
+  supported: boolean; complete: boolean; repaired: boolean;
+  listedUsers: number; unrelated: number; missingCount: number; staleCount: number; orphanedCount: number;
+  missing: DriftEntry[]; stale: DriftEntry[]; orphaned: DriftEntry[];
+  groupsRequeued: number; groupsOrphaned: number; listingError?: string;
+}
+export interface ReconcileJob {
+  id: string; systemId: string; kind: 'preview' | 'repair'; status: 'queued' | 'running' | 'done' | 'failed';
+  requestedBy: string; attempts: number; createdAt: string; startedAt?: string; finishedAt?: string; error?: string; result?: DriftReport;
+}

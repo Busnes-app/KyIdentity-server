@@ -63,13 +63,16 @@ func (s *Store) SaveSCIMUserLink(systemID, localID, remoteID string) error {
 
 // ConfigureSystem preserves application identity, the endpoint and existing mappings.
 // Enabling group delivery queues the connector's assigned groups in the same transaction.
-func (s *Store) ConfigureSystem(id, oldType, newType, encrypted string, groups bool, audit *AuditEvent) error {
+func (s *Store) ConfigureSystem(id, oldType, newType, encrypted string, groups bool, reconcileHours int, audit *AuditEvent) error {
+	if reconcileHours < 0 || reconcileHours > 24*30 {
+		return errors.New("reconcile interval must be 0 to 720 hours")
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	r, err := tx.Exec(`UPDATE paired_systems SET system_type=?,hmac_secret_encrypted=?,groups_enabled=? WHERE id=? AND system_type=?`, newType, encrypted, groups, id, oldType)
+	r, err := tx.Exec(`UPDATE paired_systems SET system_type=?,hmac_secret_encrypted=?,groups_enabled=?,reconcile_hours=? WHERE id=? AND system_type=?`, newType, encrypted, groups, reconcileHours, id, oldType)
 	if err != nil {
 		return err
 	}

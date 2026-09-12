@@ -1,4 +1,4 @@
-import { parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies } from './parsers';
+import { parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseGroupPage,
@@ -130,6 +130,13 @@ describe('parsePairedSystems', () => {
   it('defaults groupsEnabled to false when absent', () => {
     expect(parsePairedSystems({ systems: [system] })[0].groupsEnabled).toBe(false);
     expect(parsePairedSystems({ systems: [{ ...system, groupsEnabled: true }] })[0].groupsEnabled).toBe(true);
+  });
+
+  it('defaults reconcileHours to 0 and refuses negative or fractional values', () => {
+    expect(parsePairedSystems({ systems: [system] })[0].reconcileHours).toBe(0);
+    expect(parsePairedSystems({ systems: [{ ...system, reconcileHours: 24 }] })[0].reconcileHours).toBe(24);
+    expect(() => parsePairedSystems({ systems: [{ ...system, reconcileHours: -1 }] })).toThrow(/reconcileHours/);
+    expect(() => parsePairedSystems({ systems: [{ ...system, reconcileHours: 1.5 }] })).toThrow(/reconcileHours/);
   });
 });
 
@@ -390,5 +397,41 @@ describe('group enrollment policies', () => {
   });
   it.each(['group:', 'group', 'group:'+'x'.repeat(513)])('rejects invalid scope %p', scope => {
     expect(() => parseEnrollmentPolicies({policies:[{scope,required:true,allowedMethods:['totp'],graceSeconds:0,revision:1}]})).toThrow();
+  });
+});
+
+describe('provisioning state', () => {
+  const row = { userId: 'u1', username: 'ada', displayName: 'Ada', desired: true, recorded: true, acknowledged: false, observed: 'present_active',
+    observedAt: '2026-09-06T00:00:00Z', revision: 3, blocked: false, lastEvent: { type: 'user.updated', status: 'pending', attempts: 2, nextAttemptAt: '2026-09-06T01:00:00Z', updatedAt: '2026-09-06T00:30:00Z' } };
+  const page = { users: [row], total: 1, limit: 25, offset: 0 };
+  it('reads a provisioning row and tolerates absent optional fields', () => {
+    expect(parseProvisioningPage(page).items[0]).toEqual(row);
+    const bare = parseProvisioningPage({ ...page, users: [{ ...row, observed: '', observedAt: undefined, lastEvent: undefined }] }).items[0];
+    expect(bare.observed).toBe('');
+    expect(bare.lastEvent).toBeUndefined();
+  });
+  it('refuses an unknown observed state or malformed last event', () => {
+    expect(() => parseProvisioningPage({ ...page, users: [{ ...row, observed: 'present' }] })).toThrow(/observed/);
+    expect(() => parseProvisioningPage({ ...page, users: [{ ...row, desired: 'yes' }] })).toThrow(/desired/);
+    expect(() => parseProvisioningPage({ ...page, users: [{ ...row, lastEvent: { ...row.lastEvent, status: 'retrying' } }] })).toThrow(/status/);
+  });
+});
+
+describe('reconcile jobs', () => {
+  const result = { supported: true, complete: true, repaired: false, listedUsers: 10, unrelated: 2, missingCount: 1, staleCount: 0, orphanedCount: 1,
+    missing: [{ id: 'u1', username: 'ada', reason: 'not listed' }], stale: [], orphaned: [{ id: 'r9', reason: 'managed account without access' }], groupsRequeued: 0, groupsOrphaned: 0 };
+  const job = { id: 'j1', systemId: 's1', kind: 'preview', status: 'done', requestedBy: 'admin', attempts: 1, createdAt: '2026-09-06T00:00:00Z', finishedAt: '2026-09-06T00:01:00Z', result };
+  it('reads a finished job with its drift report', () => {
+    expect(parseReconcileJobs({ jobs: [job] })[0]).toEqual(job);
+  });
+  it('accepts a queued job with no result and an empty list', () => {
+    expect(parseReconcileJobs({ jobs: [{ ...job, status: 'queued', finishedAt: undefined, result: undefined }] })[0].result).toBeUndefined();
+    expect(parseReconcileJobs({})).toEqual([]);
+  });
+  it('refuses unknown status or kind and malformed reports', () => {
+    expect(() => parseReconcileJobs({ jobs: [{ ...job, status: 'cancelled' }] })).toThrow(/status/);
+    expect(() => parseReconcileJobs({ jobs: [{ ...job, kind: 'audit' }] })).toThrow(/kind/);
+    expect(() => parseReconcileJobs({ jobs: [{ ...job, result: { ...result, missingCount: -1 } }] })).toThrow(/missingCount/);
+    expect(() => parseReconcileJobs({ jobs: [{ ...job, result: { ...result, missing: [{ reason: 'x' }] } }] })).toThrow(/id/);
   });
 });
