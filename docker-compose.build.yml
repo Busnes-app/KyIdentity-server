@@ -1,7 +1,9 @@
-# Source build. Set it once so every `docker compose` command, the recovery
-# procedure included, keeps using the local build instead of the published image:
-#   echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env
-# Or layer it per command: docker compose -f docker-compose.yml -f docker-compose.build.yml ...
+# Source build. Set it once, with a mode only you can read since .env also holds
+# secrets, and every `docker compose` command, the recovery procedure included,
+# keeps using the local build instead of the published image:
+#   (umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env)
+# Further overlays chain onto the same value, e.g. `:docker-compose.lan-dns.yml`;
+# an explicit `-f` list replaces COMPOSE_FILE entirely, so avoid mixing the two.
 # The result is tagged kysignon-server:local so it never occupies the published name.
 services:
   kysignon-server:

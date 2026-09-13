@@ -55,8 +55,8 @@ re-litigation in a PR:
 Docker is the only requirement to *run* KySignOn:
 
 ```bash
-cp .env.example .env
-echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env   # source build; omit to run the published image
+(umask 077; cp .env.example .env)
+(umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env)   # source build; omit to run the published image
 docker compose up -d
 ```
 

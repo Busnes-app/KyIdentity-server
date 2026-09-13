@@ -15,8 +15,9 @@ procedure once as a drill before you ever need it.
 
 The `docker compose` commands below use the base file alone, which runs the published
 image. If this server was installed from source, `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml`
-must be in `.env` (see the install steps); otherwise a restore silently pulls a different
-binary than the one you built and are running.
+must be in `.env` (the README install step writes it); otherwise a restore silently pulls a
+different binary than the one you built and are running. A published-image install reuses the
+image already on the host; run `docker compose pull` first to restore onto the newest attested one.
 
 ## What a capsule holds
 
