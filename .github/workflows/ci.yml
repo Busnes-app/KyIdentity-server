@@ -166,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           gh attestation verify "oci://$NAME@$DIGEST" --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/master"
 
 
   # :latest advances only to an image whose provenance verified above, and only
@@ -209,5 +209,5 @@ jobs:
             exit 1
           fi
           gh attestation verify "oci://$NAME:latest" --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/master"
           echo "Published \`$NAME@$DIGEST\` as \`:latest\` and \`:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"

@@ -1,10 +1,11 @@
-# Source build. Set it once, with a mode only you can read since .env also holds
-# secrets, and every `docker compose` command, the recovery procedure included,
-# keeps using the local build instead of the published image:
-#   (umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env)
+# Source build. Set it once and every `docker compose` command, the recovery procedure
+# included, keeps using the local build instead of the published image. The line is replaced
+# in place (never appended twice) and .env, which also holds secrets, is written at 0600.
+#   (umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)
 # Further overlays chain onto the same value, e.g. `:docker-compose.lan-dns.yml`;
 # an explicit `-f` list replaces COMPOSE_FILE entirely, so avoid mixing the two.
-# The result is tagged kysignon-server:local so it never occupies the published name.
+# The result is tagged kysignon-server:local so it never occupies the published name. This
+# image also wins over a KYSIGNON_IMAGE digest pin in .env: a source install always runs its build.
 services:
   kysignon-server:
     image: kysignon-server:local

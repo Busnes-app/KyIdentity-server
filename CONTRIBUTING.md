@@ -55,10 +55,11 @@ re-litigation in a PR:
 Docker is the only requirement to *run* KySignOn:
 
 ```bash
-(umask 077; cp .env.example .env)
-(umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env)   # source build; omit to run the published image
-# Existing source install? Add that line before the first `up -d` on this checkout: the old
-# image name is gone and a bare `up -d` would pull the published image instead of rebuilding.
+# Existing install? Your .env is kept: the copy below never overwrites one, and the COMPOSE_FILE line
+# is replaced in place. A source install must set it before its first `up -d` on this checkout,
+# or a bare `up -d` pulls the published image instead of rebuilding.
+[ -e .env ] || (umask 077; cp .env.example .env); chmod 600 .env
+(umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)   # source build; omit to run the published image
 docker compose up -d
 ```
 
