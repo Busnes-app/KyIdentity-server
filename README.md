@@ -833,7 +833,10 @@ a `password` attribute is rejected outright; `roles` are ignored.
 **Ownership.** An account the upstream creates is keyed by connector plus its immutable
 `externalId`; a changed `externalId` is refused. It starts pending with no credential,
 like any invited account: an administrator issues its activation link (or mail delivery
-does), and only then can it sign in, be provisioned or hold app access. `userName`,
+does), and only then can it sign in, be provisioned or hold app access. No activation
+link is issued while the upstream marks the account inactive or a local override holds,
+and activation never outranks either: the password is set, the status follows the
+source state. `userName`,
 `displayName`, `name`, the primary email and the `active` flag belong to the upstream
 and are read-only for local administrators; role is a local decision the upstream
 cannot make. A clash with an existing username or email, local or from another

@@ -425,3 +425,65 @@ func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 		t.Fatalf("upstream profile lost to a concurrent local edit: %+v", after)
 	}
 }
+
+// Activation never outranks the source state: an owned account the upstream marks
+// inactive, or a local override holds down, gets no link, and a link that slipped through
+// (issued before the flag flipped) still yields a disabled account.
+func TestActivationDerivesStatusFromSourceState(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	c, _ := s.CreateSCIMConnector("A", nil)
+
+	inactive := &User{Username: "inactive", DisplayName: "Inactive", Email: "inactive@up.test", SourceConnectorID: c.ID, ExternalID: "ext-i", SourceActive: false}
+	if err := s.CreateUpstreamUser(inactive, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.IssueAccountToken(inactive.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("activation link issued for an upstream-inactive account: %v", err)
+	}
+
+	// A link issued while the upstream wanted the account active, then deactivated.
+	flipped := upstream(t, s, c.ID, "ext-f", "flipped")
+	raw, err := s.IssueAccountToken(flipped.ID, "activation", "manual", time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE users SET source_active=0 WHERE id=?`, flipped.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetUserByID(flipped.ID)
+	if got.Pending || got.Status != "disabled" || got.PasswordHash != "hash" {
+		t.Fatalf("activation outranked the upstream's inactive flag: %+v", got)
+	}
+
+	// The same with a local override in force.
+	held := upstream(t, s, c.ID, "ext-h", "held")
+	raw, _ = s.IssueAccountToken(held.ID, "activation", "manual", time.Hour, nil)
+	if _, err := s.db.Exec(`UPDATE users SET locally_disabled=1 WHERE id=?`, held.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetUserByID(held.ID); got.Pending || got.Status != "disabled" || !got.LocallyDisabled {
+		t.Fatalf("activation outranked a local override: %+v", got)
+	}
+	if _, err := s.IssueAccountToken(held.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("activation link issued for a locally disabled account: %v", err)
+	}
+
+	// Lifting the override or the upstream flag later makes the account active with the
+	// password that was set.
+	got, _ = s.GetUserByID(held.ID)
+	got.LocallyDisabled = false
+	got.ApplySourceState()
+	if err := s.UpdateUserWithSyncEvents(got, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetUserByID(held.ID); got.Status != "active" {
+		t.Fatalf("lifting the override after activation: %+v", got)
+	}
+}
