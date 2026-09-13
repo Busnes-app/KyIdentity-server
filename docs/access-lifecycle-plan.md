@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/inbound-scim-groups)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/app-roles)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -24,8 +24,9 @@ acknowledgement, contradicting listings, wire shape, pruning, untracked holders)
 (inbound SCIM connector security and Users) merged as GitHub PR #46 after four review
 rounds (atomic upstream writes, identifier shadowing, last-admin on disconnect, stale
 local copies, activation following source state). PR15 (inbound SCIM Groups and
-operational setup) is implemented on feat/inbound-scim-groups. PRs 16–23 and D1–D4
-remain planned. Note for D1–D4: released
+operational setup) merged as GitHub PR #47 after one review round. PR16 (app roles and
+bounded claim mappings) is implemented on feat/app-roles. PRs 17–23 and D1–D4 remain
+planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -582,6 +583,16 @@ Depends on: 04, 08. Touch: policy/claims/store, OAuth and sync, app administrati
 Acceptance: Finance maps to one app's billing role without privilege in another;
 unassigned apps receive no claims; role removal blocks stale code exchange; unknown
 scopes and large memberships cannot leak or silently broaden permissions.
+
+Implementation: `app_roles` with group/user mappings, `roles` and optional `groups`
+claims per app, `role_revision` stamped on codes and checked at exchange, affected
+grants revoked and SCIM profiles re-sent on every change, claims gated by granted scope
+in ID token and UserInfo alike, 4 KiB identity-claim cap with an actionable
+`invalid_request`, client scopes restricted to the known set, per-app legacy `role`
+claim switch (on for pre-existing apps, off for new ones; each remaining exception is
+visible on the app's Roles page). README.md "App roles and token claims".
+Compatibility exceptions to remove after D1–D4 verify `roles`: every app created before
+this PR has the legacy switch on.
 
 ### PR 17 — Delegated administration
 

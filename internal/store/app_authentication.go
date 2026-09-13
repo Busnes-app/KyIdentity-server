@@ -154,7 +154,7 @@ func (s *Store) SetAppAuthenticationPolicy(id string, p AppAuthenticationPolicy,
 // Called under the code transaction's writer lock, before consuming an interaction.
 func checkCodeAppAuthenticationTx(tx *sql.Tx, code *AuthorizationCode) error {
 	var p AppAuthenticationPolicy
-	if err := tx.QueryRow(`SELECT id,auth_revision,auth_mode,auth_primary_max_age,auth_factor,auth_factor_max_age FROM app_registry WHERE client_id=?`, code.ClientID).Scan(&code.AuthenticationAppID, &code.AuthenticationPolicyRevision, &p.Mode, &p.PrimaryMaxAge, &p.Factor, &p.FactorMaxAge); err != nil {
+	if err := tx.QueryRow(`SELECT id,auth_revision,role_revision,auth_mode,auth_primary_max_age,auth_factor,auth_factor_max_age FROM app_registry WHERE client_id=?`, code.ClientID).Scan(&code.AuthenticationAppID, &code.AuthenticationPolicyRevision, &code.RoleRevision, &p.Mode, &p.PrimaryMaxAge, &p.Factor, &p.FactorMaxAge); err != nil {
 		return err
 	}
 	if !p.Valid() || p.EvidenceReason(code.AuthenticationEvidence, time.Now().UTC()) != "" {

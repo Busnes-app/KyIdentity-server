@@ -311,5 +311,14 @@ func ensureAppLinkPoliciesTx(tx *sql.Tx, target, source AppRecord) error {
 	if count > 0 {
 		return fmt.Errorf("%w: remove assignments before linking", ErrAppLinkConflict)
 	}
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM app_roles WHERE app_id IN (?,?)`, target.ID, source.ID).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("%w: remove app roles before linking", ErrAppLinkConflict)
+	}
+	if target.LegacyRoleClaim != source.LegacyRoleClaim || target.GroupsClaim != source.GroupsClaim {
+		return fmt.Errorf("%w: claim settings differ", ErrAppLinkConflict)
+	}
 	return nil
 }

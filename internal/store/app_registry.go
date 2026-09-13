@@ -16,16 +16,23 @@ var ErrAppRecordMissing = errors.New("application record not found")
 type AppRecord struct {
 	Authentication         AppAuthenticationPolicy `json:"authentication"`
 	AuthenticationRevision int                     `json:"authenticationRevision"`
-	AccessMode             string                  `json:"accessMode"`
-	Enabled                bool                    `json:"enabled"`
-	ID                     string                  `json:"id"`
-	Revision               int                     `json:"revision"`
-	ClientID               string                  `json:"clientId"`
-	ClientName             string                  `json:"clientName"`
-	LauncherID             string                  `json:"launcherId"`
-	LauncherName           string                  `json:"launcherName"`
-	SystemID               string                  `json:"systemId"`
-	SystemName             string                  `json:"systemName"`
+	// RoleRevision changes with every role, mapping or claim-setting edit; a code carries
+	// the revision it was issued under and cannot be exchanged after a change.
+	RoleRevision int `json:"roleRevision"`
+	// LegacyRoleClaim keeps the global directory role in this app's tokens for clients
+	// built before app roles existed; GroupsClaim adds the names of assigned groups.
+	LegacyRoleClaim bool   `json:"legacyRoleClaim"`
+	GroupsClaim     bool   `json:"groupsClaim"`
+	AccessMode      string `json:"accessMode"`
+	Enabled         bool   `json:"enabled"`
+	ID              string `json:"id"`
+	Revision        int    `json:"revision"`
+	ClientID        string `json:"clientId"`
+	ClientName      string `json:"clientName"`
+	LauncherID      string `json:"launcherId"`
+	LauncherName    string `json:"launcherName"`
+	SystemID        string `json:"systemId"`
+	SystemName      string `json:"systemName"`
 }
 
 // Source rows remain authoritative for connection settings. Triggers cover every
@@ -67,11 +74,11 @@ const appRecordFrom = ` FROM app_registry a
  LEFT JOIN oauth_clients c ON c.id=a.client_id
  LEFT JOIN applications l ON l.id=a.launcher_id
  LEFT JOIN paired_systems s ON s.id=a.system_id`
-const appRecordSelect = `SELECT a.id,a.revision,COALESCE(a.client_id,''),COALESCE(c.client_name,''),COALESCE(a.launcher_id,''),COALESCE(l.name,''),COALESCE(a.system_id,''),COALESCE(s.name,''),a.access_mode,a.enabled,a.auth_mode,a.auth_primary_max_age,a.auth_factor,a.auth_factor_max_age,a.auth_revision`
+const appRecordSelect = `SELECT a.id,a.revision,COALESCE(a.client_id,''),COALESCE(c.client_name,''),COALESCE(a.launcher_id,''),COALESCE(l.name,''),COALESCE(a.system_id,''),COALESCE(s.name,''),a.access_mode,a.enabled,a.auth_mode,a.auth_primary_max_age,a.auth_factor,a.auth_factor_max_age,a.auth_revision,a.role_revision,a.legacy_role_claim,a.groups_claim`
 
 func scanAppRecord(row interface{ Scan(...any) error }) (AppRecord, error) {
 	var a AppRecord
-	err := row.Scan(&a.ID, &a.Revision, &a.ClientID, &a.ClientName, &a.LauncherID, &a.LauncherName, &a.SystemID, &a.SystemName, &a.AccessMode, &a.Enabled, &a.Authentication.Mode, &a.Authentication.PrimaryMaxAge, &a.Authentication.Factor, &a.Authentication.FactorMaxAge, &a.AuthenticationRevision)
+	err := row.Scan(&a.ID, &a.Revision, &a.ClientID, &a.ClientName, &a.LauncherID, &a.LauncherName, &a.SystemID, &a.SystemName, &a.AccessMode, &a.Enabled, &a.Authentication.Mode, &a.Authentication.PrimaryMaxAge, &a.Authentication.Factor, &a.Authentication.FactorMaxAge, &a.AuthenticationRevision, &a.RoleRevision, &a.LegacyRoleClaim, &a.GroupsClaim)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrAppRecordMissing
 	}
@@ -224,7 +231,14 @@ func (s *Store) UnlinkAppRecord(id, kind string, revision int, audit *AuditEvent
 	if _, err = tx.Exec(`INSERT INTO app_registry(id,`+column+`) VALUES(?,?)`, newID, refs[kind]); err != nil {
 		return "", err
 	}
-	if _, err = tx.Exec(`UPDATE app_registry SET access_mode=?,enabled=?,auth_mode=?,auth_primary_max_age=?,auth_factor=?,auth_factor_max_age=?,auth_revision=? WHERE id=?`, a.AccessMode, a.Enabled, a.Authentication.Mode, a.Authentication.PrimaryMaxAge, a.Authentication.Factor, a.Authentication.FactorMaxAge, a.AuthenticationRevision, newID); err != nil {
+	var roles int
+	if err = tx.QueryRow(`SELECT COUNT(*) FROM app_roles WHERE app_id=?`, id).Scan(&roles); err != nil {
+		return "", err
+	}
+	if roles > 0 {
+		return "", fmt.Errorf("%w: remove app roles before unlinking", ErrAppLinkConflict)
+	}
+	if _, err = tx.Exec(`UPDATE app_registry SET access_mode=?,enabled=?,auth_mode=?,auth_primary_max_age=?,auth_factor=?,auth_factor_max_age=?,auth_revision=?,legacy_role_claim=?,groups_claim=? WHERE id=?`, a.AccessMode, a.Enabled, a.Authentication.Mode, a.Authentication.PrimaryMaxAge, a.Authentication.Factor, a.Authentication.FactorMaxAge, a.AuthenticationRevision, a.LegacyRoleClaim, a.GroupsClaim, newID); err != nil {
 		return "", err
 	}
 	for _, spec := range []struct{ table, column string }{{"app_user_assignments", "user_id"}, {"app_group_assignments", "group_id"}} {

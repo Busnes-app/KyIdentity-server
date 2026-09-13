@@ -81,7 +81,7 @@ func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 		BackchannelLogoutSupported:        true,
 		BackchannelLogoutSessionSupported: true,
 		ClaimsSupported: []string{"sub", "iss", "aud", "exp", "iat", "jti", "nonce", "auth_time", "amr", "acr", "sid",
-			"preferred_username", "name", "email", "email_verified", "role"},
+			"preferred_username", "name", "email", "email_verified", "roles", "groups", "role"},
 	}
 	if e.SupportsRevocation() {
 		cfg.RevocationEndpoint = e.issuerURL + "/oauth/revoke"
@@ -378,22 +378,17 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 		if err != nil {
 			return nil, fmt.Errorf("failed to bind session to client: %w", err)
 		}
-		claims := map[string]any{
-			"sid":                sid,
-			"iss":                e.issuerURL,
-			"sub":                user.ID,
-			"aud":                clientID,
-			"exp":                exp.Unix(),
-			"iat":                now.Unix(),
-			"jti":                uuid.New().String(),
-			"token_use":          "id_token",
-			"username":           user.Username,
-			"preferred_username": user.Username,
-			"name":               user.DisplayName,
-			"email":              user.Email,
-			"email_verified":     user.EmailVerifiedAt != nil,
-			"role":               user.Role,
+		claims, err := e.identityClaims(user, clientID, authCode.Scope)
+		if err != nil {
+			return nil, err
 		}
+		claims["sid"] = sid
+		claims["iss"] = e.issuerURL
+		claims["aud"] = clientID
+		claims["exp"] = exp.Unix()
+		claims["iat"] = now.Unix()
+		claims["jti"] = uuid.New().String()
+		claims["token_use"] = "id_token"
 		addAuthenticationClaims(claims, authCode.AuthenticationEvidence)
 		if authCode.Nonce != "" {
 			claims["nonce"] = authCode.Nonce
@@ -472,15 +467,56 @@ func (e *Engine) GetUserinfo(tokenString string) (map[string]any, error) {
 		return nil, errors.New("user not found or inactive")
 	}
 
-	return map[string]any{
-		"sub":                user.ID,
-		"username":           user.Username,
-		"preferred_username": user.Username,
-		"name":               user.DisplayName,
-		"email":              user.Email,
-		"email_verified":     user.EmailVerifiedAt != nil,
-		"role":               user.Role,
-	}, nil
+	aud, _ := claims["aud"].(string)
+	scope, _ := claims["scope"].(string)
+	return e.identityClaims(user, aud, scope)
+}
+
+// ErrClaimsTooLarge means the roles and groups mapped for this user and app do not fit
+// in a token. It is a configuration problem for the administrator to fix, so it is
+// reported rather than silently truncated.
+var ErrClaimsTooLarge = errors.New("identity claims exceed the token size limit; reduce the roles or groups mapped for this user")
+
+// identityClaims are the claims about the user an ID token and UserInfo share, gated by
+// the granted scope: profile for names, email for the address, and always the app's own
+// roles (plus its assigned groups when it asks) and the legacy global role only while
+// the app keeps it on. Nothing about another app ever appears.
+func (e *Engine) identityClaims(user *store.User, clientID, scope string) (map[string]any, error) {
+	claims := map[string]any{"sub": user.ID}
+	if hasScope(scope, "profile") {
+		claims["username"] = user.Username
+		claims["preferred_username"] = user.Username
+		claims["name"] = user.DisplayName
+	}
+	if hasScope(scope, "email") {
+		claims["email"] = user.Email
+		claims["email_verified"] = user.EmailVerifiedAt != nil
+	}
+	app, err := e.store.UserAppClaims(user.ID, clientID)
+	if err != nil {
+		return nil, err
+	}
+	if app.Roles == nil {
+		app.Roles = []string{}
+	}
+	claims["roles"] = app.Roles
+	if app.GroupsClaim {
+		if app.Groups == nil {
+			app.Groups = []string{}
+		}
+		claims["groups"] = app.Groups
+	}
+	if app.LegacyRole {
+		claims["role"] = user.Role
+	}
+	encoded, err := json.Marshal(claims)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > store.MaxIdentityClaimBytes {
+		return nil, fmt.Errorf("%w (%d roles, %d groups)", ErrClaimsTooLarge, len(app.Roles), len(app.Groups))
+	}
+	return claims, nil
 }
 
 // RevokeToken implements RFC 7009. The caller must authenticate as the client the token

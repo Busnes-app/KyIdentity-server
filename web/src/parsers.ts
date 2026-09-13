@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, MailSettings, Offboarding, SCIMConnector, SCIMToken } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -557,6 +557,9 @@ export function parseAppRecord(value: unknown): AppRecord {
     id: str(a, 'id'), revision,
     authentication: parseAppAuthenticationPolicy(a.authentication),
     authenticationRevision: directoryCount(a, 'authenticationRevision'),
+    roleRevision: directoryCount(a, 'roleRevision'),
+    legacyRoleClaim: requiredBool(a, 'legacyRoleClaim'),
+    groupsClaim: requiredBool(a, 'groupsClaim'),
     accessMode: oneOf(a, 'accessMode', ['all_active_users', 'assigned_only']),
     enabled: requiredBool(a, 'enabled'),
     clientId: str(a, 'clientId'), clientName: str(a, 'clientName'),
@@ -712,4 +715,20 @@ export function parseSCIMConnector(value: unknown): SCIMConnector {
 export function parseSCIMConnectors(value: unknown): { connectors: SCIMConnector[]; endpoint: string } {
   const o = obj(value, 'a connector listing');
   return { connectors: list(o.connectors, parseSCIMConnector), endpoint: optStr(o, 'endpoint') ?? '' };
+}
+
+function parseAppRolePrincipal(value: unknown): AppRolePrincipal {
+  const p = obj(value, 'a role principal');
+  return { id: str(p, 'id'), name: str(p, 'name') };
+}
+
+export function parseAppRole(value: unknown): AppRole {
+  const r = obj(value, 'an app role');
+  return { id: str(r, 'id'), appId: str(r, 'appId'), name: str(r, 'name'), description: optStr(r, 'description') ?? '', createdAt: str(r, 'createdAt'),
+    users: list(r.users, parseAppRolePrincipal), groups: list(r.groups, parseAppRolePrincipal) };
+}
+
+export function parseAppRolesPage(value: unknown): { app: AppRecord; roles: AppRole[] } {
+  const o = obj(value, 'an app roles page');
+  return { app: parseAppRecord(o.app), roles: list(o.roles, parseAppRole) };
 }

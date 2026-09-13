@@ -483,6 +483,10 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 	if len(req.AllowedScopes) == 0 {
 		req.AllowedScopes = []string{"openid", "profile", "email"}
 	}
+	if !knownScopes(req.AllowedScopes) {
+		http.Error(w, `{"error":"unknown_scope","error_description":"Allowed scopes must be drawn from openid, profile and email"}`, http.StatusBadRequest)
+		return
+	}
 	if len(req.RedirectURIs) == 0 {
 		http.Error(w, `{"error":"invalid_request","error_description":"At least one redirect URI is required"}`, http.StatusBadRequest)
 		return
@@ -643,6 +647,10 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 		client.PostLogoutRedirectURIsJSON = encoded
 	}
 	if req.AllowedScopes != nil {
+		if !knownScopes(*req.AllowedScopes) {
+			http.Error(w, `{"error":"unknown_scope","error_description":"Allowed scopes must be drawn from openid, profile and email"}`, http.StatusBadRequest)
+			return
+		}
 		encoded, err := json.Marshal(*req.AllowedScopes)
 		if err != nil {
 			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
@@ -1144,4 +1152,17 @@ func (h *AdminHandler) TestSystem(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// knownScopes admits only the scopes this server defines claims for; an unknown scope
+// can neither be granted nor quietly widen what a token says.
+func knownScopes(scopes []string) bool {
+	for _, sc := range scopes {
+		switch sc {
+		case "openid", "profile", "email":
+		default:
+			return false
+		}
+	}
+	return true
 }

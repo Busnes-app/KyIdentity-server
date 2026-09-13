@@ -267,6 +267,16 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tokenResp, err := h.oauthEngine.ExchangeAuthorizationCode(code, clientID, clientSecret, redirectURI, codeVerifier)
+	if errors.Is(err, oauth.ErrClaimsTooLarge) {
+		// A configuration problem, not a guess about credentials: name it so the app's
+		// administrator can fix the mappings.
+		h.audit.Record("oauth.token_exchange", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"error": err.Error()})
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request", "error_description": err.Error()})
+		return
+	}
 	if err != nil {
 		// The precise reason goes to the audit log, not to the caller: distinguishing
 		// "client mismatch" from "invalid PKCE verifier" tells an attacker which half of

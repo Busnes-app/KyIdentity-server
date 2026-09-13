@@ -1,4 +1,4 @@
-import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken } from './parsers';
+import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseGroupPage,
@@ -330,7 +330,7 @@ describe('group directory pages', () => {
 });
 
 it('validates app registry references and revisions', () => {
-  const record = { id: 'app', revision: 1, authenticationRevision: 1, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+  const record = { id: 'app', revision: 1, authenticationRevision: 1, roleRevision: 0, legacyRoleClaim: true, groupsClaim: false, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
   const page = { records: [record], total: 1, limit: 25, offset: 0 };
   expect(parseAppRecordPage(page).items[0]).toEqual(record);
   expect(() => parseAppRecordPage({ ...page, records: [{ ...record, revision: 0 }] })).toThrow();
@@ -339,7 +339,7 @@ it('validates app registry references and revisions', () => {
 });
 
 it('validates effective-access decisions and preview metadata', () => {
- const app = { id: 'app', revision: 1, authenticationRevision: 1, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'c', clientName: 'C', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+ const app = { id: 'app', revision: 1, authenticationRevision: 1, roleRevision: 0, legacyRoleClaim: true, groupsClaim: false, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'c', clientName: 'C', launcherId: '', launcherName: '', systemId: '', systemName: '' };
  const user = { id: 'u', username: 'User', displayName: '', status: 'active', direct: false, groupAssigned: true, effective: true, preview: false, reason: 'group_assignment' };
  const page = { app, users: [user], total: 1, limit: 25, offset: 0, losingAccess: 1, gainingAccess: 2 };
  expect(parseAppAccessPage(page).items[0].effective).toBe(true);
@@ -358,7 +358,7 @@ it('preserves a successful login when its authorization must restart', () => {
 
 
 describe('authentication policy boundary', () => {
- const record = { id: 'app', revision: 1, authenticationRevision: 1, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+ const record = { id: 'app', revision: 1, authenticationRevision: 1, roleRevision: 0, legacyRoleClaim: true, groupsClaim: false, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
  it('rejects invalid server policy before displaying editable controls', () => {
   for (const authentication of [null, {}, { mode: 'max_age', primaryMaxAge: 0, factor: 'mfa', factorMaxAge: 0 }, { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 60 }, { mode: 'reuse', primaryMaxAge: 0, factor: 'passkey', factorMaxAge: -1 }]) {
    expect(() => parseAppRecordPage({ records: [{ ...record, authentication }], total: 1, limit: 25, offset: 0 })).toThrow();
@@ -550,5 +550,16 @@ describe('inbound SCIM parsers', () => {
 
   it('marks upstream-owned users', () => {
     expect(parseUser({ id: 'u', username: 'x', role: 'user', status: 'disabled', sourceConnectorId: 'c1', externalId: 'e1', locallyDisabled: true }).locallyDisabled).toBe(true);
+  });
+});
+
+describe('parseAppRolesPage', () => {
+  const app = { id: 'a1', revision: 3, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, authenticationRevision: 1, roleRevision: 2, legacyRoleClaim: false, groupsClaim: true,
+    accessMode: 'assigned_only', enabled: true, clientId: 'c', clientName: 'C', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+  it('reads roles with their mappings and the claim settings', () => {
+    const page = parseAppRolesPage({ app, roles: [{ id: 'r', appId: 'a1', name: 'billing.admin', description: '', createdAt: 'x', users: [{ id: 'u', name: 'ada' }], groups: [] }] });
+    expect(page.roles[0]?.users[0]?.name).toBe('ada');
+    expect(page.app.groupsClaim).toBe(true);
+    expect(() => parseAppRolesPage({ app: { ...app, legacyRoleClaim: 'yes' }, roles: [] })).toThrow();
   });
 });
