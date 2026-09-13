@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+
+	"github.com/Busness-app/kysignon-server/internal/store"
 )
 
 // UserOffboarding shows how far a user's removal has propagated. It answers for deleted
@@ -18,5 +20,8 @@ func (h *AdminHandler) UserOffboarding(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeGroupJSON(w, off)
+	writeGroupJSON(w, struct {
+		*store.Offboarding
+		Logouts []logoutDeliveryView `json:"logouts"`
+	}{off, logoutViews(off.Logouts, true)})
 }

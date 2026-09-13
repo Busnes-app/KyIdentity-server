@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,15 @@ func TestOffboardingViewSurvivesDeletionAndIsAdminOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.SaveSCIMUserLink("notes", u.ID, "remote-1"); err != nil {
+		t.Fatal(err)
+	}
+	newClient(t, db, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	c, _ := db.GetOAuthClientByID("kynotes")
+	c.BackchannelLogoutURI = "https://notes.urlxl.com/backchannel"
+	if err := db.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.EnsureClientSession("kynotes", sessionIDFor(t, db, newSession(t, db, u, exp)), u.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
@@ -46,10 +56,23 @@ func TestOffboardingViewSurvivesDeletionAndIsAdminOnly(t *testing.T) {
 				Type string `json:"type"`
 			} `json:"lastEvent"`
 		} `json:"targets"`
-		Logouts []any `json:"logouts"`
+		Logouts []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"logouts"`
 	}
 	if err := json.Unmarshal(got.Body.Bytes(), &off); err != nil {
 		t.Fatal(err)
+	}
+	// The sign-out list uses the same wire shape as the sessions inventory and carries
+	// no worker or session identifiers.
+	if len(off.Logouts) != 1 || off.Logouts[0].ID == "" || off.Logouts[0].Status != "queued" {
+		t.Fatalf("logouts = %+v", off.Logouts)
+	}
+	for _, secret := range []string{"ClaimToken", "claimToken", `"SID"`, `"sid"`, "BackchannelLogoutURI", "backchannel"} {
+		if strings.Contains(got.Body.String(), secret) {
+			t.Fatalf("response leaks %s: %s", secret, got.Body.String())
+		}
 	}
 	if !off.Deleted || off.Acknowledged || len(off.Targets) != 1 || off.Targets[0].SystemName != "KyNotes" || !off.Targets[0].Recorded || off.Targets[0].LastEvent == nil || off.Targets[0].LastEvent.Type != "user.deleted" {
 		t.Fatalf("offboarding = %+v", off)
