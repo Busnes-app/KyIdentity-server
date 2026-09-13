@@ -1,10 +1,11 @@
 # Source build. Set it once and every `docker compose` command, the recovery procedure
 # included, keeps using the local build instead of the published image. .env also holds
 # secrets: the chmod makes it 0600 whether or not the file already existed.
-#   (umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env); chmod 600 .env
+#   (umask 077; printf '\n%s\n' 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env); chmod 600 .env
 # Further overlays chain onto the same value, e.g. `:docker-compose.lan-dns.yml`;
 # an explicit `-f` list replaces COMPOSE_FILE entirely, so avoid mixing the two.
-# The result is tagged kysignon-server:local so it never occupies the published name.
+# The result is tagged kysignon-server:local so it never occupies the published name. This
+# image also wins over a KYSIGNON_IMAGE digest pin in .env: a source install always runs its build.
 services:
   kysignon-server:
     image: kysignon-server:local

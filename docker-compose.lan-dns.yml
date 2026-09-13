@@ -7,7 +7,7 @@
 # replaces COMPOSE_FILE outright and would drop the build overlay of a source install.
 # The resolver lives in .env too, since every later compose command needs it once this
 # file is in the chain. Source installs keep docker-compose.build.yml in the middle.
-#   (umask 077; printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKYSIGNON_DNS=192.168.1.1\n' >> .env); chmod 600 .env
+#   (umask 077; printf '\nCOMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKYSIGNON_DNS=192.168.1.1\n' >> .env); chmod 600 .env
 #   docker compose up -d --force-recreate
 services:
   kysignon-server:
