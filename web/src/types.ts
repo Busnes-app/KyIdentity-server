@@ -92,6 +92,7 @@ export interface OAuthClient {
   clientType: 'public' | 'confidential';
   redirectUris: string[];
   allowedScopes: string[];
+  postLogoutRedirectUris: string[];
   launchUrl?: string;
   enabled: boolean;
   createdAt: string;

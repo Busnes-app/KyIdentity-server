@@ -327,6 +327,7 @@ export function parseOAuthClients(value: unknown): OAuthClient[] {
       clientType: oneOf(c, 'clientType', ['confidential', 'public'] as const),
       redirectUris: jsonStringArray(c, 'redirectUrisJson'),
       allowedScopes: jsonStringArray(c, 'allowedScopesJson'),
+      postLogoutRedirectUris: typeof c.postLogoutRedirectUrisJson === 'string' ? jsonStringArray(c, 'postLogoutRedirectUrisJson') : [],
       launchUrl: optStr(c, 'launchUrl'),
       enabled: c.enabled !== false,
       createdAt: optStr(c, 'createdAt') ?? '',

@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server (branch feat/session-inventory)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/oidc-logout)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -14,8 +14,14 @@ merged as GitHub PR #31) and 06b (group-specific requirements, merged as GitHub 
 PR07 merged as GitHub PR #33 with CI passed and both findings resolved.
 PR08 is split into 08a (resource ordering and uncertain-write recovery, merged as
 GitHub PR #34) and 08b (assignment-aware desired state, revisions and group delivery,
-merged as GitHub PR #35). PR09 merged as GitHub PR #36. PR10 is implemented on
-feat/session-inventory. PRs 11–23 and D1–D4 remain planned.
+merged as GitHub PR #35). PR09 merged as GitHub PR #36. PR10 merged as GitHub PR #37 with CI
+passed and the security review cleared. PR11 is split into 11a (per-client `sid`,
+RP-initiated logout, post-logout redirect registration; implemented on feat/oidc-logout)
+and 11b (back-channel logout tokens and durable delivery, planned). PRs 12–23 and D1–D4
+remain planned.
+PR37 review limitation: review input was truncated and omitted changes were not
+reviewed; the reviewer ran no browser session. Local browser verification covered the
+own-account list, revoke-others and the admin modal only.
 PR33 review limitations remain: truncated input omitted frontend source; the reviewer
 performed no dynamic real-target SCIM exercise. It was not an exhaustive whole-PR audit.
 PR32 review limitations remain: some frontend source hunks were omitted from review
@@ -368,6 +374,16 @@ device description is the recorded User-Agent string; app rows are derived from 
 tokens only. README.md "Sessions".
 
 ### PR 11 — Standard OIDC logout and durable downstream delivery
+
+Split for independent review:
+- **11a — RP-initiated logout and `sid`:** per-client opaque `sid` in ID tokens backed by
+  `oidc_client_sessions`, `/oauth/logout` with exact post-logout redirect matching, state
+  echo, expired-hint tolerance, a session-bound confirmation page for unproven requests,
+  admin registration of post-logout URIs, discovery `end_session_endpoint`. The browser
+  logout button and RP-initiated logout share the PR10 transactional session revocation.
+- **11b — Back-channel delivery:** logout-token signing, per-client receiver registration,
+  durable retry jobs enqueued from session revocation, delivery status display and the
+  discovery flags. The acceptance criteria below span both increments.
 
 Depends on: 01, 10. Touch: OAuth discovery/handlers, client metadata, logout outbox.
 

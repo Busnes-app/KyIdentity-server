@@ -173,6 +173,8 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/auth/authorization/{id}", oauthH.InteractionDetails)
 	mux.Handle("POST /api/auth/authorization/cancel", s.middleware.RateLimit("authorization_cancel", 20, 1)(http.HandlerFunc(oauthH.CancelInteraction)))
 	mux.Handle("GET /oauth/authorize", s.middleware.OptionalAuth(http.HandlerFunc(oauthH.Authorize)))
+	mux.Handle("GET /oauth/logout", s.middleware.OptionalAuth(s.middleware.RateLimit("oauth_logout", 30, 1.0)(http.HandlerFunc(oauthH.EndSession))))
+	mux.Handle("POST /oauth/logout", s.middleware.OptionalAuth(s.middleware.RateLimit("oauth_logout", 30, 1.0)(http.HandlerFunc(oauthH.EndSession))))
 	mux.Handle("POST /oauth/token", s.middleware.RateLimit("oauth_token", 30, 1.0)(http.HandlerFunc(oauthH.Token)))
 	mux.Handle("GET /oauth/userinfo", s.middleware.RateLimit("oauth_userinfo", 120, 2.0)(http.HandlerFunc(oauthH.Userinfo)))
 	mux.Handle("POST /oauth/revoke", s.middleware.RateLimit("oauth_revoke", 30, 1.0)(http.HandlerFunc(oauthH.Revoke)))

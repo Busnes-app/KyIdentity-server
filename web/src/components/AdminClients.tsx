@@ -21,6 +21,7 @@ export const AdminClients: React.FC = () => {
   const [clientName, setClientName] = useState('');
   const [clientType, setClientType] = useState<'public' | 'confidential'>('confidential');
   const [redirectUris, setRedirectUris] = useState('');
+  const [postLogoutUris, setPostLogoutUris] = useState('');
   const [launchUrl, setLaunchUrl] = useState('');
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [createdClientId, setCreatedClientId] = useState<string | null>(null);
@@ -94,6 +95,7 @@ export const AdminClients: React.FC = () => {
           clientName,
           clientType: suiteLocked ? 'confidential' : clientType,
           redirectUris: uris,
+          postLogoutRedirectUris: postLogoutUris.split('\n').map((u) => u.trim()).filter((u) => u.length > 0),
           launchUrl: launchUrl.trim() || undefined,
           allowedScopes: ['openid', 'profile', 'email'],
         }),
@@ -166,6 +168,7 @@ export const AdminClients: React.FC = () => {
     setClientName('');
     setClientType('confidential');
     setRedirectUris('');
+    setPostLogoutUris('');
     setLaunchUrl('');
     setCreatedSecret(null);
     setCreatedClientId(null);
@@ -279,7 +282,8 @@ export const AdminClients: React.FC = () => {
                 ['Authorization URL', `${issuer}/oauth/authorize`],
                 ['Access token URL', `${issuer}/oauth/token`],
                 ['Resource URL', `${issuer}/oauth/userinfo`],
-                ['Logout URL', 'Leave blank (browser logout is not supported)'],
+                ['Logout URL', `${issuer}/oauth/logout`],
+                ['Post-logout redirect URIs', detailsClient.postLogoutRedirectUris.join(' ') || 'None registered; sign-out ends on the KySignOn page'],
                 ['User identifier', 'username'],
                 ['Scope', detailsClient.allowedScopes.join(' ')],
                 ['Auth Style', 'In Params'],
@@ -421,6 +425,20 @@ export const AdminClients: React.FC = () => {
                     onChange={(e) => setRedirectUris(e.target.value)}
                     required
                   />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Post-logout redirect URIs (optional, one per line)</label>
+                  <textarea
+                    className="form-textarea font-mono"
+                    rows={2}
+                    placeholder="https://dns.example.com/signed-out"
+                    value={postLogoutUris}
+                    onChange={(e) => setPostLogoutUris(e.target.value)}
+                  />
+                  <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
+                    Where the app may send the browser after it asks KySignOn to sign the user out. Exact match only.
+                  </span>
                 </div>
 
                 <div className="form-group">

@@ -47,6 +47,7 @@ type OIDCConfiguration struct {
 	UserinfoEndpoint                 string   `json:"userinfo_endpoint"`
 	JwksURI                          string   `json:"jwks_uri"`
 	RevocationEndpoint               string   `json:"revocation_endpoint,omitempty"`
+	EndSessionEndpoint               string   `json:"end_session_endpoint"`
 	ResponseTypesSupported           []string `json:"response_types_supported"`
 	SubjectTypesSupported            []string `json:"subject_types_supported"`
 	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
@@ -74,7 +75,8 @@ func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 		ScopesSupported:                  []string{"openid", "profile", "email"},
 		TokenEndpointAuthMethods:         []string{"client_secret_post", "client_secret_basic", "none"},
 		CodeChallengeMethodsSupported:    []string{"S256"},
-		ClaimsSupported: []string{"sub", "iss", "aud", "exp", "iat", "jti", "nonce", "auth_time", "amr", "acr",
+		EndSessionEndpoint:               e.issuerURL + "/oauth/logout",
+		ClaimsSupported: []string{"sub", "iss", "aud", "exp", "iat", "jti", "nonce", "auth_time", "amr", "acr", "sid",
 			"preferred_username", "name", "email", "role"},
 	}
 	if e.SupportsRevocation() {
@@ -107,11 +109,27 @@ func ValidatePKCE(verifier, challenge, method string) bool {
 // and a redirect URI is the only thing deciding who receives an authorization code. A
 // deployment that needs three ports registers three URIs.
 func (e *Engine) ValidateRedirectURI(client *store.OAuthClient, uri string) bool {
-	if uri == "" || client == nil {
+	if client == nil {
+		return false
+	}
+	return registeredExactly(client.RedirectURIsJSON, uri)
+}
+
+// ValidatePostLogoutRedirectURI applies the same exact-match rule to the URIs a client
+// registered for RP-initiated logout.
+func (e *Engine) ValidatePostLogoutRedirectURI(client *store.OAuthClient, uri string) bool {
+	if client == nil {
+		return false
+	}
+	return registeredExactly(client.PostLogoutRedirectURIsJSON, uri)
+}
+
+func registeredExactly(registeredJSON, uri string) bool {
+	if uri == "" {
 		return false
 	}
 	var registered []string
-	if err := json.Unmarshal([]byte(client.RedirectURIsJSON), &registered); err != nil {
+	if err := json.Unmarshal([]byte(registeredJSON), &registered); err != nil {
 		return false
 	}
 	for _, candidate := range registered {
@@ -352,7 +370,12 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 
 	var idToken string
 	if hasScope(authCode.Scope, "openid") {
+		sid, err := e.store.EnsureClientSession(clientID, authCode.SessionID, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to bind session to client: %w", err)
+		}
 		claims := map[string]any{
+			"sid":                sid,
 			"iss":                e.issuerURL,
 			"sub":                user.ID,
 			"aud":                clientID,

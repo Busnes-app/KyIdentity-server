@@ -225,7 +225,8 @@ access revokes online tokens and invalidates authorization codes in the same tra
 Token registration rechecks access and the originating code atomically, including during
 membership-removal races. Re-granting access cannot revive invalidated codes or tokens.
 Offline JWT consumers may accept old access tokens for up to 15 minutes, and an app's own
-session may last longer until downstream logout integration ships.
+session may last longer until it asks KySignOn to sign out (below) or back-channel logout
+delivery ships.
 
 Admin API: `GET /api/admin/app-registry` accepts the same pagination bounds as group lists
 and searches connection names and IDs. `POST /api/admin/app-registry/{id}/link` accepts
@@ -288,7 +289,26 @@ codes, tokens, step-up grants and pending authorization interactions in the same
 transaction as the audit event. These routes need CSRF but no step-up, like the emergency
 button. The app list is derived from issued tokens: it shows which apps can still call
 KySignOn, not whether the app's own login is alive, and downstream apps may keep their
-session until standard logout ships.
+session until they end it through RP-initiated logout or back-channel delivery ships.
+
+**RP-initiated logout.** Discovery advertises `end_session_endpoint` at `/oauth/logout`
+([OpenID Connect RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html)).
+Every ID token carries a `sid`: an opaque value minted per client and login, so two apps
+cannot correlate a user's sessions through it and no app learns the internal session ID.
+An app sends the browser to `/oauth/logout` with `id_token_hint`, optionally `client_id`,
+`post_logout_redirect_uri` and `state` (GET or POST). A hint this server signed for that
+client whose `sid` names the session held in this browser ends it at once. Without such a
+hint, or with a hint for another user or another login of the same user, KySignOn shows a
+confirmation page whose form carries a session-bound token; a cross-site POST cannot
+confirm on the user's behalf. A cross-site POST carries no session cookie (`SameSite=Lax`),
+so it is answered with a 303 to the same request as a top-level GET on this origin rather
+than reported as a sign-out.
+`post_logout_redirect_uri` must match one of the client's registered post-logout URIs
+exactly (register them on the client, https or loopback http only); anything else is a 400
+page and nothing is changed, never a redirect. `state` is echoed on the redirect. Expired
+hints are accepted, forged or foreign-issuer hints are not. Ending the session revokes its
+codes, tokens, step-up grants and pending interactions in the same audited transaction as
+the browser logout button. Back-channel delivery to other apps is not implemented yet.
 
 **Authorization re-authentication (PR05a).** Ordinary requests reuse SSO. Following
 [OpenID Connect authentication requests](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest),
@@ -430,8 +450,8 @@ login supplies evidence. Pending legacy authorization codes and MFA flows are in
 users in those flows restart login. New codes and access tokens bind internally to the
 originating session: removing it blocks exchange and online UserInfo access. Already-issued
 legacy access tokens retain their previous expiry/revocation behavior. Internal session IDs
-are listed to their owner and administrators for revocation but are not published as logout
-`sid` claims; standard downstream logout remains future work.
+are listed to their owner and administrators for revocation; ID tokens publish a separate
+per-client `sid` for RP-initiated logout. Back-channel logout delivery remains future work.
 
 **System pairing requires the PIN** shown next to the token, and callback URLs must be
 `https` and resolve off-network unless `KYSIGNON_ALLOW_PRIVATE_CALLBACKS=true` (the
