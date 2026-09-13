@@ -115,11 +115,12 @@ jobs:
     needs: [go, web, relay, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    # One publish at a time, never cancelled: a run that has pushed :<sha> must
-    # be allowed to finish attesting it. Ordering is handled below, not here.
-    concurrency:
-      group: publish-master
-      cancel-in-progress: false
+    # No concurrency group here on purpose: GitHub cancels a *pending* job when a
+    # newer one queues into the same group, which would leave that commit with no
+    # :<sha> image and no attestation. Every commit that reaches this job gets both.
+    outputs:
+      name: ${{ steps.push.outputs.name }}
+      digest: ${{ steps.push.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -138,8 +139,8 @@ jobs:
       # Name derived, not spelled out: GITHUB_TOKEN can only write the owning
       # account's namespace, and registries reject a mixed-case name. Only the
       # commit tag is pushed here; it is what lets an operator pin a known-good
-      # image and roll back to it. :latest moves last, after the attestation
-      # verifies.
+      # image and roll back to it. :latest moves in the promote job, after the
+      # attestation verifies.
       - id: push
         run: |
           set -euo pipefail
@@ -166,15 +167,30 @@ jobs:
           gh attestation verify "oci://$NAME@$DIGEST" --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"
 
-      # :latest advances only to an image whose provenance verified above, and
-      # only to the current tip of master: two runs are serialised but not
-      # ordered, so a slower run for an older commit would otherwise move
-      # :latest backwards. Everything above is unconditional, so an older
-      # commit stays pinnable by :<sha> and verifiable.
+
+  # :latest advances only to an image whose provenance verified above, and only
+  # to the current tip of master. Serialised here, not in publish: a pending
+  # promote cancelled by a newer one queuing is harmless, since a newer run
+  # existing is exactly what makes this commit no longer the tip. Promotion is
+  # by digest, so the bytes that move are the bytes that were attested.
+  promote:
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: promote-master
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NAME: ${{ steps.push.outputs.name }}
-          DIGEST: ${{ steps.push.outputs.digest }}
+          NAME: ${{ needs.publish.outputs.name }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
         run: |
           set -euo pipefail
           tip="$(gh api "repos/$GITHUB_REPOSITORY/branches/master" --jq .commit.sha)"
@@ -182,6 +198,5 @@ jobs:
             echo "Published \`$NAME@$DIGEST\` as \`:$GITHUB_SHA\` only: master has moved on to $tip" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          docker tag kysignon-ci "$NAME:latest"
-          docker push "$NAME:latest"
+          docker buildx imagetools create --tag "$NAME:latest" "$NAME@$DIGEST"
           echo "Published \`$NAME@$DIGEST\` as \`:latest\` and \`:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
