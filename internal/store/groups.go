@@ -198,6 +198,25 @@ func (s *Store) SetGroupMembershipForSession(groupID, userID string, member bool
 // setGroupMembershipTx applies one membership change with its policy checks and the
 // grant/provisioning follow-up, returning the names for the audit row.
 func setGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, sessionID string) (groupName, username string, err error) {
+	if groupName, username, err = applyGroupMembershipTx(tx, groupID, userID, member, sessionID); err != nil {
+		return "", "", err
+	}
+	return groupName, username, reconcileAccessTx(tx)
+}
+
+// reconcileAccessTx is the whole-directory follow-up to any membership change: revoke
+// grants that no longer have a source and converge downstream desired state. It is
+// set-based, so one run after a batch of changes yields the same state as one per change.
+func reconcileAccessTx(tx *sql.Tx) error {
+	if err := revokeLostAppAccessTx(tx); err != nil {
+		return err
+	}
+	return reconcileProvisioningTx(tx, time.Now().UTC())
+}
+
+// applyGroupMembershipTx writes one membership row with its policy checks and nothing
+// else; the caller owes a reconcileAccessTx before committing.
+func applyGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, sessionID string) (groupName, username string, err error) {
 	var result sql.Result
 	if member {
 		result, err = tx.Exec(`INSERT INTO group_memberships(group_id,user_id) VALUES (?,?) ON CONFLICT(group_id,user_id) DO NOTHING`, groupID, userID)
@@ -240,12 +259,6 @@ func setGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, sessi
 		if err = invalidateUserEnrollmentTx(tx, userID); err != nil {
 			return "", "", err
 		}
-	}
-	if err = revokeLostAppAccessTx(tx); err != nil {
-		return "", "", err
-	}
-	if err = reconcileProvisioningTx(tx, time.Now().UTC()); err != nil {
-		return "", "", err
 	}
 	return groupName, username, nil
 }

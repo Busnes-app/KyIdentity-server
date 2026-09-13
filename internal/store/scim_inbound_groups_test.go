@@ -61,23 +61,23 @@ func TestUpstreamGroupsHoldOnlyTheConnectorsAccounts(t *testing.T) {
 
 	// Replace is all or nothing: a foreign member in the new set rolls the rename back.
 	g.Name = "Renamed"
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID, other.ID}, nil); !errors.Is(err, ErrGroupMemberForeign) {
+	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID, other.ID}, nil, nil); !errors.Is(err, ErrGroupMemberForeign) {
 		t.Fatalf("cross-connector member accepted on replace: %v", err)
 	}
 	if got, _ = s.GetUpstreamGroup(a.ID, g.ID); got.Name != "Engineering" || len(got.Members) != 2 {
 		t.Fatalf("refused replace changed the group: %+v", got)
 	}
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{bob.ID}, nil); err != nil {
+	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{bob.ID}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ = s.GetUpstreamGroup(a.ID, g.ID); got.Name != "Renamed" || len(got.Members) != 1 || got.Members[0] != bob.ID {
 		t.Fatalf("replace: %+v", got)
 	}
 	g.ExternalID = "grp-2"
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{bob.ID}, nil); err == nil {
+	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{bob.ID}, nil, nil); err == nil {
 		t.Fatal("external id changed")
 	}
-	if err := s.ReplaceUpstreamGroup(b.ID, &Group{ID: g.ID, Name: "Hijack"}, nil, nil); !errors.Is(err, ErrGroupTargetMissing) {
+	if err := s.ReplaceUpstreamGroup(b.ID, &Group{ID: g.ID, Name: "Hijack"}, nil, nil, nil); !errors.Is(err, ErrGroupTargetMissing) {
 		t.Fatalf("another connector replaced the group: %v", err)
 	}
 
@@ -109,23 +109,23 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 0 {
 		t.Fatalf("access before membership: %+v", got)
 	}
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID}, nil); err != nil {
+	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 1 || got[0].Type != "user.created" {
 		t.Fatalf("join did not provision: %+v", got)
 	}
 	deliverAll(t, s)
-	if err := s.ReplaceUpstreamGroup(a.ID, g, nil, nil); err != nil {
+	if err := s.ReplaceUpstreamGroup(a.ID, g, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 1 || got[0].Active {
 		t.Fatalf("leave did not deprovision: %+v", got)
 	}
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID}, nil); err != nil {
+	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUpstreamGroup(a.ID, g.ID, nil); err != nil {
+	if err := s.DeleteUpstreamGroup(a.ID, g.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.GetUserByID(alice.ID); got == nil || got.Status != "active" || got.SourceConnectorID != a.ID {
@@ -134,7 +134,7 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 1 || got[0].Active {
 		t.Fatalf("group deletion did not remove the grant: %+v", got)
 	}
-	if err := s.DeleteUpstreamGroup(a.ID, g.ID, nil); !errors.Is(err, ErrGroupTargetMissing) {
+	if err := s.DeleteUpstreamGroup(a.ID, g.ID, nil, nil); !errors.Is(err, ErrGroupTargetMissing) {
 		t.Fatalf("double delete: %v", err)
 	}
 	// Disconnecting releases the groups it owned as local groups.
@@ -161,5 +161,122 @@ func TestUpstreamGroupCreateRollsBackWithoutItsAuditRow(t *testing.T) {
 	}
 	if n := count(t, s, `SELECT COUNT(*) FROM directory_groups WHERE name='Audited'`); n != 0 {
 		t.Fatal("group survived the rollback")
+	}
+}
+
+// A batch membership write reconciles the directory once, not once per member.
+func TestUpstreamGroupBulkMembershipReconcilesOnce(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	provisioningFixture(t, s, "target")
+	a, _ := s.CreateSCIMConnector("A", nil)
+	members := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		u := upstream(t, s, a.ID, "ext-"+string(rune('a'+i%26))+strconvItoa(i), "bulk"+strconvItoa(i))
+		members = append(members, u.ID)
+	}
+	before := reconcileRuns.Load()
+	g := &Group{Name: "Bulk", SourceConnectorID: a.ID}
+	if err := s.CreateUpstreamGroup(g, members, nil); err != nil {
+		t.Fatal(err)
+	}
+	if runs := reconcileRuns.Load() - before; runs != 1 {
+		t.Fatalf("create reconciled %d times for 200 members", runs)
+	}
+	before = reconcileRuns.Load()
+	if err := s.ReplaceUpstreamGroup(a.ID, g, members[:100], nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if runs := reconcileRuns.Load() - before; runs != 1 {
+		t.Fatalf("replace reconciled %d times for 100 removals", runs)
+	}
+	if got, _ := s.GetUpstreamGroup(a.ID, g.ID); len(got.Members) != 100 {
+		t.Fatalf("members after replace: %d", len(got.Members))
+	}
+}
+
+func strconvItoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var b []byte
+	for i > 0 {
+		b = append([]byte{byte('0' + i%10)}, b...)
+		i /= 10
+	}
+	return string(b)
+}
+
+// A required MFA policy makes the group a local administrator's to change: the upstream
+// may not even rename it.
+func TestUpstreamRenameOfMFARequiredGroupIsRefused(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	admin := &User{ID: "admin-1", Username: "boss", DisplayName: "Boss", Email: "boss@x.test", PasswordHash: "x", Role: "admin", Status: "active"}
+	if err := s.CreateUser(admin); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMFAMethod(&MFAMethod{ID: "admin-totp", UserID: admin.ID, MethodType: "totp", EncryptedSecret: "test"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	if err := s.CreateSession(&Session{ID: "admin-session", UserID: admin.ID, SessionTokenHash: "admin-session", ExpiresAt: at.Add(time.Hour), AuthenticationEvidence: AuthenticationEvidence{PrimaryAuthenticatedAt: &at, FactorAuthenticatedAt: &at, FactorMethod: "totp"}}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := s.CreateSCIMConnector("A", nil)
+	alice := activated(t, s, a.ID, "ext-a", "alice")
+	g := &Group{Name: "Secure", SourceConnectorID: a.ID}
+	if err := s.CreateUpstreamGroup(g, []string{alice.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetEnrollmentPolicy(enrollmentPolicy("group:"+g.ID, 3600), "admin-session", nil); err != nil {
+		t.Fatal(err)
+	}
+	renamed := *g
+	renamed.Name = "Relabelled"
+	if err := s.ReplaceUpstreamGroup(a.ID, &renamed, []string{alice.ID}, nil, nil); !errors.Is(err, ErrEmergencyAdministrator) {
+		t.Fatalf("upstream renamed an MFA-required group: %v", err)
+	}
+	if got, _ := s.GetUpstreamGroup(a.ID, g.ID); got.Name != "Secure" {
+		t.Fatalf("name changed: %+v", got)
+	}
+	// The same name with the same members is a no-op the upstream may still send.
+	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID}, nil, nil); err != nil {
+		t.Fatalf("idempotent replace refused: %v", err)
+	}
+}
+
+// A conditional write carries the version it read into the transaction.
+func TestUpstreamGroupReplaceRejectsStaleVersion(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	a, _ := s.CreateSCIMConnector("A", nil)
+	alice := activated(t, s, a.ID, "ext-a", "alice")
+	g := &Group{Name: "Versioned", SourceConnectorID: a.ID}
+	if err := s.CreateUpstreamGroup(g, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	read, _ := s.GetUpstreamGroup(a.ID, g.ID)
+	stale := read.UpdatedAt
+	first := read.Group
+	first.Name = "Versioned 2"
+	if err := s.ReplaceUpstreamGroup(a.ID, &first, []string{alice.ID}, &stale, nil); err != nil {
+		t.Fatalf("first conditional write: %v", err)
+	}
+	second := read.Group
+	second.Name = "Versioned 3"
+	if err := s.ReplaceUpstreamGroup(a.ID, &second, nil, &stale, nil); !errors.Is(err, ErrGroupVersionStale) {
+		t.Fatalf("stale write accepted: %v", err)
+	}
+	got, _ := s.GetUpstreamGroup(a.ID, g.ID)
+	if got.Name != "Versioned 2" || len(got.Members) != 1 {
+		t.Fatalf("stale write applied: %+v", got)
+	}
+	if err := s.DeleteUpstreamGroup(a.ID, g.ID, &stale, nil); !errors.Is(err, ErrGroupVersionStale) {
+		t.Fatalf("stale delete accepted: %v", err)
+	}
+	fresh := got.UpdatedAt
+	if err := s.DeleteUpstreamGroup(a.ID, g.ID, &fresh, nil); err != nil {
+		t.Fatalf("fresh delete refused: %v", err)
 	}
 }

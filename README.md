@@ -858,8 +858,10 @@ group is refused with a clear SCIM error and nothing is applied), and nested gro
 refused. A PATCH is validated in full and applied as one replace, so an invalid
 operation anywhere means nothing changes. Weak ETags apply as for Users. Deleting a
 group removes what its memberships granted and never deletes a user. A group with a
-required MFA policy is refused to the upstream, since only a local administrator with a
-compliant sign-in may change such a group. Locally, an upstream group's name is
+required MFA policy is refused to the upstream for any change, its name included, since
+only a local administrator with a compliant sign-in may change such a group. One request
+carries at most 1000 members; a conditional write (`If-Match`) is re-checked inside the
+write transaction, so two writes that read the same version cannot both land. Locally, an upstream group's name is
 read-only (`source_owned`); its description stays local. Group membership drives app
 assignment and downstream provisioning exactly as local membership does.
 

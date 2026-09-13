@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Busness-app/ky-primitives/scim"
 	"github.com/Busness-app/kysignon-server/internal/store"
@@ -72,8 +73,14 @@ func (h *SCIMHandler) writeGroup(w http.ResponseWriter, status int, g *store.Ups
 	scimJSON(w, status, res)
 }
 
+// scimMaxMembers bounds one group write; a larger directory group must arrive in pages.
+const scimMaxMembers = 1000
+
 // memberIDs validates a member list: only User members by id, no groups, no blanks.
 func memberIDs(members []scimMember) ([]string, string) {
+	if len(members) > scimMaxMembers {
+		return nil, "too many members in one request (at most 1000)"
+	}
 	out := make([]string, 0, len(members))
 	for _, m := range members {
 		if strings.EqualFold(m.Type, "Group") {
@@ -92,6 +99,8 @@ func (h *SCIMHandler) groupError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrGroupTargetMissing):
 		scimError(w, http.StatusNotFound, "", "Resource not found")
+	case errors.Is(err, store.ErrGroupVersionStale):
+		scimError(w, http.StatusPreconditionFailed, "", "Resource version does not match If-Match")
 	case errors.Is(err, store.ErrGroupMemberForeign):
 		scimError(w, http.StatusBadRequest, "invalidValue", "a member is not an account of this connector, or is a group; provision the user first and reference only Users")
 	case errors.Is(err, store.ErrGroupNameExists):
@@ -215,10 +224,19 @@ func (h *SCIMHandler) loadGroup(w http.ResponseWriter, r *http.Request) *store.U
 	return g
 }
 
+// expectedVersion turns an If-Match header into the version the write must still see.
+func expectedVersion(r *http.Request, g *store.Group) *time.Time {
+	if want := strings.TrimSpace(r.Header.Get("If-Match")); want == "" || want == "*" {
+		return nil
+	}
+	v := g.UpdatedAt
+	return &v
+}
+
 func (h *SCIMHandler) saveGroup(w http.ResponseWriter, r *http.Request, g *store.UpstreamGroup, members []string) {
 	c := scimConnector(r)
 	pending := h.audit.Prepare("scim.group_updated", c.ID, "connector:"+c.Name, g.ID, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"name": g.Name, "members": len(members)})
-	if err := h.store.ReplaceUpstreamGroup(c.ID, &g.Group, members, pending.Row); err != nil {
+	if err := h.store.ReplaceUpstreamGroup(c.ID, &g.Group, members, expectedVersion(r, &g.Group), pending.Row); err != nil {
 		h.groupError(w, err)
 		return
 	}
@@ -396,7 +414,7 @@ func (h *SCIMHandler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending := h.audit.Prepare("scim.group_deleted", c.ID, "connector:"+c.Name, g.ID, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"name": g.Name})
-	if err := h.store.DeleteUpstreamGroup(c.ID, g.ID, pending.Row); err != nil {
+	if err := h.store.DeleteUpstreamGroup(c.ID, g.ID, expectedVersion(r, &g.Group), pending.Row); err != nil {
 		h.groupError(w, err)
 		return
 	}

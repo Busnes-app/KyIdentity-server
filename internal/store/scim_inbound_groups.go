@@ -17,6 +17,7 @@ import (
 var (
 	ErrGroupMemberForeign  = errors.New("member is not an account of this connector")
 	ErrGroupExternalExists = errors.New("external id already in use for this connector")
+	ErrGroupVersionStale   = errors.New("group changed since it was read")
 )
 
 // UpstreamGroup is a group as the upstream sees it: the row plus its member ids.
@@ -126,7 +127,12 @@ func (s *Store) CreateUpstreamGroup(g *Group, members []string, audit *AuditEven
 			return groupWriteError(err)
 		}
 		for _, uid := range members {
-			if _, _, err := setGroupMembershipTx(tx, g.ID, uid, true, ""); err != nil {
+			if _, _, err := applyGroupMembershipTx(tx, g.ID, uid, true, ""); err != nil {
+				return err
+			}
+		}
+		if len(members) > 0 {
+			if err := reconcileAccessTx(tx); err != nil {
 				return err
 			}
 		}
@@ -238,8 +244,11 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 
 // ReplaceUpstreamGroup writes the upstream's full view of an owned group: its name and
 // its exact member set. The whole change applies or none of it does; the external id
-// never changes and every member must be an account this connector owns.
-func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []string, audit *AuditEvent) error {
+// never changes and every member must be an account this connector owns. expect, when
+// set, is the version the caller read (If-Match): a group changed since then is refused.
+// A rename of a group carrying a required MFA policy fails closed like any other change
+// to such a group, since no local administrator is behind an upstream write.
+func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []string, expect *time.Time, audit *AuditEvent) error {
 	members = uniqueStrings(members)
 	now := time.Now().UTC()
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
@@ -249,6 +258,18 @@ func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []str
 		}
 		if current == nil {
 			return ErrGroupTargetMissing
+		}
+		if expect != nil && !current.UpdatedAt.Equal(*expect) {
+			return ErrGroupVersionStale
+		}
+		if g.Name != current.Name {
+			var required bool
+			if err := tx.QueryRow(`SELECT required FROM enrollment_policies WHERE group_id=?`, g.ID).Scan(&required); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if required {
+				return ErrEmergencyAdministrator
+			}
 		}
 		if g.ExternalID != "" && current.ExternalID != "" && g.ExternalID != current.ExternalID {
 			return errors.New("external id is immutable")
@@ -273,16 +294,24 @@ func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []str
 		for _, id := range members {
 			want[id] = true
 		}
+		changed := false
 		for _, id := range have {
 			if !want[id] {
-				if _, _, err := setGroupMembershipTx(tx, g.ID, id, false, ""); err != nil {
+				if _, _, err := applyGroupMembershipTx(tx, g.ID, id, false, ""); err != nil {
 					return err
 				}
+				changed = true
 			}
 			delete(want, id)
 		}
 		for id := range want {
-			if _, _, err := setGroupMembershipTx(tx, g.ID, id, true, ""); err != nil {
+			if _, _, err := applyGroupMembershipTx(tx, g.ID, id, true, ""); err != nil {
+				return err
+			}
+			changed = true
+		}
+		if changed {
+			if err := reconcileAccessTx(tx); err != nil {
 				return err
 			}
 		}
@@ -292,14 +321,19 @@ func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []str
 }
 
 // DeleteUpstreamGroup removes an owned group and its memberships. Its users are untouched.
-func (s *Store) DeleteUpstreamGroup(connectorID, id string, audit *AuditEvent) error {
+// expect, when set, is the version the caller read.
+func (s *Store) DeleteUpstreamGroup(connectorID, id string, expect *time.Time, audit *AuditEvent) error {
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		var owned bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM directory_groups WHERE id=? AND source_connector_id=?)`, id, connectorID).Scan(&owned); err != nil {
+		var updated time.Time
+		err := tx.QueryRow(`SELECT updated_at FROM directory_groups WHERE id=? AND source_connector_id=?`, id, connectorID).Scan(&updated)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrGroupTargetMissing
+		}
+		if err != nil {
 			return err
 		}
-		if !owned {
-			return ErrGroupTargetMissing
+		if expect != nil && !updated.Equal(*expect) {
+			return ErrGroupVersionStale
 		}
 		name, err := deleteGroupTx(tx, id, "")
 		if err != nil {
