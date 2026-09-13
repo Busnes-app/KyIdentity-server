@@ -700,6 +700,11 @@ func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepar
 		if err := prepare(tx, current); err != nil {
 			return err
 		}
+	} else {
+		// A local caller never owns the upstream's fields: take them from the row as it is
+		// now, so an upstream deactivation landing since the caller's read is not undone.
+		u.SourceConnectorID, u.ExternalID, u.SourceActive = current.SourceConnectorID, current.ExternalID, current.SourceActive
+		u.ApplySourceState()
 	}
 	oldRole, oldStatus, oldEmail := current.Role, current.Status, current.Email
 	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active") {

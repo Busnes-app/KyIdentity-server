@@ -323,3 +323,53 @@ func TestLocalOverrideSurvivesAConcurrentUpstreamWrite(t *testing.T) {
 		t.Fatalf("override lost to a concurrent upstream write: %+v", after)
 	}
 }
+
+// The mirror image: an upstream deactivation that lands while an administrator is editing
+// something else is never undone by the administrator's stale copy of the row.
+func TestUpstreamDeactivationSurvivesAConcurrentLocalEdit(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	// A local administrator exists so the promoted upstream account is never the last one.
+	localAdmin := createTestUser(t, s)
+	localAdmin.Role = "admin"
+	if err := s.UpdateUserWithSyncEvents(localAdmin, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.CreateSCIMConnector("A", nil)
+	u := upstream(t, s, c.ID, "ext-1", "alice")
+	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
+		t.Fatal(err)
+	}
+	fromUpstream, _ := s.GetUserByID(u.ID)
+	fromAdmin, _ := s.GetUserByID(u.ID)
+	fromUpstream.SourceActive = false
+	fromAdmin.Role = "admin"
+
+	var start, done sync.WaitGroup
+	start.Add(1)
+	done.Add(2)
+	errs := make(chan error, 2)
+	go func() {
+		defer done.Done()
+		start.Wait()
+		errs <- s.UpdateUpstreamUser(fromUpstream, nil)
+	}()
+	go func() {
+		defer done.Done()
+		start.Wait()
+		errs <- s.UpdateUserWithSyncEvents(fromAdmin, false, nil)
+	}()
+	start.Done()
+	done.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, _ := s.GetUserByID(u.ID)
+	if after.SourceActive || after.Status != "disabled" || after.Role != "admin" {
+		t.Fatalf("upstream deactivation lost to a concurrent local edit: %+v", after)
+	}
+}
