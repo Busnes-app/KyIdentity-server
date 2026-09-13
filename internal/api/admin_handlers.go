@@ -394,6 +394,8 @@ type CreateClientRequest struct {
 	RedirectURIs  []string `json:"redirectUris"`
 	AllowedScopes []string `json:"allowedScopes"`
 	LaunchURL     string   `json:"launchUrl"`
+	// PostLogoutRedirectURIs are the only places RP-initiated logout may send the browser.
+	PostLogoutRedirectURIs []string `json:"postLogoutRedirectUris"`
 }
 
 // suiteClientIDs are the KySecurity services, every one of which is a server-side backend
@@ -473,6 +475,11 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
 		return
 	}
+	postLogoutJSON, err := encodePostLogoutURIs(req.PostLogoutRedirectURIs)
+	if err != nil {
+		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
 	redirectURIsJSON, _ := json.Marshal(req.RedirectURIs)
 	scopesJSON, _ := json.Marshal(req.AllowedScopes)
 
@@ -490,6 +497,8 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		AllowedScopesJSON: string(scopesJSON),
 		LaunchURL:         strings.TrimSpace(req.LaunchURL),
 		Enabled:           true,
+
+		PostLogoutRedirectURIsJSON: postLogoutJSON,
 	}
 
 	if err := h.store.CreateOAuthClient(client); err != nil {
@@ -519,6 +528,8 @@ type UpdateClientRequest struct {
 	LaunchURL     *string   `json:"launchUrl,omitempty"`
 	Enabled       *bool     `json:"enabled,omitempty"`
 	RotateSecret  bool      `json:"rotateSecret,omitempty"`
+
+	PostLogoutRedirectURIs *[]string `json:"postLogoutRedirectUris,omitempty"`
 }
 
 // UpdateOAuthClient edits a registered client in place.
@@ -576,6 +587,14 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		client.RedirectURIsJSON = string(encoded)
+	}
+	if req.PostLogoutRedirectURIs != nil {
+		encoded, err := encodePostLogoutURIs(*req.PostLogoutRedirectURIs)
+		if err != nil {
+			http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			return
+		}
+		client.PostLogoutRedirectURIsJSON = encoded
 	}
 	if req.AllowedScopes != nil {
 		encoded, err := json.Marshal(*req.AllowedScopes)
@@ -769,6 +788,24 @@ func (h *AdminHandler) CreateApplication(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "application": app})
+}
+
+// encodePostLogoutURIs validates post-logout redirect URIs like redirect URIs (https, or
+// http on loopback) and returns the stored JSON; an empty list disables redirects.
+func encodePostLogoutURIs(uris []string) (string, error) {
+	cleaned := make([]string, 0, len(uris))
+	for _, raw := range uris {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if err := validateExternalURL(raw); err != nil {
+			return "", fmt.Errorf("invalid post-logout redirect URI: %w", err)
+		}
+		cleaned = append(cleaned, raw)
+	}
+	encoded, err := json.Marshal(cleaned)
+	return string(encoded), err
 }
 
 func validateRegisteredURLs(redirectURIs []string, launchURL string) error {

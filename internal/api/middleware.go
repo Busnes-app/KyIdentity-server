@@ -326,7 +326,8 @@ func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 			(strings.HasPrefix(path, "/api/notifications/native/devices/") && strings.HasSuffix(path, "/push-token")) ||
 			path == "/api/mfa/push/respond" ||
 			path == "/oauth/token" ||
-			path == "/oauth/revoke" {
+			path == "/oauth/revoke" ||
+			path == "/oauth/logout" { // RP-initiated logout POSTs cross-site by design; EndSession checks its own confirmation token.
 			next.ServeHTTP(w, r)
 			return
 		}

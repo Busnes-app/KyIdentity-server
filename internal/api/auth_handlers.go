@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/Busness-app/kysignon-server/internal/oauth"
+	"log"
 	"net/http"
 	"net/url"
 	"slices"
@@ -578,15 +579,18 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	sess := GetSessionFromContext(r.Context())
 	user := GetUserFromContext(r.Context())
 
-	if sess != nil {
-		_ = h.store.DeleteSession(sess.ID)
+	if sess != nil && user != nil {
+		pending := h.audit.Prepare("auth.logout", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+		if err := h.store.RevokeSession(user.ID, sess.ID, pending.Row); err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("logout for user %s failed: %v", user.ID, err)
+			stepUpInternalError(w)
+			return
+		} else if err == nil {
+			pending.Committed()
+		}
 	}
 
 	clearSessionCookies(w)
-
-	if user != nil {
-		h.audit.Record("auth.logout", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})

@@ -140,17 +140,19 @@ type RecoveryCode struct {
 }
 
 type OAuthClient struct {
-	ID                string    `json:"id"`
-	ClientName        string    `json:"clientName"`
-	ClientType        string    `json:"clientType"` // "public", "confidential"
-	ClientSecretHash  string    `json:"-"`
-	RedirectURIsJSON  string    `json:"redirectUrisJson"`
-	AllowedScopesJSON string    `json:"allowedScopesJson"`
-	LaunchURL         string    `json:"launchUrl,omitempty"`
-	Description       string    `json:"description,omitempty"`
-	IconName          string    `json:"iconName,omitempty"`
-	Enabled           bool      `json:"enabled"`
-	CreatedAt         time.Time `json:"createdAt"`
+	ID                string `json:"id"`
+	ClientName        string `json:"clientName"`
+	ClientType        string `json:"clientType"` // "public", "confidential"
+	ClientSecretHash  string `json:"-"`
+	RedirectURIsJSON  string `json:"redirectUrisJson"`
+	AllowedScopesJSON string `json:"allowedScopesJson"`
+	// PostLogoutRedirectURIsJSON lists where RP-initiated logout may send the browser.
+	PostLogoutRedirectURIsJSON string    `json:"postLogoutRedirectUrisJson"`
+	LaunchURL                  string    `json:"launchUrl,omitempty"`
+	Description                string    `json:"description,omitempty"`
+	IconName                   string    `json:"iconName,omitempty"`
+	Enabled                    bool      `json:"enabled"`
+	CreatedAt                  time.Time `json:"createdAt"`
 }
 
 type AuthorizationCode struct {

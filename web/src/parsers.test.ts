@@ -460,3 +460,11 @@ describe('parseSessionInventory', () => {
     expect(() => parseSessionInventory({ sessions: [{ ...session, id: 1 }], apps: [] })).toThrow();
   });
 });
+
+describe('parseOAuthClients', () => {
+  it('reads post-logout redirect URIs and defaults them to none', () => {
+    const base = { id: 'app', clientName: 'App', clientType: 'public', redirectUrisJson: '["https://a/cb"]', allowedScopesJson: '["openid"]' };
+    expect(parseOAuthClients({ clients: [{ ...base, postLogoutRedirectUrisJson: '["https://a/bye"]' }] })[0]?.postLogoutRedirectUris).toEqual(['https://a/bye']);
+    expect(parseOAuthClients({ clients: [base] })[0]?.postLogoutRedirectUris).toEqual([]);
+  });
+});
