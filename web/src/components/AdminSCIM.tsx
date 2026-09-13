@@ -74,7 +74,16 @@ export function AdminSCIM() {
   return (
     <div className="admin-page">
       <div className="page-header"><h1 className="page-title">Inbound SCIM</h1></div>
-      <p>An upstream directory pushes users here over SCIM 2.0 at <code>{endpoint || '…'}</code> with a connector token. Accounts it creates are invited, never given a password, and its profile fields stay read-only locally; a local disable is an override the upstream cannot lift.</p>
+      <p>An upstream directory pushes users and groups here over SCIM 2.0 at <code>{endpoint || '…'}</code> with a connector token. Accounts it creates are invited, never given a password, and its profile fields stay read-only locally; a local disable is an override the upstream cannot lift. Its groups hold only its own accounts, and their names and members are the upstream's.</p>
+      <details className="settings-section"><summary>Setup in the upstream directory</summary>
+        <ol>
+          <li>Create a connector below and issue a <em>write</em> token.</li>
+          <li>In the directory, add a SCIM provisioning target with tenant URL <code>{endpoint || '…'}</code> and the token as the Bearer secret. Test the connection there.</li>
+          <li>Map <code>userName</code>, <code>externalId</code> (immutable), <code>displayName</code> or <code>name</code>, the primary <code>emails</code> value and <code>active</code> for users; <code>displayName</code>, <code>externalId</code> and <code>members</code> for groups. Do not map <code>password</code> or roles; they are refused or ignored.</li>
+          <li>Provisioned accounts appear on the Users page as pending: issue their activation links (or let mail delivery do it). Groups appear on the Groups page marked SCIM.</li>
+          <li>Rotate by issuing a new token, updating the directory, then revoking the old one. Every write is in the audit log under <code>scim.*</code>.</li>
+        </ol>
+      </details>
       {error && <div className="alert-box error" role="alert">{error}</div>}
       <form className="settings-section" onSubmit={create}>
         <div className="form-row">
@@ -88,7 +97,7 @@ export function AdminSCIM() {
             <div className="section-header">
               <div className="section-title-wrap">
                 <h2>{c.name} <span className={`status-badge ${c.status === 'active' ? 'active' : 'disabled'}`}>{c.status === 'active' ? 'Active' : 'Paused'}</span></h2>
-                <p className="section-desc">{c.users} owned account{c.users === 1 ? '' : 's'} · created {when(c.createdAt)}</p>
+                <p className="section-desc">{c.users} owned account{c.users === 1 ? '' : 's'} · {c.groups} owned group{c.groups === 1 ? '' : 's'} · created {when(c.createdAt)}</p>
               </div>
               <div className="action-buttons-wrap">
                 <button className="secondary-btn sm" disabled={busy} onClick={() => issue(c, 'write')}>Issue write token</button>

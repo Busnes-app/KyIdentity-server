@@ -522,6 +522,7 @@ export function parseGroupPage(value: unknown): DirectoryPage<DirectoryGroup> {
   return directoryPage(value, 'groups', item => {
     const o = obj(item, 'a group');
     return { id: str(o, 'id'), name: str(o, 'name'), description: str(o, 'description'),
+      sourceConnectorId: optStr(o, 'sourceConnectorId'), externalId: optStr(o, 'externalId'),
       memberCount: directoryCount(o, 'memberCount'), member: directoryMember(o),
       createdAt: str(o, 'createdAt'), updatedAt: str(o, 'updatedAt') };
   });
@@ -705,7 +706,7 @@ export function parseSCIMToken(value: unknown): SCIMToken & { token: string } {
 export function parseSCIMConnector(value: unknown): SCIMConnector {
   const c = obj(value, 'a SCIM connector');
   return { id: str(c, 'id'), name: str(c, 'name'), status: oneOf(c, 'status', ['active', 'disabled'] as const), createdAt: str(c, 'createdAt'),
-    tokens: list(c.tokens, parseSCIMTokenRow), users: directoryCount(c, 'users') };
+    tokens: list(c.tokens, parseSCIMTokenRow), users: directoryCount(c, 'users'), groups: directoryCount(c, 'groups') };
 }
 
 export function parseSCIMConnectors(value: unknown): { connectors: SCIMConnector[]; endpoint: string } {

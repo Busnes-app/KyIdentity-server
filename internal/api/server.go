@@ -243,6 +243,12 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("PUT /scim/v2/Users/{id}", scimH.Authenticate(true, scimH.Replace))
 	mux.Handle("PATCH /scim/v2/Users/{id}", scimH.Authenticate(true, scimH.Patch))
 	mux.Handle("DELETE /scim/v2/Users/{id}", scimH.Authenticate(true, scimH.Delete))
+	mux.Handle("GET /scim/v2/Groups", scimH.Authenticate(false, scimH.ListGroups))
+	mux.Handle("GET /scim/v2/Groups/{id}", scimH.Authenticate(false, scimH.GetGroup))
+	mux.Handle("POST /scim/v2/Groups", scimH.Authenticate(true, scimH.CreateGroup))
+	mux.Handle("PUT /scim/v2/Groups/{id}", scimH.Authenticate(true, scimH.ReplaceGroup))
+	mux.Handle("PATCH /scim/v2/Groups/{id}", scimH.Authenticate(true, scimH.PatchGroup))
+	mux.Handle("DELETE /scim/v2/Groups/{id}", scimH.Authenticate(true, scimH.DeleteGroup))
 
 	mux.Handle("GET /api/admin/mail", adminM(http.HandlerFunc(onboardH.GetMail)))
 	mux.Handle("PUT /api/admin/mail", adminStepUpM(http.HandlerFunc(onboardH.PutMail)))

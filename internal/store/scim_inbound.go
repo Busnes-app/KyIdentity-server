@@ -430,6 +430,9 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 			}
 		}
 		affected = len(owned)
+		if _, err := tx.Exec(`UPDATE directory_groups SET source_connector_id=NULL, external_id=NULL, updated_at=? WHERE source_connector_id=?`, now, id); err != nil {
+			return err
+		}
 		res, err := tx.Exec(`DELETE FROM scim_connectors WHERE id=?`, id)
 		if err != nil {
 			return err

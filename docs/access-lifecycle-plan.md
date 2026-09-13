@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/inbound-scim)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/inbound-scim-groups)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -21,8 +21,11 @@ and 11b (back-channel logout tokens and durable delivery; merged as GitHub PR #4
 the security review's four findings fixed). PR12 merged as GitHub PR #44 after five review rounds (durable
 acknowledgement, contradicting listings, wire shape, pruning, untracked holders). PR13
 (invitations, activation and password self-service) merged as GitHub PR #45. PR14
-(inbound SCIM connector security and Users) is implemented on feat/inbound-scim.
-PRs 15–23 and D1–D4 remain planned. Note for D1–D4: released
+(inbound SCIM connector security and Users) merged as GitHub PR #46 after four review
+rounds (atomic upstream writes, identifier shadowing, last-admin on disconnect, stale
+local copies, activation following source state). PR15 (inbound SCIM Groups and
+operational setup) is implemented on feat/inbound-scim-groups. PRs 16–23 and D1–D4
+remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -549,6 +552,14 @@ Depends on: 03, 08, 14. Touch: SCIM Groups, group/source metadata, connector adm
 Acceptance: upstream join/move/leave drives assignment and downstream convergence;
 invalid PATCH rolls back fully; cross-connector membership is rejected; deleting an
 external group cannot delete users or mutate local admin ownership.
+
+Implementation: `directory_groups.source_connector_id`/`external_id`; `/scim/v2/Groups`
+with one-clause filters, weak ETags, PATCH computed then applied as one replace, members
+restricted to the connector's users, nested groups refused, delete never touches users;
+admin refuses local rename of upstream groups; Inbound SCIM page shows setup steps and
+counts; README.md "Inbound SCIM" (Groups, Setup). Not done: validation against a real
+upstream tenant; README says so and withholds product compatibility claims. Redacted
+request logs are the `scim.*` audit rows; a per-request log was not added.
 
 Release C gate: upstream create → activation → MFA → group grant → app login → group
 removal → downstream access removal, with a manual-only onboarding path also verified.
