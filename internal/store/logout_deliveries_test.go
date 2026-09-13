@@ -264,7 +264,7 @@ func TestClaimSkipsClientsWithAnActiveLease(t *testing.T) {
 	}
 }
 
-func TestPruningRemovesOnlyFinishedOldDeliveries(t *testing.T) {
+func TestPruningRemovesOnlyDeliveredOldRows(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := createTestUser(t, s)
@@ -294,8 +294,14 @@ func TestPruningRemovesOnlyFinishedOldDeliveries(t *testing.T) {
 	if err := s.DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if n := countDeliveries(t, s, `1=1`); n != 1 {
-		t.Fatalf("deliveries after prune = %d, want only the queued one", n)
+	if n := countDeliveries(t, s, `1=1`); n != 2 {
+		t.Fatalf("deliveries after prune = %d, want the failed and queued ones", n)
+	}
+	if n := countDeliveries(t, s, `client_id='a'`); n != 0 {
+		t.Fatal("the old delivered row survived the prune")
+	}
+	if n := countDeliveries(t, s, `client_id='b' AND status='failed'`); n != 1 {
+		t.Fatal("the failed delivery was pruned: its absence would read as success")
 	}
 	if n := countDeliveries(t, s, `client_id='c' AND status='queued'`); n != 1 {
 		t.Fatal("the queued delivery was pruned")

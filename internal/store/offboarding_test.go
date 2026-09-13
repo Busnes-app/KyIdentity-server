@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -253,5 +254,49 @@ func TestUntrackedHolderKeepsDeletionOutOfComplete(t *testing.T) {
 		if tgt.SystemID == "untracked" && (tgt.Acknowledged || tgt.Verified || tgt.LastEvent == nil || tgt.LastEvent.Type != "user.deleted" || tgt.LastEvent.Status != "pending") {
 			t.Fatalf("untracked target: %+v", tgt)
 		}
+	}
+}
+
+// A sign-out that exhausted its attempts must keep holding the view back, even after
+// housekeeping has run past the retention window.
+func TestExhaustedLogoutOutlivesPruningAndKeepsCompletionFalse(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	now := time.Now().UTC()
+	sess := seedSession(t, s, u.ID, now.Add(time.Hour), now)
+	seedLogoutClient(t, s, "app", "https://app.example/bc")
+	if _, err := s.EnsureClientSession("app", sess, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	u.Status = "disabled"
+	if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE logout_deliveries SET attempts=4, next_attempt_at=? WHERE user_id=?`, now.Add(-time.Second), u.ID); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.ClaimLogoutDelivery(time.Minute)
+	if err != nil || d == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := s.FinishLogoutDelivery(d, errors.New("receiver down")); err != nil {
+		t.Fatal(err)
+	}
+	if n := countDeliveries(t, s, `user_id=? AND status='failed'`, u.ID); n != 1 {
+		t.Fatalf("failed rows = %d", n)
+	}
+	if _, err := s.db.Exec(`UPDATE logout_deliveries SET updated_at=? WHERE user_id=?`, now.Add(-8*24*time.Hour), u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	off, err := s.UserOffboarding(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off.Acknowledged || off.Verified || len(off.Logouts) != 1 || off.Logouts[0].Status != "failed" {
+		t.Fatalf("a pruned failure was read as success: %+v", off)
 	}
 }

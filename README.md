@@ -346,7 +346,8 @@ Administrators see each delivery in the user's Sessions modal and can retry a st
 which restores the attempt budget; the retry is audited as `admin.logout_retry`. Only
 administrators see the transport error text, since it can name the receiver's host.
 Deliveries run on four workers with at most one in flight per client, so a receiver that
-never answers delays only its own queue. Finished deliveries are pruned after seven days.
+never answers delays only its own queue. Delivered rows are pruned after seven days; a failed delivery stays until it succeeds
+or an administrator retries it, because its absence would read as success.
 A session that reaches its idle or absolute limit is dropped without a logout token:
 expiry is not a sign-out action, and apps rely on their own session lifetimes for it.
 
