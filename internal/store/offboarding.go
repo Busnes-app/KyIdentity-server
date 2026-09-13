@@ -86,7 +86,7 @@ func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
 	}
 	off.Deleted, off.Active = !exists, active
 	off.Acknowledged, off.Verified = !active, !active
-	rows, err := s.db.Query(`SELECT s.id,s.name,s.system_type,s.status,st.revision,NOT st.active,st.provisioned,st.observed,st.observed_at,
+	rows, err := s.db.Query(`SELECT s.id,s.name,s.system_type,s.status,st.revision,NOT st.active,st.offboarded_at,st.observed,st.observed_at,
  EXISTS(SELECT 1 FROM sync_delivery_attempts d WHERE d.system_id=s.id AND d.user_id=st.resource_id),
  ev.event_type,ev.status,ev.last_error,ev.attempts,ev.next_attempt_at,ev.updated_at
  FROM sync_resource_state st JOIN paired_systems s ON s.id=st.system_id
@@ -98,11 +98,10 @@ func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var t OffboardingTarget
-		var provisioned bool
-		var observedAt, evNext, evUpdated sql.NullTime
+		var offboardedAt, observedAt, evNext, evUpdated sql.NullTime
 		var evType, evStatus, evError sql.NullString
 		var evAttempts sql.NullInt64
-		if err := rows.Scan(&t.SystemID, &t.SystemName, &t.SystemType, &t.SystemStatus, &t.Revision, &t.Recorded, &provisioned, &t.Observed, &observedAt, &t.Blocked,
+		if err := rows.Scan(&t.SystemID, &t.SystemName, &t.SystemType, &t.SystemStatus, &t.Revision, &t.Recorded, &offboardedAt, &t.Observed, &observedAt, &t.Blocked,
 			&evType, &evStatus, &evError, &evAttempts, &evNext, &evUpdated); err != nil {
 			return nil, err
 		}
@@ -117,9 +116,18 @@ func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
 				t.LastEvent.NextAttempt = &at
 			}
 		}
-		listedAfter := t.ObservedAt != nil && t.LastEvent != nil && !t.ObservedAt.Before(t.LastEvent.UpdatedAt)
+		// The acknowledgement lives on the state row so it outlives outbox pruning; the
+		// event is the fallback for rows delivered before the column existed.
+		acknowledged, baseline := false, (*time.Time)(nil)
+		switch {
+		case offboardedAt.Valid:
+			acknowledged, baseline = true, &offboardedAt.Time
+		case t.LastEvent != nil:
+			acknowledged, baseline = t.LastEvent.Status == "delivered", &t.LastEvent.UpdatedAt
+		}
+		listedAfter := t.ObservedAt != nil && baseline != nil && !t.ObservedAt.Before(*baseline)
 		t.Contradicted = t.Recorded && listedAfter && t.Observed == "present_active"
-		t.Acknowledged = t.Recorded && t.LastEvent != nil && t.LastEvent.Status == "delivered" && !t.Contradicted
+		t.Acknowledged = t.Recorded && acknowledged && !t.Contradicted
 		t.Verified = t.Recorded && listedAfter && (t.Observed == "present_inactive" || t.Observed == "absent")
 		off.Acknowledged = off.Acknowledged && t.Acknowledged
 		off.Verified = off.Verified && t.Verified

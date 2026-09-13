@@ -750,7 +750,8 @@ connector, what was queued, whether the connector acknowledged it, and what the 
 listing observed, with attempts, next retry and a retry button; below it are the
 sign-out notifications. The summary reads *Pending* while any target is outstanding,
 *Acknowledged* once every connector and app accepted its delivery (decided over every
-delivery, not just the ones listed), and *Complete* only when a later listing verified
+delivery, not just the ones listed, and recorded on the connector's state row so it
+survives outbox pruning), and *Complete* only when a later listing verified
 the account inactive or absent at every connector. A
 connector whose listing is unsupported can be acknowledged but never verified, and a
 connector whose later listing still shows the account active is marked *Still active at

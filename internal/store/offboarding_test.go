@@ -334,3 +334,47 @@ func TestListingThatStillSeesTheAccountActiveContradictsTheAcknowledgement(t *te
 		t.Fatalf("a stale listing contradicted a later delivery: %+v", off)
 	}
 }
+
+// The acknowledgement must survive housekeeping pruning the delivered outbox row, and a
+// re-enable must clear it so the next removal starts unacknowledged.
+func TestAcknowledgementOutlivesPrunedSyncEvents(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	provisionedUser(t, s, u, "assigned")
+	u.Status = "disabled"
+	if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	off, err := s.UserOffboarding(u.ID)
+	if err != nil || !off.Acknowledged {
+		t.Fatalf("after delivery: %+v %v", off, err)
+	}
+	if _, err := s.db.Exec(`UPDATE sync_resource_state SET observed='absent',observed_at=? WHERE resource_id=?`, time.Now().UTC().Add(time.Second), u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if off, _ = s.UserOffboarding(u.ID); !off.Verified {
+		t.Fatalf("after listing: %+v", off)
+	}
+	if err := s.DeleteDeliveredSyncEvents(time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	off, _ = s.UserOffboarding(u.ID)
+	if !off.Acknowledged || !off.Verified || !off.Targets[0].Acknowledged || off.Targets[0].LastEvent != nil {
+		t.Fatalf("pruning the outbox row lost the acknowledgement: %+v", off)
+	}
+
+	u.Status = "active"
+	if err := s.UpdateUserWithSyncEvents(u, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	u.Status = "disabled"
+	if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	off, _ = s.UserOffboarding(u.ID)
+	if off.Acknowledged || off.Targets[0].Acknowledged {
+		t.Fatalf("a new removal inherited the old acknowledgement: %+v", off)
+	}
+}
