@@ -58,13 +58,15 @@ kysignon restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored
 ```
 
 For a published-image install, and always on a fresh recovery machine, pin the image to a
-digest you have verified before it reads a single share (`gh` must be logged in):
+digest you have verified before it reads a single share (`gh` must be logged in). The
+chain stops at the first failure, so a failed verify never writes the pin. The pin persists
+in `.env` after the drill: see the README's upgrade note for moving off it.
 
 ```bash
-d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:latest --format '{{.Manifest.Digest}}')
-gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
-  --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master
-(umask 077; echo "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" >> .env); chmod 600 .env
+d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:latest --format '{{.Manifest.Digest}}') \
+  && gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
+       --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
+  && (umask 077; touch .env; sed -i '/^KYSIGNON_IMAGE=/d' .env; echo "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" >> .env; chmod 600 .env)
 ```
 
 With Docker Compose, from the repository directory, mount the capsule and an empty target

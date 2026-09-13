@@ -97,7 +97,9 @@ APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 # Existing source install? Add that line before the first `up -d` on this checkout: the old
 # image name is gone and a bare `up -d` would pull the published image instead of rebuilding.
 docker compose up -d
-docker compose pull && docker compose up -d   # update a published-image install
+docker compose pull && docker compose up -d   # update a published-image install on the rolling tag
+# A digest-pinned install (KYSIGNON_IMAGE in .env) must re-run the pin recipe in docker-compose.yml
+# first, or delete that line to follow :latest again; `pull` alone is a no-op for a pinned digest.
 ```
 
 ### 3. Retrieve Credentials & Log In
