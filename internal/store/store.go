@@ -797,7 +797,12 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 	if err != nil {
 		return err
 	}
+	// The bare deletion is recorded as a target too, so the completion view cannot claim
+	// every connector is done while it is still queued.
 	for _, sys := range strangers {
+		if _, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',0,0,0)`, sys, userID); err != nil {
+			return err
+		}
 		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", scimInactivePayload(userID), 0, now); err != nil {
 			return err
 		}

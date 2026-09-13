@@ -737,7 +737,10 @@ recorded for every connector that holds the account, including a connector that 
 knows the user through a remote ID mapping and never had a tracked grant. Deletion sends
 `user.deleted` instead of an inactive profile and then removes the directory row; the
 completion state, the remote ID mappings and the audit trail outlive it so retries and
-reconciliation still work. Products are told to deactivate; nothing erases mail, notes
+reconciliation still work. A connector with no recorded account still receives a bare
+deletion, in case it holds one from whole-directory delivery that predates tracking, and
+it appears in the completion view like any other target. Disabling does not send to such
+a connector: nothing shows it holds the account, and nothing is hidden from the view. Products are told to deactivate; nothing erases mail, notes
 or vaults. Re-enabling records a new desired-state revision, so a deactivation still in
 flight cannot land after the reactivation, and the user must sign in again.
 
@@ -745,8 +748,9 @@ flight cannot land after the reactivation, and the user must sign in again.
 connector, what was queued, whether the connector acknowledged it, and what the last
 listing observed, with attempts, next retry and a retry button; below it are the
 sign-out notifications. The summary reads *Pending* while any target is outstanding,
-*Acknowledged* once every connector and app accepted its delivery, and *Complete* only
-when a later listing verified the account inactive or absent at every connector. A
+*Acknowledged* once every connector and app accepted its delivery (decided over every
+delivery, not just the ones listed), and *Complete* only when a later listing verified
+the account inactive or absent at every connector. A
 connector whose listing is unsupported can be acknowledged but never verified, and the
 view says so rather than rounding up.
 

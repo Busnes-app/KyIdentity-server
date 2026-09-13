@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // provisionedUser seeds a SCIM connector with an assigned, delivered account for u.
@@ -185,5 +187,71 @@ func TestReenablingStartsANewGenerationAndRequiresANewLogin(t *testing.T) {
 	off, err := s.UserOffboarding(u.ID)
 	if err != nil || off.Deleted || !off.Active || off.Acknowledged || off.Verified || len(off.Targets) != 1 || off.Targets[0].Recorded {
 		t.Fatalf("offboarding view after re-enable: %+v %v", off, err)
+	}
+}
+
+// Completion is decided over every delivery, not the page the UI shows.
+func TestLogoutCompletionCountsEveryDelivery(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	seedLogoutClient(t, s, "app", "https://app.example/bc")
+	u.Status = "disabled"
+	if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC().Add(-time.Hour)
+	for i := 0; i < 51; i++ {
+		status := "delivered"
+		if i == 0 {
+			status = "queued"
+		}
+		if _, err := s.db.Exec(`INSERT INTO logout_deliveries (id,client_id,user_id,sid,status,attempts,next_attempt_at,created_at,updated_at) VALUES (?,'app',?,?,?,1,?,?,?)`,
+			uuid.NewString(), u.ID, "sid-"+uuid.NewString(), status, base, base.Add(time.Duration(i)*time.Second), base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	off, err := s.UserOffboarding(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(off.Logouts) != 50 {
+		t.Fatalf("display page = %d rows", len(off.Logouts))
+	}
+	if off.Acknowledged || off.Verified {
+		t.Fatalf("a queued delivery outside the display page was rounded up: %+v", off)
+	}
+}
+
+// A connector with no recorded account still gets a bare deletion in case it holds one
+// from whole-directory delivery; that deletion must be a visible target, not hidden work.
+func TestUntrackedHolderKeepsDeletionOutOfComplete(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	provisionedUser(t, s, u, "tracked")
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "untracked", Name: "untracked", SystemType: "scim", CallbackURL: "https://untracked.example/scim", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE account_sync_events SET status='delivered' WHERE user_id=? AND system_id='tracked'`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	off, err := s.UserOffboarding(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(off.Targets) != 2 {
+		t.Fatalf("targets = %+v, want both connectors", off.Targets)
+	}
+	if off.Acknowledged || off.Verified {
+		t.Fatalf("pending deletion on the untracked connector was rounded up: %+v", off)
+	}
+	for _, tgt := range off.Targets {
+		if tgt.SystemID == "untracked" && (tgt.Acknowledged || tgt.Verified || tgt.LastEvent == nil || tgt.LastEvent.Type != "user.deleted" || tgt.LastEvent.Status != "pending") {
+			t.Fatalf("untracked target: %+v", tgt)
+		}
 	}
 }

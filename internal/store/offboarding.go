@@ -123,12 +123,15 @@ func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// The list is a display page; completion is decided over every delivery.
 	if off.Logouts, err = s.ListLogoutDeliveries(userID, 50); err != nil {
 		return nil, err
 	}
-	for _, d := range off.Logouts {
-		off.Acknowledged = off.Acknowledged && d.Status == "delivered"
+	var outstanding bool
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM logout_deliveries WHERE user_id=? AND status<>'delivered')`, userID).Scan(&outstanding); err != nil {
+		return nil, err
 	}
+	off.Acknowledged = off.Acknowledged && !outstanding
 	off.Verified = off.Verified && off.Acknowledged && !off.Active
 	if off.Deleted && len(off.Targets) == 0 && len(off.Logouts) == 0 {
 		return nil, sql.ErrNoRows
