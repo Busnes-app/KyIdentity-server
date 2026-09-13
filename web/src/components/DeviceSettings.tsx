@@ -69,7 +69,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
 
   const { requestGrant, stepUpPrompt } = useStepUp();
 
-  const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [] });
+  const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [], logouts: [] });
   const loadSessions = async () => {
     try {
       setInventory(await apiJson('/api/user/sessions', parseSessionInventory));
@@ -533,7 +533,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
             <span>Sign out other sessions</span>
           </button>
         </div>
-        <SessionList sessions={inventory.sessions} apps={inventory.apps} onRevokeSession={(sess) => handleRevokeSession(sess.id, sess.current)} />
+        <SessionList sessions={inventory.sessions} apps={inventory.apps} logouts={inventory.logouts} onRevokeSession={(sess) => handleRevokeSession(sess.id, sess.current)} />
       </div>
 
       {/* Device Pairing Modal (90s Ephemeral Key / QR) */}

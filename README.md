@@ -245,8 +245,8 @@ access revokes online tokens and invalidates authorization codes in the same tra
 Token registration rechecks access and the originating code atomically, including during
 membership-removal races. Re-granting access cannot revive invalidated codes or tokens.
 Offline JWT consumers may accept old access tokens for up to 15 minutes, and an app's own
-session may last longer until it asks KySignOn to sign out (below) or back-channel logout
-delivery ships.
+session lasts until it asks KySignOn to sign out or receives the back-channel logout
+described below; an app with no back-channel receiver is never told.
 
 Admin API: `GET /api/admin/app-registry` accepts the same pagination bounds as group lists
 and searches connection names and IDs. `POST /api/admin/app-registry/{id}/link` accepts
@@ -308,8 +308,9 @@ codes while the browser session survives). Revoking a session removes its author
 codes, tokens, step-up grants and pending authorization interactions in the same
 transaction as the audit event. These routes need CSRF but no step-up, like the emergency
 button. The app list is derived from issued tokens: it shows which apps can still call
-KySignOn, not whether the app's own login is alive, and downstream apps may keep their
-session until they end it through RP-initiated logout or back-channel delivery ships.
+KySignOn, not whether the app's own login is alive. The "Sign-out notifications" list
+below it shows, per app, whether the back-channel logout for an ended login is pending,
+acknowledged or failed; apps without a receiver never appear there.
 
 **RP-initiated logout.** Discovery advertises `end_session_endpoint` at `/oauth/logout`
 ([OpenID Connect RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html)).
@@ -328,7 +329,40 @@ exactly (register them on the client, https or loopback http only); anything els
 page and nothing is changed, never a redirect. `state` is echoed on the redirect. Expired
 hints are accepted, forged or foreign-issuer hints are not. Ending the session revokes its
 codes, tokens, step-up grants and pending interactions in the same audited transaction as
-the browser logout button. Back-channel delivery to other apps is not implemented yet.
+the browser logout button.
+
+**Back-channel logout.** Discovery advertises `backchannel_logout_supported` and
+`backchannel_logout_session_supported`
+([OpenID Connect Back-Channel Logout](https://openid.net/specs/openid-connect-backchannel-1_0.html)).
+A client may register one back-channel logout URI (public HTTPS, same guard as
+provisioning callbacks). Whenever a login ends, whether by the logout button, RP-initiated
+logout, "sign out other sessions", an administrator revoking a session or an app's tokens,
+or an account being disabled, KySignOn queues one delivery per client that saw that login
+and has a receiver, in the same transaction as the revocation. A worker POSTs
+`logout_token=<JWT>` as a form body with no redirects followed, a ten-second timeout and a
+fresh token per attempt; 200 or 204 acknowledges, anything else retries with exponential
+backoff (30 s doubling, 30 min cap) up to five attempts, then the delivery is marked failed.
+Administrators see each delivery in the user's Sessions modal and can retry a stuck one,
+which restores the attempt budget; the retry is audited as `admin.logout_retry`. Only
+administrators see the transport error text, since it can name the receiver's host.
+Deliveries run on four workers with at most one in flight per client, so a receiver that
+never answers delays only its own queue. Finished deliveries are pruned after seven days.
+A session that reaches its idle or absolute limit is dropped without a logout token:
+expiry is not a sign-out action, and apps rely on their own session lifetimes for it.
+
+The logout token is an RS256 JWT with header `typ: logout+jwt` and claims `iss`, `aud`
+(the client ID), `sub`, `sid` (the client-scoped session ID from the ID token), `iat`,
+`exp` (two minutes), `jti` and `events` containing
+`http://schemas.openid.net/event/backchannel-logout`. It never carries `nonce` or
+`token_use`, and this server rejects it as an ID token hint and as an access token. A
+receiver must verify the signature against the JWKS, the issuer, that `aud` is its client
+ID, that `typ` is `logout+jwt`, that the events claim is present and `nonce` absent, and
+reject a `jti` it has already seen; it should then end every local session tied to that
+`sid` (or to `sub` when it keys sessions by subject) and answer 200 with `Cache-Control:
+no-store`. An acknowledgement means the receiver accepted the token, not that it proved it
+ended a session; "Acknowledged" in the UI carries exactly that meaning. Subject-wide logout
+(a token with `sub` and no `sid`) is not sent by this server today: every delivery names one
+login.
 
 **Authorization re-authentication (PR05a).** Ordinary requests reuse SSO. Following
 [OpenID Connect authentication requests](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest),
@@ -471,7 +505,7 @@ users in those flows restart login. New codes and access tokens bind internally 
 originating session: removing it blocks exchange and online UserInfo access. Already-issued
 legacy access tokens retain their previous expiry/revocation behavior. Internal session IDs
 are listed to their owner and administrators for revocation; ID tokens publish a separate
-per-client `sid` for RP-initiated logout. Back-channel logout delivery remains future work.
+per-client `sid` for RP-initiated and back-channel logout.
 
 **System pairing requires the PIN** shown next to the token, and callback URLs must be
 `https` and resolve off-network unless `KYSIGNON_ALLOW_PRIVATE_CALLBACKS=true` (the

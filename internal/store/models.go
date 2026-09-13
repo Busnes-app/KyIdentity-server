@@ -147,12 +147,14 @@ type OAuthClient struct {
 	RedirectURIsJSON  string `json:"redirectUrisJson"`
 	AllowedScopesJSON string `json:"allowedScopesJson"`
 	// PostLogoutRedirectURIsJSON lists where RP-initiated logout may send the browser.
-	PostLogoutRedirectURIsJSON string    `json:"postLogoutRedirectUrisJson"`
-	LaunchURL                  string    `json:"launchUrl,omitempty"`
-	Description                string    `json:"description,omitempty"`
-	IconName                   string    `json:"iconName,omitempty"`
-	Enabled                    bool      `json:"enabled"`
-	CreatedAt                  time.Time `json:"createdAt"`
+	PostLogoutRedirectURIsJSON string `json:"postLogoutRedirectUrisJson"`
+	// BackchannelLogoutURI receives signed logout tokens when a login ends; empty means unsupported.
+	BackchannelLogoutURI string    `json:"backchannelLogoutUri"`
+	LaunchURL            string    `json:"launchUrl,omitempty"`
+	Description          string    `json:"description,omitempty"`
+	IconName             string    `json:"iconName,omitempty"`
+	Enabled              bool      `json:"enabled"`
+	CreatedAt            time.Time `json:"createdAt"`
 }
 
 type AuthorizationCode struct {

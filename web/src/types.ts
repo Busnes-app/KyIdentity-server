@@ -60,9 +60,21 @@ export interface AppGrant {
   expiresAt: string;
 }
 
+export interface LogoutDelivery {
+  id: string;
+  clientId: string;
+  clientName: string;
+  status: 'queued' | 'delivered' | 'failed';
+  attempts: number;
+  lastError: string;
+  nextAttemptAt: string;
+  updatedAt: string;
+}
+
 export interface SessionInventory {
   sessions: BrowserSession[];
   apps: AppGrant[];
+  logouts: LogoutDelivery[];
 }
 
 export interface Passkey {
@@ -93,6 +105,7 @@ export interface OAuthClient {
   redirectUris: string[];
   allowedScopes: string[];
   postLogoutRedirectUris: string[];
+  backchannelLogoutUri?: string;
   launchUrl?: string;
   enabled: boolean;
   createdAt: string;

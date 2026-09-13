@@ -17,8 +17,10 @@ GitHub PR #34) and 08b (assignment-aware desired state, revisions and group deli
 merged as GitHub PR #35). PR09 merged as GitHub PR #36. PR10 merged as GitHub PR #37 with CI
 passed and the security review cleared. PR11 is split into 11a (per-client `sid`,
 RP-initiated logout, post-logout redirect registration; implemented on feat/oidc-logout)
-and 11b (back-channel logout tokens and durable delivery, planned). PRs 12–23 and D1–D4
-remain planned.
+and 11b (back-channel logout tokens and durable delivery; implemented on
+feat/backchannel-logout). PRs 12–23 and D1–D4 remain planned. Note for D1–D4: released
+ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
+receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
 reviewed; the reviewer ran no browser session. Local browser verification covered the
 own-account list, revoke-others and the admin modal only.
@@ -383,7 +385,11 @@ Split for independent review:
   logout button and RP-initiated logout share the PR10 transactional session revocation.
 - **11b — Back-channel delivery:** logout-token signing, per-client receiver registration,
   durable retry jobs enqueued from session revocation, delivery status display and the
-  discovery flags. The acceptance criteria below span both increments.
+  discovery flags. The acceptance criteria below span both increments. Implementation:
+  `logout_deliveries` with leases, claim tokens, backoff and a five-attempt budget; enqueue
+  happens in `revokeSessionsTx` and per-client revocation before session rows cascade;
+  `Engine.StartLogoutWorker` delivers; README.md "Back-channel logout" documents receiver
+  checks, replay handling and that only session-specific tokens are sent.
 
 Depends on: 01, 10. Touch: OAuth discovery/handlers, client metadata, logout outbox.
 

@@ -14,6 +14,7 @@ import (
 	"github.com/Busness-app/kysignon-server/internal/audit"
 	"github.com/Busness-app/kysignon-server/internal/auth"
 	"github.com/Busness-app/kysignon-server/internal/crypto"
+	"github.com/Busness-app/kysignon-server/internal/netguard"
 	"github.com/Busness-app/kysignon-server/internal/store"
 	"github.com/Busness-app/kysignon-server/internal/sync"
 	"github.com/google/uuid"
@@ -396,6 +397,9 @@ type CreateClientRequest struct {
 	LaunchURL     string   `json:"launchUrl"`
 	// PostLogoutRedirectURIs are the only places RP-initiated logout may send the browser.
 	PostLogoutRedirectURIs []string `json:"postLogoutRedirectUris"`
+	// BackchannelLogoutURI receives signed logout tokens; it is an outbound target, so it
+	// must pass the same public-HTTPS guard as provisioning callbacks.
+	BackchannelLogoutURI string `json:"backchannelLogoutUri"`
 }
 
 // suiteClientIDs are the KySecurity services, every one of which is a server-side backend
@@ -480,6 +484,13 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
 		return
 	}
+	req.BackchannelLogoutURI = strings.TrimSpace(req.BackchannelLogoutURI)
+	if req.BackchannelLogoutURI != "" {
+		if err := netguard.ValidateURL(req.BackchannelLogoutURI, "backchannelLogoutUri"); err != nil {
+			http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			return
+		}
+	}
 	redirectURIsJSON, _ := json.Marshal(req.RedirectURIs)
 	scopesJSON, _ := json.Marshal(req.AllowedScopes)
 
@@ -499,6 +510,7 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		Enabled:           true,
 
 		PostLogoutRedirectURIsJSON: postLogoutJSON,
+		BackchannelLogoutURI:       req.BackchannelLogoutURI,
 	}
 
 	if err := h.store.CreateOAuthClient(client); err != nil {
@@ -530,6 +542,7 @@ type UpdateClientRequest struct {
 	RotateSecret  bool      `json:"rotateSecret,omitempty"`
 
 	PostLogoutRedirectURIs *[]string `json:"postLogoutRedirectUris,omitempty"`
+	BackchannelLogoutURI   *string   `json:"backchannelLogoutUri,omitempty"`
 }
 
 // UpdateOAuthClient edits a registered client in place.
@@ -587,6 +600,16 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		client.RedirectURIsJSON = string(encoded)
+	}
+	if req.BackchannelLogoutURI != nil {
+		uri := strings.TrimSpace(*req.BackchannelLogoutURI)
+		if uri != "" {
+			if err := netguard.ValidateURL(uri, "backchannelLogoutUri"); err != nil {
+				http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+				return
+			}
+		}
+		client.BackchannelLogoutURI = uri
 	}
 	if req.PostLogoutRedirectURIs != nil {
 		encoded, err := encodePostLogoutURIs(*req.PostLogoutRedirectURIs)

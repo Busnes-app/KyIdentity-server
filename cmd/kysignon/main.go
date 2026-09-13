@@ -149,6 +149,7 @@ func main() {
 
 	// Start background account sync dispatcher worker
 	go syncEngine.StartWorker(ctx)
+	go oauthEngine.StartLogoutWorker(ctx)
 
 	// Background housekeeping. Every table below is written by unauthenticated or
 	// per-request paths, so none of them may grow without bound.
@@ -162,6 +163,7 @@ func main() {
 			_ = dbStore.DeleteExpiredMFAChallenges()
 			_ = dbStore.DeleteExpiredWebAuthnChallenges()
 			_ = dbStore.DeleteDeliveredSyncEvents(time.Now().UTC().Add(-7 * 24 * time.Hour))
+			_ = dbStore.DeleteLogoutDeliveriesOlderThan(time.Now().UTC().Add(-7 * 24 * time.Hour))
 			_ = dbStore.DeleteAuditEventsOlderThan(time.Now().UTC().Add(-auditRetention))
 			_, _ = dbStore.DeleteOrphanedLauncherIcons(time.Hour)
 			if err := clearFirstRunPasswordFile(dbStore, cfg.DataDir); err != nil {

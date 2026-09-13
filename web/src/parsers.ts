@@ -16,6 +16,7 @@ import type {
   AuditEvent,
   AppGrant,
   BrowserSession,
+  LogoutDelivery,
   SessionInventory,
   BackupDrillResult,
   BackupRunResult,
@@ -172,9 +173,27 @@ function parseAppGrant(value: unknown): AppGrant {
   };
 }
 
+function parseLogoutDelivery(value: unknown): LogoutDelivery {
+  const o = obj(value, 'a logout delivery');
+  return {
+    id: str(o, 'id'),
+    clientId: str(o, 'clientId'),
+    clientName: optStr(o, 'clientName') ?? str(o, 'clientId'),
+    status: oneOf(o, 'status', ['queued', 'delivered', 'failed'] as const),
+    attempts: typeof o.attempts === 'number' ? o.attempts : 0,
+    lastError: optStr(o, 'lastError') ?? '',
+    nextAttemptAt: optStr(o, 'nextAttemptAt') ?? '',
+    updatedAt: optStr(o, 'updatedAt') ?? '',
+  };
+}
+
 export function parseSessionInventory(value: unknown): SessionInventory {
   const o = obj(value, 'a session inventory');
-  return { sessions: list(o.sessions, parseBrowserSession), apps: list(o.apps, parseAppGrant) };
+  return {
+    sessions: list(o.sessions, parseBrowserSession),
+    apps: list(o.apps, parseAppGrant),
+    logouts: list(o.logouts, parseLogoutDelivery),
+  };
 }
 
 export interface PairingToken {
@@ -328,6 +347,7 @@ export function parseOAuthClients(value: unknown): OAuthClient[] {
       redirectUris: jsonStringArray(c, 'redirectUrisJson'),
       allowedScopes: jsonStringArray(c, 'allowedScopesJson'),
       postLogoutRedirectUris: typeof c.postLogoutRedirectUrisJson === 'string' ? jsonStringArray(c, 'postLogoutRedirectUrisJson') : [],
+      backchannelLogoutUri: optStr(c, 'backchannelLogoutUri') || undefined,
       launchUrl: optStr(c, 'launchUrl'),
       enabled: c.enabled !== false,
       createdAt: optStr(c, 'createdAt') ?? '',

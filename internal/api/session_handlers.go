@@ -37,8 +37,9 @@ type sessionView struct {
 
 // writeInventory renders a user's live browser sessions and the apps holding live tokens.
 // App entries come from the token registry, not from the apps themselves, so they are
-// not a complete inventory of downstream app sessions.
-func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSessionID string) {
+// not a complete inventory of downstream app sessions. Delivery errors name receiver
+// hosts, so only an administrator's view carries them.
+func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSessionID string, admin bool) {
 	sessions, err := h.store.ListUserSessions(userID, h.middleware.sessionIdleTTL)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -49,6 +50,19 @@ func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSe
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
+	deliveries, err := h.store.ListLogoutDeliveries(userID, 50)
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	logouts := make([]logoutDeliveryView, 0, len(deliveries))
+	for _, d := range deliveries {
+		v := logoutDeliveryView{ID: d.ID, ClientID: d.ClientID, ClientName: d.ClientName, Status: d.Status, Attempts: d.Attempts, NextAttemptAt: d.NextAttemptAt, UpdatedAt: d.UpdatedAt}
+		if admin {
+			v.LastError = d.LastError
+		}
+		logouts = append(logouts, v)
+	}
 	views := make([]sessionView, 0, len(sessions))
 	for _, s := range sessions {
 		views = append(views, sessionView{
@@ -57,11 +71,42 @@ func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSe
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"sessions": views, "apps": apps})
+	_ = json.NewEncoder(w).Encode(map[string]any{"sessions": views, "apps": apps, "logouts": logouts})
+}
+
+// logoutDeliveryView is one back-channel logout owed to an app: what the app was told, or not.
+type logoutDeliveryView struct {
+	ID            string    `json:"id"`
+	ClientID      string    `json:"clientId"`
+	ClientName    string    `json:"clientName"`
+	Status        string    `json:"status"`
+	Attempts      int       `json:"attempts"`
+	LastError     string    `json:"lastError"`
+	NextAttemptAt time.Time `json:"nextAttemptAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+// AdminRetryLogout makes a stuck back-channel logout due again with a fresh attempt budget.
+func (h *SessionHandler) AdminRetryLogout(w http.ResponseWriter, r *http.Request) {
+	admin := GetUserFromContext(r.Context())
+	userID, id := r.PathValue("id"), r.PathValue("deliveryId")
+	pending := h.audit.Prepare("admin.logout_retry", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"deliveryId": id})
+	found, err := h.store.RetryLogoutDeliveryNow(userID, id, pending.Row)
+	if err != nil {
+		log.Printf("logout retry failed: %v", err)
+		stepUpInternalError(w)
+		return
+	}
+	if !found {
+		http.Error(w, `{"error":"delivery_not_found"}`, http.StatusNotFound)
+		return
+	}
+	pending.Committed()
+	writeSuccess(w)
 }
 
 func (h *SessionHandler) ListOwn(w http.ResponseWriter, r *http.Request) {
-	h.writeInventory(w, GetUserFromContext(r.Context()).ID, GetSessionFromContext(r.Context()).ID)
+	h.writeInventory(w, GetUserFromContext(r.Context()).ID, GetSessionFromContext(r.Context()).ID, false)
 }
 
 // RevokeOwn signs out one of the caller's sessions. Revoking the current one also clears
@@ -91,7 +136,7 @@ func (h *SessionHandler) AdminList(w http.ResponseWriter, r *http.Request) {
 	if !h.userExists(w, r.PathValue("id")) {
 		return
 	}
-	h.writeInventory(w, r.PathValue("id"), "")
+	h.writeInventory(w, r.PathValue("id"), "", true)
 }
 
 func (h *SessionHandler) AdminRevokeSession(w http.ResponseWriter, r *http.Request) {

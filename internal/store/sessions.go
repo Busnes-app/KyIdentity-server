@@ -74,27 +74,22 @@ func (s *Store) ListUserAppGrants(userID string) ([]AppGrant, error) {
 // does not exist or belongs to someone else is ErrNotFound and writes nothing.
 func (s *Store) RevokeSession(userID, sessionID string, audit *AuditEvent) error {
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`DELETE FROM sessions WHERE id=? AND user_id=?`, sessionID, userID)
+		n, err := revokeSessionsTx(tx, time.Now().UTC(), `id=? AND user_id=?`, sessionID, userID)
 		if err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			if err != nil {
-				return err
-			}
+		if n == 0 {
 			return ErrNotFound
 		}
-		return revokeSessionGrantsTx(tx, `session_id=?`, time.Now().UTC(), sessionID)
+		return nil
 	})
 }
 
 // RevokeOtherSessions signs out every session of userID except keepSessionID.
 func (s *Store) RevokeOtherSessions(userID, keepSessionID string, audit *AuditEvent) error {
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id=? AND id<>?`, userID, keepSessionID); err != nil {
-			return err
-		}
-		return revokeSessionGrantsTx(tx, `user_id=? AND session_id<>?`, time.Now().UTC(), userID, keepSessionID)
+		_, err := revokeSessionsTx(tx, time.Now().UTC(), `user_id=? AND id<>?`, userID, keepSessionID)
+		return err
 	})
 }
 
@@ -103,12 +98,32 @@ func (s *Store) RevokeOtherSessions(userID, keepSessionID string, audit *AuditEv
 func (s *Store) RevokeUserClientAccess(userID, clientID string, audit *AuditEvent) error {
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
 		now := time.Now().UTC()
+		if err := enqueueLogoutTx(tx, now, `cs.user_id=? AND cs.client_id=?`, userID, clientID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`UPDATE issued_tokens SET revoked_at=? WHERE user_id=? AND client_id=? AND revoked_at IS NULL`, now, userID, clientID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(`DELETE FROM authorization_codes WHERE user_id=? AND client_id=?`, userID, clientID)
 		return err
 	})
+}
+
+// revokeSessionsTx ends every session matching sessionWhere: it queues back-channel
+// logout for the clients that saw those logins, invalidates everything the sessions
+// minted, then deletes the rows. It reports how many sessions were removed.
+func revokeSessionsTx(tx *sql.Tx, now time.Time, sessionWhere string, args ...any) (int64, error) {
+	if err := enqueueLogoutTx(tx, now, `cs.session_id IN (SELECT id FROM sessions WHERE `+sessionWhere+`)`, args...); err != nil {
+		return 0, err
+	}
+	if err := revokeSessionGrantsTx(tx, `session_id IN (SELECT id FROM sessions WHERE `+sessionWhere+`)`, now, args...); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`DELETE FROM sessions WHERE `+sessionWhere, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // revokeSessionGrantsTx invalidates the codes, tokens, step-up grants and pending
