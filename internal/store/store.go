@@ -713,14 +713,19 @@ func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *Audi
 	if _, err := tx.Exec(`UPDATE users SET display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, updated_at = ? WHERE id = ?`, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, now, u.ID); err != nil {
 		return enrollmentMutationError(err)
 	}
-	if revokeAccess {
-		if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
-			return err
-		}
-	}
 	stored, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, u.ID))
 	if err != nil || stored == nil {
 		return err
+	}
+	switch {
+	case oldStatus == "active" && stored.Status == "disabled":
+		if err := offboardUserTx(tx, stored, false, now); err != nil {
+			return err
+		}
+	case revokeAccess:
+		if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
+			return err
+		}
 	}
 	if err := queueUserUpdateTx(tx, stored, now); err != nil {
 		return err
@@ -757,9 +762,10 @@ func (s *Store) DeleteUser(userID string) error {
 	return err
 }
 
-// DeleteUserWithSyncEvents atomically removes a user and queues its deletion for every
-// connector that holds the account. Older queued user events are discarded so a
-// downstream system cannot receive stale updates after the deletion.
+// DeleteUserWithSyncEvents atomically offboards a user and removes the directory row.
+// Every connector that holds the account gets a deletion through its desired state, so
+// completion stays visible afterwards; connectors with no recorded account get a bare
+// deletion in case they hold one from whole-directory delivery that predates tracking.
 func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -782,56 +788,27 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 			return ErrLastActiveAdmin
 		}
 	}
-
-	// Every connector may hold the account from whole-directory delivery that predates
-	// desired-state tracking; receivers tolerate a deletion for an unknown account. Only
-	// a connector known to hold the account receives the profile; the rest get the ID.
-	rows, err := tx.Query(`SELECT s.id,COALESCE(st.revision,0)+1,
- st.resource_id IS NOT NULL OR EXISTS(SELECT 1 FROM scim_user_links l WHERE l.system_id=s.id AND l.local_id=? AND l.kind='user')
- FROM paired_systems s LEFT JOIN sync_resource_state st ON st.system_id=s.id AND st.resource_id=? AND st.kind='user'
- WHERE s.status<>'disabled' ORDER BY s.id`, userID, userID)
+	now := time.Now().UTC()
+	if err := offboardUserTx(tx, u, true, now); err != nil {
+		return err
+	}
+	strangers, err := scanStrings(tx.Query(`SELECT s.id FROM paired_systems s WHERE s.status<>'disabled'
+ AND NOT EXISTS(SELECT 1 FROM sync_resource_state st WHERE st.system_id=s.id AND st.resource_id=? AND st.kind='user') ORDER BY s.id`, userID))
 	if err != nil {
 		return err
 	}
-	type target struct {
-		revision int
-		held     bool
-	}
-	targets := map[string]target{}
-	for rows.Next() {
-		var sys string
-		var t target
-		if err := rows.Scan(&sys, &t.revision, &t.held); err != nil {
-			rows.Close()
+	// The bare deletion is recorded as a target too, so the completion view cannot claim
+	// every connector is done while it is still queued.
+	for _, sys := range strangers {
+		if _, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',0,0,0)`, sys, userID); err != nil {
 			return err
 		}
-		targets[sys] = t
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM sync_resource_state WHERE resource_id = ? AND kind='user'`, userID); err != nil {
-		return err
+		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", scimInactivePayload(userID), 0, now); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`DELETE FROM users WHERE id = ?`, userID); err != nil {
 		return err
-	}
-	now := time.Now().UTC()
-	payload, err := scimUserPayload(u, false)
-	if err != nil {
-		return err
-	}
-	for sys, t := range targets {
-		body := scimInactivePayload(userID)
-		if t.held {
-			body = payload
-		}
-		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", body, t.revision, now); err != nil {
-			return err
-		}
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
 		return err

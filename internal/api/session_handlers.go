@@ -55,14 +55,7 @@ func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSe
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	logouts := make([]logoutDeliveryView, 0, len(deliveries))
-	for _, d := range deliveries {
-		v := logoutDeliveryView{ID: d.ID, ClientID: d.ClientID, ClientName: d.ClientName, Status: d.Status, Attempts: d.Attempts, NextAttemptAt: d.NextAttemptAt, UpdatedAt: d.UpdatedAt}
-		if admin {
-			v.LastError = d.LastError
-		}
-		logouts = append(logouts, v)
-	}
+	logouts := logoutViews(deliveries, admin)
 	views := make([]sessionView, 0, len(sessions))
 	for _, s := range sessions {
 		views = append(views, sessionView{
@@ -72,6 +65,20 @@ func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSe
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"sessions": views, "apps": apps, "logouts": logouts})
+}
+
+// logoutViews is the only shape a delivery leaves the server in: never the claim token,
+// the client-scoped sid or the receiver URI, and the transport error only for admins.
+func logoutViews(deliveries []store.LogoutDelivery, admin bool) []logoutDeliveryView {
+	out := make([]logoutDeliveryView, 0, len(deliveries))
+	for _, d := range deliveries {
+		v := logoutDeliveryView{ID: d.ID, ClientID: d.ClientID, ClientName: d.ClientName, Status: d.Status, Attempts: d.Attempts, NextAttemptAt: d.NextAttemptAt, UpdatedAt: d.UpdatedAt}
+		if admin {
+			v.LastError = d.LastError
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 // logoutDeliveryView is one back-channel logout owed to an app: what the app was told, or not.

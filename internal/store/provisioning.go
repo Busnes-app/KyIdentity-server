@@ -40,6 +40,9 @@ func (s *Store) migrateProvisioning() error {
  PRIMARY KEY(system_id,resource_id));
  INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision)
  SELECT a.system_id,e.user_id,1,1,1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id IS NOT NULL`},
+		// offboarded_at is the durable acknowledgement of a deactivation or deletion; the
+		// outbox row that carried it is pruned, this is not.
+		{`SELECT COUNT(*) FROM pragma_table_info('sync_resource_state') WHERE name='offboarded_at'`, `ALTER TABLE sync_resource_state ADD COLUMN offboarded_at DATETIME`},
 	} {
 		var n int
 		if err = tx.QueryRow(c.probe).Scan(&n); err != nil {
@@ -99,6 +102,8 @@ type desiredState struct {
 	// force sends even when the receiver already holds this state (resync); for users
 	// it sends user.created so a missing suite account is recreated.
 	force bool
+	// deleted announces removal from the directory instead of an inactive profile.
+	deleted bool
 }
 
 // queueDesiredStateTx records the new desired state and the outbox work that delivers it.
@@ -122,12 +127,14 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	}
 	var revision int
 	if err := tx.QueryRow(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,revision,members) VALUES(?,?,?,?,1,?)
- ON CONFLICT(system_id,resource_id) DO UPDATE SET active=excluded.active,revision=revision+1,members=excluded.members RETURNING revision`,
+ ON CONFLICT(system_id,resource_id) DO UPDATE SET active=excluded.active,revision=revision+1,members=excluded.members,offboarded_at=NULL RETURNING revision`,
 		d.systemID, d.resourceID, d.kind, d.active, d.members).Scan(&revision); err != nil {
 		return err
 	}
 	eventType := "user.updated"
 	switch {
+	case d.deleted:
+		eventType = "user.deleted"
 	case d.kind == "group" && d.active:
 		eventType = "group.updated"
 	case d.kind == "group":
@@ -469,6 +476,13 @@ func (s *Store) SCIMGroupMembers(systemID, groupID string) (name string, exists 
 // A confirmed first delivery establishes the remote link, so groups holding this user
 // are re-queued to pick the member up.
 func provisionedTx(tx *sql.Tx, ev AccountSyncEvent, now time.Time) error {
+	if ev.EventType == "user.deleted" || ev.EventType == "user.updated" {
+		// A delivered inactive state for the current revision is the acknowledgement the
+		// offboarding view reads; a newer desired state clears it.
+		if _, err := tx.Exec(`UPDATE sync_resource_state SET offboarded_at=? WHERE system_id=? AND resource_id=? AND kind='user' AND NOT active AND revision=?`, now, ev.SystemID, ev.UserID, ev.Revision); err != nil {
+			return err
+		}
+	}
 	switch ev.EventType {
 	case "user.created", "user.updated", "group.updated":
 	case "group.deleted":

@@ -82,6 +82,13 @@ export const SessionList: React.FC<SessionListProps> = ({ sessions, apps, logout
     <div className="section-header">
       <div className="section-title-wrap"><h3>Sign-out notifications</h3></div>
     </div>
+    <LogoutDeliveries logouts={logouts} onRetryLogout={onRetryLogout} />
+  </>
+);
+
+/** Back-channel logout deliveries owed to apps: what each app was told, or not. */
+export const LogoutDeliveries: React.FC<{ logouts: LogoutDelivery[]; onRetryLogout?: (delivery: LogoutDelivery) => void }> = ({ logouts, onRetryLogout }) => (
+  <>
     <div className="device-list">
       {logouts.length === 0 ? (
         <div className="empty-box"><p>No app has been told about a sign-out yet. Apps without a back-channel logout address are never told.</p></div>

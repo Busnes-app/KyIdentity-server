@@ -156,10 +156,11 @@ func (s *Store) RetryLogoutDeliveryNow(userID, id string, audit *AuditEvent) (bo
 	return true, tx.Commit()
 }
 
-// DeleteLogoutDeliveriesOlderThan prunes finished deliveries, delivered or failed, last
-// touched before cutoff. Queued rows stay until they finish.
+// DeleteLogoutDeliveriesOlderThan prunes delivered rows last touched before cutoff. A
+// failed delivery is evidence that an app was never told, so it stays until it succeeds
+// or an administrator retries it; the completion view must never read absence as success.
 func (s *Store) DeleteLogoutDeliveriesOlderThan(cutoff time.Time) error {
-	_, err := s.db.Exec(`DELETE FROM logout_deliveries WHERE status IN ('delivered','failed') AND updated_at<?`, cutoff)
+	_, err := s.db.Exec(`DELETE FROM logout_deliveries WHERE status='delivered' AND updated_at<?`, cutoff)
 	return err
 }
 

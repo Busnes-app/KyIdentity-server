@@ -346,7 +346,8 @@ Administrators see each delivery in the user's Sessions modal and can retry a st
 which restores the attempt budget; the retry is audited as `admin.logout_retry`. Only
 administrators see the transport error text, since it can name the receiver's host.
 Deliveries run on four workers with at most one in flight per client, so a receiver that
-never answers delays only its own queue. Finished deliveries are pruned after seven days.
+never answers delays only its own queue. Delivered rows are pruned after seven days; a failed delivery stays until it succeeds
+or an administrator retries it, because its absence would read as success.
 A session that reaches its idle or absolute limit is dropped without a logout token:
 expiry is not a sign-out action, and apps rely on their own session lifetimes for it.
 
@@ -727,6 +728,34 @@ Signed suite webhooks have no read contract. Their jobs record every held accoun
 
 **Scheduled repair every N hours** in Connection settings queues a repair job at that
 interval (0 disables it). The last twenty jobs per connector are kept.
+
+### Offboarding
+
+Disabling an account, deleting it, and (when it ships) an account end date all run the
+same transaction: every browser session ends and its back-channel logout is queued,
+every token, code and step-up grant is revoked, and an inactive desired state is
+recorded for every connector that holds the account, including a connector that only
+knows the user through a remote ID mapping and never had a tracked grant. Deletion sends
+`user.deleted` instead of an inactive profile and then removes the directory row; the
+completion state, the remote ID mappings and the audit trail outlive it so retries and
+reconciliation still work. A connector with no recorded account still receives a bare
+deletion, in case it holds one from whole-directory delivery that predates tracking, and
+it appears in the completion view like any other target. Disabling does not send to such
+a connector: nothing shows it holds the account, and nothing is hidden from the view. Products are told to deactivate; nothing erases mail, notes
+or vaults. Re-enabling records a new desired-state revision, so a deactivation still in
+flight cannot land after the reactivation, and the user must sign in again.
+
+**Users → Offboarding status** (also opened automatically after a delete) shows, per
+connector, what was queued, whether the connector acknowledged it, and what the last
+listing observed, with attempts, next retry and a retry button; below it are the
+sign-out notifications. The summary reads *Pending* while any target is outstanding,
+*Acknowledged* once every connector and app accepted its delivery (decided over every
+delivery, not just the ones listed, and recorded on the connector's state row so it
+survives outbox pruning), and *Complete* only when a later listing verified
+the account inactive or absent at every connector. A
+connector whose listing is unsupported can be acknowledged but never verified, and a
+connector whose later listing still shows the account active is marked *Still active at
+target* and counts as neither; the view says so rather than rounding up.
 
 ### SCIM Groups
 
