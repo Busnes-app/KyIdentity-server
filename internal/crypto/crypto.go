@@ -323,8 +323,14 @@ func (m *JWTKeyManager) GetJWKS() JWKS {
 
 // SignJWT creates an RS256 signed JWT string with the given claims.
 func (m *JWTKeyManager) SignJWT(claims map[string]any) (string, error) {
+	return m.SignJWTWithType("JWT", claims)
+}
+
+// SignJWTWithType signs claims under an explicit `typ` header, so tokens with a different
+// purpose (logout tokens are `logout+jwt`) are distinguishable before their claims are read.
+func (m *JWTKeyManager) SignJWTWithType(typ string, claims map[string]any) (string, error) {
 	header := map[string]any{
-		"typ": "JWT",
+		"typ": typ,
 		"alg": "RS256",
 		"kid": m.KeyID,
 	}

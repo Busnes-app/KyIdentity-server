@@ -468,3 +468,30 @@ describe('parseOAuthClients', () => {
     expect(parseOAuthClients({ clients: [base] })[0]?.postLogoutRedirectUris).toEqual([]);
   });
 });
+
+describe('parseSessionInventory logouts', () => {
+  const logout = { id: 'd1', clientId: 'kynotes', clientName: 'KyNotes', status: 'queued', attempts: 2, lastError: '503', nextAttemptAt: '2026-09-13T10:00:00Z', updatedAt: '2026-09-13T09:59:00Z' };
+
+  it('reads back-channel logout deliveries', () => {
+    const inv = parseSessionInventory({ sessions: [], apps: [], logouts: [logout] });
+    expect(inv.logouts[0]?.status).toBe('queued');
+    expect(inv.logouts[0]?.attempts).toBe(2);
+  });
+
+  it('defaults to no deliveries for an older server', () => {
+    expect(parseSessionInventory({ sessions: [], apps: [] }).logouts).toEqual([]);
+  });
+
+  // A delivery state the UI does not understand must not be shown as delivered.
+  it('refuses an unknown delivery status', () => {
+    expect(() => parseSessionInventory({ sessions: [], apps: [], logouts: [{ ...logout, status: 'done' }] })).toThrow();
+  });
+});
+
+describe('parseOAuthClients backchannel', () => {
+  it('reads the back-channel logout URI when present', () => {
+    const base = { id: 'app', clientName: 'App', clientType: 'public', redirectUrisJson: '[]', allowedScopesJson: '[]' };
+    expect(parseOAuthClients({ clients: [{ ...base, backchannelLogoutUri: 'https://a/bc' }] })[0]?.backchannelLogoutUri).toBe('https://a/bc');
+    expect(parseOAuthClients({ clients: [base] })[0]?.backchannelLogoutUri).toBeUndefined();
+  });
+});

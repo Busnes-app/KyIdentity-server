@@ -40,21 +40,23 @@ func NewEngine(s *store.Store, km *crypto.JWTKeyManager, issuerURL string) *Engi
 
 // OIDCConfiguration returns RFC 8414 / OpenID Connect Discovery metadata.
 type OIDCConfiguration struct {
-	ACRValuesSupported               []string `json:"acr_values_supported"`
-	Issuer                           string   `json:"issuer"`
-	AuthorizationEndpoint            string   `json:"authorization_endpoint"`
-	TokenEndpoint                    string   `json:"token_endpoint"`
-	UserinfoEndpoint                 string   `json:"userinfo_endpoint"`
-	JwksURI                          string   `json:"jwks_uri"`
-	RevocationEndpoint               string   `json:"revocation_endpoint,omitempty"`
-	EndSessionEndpoint               string   `json:"end_session_endpoint"`
-	ResponseTypesSupported           []string `json:"response_types_supported"`
-	SubjectTypesSupported            []string `json:"subject_types_supported"`
-	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
-	ScopesSupported                  []string `json:"scopes_supported"`
-	TokenEndpointAuthMethods         []string `json:"token_endpoint_auth_methods_supported"`
-	CodeChallengeMethodsSupported    []string `json:"code_challenge_methods_supported"`
-	ClaimsSupported                  []string `json:"claims_supported"`
+	ACRValuesSupported                []string `json:"acr_values_supported"`
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	UserinfoEndpoint                  string   `json:"userinfo_endpoint"`
+	JwksURI                           string   `json:"jwks_uri"`
+	RevocationEndpoint                string   `json:"revocation_endpoint,omitempty"`
+	EndSessionEndpoint                string   `json:"end_session_endpoint"`
+	BackchannelLogoutSupported        bool     `json:"backchannel_logout_supported"`
+	BackchannelLogoutSessionSupported bool     `json:"backchannel_logout_session_supported"`
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	SubjectTypesSupported             []string `json:"subject_types_supported"`
+	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`
+	ScopesSupported                   []string `json:"scopes_supported"`
+	TokenEndpointAuthMethods          []string `json:"token_endpoint_auth_methods_supported"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	ClaimsSupported                   []string `json:"claims_supported"`
 }
 
 // SupportsRevocation reports whether /oauth/revoke actually invalidates a token. Discovery
@@ -63,19 +65,21 @@ func (e *Engine) SupportsRevocation() bool { return true }
 
 func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 	cfg := OIDCConfiguration{
-		ACRValuesSupported:               []string{PasswordACR, MFAACR},
-		Issuer:                           e.issuerURL,
-		AuthorizationEndpoint:            e.issuerURL + "/oauth/authorize",
-		TokenEndpoint:                    e.issuerURL + "/oauth/token",
-		UserinfoEndpoint:                 e.issuerURL + "/oauth/userinfo",
-		JwksURI:                          e.issuerURL + "/.well-known/jwks.json",
-		ResponseTypesSupported:           []string{"code"},
-		SubjectTypesSupported:            []string{"public"},
-		IDTokenSigningAlgValuesSupported: []string{"RS256"},
-		ScopesSupported:                  []string{"openid", "profile", "email"},
-		TokenEndpointAuthMethods:         []string{"client_secret_post", "client_secret_basic", "none"},
-		CodeChallengeMethodsSupported:    []string{"S256"},
-		EndSessionEndpoint:               e.issuerURL + "/oauth/logout",
+		ACRValuesSupported:                []string{PasswordACR, MFAACR},
+		Issuer:                            e.issuerURL,
+		AuthorizationEndpoint:             e.issuerURL + "/oauth/authorize",
+		TokenEndpoint:                     e.issuerURL + "/oauth/token",
+		UserinfoEndpoint:                  e.issuerURL + "/oauth/userinfo",
+		JwksURI:                           e.issuerURL + "/.well-known/jwks.json",
+		ResponseTypesSupported:            []string{"code"},
+		SubjectTypesSupported:             []string{"public"},
+		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
+		ScopesSupported:                   []string{"openid", "profile", "email"},
+		TokenEndpointAuthMethods:          []string{"client_secret_post", "client_secret_basic", "none"},
+		CodeChallengeMethodsSupported:     []string{"S256"},
+		EndSessionEndpoint:                e.issuerURL + "/oauth/logout",
+		BackchannelLogoutSupported:        true,
+		BackchannelLogoutSessionSupported: true,
 		ClaimsSupported: []string{"sub", "iss", "aud", "exp", "iat", "jti", "nonce", "auth_time", "amr", "acr", "sid",
 			"preferred_username", "name", "email", "role"},
 	}

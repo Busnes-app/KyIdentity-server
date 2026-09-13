@@ -149,6 +149,7 @@ func main() {
 
 	// Start background account sync dispatcher worker
 	go syncEngine.StartWorker(ctx)
+	go oauthEngine.StartLogoutWorker(ctx)
 
 	// Background housekeeping. Every table below is written by unauthenticated or
 	// per-request paths, so none of them may grow without bound.

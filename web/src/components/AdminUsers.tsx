@@ -12,7 +12,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [sessionsUser, setSessionsUser] = useState<User | null>(null);
-  const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [] });
+  const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [], logouts: [] });
 
   // Form State
   const [username, setUsername] = useState('');
@@ -140,7 +140,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
   };
 
   const openSessions = (u: User) => {
-    setInventory({ sessions: [], apps: [] });
+    setInventory({ sessions: [], apps: [], logouts: [] });
     setSessionsUser(u);
     loadSessions(u);
   };
@@ -271,6 +271,8 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
               <SessionList
                 sessions={inventory.sessions}
                 apps={inventory.apps}
+                logouts={inventory.logouts}
+                onRetryLogout={(d) => revokeFor(sessionsUser, `/api/admin/users/${sessionsUser.id}/logouts/${d.id}/retry`, 'POST', 'Failed to retry sign-out notification')}
                 onRevokeSession={(s) => {
                   if (confirm('Sign out this session?')) revokeFor(sessionsUser, `/api/admin/users/${sessionsUser.id}/sessions/${s.id}`, 'DELETE', 'Failed to revoke session');
                 }}
