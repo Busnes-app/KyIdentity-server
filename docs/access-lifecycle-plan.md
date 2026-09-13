@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/onboarding)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/inbound-scim)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -20,8 +20,9 @@ RP-initiated logout, post-logout redirect registration; merged as GitHub PR #39)
 and 11b (back-channel logout tokens and durable delivery; merged as GitHub PR #41 with
 the security review's four findings fixed). PR12 merged as GitHub PR #44 after five review rounds (durable
 acknowledgement, contradicting listings, wire shape, pruning, untracked holders). PR13
-(invitations, activation and password self-service) is implemented on feat/onboarding.
-PRs 14–23 and D1–D4 remain planned. Note for D1–D4: released
+(invitations, activation and password self-service) merged as GitHub PR #45. PR14
+(inbound SCIM connector security and Users) is implemented on feat/inbound-scim.
+PRs 15–23 and D1–D4 remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -521,6 +522,14 @@ Depends on: 07, 12, 13. Touch: new SCIM HTTP boundary, shared lifecycle/store, c
 Acceptance: realistic SCIM client fixture completes lifecycle with stable IDs; conflicting
 email does not take over an account; repeated creates resolve safely; stale conditional
 writes fail; credential rotation rejects the old token; local disable overrides survive.
+
+Implementation: `scim_connectors`/`scim_connector_tokens`, `users.source_connector_id`,
+`external_id`, `source_active`, `locally_disabled`; `/scim/v2` Users + discovery with
+one-clause `eq` filters, weak ETags, PATCH add/replace, delete-to-deactivate; admin
+routes under `/api/admin/scim-connectors`; Administration → Inbound SCIM page; Users
+page marks managed accounts and refuses edits of source-owned fields. README.md
+"Inbound SCIM". Emergency administrators are protected by construction (local accounts
+are outside every connector). Groups are PR 15.
 
 ### PR 15 — Inbound SCIM Groups and operational setup
 

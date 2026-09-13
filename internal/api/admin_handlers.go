@@ -150,10 +150,15 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.DisplayName = strings.TrimSpace(req.DisplayName); req.DisplayName != "" {
+	req.DisplayName, req.Email = strings.TrimSpace(req.DisplayName), strings.TrimSpace(req.Email)
+	if user.SourceConnectorID != "" && ((req.DisplayName != "" && req.DisplayName != user.DisplayName) || (req.Email != "" && !strings.EqualFold(req.Email, user.Email))) {
+		http.Error(w, `{"error":"source_owned","error_description":"Name and email of this account are managed by its SCIM connector"}`, http.StatusBadRequest)
+		return
+	}
+	if req.DisplayName != "" {
 		user.DisplayName = req.DisplayName
 	}
-	if req.Email = strings.TrimSpace(req.Email); req.Email != "" {
+	if req.Email != "" {
 		user.Email = req.Email
 	}
 	wasAdmin := user.Role == "admin"
@@ -163,6 +168,12 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	wasActive := user.Status == "active"
 	if req.Status == "active" || req.Status == "disabled" {
 		user.Status = req.Status
+		if user.SourceConnectorID != "" {
+			// A local disable is an override the upstream cannot lift; enabling lifts it
+			// but only takes effect if the upstream also wants the account active.
+			user.LocallyDisabled = req.Status == "disabled"
+			user.ApplySourceState()
+		}
 	}
 
 	passwordChanged := req.Password != ""

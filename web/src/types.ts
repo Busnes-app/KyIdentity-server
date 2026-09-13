@@ -13,6 +13,10 @@ export interface User {
   /** Invited but no password yet; stays disabled until an activation link sets one. */
   pending?: boolean;
   emailVerifiedAt?: string;
+  /** Set when an inbound SCIM connector owns the profile; name and email are then read-only here. */
+  sourceConnectorId?: string;
+  externalId?: string;
+  locallyDisabled?: boolean;
   mfaMethods?: string[];
   createdAt?: string;
 }
@@ -271,3 +275,6 @@ export interface Offboarding {
 
 export interface AccountLink { kind: 'activation' | 'reset'; delivery: 'manual' | 'email'; link?: string; expiresAt: string }
 export interface MailSettings { host: string; port: number; username: string; from: string; security: 'tls' | 'starttls'; hasPassword: boolean; configured: boolean }
+
+export interface SCIMToken { id: string; scope: 'read' | 'write'; createdAt: string; lastUsedAt?: string; revokedAt?: string }
+export interface SCIMConnector { id: string; name: string; status: 'active' | 'disabled'; createdAt: string; tokens: SCIMToken[]; users: number }

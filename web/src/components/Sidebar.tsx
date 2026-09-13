@@ -1,6 +1,6 @@
 import React from 'react';
 import { User } from '../types';
-import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut, Mail } from 'lucide-react';
+import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database } from 'lucide-react';
 
 interface SidebarProps {
   user: User;
@@ -24,6 +24,7 @@ const ADMIN: Item[] = [
   ['admin-groups', 'Groups', Users],
   ['admin-app-registry', 'App connections', LayoutGrid],
   ['admin-systems', 'Suite sync', RefreshCw],
+  ['admin-scim', 'Inbound SCIM', Database],
   ['admin-clients', 'OAuth clients', Key],
   ['admin-audit', 'Audit log', FileText],
   ['admin-backup', 'Disaster recovery', Archive],

@@ -1,4 +1,4 @@
-import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser } from './parsers';
+import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseGroupPage,
@@ -531,5 +531,23 @@ describe('onboarding parsers', () => {
     expect(m.hasPassword).toBe(true);
     expect('password' in m).toBe(false);
     expect(() => parseMailSettings({ host: 'smtp', port: 25, from: 'a@b.test', security: 'none', hasPassword: false, configured: true })).toThrow();
+  });
+});
+
+describe('inbound SCIM parsers', () => {
+  it('reads connectors with their tokens and never expects a raw token in listings', () => {
+    const page = parseSCIMConnectors({ endpoint: 'https://id/scim/v2', connectors: [{ id: 'c1', name: 'Up', status: 'active', createdAt: '2026-09-13T10:00:00Z', users: 2, tokens: [{ id: 't1', scope: 'write', createdAt: '2026-09-13T10:00:00Z', revokedAt: '2026-09-13T11:00:00Z' }] }] });
+    expect(page.connectors[0]?.tokens[0]?.revokedAt).toBeDefined();
+    expect(page.connectors[0]?.users).toBe(2);
+    expect(() => parseSCIMConnectors({ connectors: [{ id: 'c1', name: 'Up', status: 'weird', createdAt: 'x', users: 0, tokens: [] }] })).toThrow();
+  });
+
+  it('requires the raw value on a freshly issued token', () => {
+    expect(parseSCIMToken({ id: 't1', scope: 'read', createdAt: 'x', token: 'scim_abc' }).token).toBe('scim_abc');
+    expect(() => parseSCIMToken({ id: 't1', scope: 'read', createdAt: 'x' })).toThrow();
+  });
+
+  it('marks upstream-owned users', () => {
+    expect(parseUser({ id: 'u', username: 'x', role: 'user', status: 'disabled', sourceConnectorId: 'c1', externalId: 'e1', locallyDisabled: true }).locallyDisabled).toBe(true);
   });
 });

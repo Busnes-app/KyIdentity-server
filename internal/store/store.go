@@ -377,6 +377,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateOnboarding(); err != nil {
 		return err
 	}
+	if err := s.migrateInboundSCIM(); err != nil {
+		return err
+	}
 	if err := s.migrateLogoutDeliveries(); err != nil {
 		return err
 	}
@@ -694,7 +697,7 @@ func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *Audi
 	}
 	now := time.Now().UTC()
 	u.UpdatedAt = now
-	if _, err := tx.Exec(`UPDATE users SET display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, updated_at = ? WHERE id = ?`, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, now, u.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, source_active = ?, locally_disabled = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.SourceActive, u.LocallyDisabled, now, u.ID); err != nil {
 		return enrollmentMutationError(err)
 	}
 	if !strings.EqualFold(oldEmail, u.Email) {

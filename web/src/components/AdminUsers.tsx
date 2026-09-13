@@ -240,7 +240,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
-                <td className="font-mono font-bold text-cyan">{u.username}</td>
+                <td className="font-mono font-bold text-cyan">{u.username}{u.sourceConnectorId && <span className="status-badge warn" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</td>
                 <td>{u.displayName || u.username}</td>
                 <td className="text-muted">{u.email}</td>
                 <td>
@@ -474,6 +474,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
             </div>
             <form onSubmit={handleUpdateUser} className="modal-body">
               {formError && <div className="alert-box error sm">{formError}</div>}
+              {selectedUser.sourceConnectorId && <p className="text-muted">Name and email are managed by the upstream directory. Disabling here is an override the upstream cannot lift.</p>}
 
               <div className="form-group">
                 <label className="form-label">Display Name</label>
@@ -482,6 +483,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
                   className="form-input"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
+                  readOnly={Boolean(selectedUser.sourceConnectorId)}
                   required
                 />
               </div>
@@ -493,6 +495,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
                   className="form-input"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  readOnly={Boolean(selectedUser.sourceConnectorId)}
                   required
                 />
               </div>
