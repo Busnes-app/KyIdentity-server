@@ -114,7 +114,7 @@ type SCIMUserResource struct {
 	DisplayName string      `json:"displayName,omitempty"`
 	Name        *SCIMName   `json:"name,omitempty"`
 	Emails      []SCIMEmail `json:"emails,omitempty"`
-	Roles       []SCIMRole  `json:"roles,omitempty"`
+	Roles       []SCIMRole  `json:"roles"`
 	Active      bool        `json:"active"`
 	Meta        *SCIMMeta   `json:"meta,omitempty"`
 }
@@ -411,6 +411,10 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 				scimUser.Meta = &SCIMMeta{ResourceType: "User"}
 			}
 			scimUser.Meta.Version = fmt.Sprintf(`W/"%d"`, ev.Revision)
+			// "No roles" is an assertion the receiver must see, never a missing field.
+			if scimUser.Roles == nil {
+				scimUser.Roles = []SCIMRole{}
+			}
 			payloadBytes, merr = json.Marshal(scimUser)
 		} else {
 			payloadBytes = []byte(ev.PayloadJSON)

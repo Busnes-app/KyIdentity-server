@@ -157,8 +157,8 @@ func TestRoleChangesRevokeGrantsAndBlockStaleCodes(t *testing.T) {
 		t.Fatalf("stale code exchanged after a role change: %v", err)
 	}
 	app, _ := s.GetAppRecord(billing.ID)
-	if app.RoleRevision != 2 {
-		t.Fatalf("role revision = %d, want 2 (map, unmap)", app.RoleRevision)
+	if app.RoleRevision != 3 {
+		t.Fatalf("role revision = %d, want 3 (first role, map, unmap)", app.RoleRevision)
 	}
 	_ = hr
 
@@ -316,4 +316,61 @@ func TestRevokedRolesAreSentAsAnEmptyList(t *testing.T) {
 	if !strings.Contains(payload, `"roles":[]`) {
 		t.Fatalf("revocation not stated explicitly: %s", payload)
 	}
+}
+
+// An app's first role moves its provisioning connection from the global role to app
+// roles, and the last role going moves it back; both re-send everyone provisioned there.
+func TestFirstAndLastRoleRepushEveryProvisionedProfile(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	appID := provisioningFixture(t, s, "target")
+	u := createTestUser(t, s)
+	if err := s.SetAppPolicy(appID, "all_active_users", true, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	latest := func(step string) string {
+		t.Helper()
+		var payload string
+		if err := s.db.QueryRow(`SELECT payload_json FROM account_sync_events WHERE user_id=? AND status='pending' ORDER BY rowid DESC LIMIT 1`, u.ID).Scan(&payload); err != nil {
+			t.Fatalf("%s re-sent nothing: %v", step, err)
+		}
+		return payload
+	}
+	first, err := s.CreateAppRole(appID, "first", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := latest("first role"); !strings.Contains(p, `"roles":[]`) || strings.Contains(p, `"value":"user"`) {
+		t.Fatalf("first role left the global role downstream: %s", p)
+	}
+	deliverAll(t, s)
+	if _, err := s.CreateAppRole(appID, "second", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := pendingRoleEvents(t, s, u.ID); n != 0 {
+		t.Fatalf("a further role re-sent %d profiles for nothing", n)
+	}
+	if err := s.DeleteAppRole(appID, first.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := pendingRoleEvents(t, s, u.ID); n != 0 {
+		t.Fatalf("deleting one of two roles re-sent %d profiles for nothing", n)
+	}
+	roles, _ := s.ListAppRoles(appID)
+	if err := s.DeleteAppRole(appID, roles[0].ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if p := latest("last role"); !strings.Contains(p, `"value":"user"`) {
+		t.Fatalf("last role did not restore the global role downstream: %s", p)
+	}
+}
+
+func pendingRoleEvents(t *testing.T, s *Store, userID string) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM account_sync_events WHERE user_id=? AND status='pending'`, userID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

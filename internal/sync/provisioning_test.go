@@ -626,3 +626,46 @@ func TestConcurrentDispatchAndRestartPreserveOrdering(t *testing.T) {
 		t.Fatal("undelivered work remains", pending, err)
 	}
 }
+
+// A revoked role set reaches the target as an explicit empty list: a receiver that merges
+// attributes must not keep the old roles.
+func TestRevokedRolesReachTheTargetAsAnEmptyList(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	role, err := s.CreateAppRole(app.ID, "operator", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	if got, _ := remote.userByExternal(u.ID); len(got.Roles) != 1 || got.Roles[0].Value != "operator" {
+		t.Fatalf("role did not reach the target: %+v", got.Roles)
+	}
+	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	got, _ := remote.userByExternal(u.ID)
+	if got.Roles == nil || len(got.Roles) != 0 {
+		t.Fatalf("revocation did not reach the target as an empty list: %+v", got.Roles)
+	}
+	pending, err := s.GetPendingSyncEvents(10)
+	if err != nil || len(pending) != 0 {
+		t.Fatal("undelivered work remains", pending, err)
+	}
+}

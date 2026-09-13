@@ -333,7 +333,9 @@ must now also request `profile` and `email` to keep receiving them; there is no 
 for this, because emitting claims a client did not ask for is the defect being fixed.
 Group membership changes, including deletion of a mapped group and changes arriving
 over inbound SCIM, count as role changes for every app that maps the group, and a
-provisioned account whose roles are revoked receives an explicit empty `roles` list.
+provisioned account whose roles are revoked receives an explicit empty `roles` list. An
+app's first role, and its last one going, re-send every account provisioned through its
+connection, since the whole role set changes shape at that point.
 
 **Per-app switches.** *Legacy global role claim* keeps the directory-wide `role`
 (`user` or `admin`) in the app's tokens; apps that existed before app roles keep it on,

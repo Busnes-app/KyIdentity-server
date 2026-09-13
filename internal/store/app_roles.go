@@ -230,7 +230,9 @@ func (s *Store) CreateAppRole(appID, name, description string, audit *AuditEvent
 			}
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE app_registry SET revision=revision+1 WHERE id=?`, appID); err != nil {
+		// The first role switches the connection from the global role to app roles:
+		// everyone provisioned there is re-sent with their (empty) app roles.
+		if err := appRoleShapeChangeTx(tx, app, 1, role.CreatedAt); err != nil {
 			return err
 		}
 		return appRegistryAudit(audit, map[string]any{"app": app.ID, "roleId": role.ID, "name": name})
@@ -239,6 +241,27 @@ func (s *Store) CreateAppRole(appID, name, description string, audit *AuditEvent
 		return nil, err
 	}
 	return role, nil
+}
+
+// appRoleShapeChangeTx runs the role follow-up for every user with access to the app
+// when its role count has just become boundary: the payload shape changed for all of
+// them, not only for role holders.
+func appRoleShapeChangeTx(tx *sql.Tx, app AppRecord, boundary int, now time.Time) error {
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM app_roles WHERE app_id=?`, app.ID).Scan(&count); err != nil {
+		return err
+	}
+	if count != boundary {
+		if _, err := tx.Exec(`UPDATE app_registry SET revision=revision+1 WHERE id=?`, app.ID); err != nil {
+			return err
+		}
+		return nil
+	}
+	users, err := scanStrings(tx.Query(`SELECT DISTINCT user_id FROM effective_app_access WHERE app_id=?`, app.ID))
+	if err != nil {
+		return err
+	}
+	return roleChangeTx(tx, app, users, now)
 }
 
 // roleHoldersTx lists every user who holds the role directly or through a group.
@@ -266,6 +289,10 @@ func (s *Store) DeleteAppRole(appID, roleID string, audit *AuditEvent) error {
 			return err
 		}
 		if err := roleChangeTx(tx, app, holders, now); err != nil {
+			return err
+		}
+		// The last role going returns the connection to the global role for everyone.
+		if err := appRoleShapeChangeTx(tx, app, 0, now); err != nil {
 			return err
 		}
 		return appRegistryAudit(audit, map[string]any{"app": app.ID, "roleId": roleID, "name": name, "affectedUsers": len(holders)})

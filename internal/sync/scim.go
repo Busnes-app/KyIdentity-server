@@ -180,9 +180,12 @@ func (e *Engine) deliverSCIM(ctx context.Context, sys *store.PairedSystem, secre
 	if err != nil {
 		return err
 	}
-	var desired scim.User
+	var desired scimUserBody
 	if err = json.Unmarshal(payload, &desired); err != nil {
 		return scim.ErrMalformedResponse
+	}
+	if desired.Roles == nil {
+		desired.Roles = []scim.MultiValue{}
 	}
 	// Scope loss and local disablement both arrive as an inactive update. Neither may
 	// create an account, so they follow the deletion path: deactivate when present.
@@ -218,7 +221,7 @@ func (e *Engine) deliverSCIM(ctx context.Context, sys *store.PairedSystem, secre
 			if !won {
 				return errCreateUncertain
 			}
-			created, err := c.CreateUser(ctx, desired)
+			created, err := c.CreateUser(ctx, desired.User)
 			if err != nil {
 				var rejection *scim.Error
 				if errors.As(err, &rejection) && rejection.Status >= 400 && rejection.Status < 500 && rejection.Status != http.StatusRequestTimeout {
@@ -269,8 +272,21 @@ func (e *Engine) deliverSCIM(ctx context.Context, sys *store.PairedSystem, secre
 		}
 		return err
 	}
-	_, err = c.ReplaceUser(ctx, remoteID, desired)
+	// The client's User type omits an empty role list; a replace states it explicitly so a
+	// receiver that merges attributes sees the revocation.
+	body, err := json.Marshal(desired)
+	if err != nil {
+		return err
+	}
+	base, _ := url.Parse(c.BaseURL)
+	_, _, err = e.scimRequest(ctx, c, http.MethodPut, base.JoinPath("Users", remoteID).String(), body)
 	return err
+}
+
+// scimUserBody is a scim.User whose roles are always written, empty included.
+type scimUserBody struct {
+	scim.User
+	Roles []scim.MultiValue `json:"roles"`
 }
 
 func (e *Engine) TestSystem(ctx context.Context, sys *store.PairedSystem) error {
