@@ -321,7 +321,8 @@ func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 
 		// Bypass CSRF for public native push response, system registration, and OAuth token endpoints
 		path := r.URL.Path
-		if path == "/api/systems/register" ||
+		if strings.HasPrefix(path, "/scim/v2/") || // Bearer-only machine boundary; cookies are never read there.
+			path == "/api/systems/register" ||
 			path == "/api/notifications/native/register" ||
 			(strings.HasPrefix(path, "/api/notifications/native/devices/") && strings.HasSuffix(path, "/push-token")) ||
 			path == "/api/mfa/push/respond" ||

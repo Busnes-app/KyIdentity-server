@@ -17,8 +17,17 @@ type User struct {
 	Pending bool `json:"pending"`
 	// EmailVerifiedAt is set only when a link mailed to the address was redeemed.
 	EmailVerifiedAt *time.Time `json:"emailVerifiedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	// SourceConnectorID names the inbound SCIM connector that owns the profile; empty
+	// for local accounts. ExternalID is the upstream's immutable key for the account.
+	SourceConnectorID string `json:"sourceConnectorId,omitempty"`
+	ExternalID        string `json:"externalId,omitempty"`
+	// SourceActive is the upstream's active flag; LocallyDisabled is a local
+	// administrator's override that the upstream cannot lift. ApplySourceState derives
+	// Status from them.
+	SourceActive    bool      `json:"sourceActive"`
+	LocallyDisabled bool      `json:"locallyDisabled"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 // AuthenticationEvidence records server-verified login facts. Nil timestamps mean

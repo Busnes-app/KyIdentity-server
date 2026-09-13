@@ -377,6 +377,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateOnboarding(); err != nil {
 		return err
 	}
+	if err := s.migrateInboundSCIM(); err != nil {
+		return err
+	}
 	if err := s.migrateLogoutDeliveries(); err != nil {
 		return err
 	}
@@ -674,15 +677,39 @@ func (s *Store) UpdateUser(u *User) error {
 // UpdateUserWithSyncEvents preserves the active-admin invariant and writes its outbox event
 // in the same transaction as the account change.
 func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *AuditEvent) error {
+	return s.updateUser(u, revokeAccess, audit, nil)
+}
+
+// updateUser is the one account-update transaction. prepare, when given, runs after the
+// current row is read under the write lock and before anything is written, so a caller
+// can refuse the change or fold local state into u without a lost update.
+func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepare func(tx *sql.Tx, current *User) error) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var oldRole, oldStatus, oldEmail string
-	if err := tx.QueryRow(`SELECT role, status, email FROM users WHERE id = ?`, u.ID).Scan(&oldRole, &oldStatus, &oldEmail); err != nil {
+	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, u.ID))
+	if err != nil {
 		return err
 	}
+	if current == nil {
+		return sql.ErrNoRows
+	}
+	if prepare != nil {
+		if err := prepare(tx, current); err != nil {
+			return err
+		}
+	} else {
+		// A local caller never owns the upstream's fields: take them from the row as it is
+		// now, so an upstream write landing since the caller's read is not undone.
+		u.SourceConnectorID, u.ExternalID, u.SourceActive = current.SourceConnectorID, current.ExternalID, current.SourceActive
+		if current.SourceConnectorID != "" {
+			u.Username, u.DisplayName, u.Email = current.Username, current.DisplayName, current.Email
+		}
+		u.ApplySourceState()
+	}
+	oldRole, oldStatus, oldEmail := current.Role, current.Status, current.Email
 	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active") {
 		var admins int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'`).Scan(&admins); err != nil {
@@ -694,7 +721,7 @@ func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *Audi
 	}
 	now := time.Now().UTC()
 	u.UpdatedAt = now
-	if _, err := tx.Exec(`UPDATE users SET display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, updated_at = ? WHERE id = ?`, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, now, u.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, source_active = ?, locally_disabled = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.SourceActive, u.LocallyDisabled, now, u.ID); err != nil {
 		return enrollmentMutationError(err)
 	}
 	if !strings.EqualFold(oldEmail, u.Email) {

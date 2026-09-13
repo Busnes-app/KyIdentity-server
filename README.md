@@ -809,3 +809,48 @@ before every write, and only 200/204 completes a write. Unassigning or deleting 
 group deletes the remote group (404 is accepted). Disabling the flag leaves remote groups untouched. Group attempts
 appear in Deliveries with the group ID as the resource; read-back and lost-create
 recovery use the Groups collection. Suite receivers never receive group events.
+
+## Inbound SCIM
+
+An upstream directory can own accounts here over SCIM 2.0. **Administration → Inbound
+SCIM** creates a connector and issues its Bearer tokens (shown once, stored as hashes,
+`read` or `write` scope, last use recorded, revocable at any time; issue a new one and
+revoke the old to rotate). The base URL is `<issuer>/scim/v2`. Connector tokens work
+only there: they never authorize the browser API, and a browser session never
+authorizes SCIM. Every request is rate limited per connector, and failed
+authentications per address.
+
+**Supported profile.** `GET /ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`
+describe exactly this: Users only; create, get, list with one exact-match filter
+(`userName`, `externalId`, `emails.value` or `id` with `eq`), `startIndex`/`count`
+paging up to 200, replace, PATCH with `add`/`replace` of `active`, `userName`,
+`displayName`, `name` and `emails` (single or path-less operations, 50 at most, applied
+atomically), and DELETE. Weak ETags are returned and honoured on `If-Match`; a stale
+version is refused with 412. Bulk, sorting, other filters and other attributes are
+refused with a SCIM error rather than ignored. Password provisioning is unsupported and
+a `password` attribute is rejected outright; `roles` are ignored.
+
+**Ownership.** An account the upstream creates is keyed by connector plus its immutable
+`externalId`; a changed `externalId` is refused. It starts pending with no credential,
+like any invited account: an administrator issues its activation link (or mail delivery
+does), and only then can it sign in, be provisioned or hold app access. No activation
+link is issued while the upstream marks the account inactive or a local override holds,
+and activation never outranks either: the password is set, the status follows the
+source state. `userName`,
+`displayName`, `name`, the primary email and the `active` flag belong to the upstream
+and are read-only for local administrators; role is a local decision the upstream
+cannot make. A clash with an existing username or email, local or from another
+connector, is a 409, and so is a `userName` equal to some account's email or the
+reverse: an upstream never takes over or shadows an account. A connector sees and
+touches only its own accounts. DELETE deactivates; nothing is erased.
+
+**Overrides.** A local administrator disabling an upstream account sets an override the
+upstream's `active: true` cannot lift; enabling it locally lifts the override and takes
+effect only if the upstream also wants the account active. Upstream deactivation runs
+the full offboarding transaction. Local accounts, including emergency administrators,
+are outside every connector's reach by construction.
+
+**Disconnecting** a connector requires a choice for the accounts it owned: keep them as
+ordinary local accounts as they are, or disable them first. Disabling is refused when it
+would leave no active administrator. Either way its tokens die with it and the choice is
+audited.

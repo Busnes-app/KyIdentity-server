@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, MailSettings, Offboarding } from './types';
+import type { AccountLink, MailSettings, Offboarding, SCIMConnector, SCIMToken } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -115,6 +115,9 @@ export function parseUser(value: unknown): User {
     status: oneOf(o, 'status', ['active', 'disabled'] as const),
     pending: o.pending === true,
     emailVerifiedAt: optStr(o, 'emailVerifiedAt'),
+    sourceConnectorId: optStr(o, 'sourceConnectorId'),
+    externalId: optStr(o, 'externalId'),
+    locallyDisabled: o.locallyDisabled === true,
     mfaMethods: strArray(o.mfaMethods),
     createdAt: optStr(o, 'createdAt'),
   };
@@ -686,4 +689,26 @@ export function parseMailSettings(value: unknown): MailSettings {
   const o = obj(value, 'mail settings');
   return { host: optStr(o, 'host') ?? '', port: typeof o.port === 'number' ? o.port : 587, username: optStr(o, 'username') ?? '', from: optStr(o, 'from') ?? '',
     security: oneOf(o, 'security', ['tls', 'starttls'] as const), hasPassword: requiredBool(o, 'hasPassword'), configured: requiredBool(o, 'configured') };
+}
+
+function parseSCIMTokenRow(value: unknown): SCIMToken {
+  const t = obj(value, 'a connector token');
+  return { id: str(t, 'id'), scope: oneOf(t, 'scope', ['read', 'write'] as const), createdAt: str(t, 'createdAt'), lastUsedAt: optStr(t, 'lastUsedAt'), revokedAt: optStr(t, 'revokedAt') };
+}
+
+/** A freshly issued token: the raw value appears here exactly once. */
+export function parseSCIMToken(value: unknown): SCIMToken & { token: string } {
+  const t = obj(value, 'an issued connector token');
+  return { ...parseSCIMTokenRow(t), token: str(t, 'token') };
+}
+
+export function parseSCIMConnector(value: unknown): SCIMConnector {
+  const c = obj(value, 'a SCIM connector');
+  return { id: str(c, 'id'), name: str(c, 'name'), status: oneOf(c, 'status', ['active', 'disabled'] as const), createdAt: str(c, 'createdAt'),
+    tokens: list(c.tokens, parseSCIMTokenRow), users: directoryCount(c, 'users') };
+}
+
+export function parseSCIMConnectors(value: unknown): { connectors: SCIMConnector[]; endpoint: string } {
+  const o = obj(value, 'a connector listing');
+  return { connectors: list(o.connectors, parseSCIMConnector), endpoint: optStr(o, 'endpoint') ?? '' };
 }

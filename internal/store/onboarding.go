@@ -40,7 +40,9 @@ func (s *Store) migrateOnboarding() error {
 // same kind. Activation needs a pending account; reset needs an active one. The raw
 // token is returned once and never stored.
 func (s *Store) IssueAccountToken(userID, kind, delivery string, ttl time.Duration, audit *AuditEvent) (string, error) {
-	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND pending)`
+	// An owned account the upstream marks inactive, or a local override holds down, gets
+	// no activation link: redeeming it could only produce a disabled account.
+	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)))`
 	if kind == "reset" {
 		eligible = `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND NOT pending)`
 	}
@@ -101,7 +103,10 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 		if n, _ := res.RowsAffected(); n != 1 {
 			return ErrNotFound
 		}
-		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=0, status=CASE WHEN ?='activation' THEN 'active' ELSE status END,
+		// Activation derives status from the source state, never a bare 'active': an owned
+		// account stays disabled while the upstream says inactive or a local override holds.
+		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=0,
+ status=CASE WHEN ?='activation' THEN CASE WHEN source_connector_id IS NULL OR (source_active AND NOT locally_disabled) THEN 'active' ELSE 'disabled' END ELSE status END,
  email_verified_at=COALESCE(email_verified_at, CASE WHEN ?='email' THEN ? END), updated_at=?
  WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending))`, passwordHash, kind, delivery, now, now, userID, kind, kind)
 		if err != nil {
