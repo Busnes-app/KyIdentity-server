@@ -59,8 +59,9 @@ kysignon restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored
 
 For a published-image install, and always on a fresh recovery machine, pin the commit you
 intend to run (normally the one that made the backup, or the current tip) to a digest you have
-verified before it reads a single share (`gh` must be logged in). Name the commit yourself:
-verification proves this workflow built the bytes, not that `:latest` is current. The
+verified before it reads a single share (`gh` must be logged in). Name the commit yourself.
+Tags are movable, `:<commit sha>` included, so the chain also checks that the attestation records
+your commit as its source: the guarantee is the commit you named, not whatever the tag points at. The
 chain stops at the first failure and renames a same-directory staging file over `.env` only
 if the filtered copy was written in full, so your secrets are never truncated. The pin persists
 in `.env` after the drill: see the README's upgrade note for moving off it.
@@ -70,6 +71,9 @@ sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
 d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:$sha --format '{{.Manifest.Digest}}') \
   && gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
        --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
+  && [ "$(gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
+       --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
+       --format json --jq '.[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit')" = "$sha" ] \
   && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYSIGNON_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
       && echo "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" >> "$t" && mv "$t" .env) \
   && grep -qxF "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" .env

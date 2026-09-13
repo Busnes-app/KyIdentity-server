@@ -92,17 +92,29 @@ APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 ```
 
 ### 2. Start the Server
+Published image:
+
 ```bash
-# Existing install? Your .env is kept: the copy below never overwrites one, and the COMPOSE_FILE line
-# is replaced in place. A source install must set it before its first `up -d` on this checkout,
-# or a bare `up -d` pulls the published image instead of rebuilding.
-(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)   # source build; omit to run the published image
 docker compose up -d
-docker compose pull && docker compose up -d   # update a published-image install on the rolling tag
-# A digest-pinned install (KYSIGNON_IMAGE in .env) must re-run the pin recipe in docker-compose.yml
-# with the commit sha it wants first, or delete that line to follow :latest again; `pull` alone is a
-# no-op for a pinned digest.
 ```
+
+Source install (never paste this into a published-image install: the build overlay wins over a
+`KYSIGNON_IMAGE` digest pin, and a source install must set this line before its first `up -d` on a
+new checkout):
+
+```bash
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)
+docker compose up -d
+```
+
+Update a published-image install on the rolling tag:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+A digest-pinned install (`KYSIGNON_IMAGE` in `.env`) gets nothing from `pull`: re-run the pin recipe in
+`docker-compose.yml` with the commit sha you want first, or delete that line to follow `:latest` again.
 
 ### 3. Retrieve Credentials & Log In
 If you did not define `BOOTSTRAP_ADMIN_PASS` in `.env`, KySignOn generates a one-time bootstrap password on first start:
