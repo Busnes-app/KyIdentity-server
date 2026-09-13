@@ -98,6 +98,11 @@ func TestInventoryShowsLogoutDeliveriesAndAdminCanRetry(t *testing.T) {
 	if len(adminRows) != 1 || adminRows[0].Attempts != 1 || adminRows[0].LastError == "" {
 		t.Fatalf("admin inventory logouts = %+v", adminRows)
 	}
+	// The owner sees the outcome, never the transport error: it can name internal hosts.
+	own = decodeLogouts(t, call(t, srv, mine, "GET", "/api/user/sessions").Body.Bytes())
+	if len(own) != 1 || own[0].Attempts != 1 || own[0].LastError != "" {
+		t.Fatalf("own inventory leaks the transport error: %+v", own)
+	}
 
 	if got := call(t, srv, mine, "POST", "/api/admin/users/"+u.ID+"/logouts/"+d.ID+"/retry"); got.Code != http.StatusForbidden {
 		t.Fatalf("non-admin retry: %d", got.Code)
@@ -118,5 +123,38 @@ func TestInventoryShowsLogoutDeliveriesAndAdminCanRetry(t *testing.T) {
 	}
 	if n := countAudit(t, db, "admin.logout_retry"); n != 1 {
 		t.Fatalf("retry audit rows = %d", n)
+	}
+}
+
+// Replacing a factor is the path that exists to cut a stolen session, so the apps that
+// saw the sibling sessions must be told like any other revocation.
+func TestReplacingAFactorQueuesLogoutForSiblingSessions(t *testing.T) {
+	f, cleanup := newStepUpFixture(t)
+	defer cleanup()
+	other := newSession(t, f.store, f.user, time.Now().UTC().Add(time.Hour))
+	newClient(t, f.store, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	c, _ := f.store.GetOAuthClientByID("kynotes")
+	c.BackchannelLogoutURI = "https://notes.urlxl.com/backchannel"
+	if err := f.store.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.EnsureClientSession("kynotes", sessionIDFor(t, f.store, other), f.user.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	grant := f.grant(t, "POST /api/user/mfa/totp/enable")
+	secret, _, err := f.srv.mfaEngine.GenerateTOTPSecret(f.user.Username, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := f.post(t, "/api/user/mfa/totp/enable", map[string]string{"secret": secret, "code": testTOTPCode(t, secret)}, grant); r.Code != http.StatusOK {
+		t.Fatalf("enable: %d %s", r.Code, r.Body.String())
+	}
+	rows, err := f.store.ListLogoutDeliveries(f.user.ID, 10)
+	if err != nil || len(rows) != 1 || rows[0].ClientID != "kynotes" || rows[0].Status != "queued" {
+		t.Fatalf("deliveries after factor replacement = %+v %v", rows, err)
+	}
+	if left, _ := f.store.ListUserSessions(f.user.ID, time.Hour); len(left) != 1 {
+		t.Fatalf("sibling session survived: %d", len(left))
 	}
 }

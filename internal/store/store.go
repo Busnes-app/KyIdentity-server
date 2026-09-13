@@ -912,11 +912,6 @@ func (s *Store) DeleteSession(sessionID string) error {
 	return err
 }
 
-func (s *Store) DeleteUserSessions(userID string) error {
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
-	return err
-}
-
 // HasAnySession reports whether anyone has ever established a session, used to decide when
 // the first-run credentials file has served its purpose.
 func (s *Store) HasAnySession() (bool, error) {
@@ -2481,13 +2476,6 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 		return err
 	}
 	return revokeSessionGrantsTx(tx, `user_id=?`, now, userID)
-}
-
-// DeleteOtherUserSessions logs out every session for a user except keepSessionID, so
-// replacing a factor does not leave a co-resident stolen session logged in.
-func (s *Store) DeleteOtherUserSessions(userID, keepSessionID string) error {
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = ? AND id != ?`, userID, keepSessionID)
-	return err
 }
 
 // PingContext proves the database is reachable and readable within the caller's deadline.

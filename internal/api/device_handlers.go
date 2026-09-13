@@ -330,7 +330,7 @@ func (h *DeviceHandler) EnableTOTP(w http.ResponseWriter, r *http.Request) {
 	// with a stolen cookie, the legitimate user keeps nothing; if it was the legitimate
 	// user, the stolen cookie is what gets cut.
 	if sess := GetSessionFromContext(r.Context()); sess != nil {
-		if err := h.store.DeleteOtherUserSessions(user.ID, sess.ID); err != nil {
+		if err := h.store.RevokeOtherSessions(user.ID, sess.ID, nil); err != nil {
 			log.Printf("failed to revoke sibling sessions after TOTP replacement for %s: %v", user.ID, err)
 		}
 	}

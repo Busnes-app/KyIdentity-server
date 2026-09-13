@@ -323,7 +323,12 @@ and has a receiver, in the same transaction as the revocation. A worker POSTs
 fresh token per attempt; 200 or 204 acknowledges, anything else retries with exponential
 backoff (30 s doubling, 30 min cap) up to five attempts, then the delivery is marked failed.
 Administrators see each delivery in the user's Sessions modal and can retry a stuck one,
-which restores the attempt budget; the retry is audited as `admin.logout_retry`.
+which restores the attempt budget; the retry is audited as `admin.logout_retry`. Only
+administrators see the transport error text, since it can name the receiver's host.
+Deliveries run on four workers with at most one in flight per client, so a receiver that
+never answers delays only its own queue. Finished deliveries are pruned after seven days.
+A session that reaches its idle or absolute limit is dropped without a logout token:
+expiry is not a sign-out action, and apps rely on their own session lifetimes for it.
 
 The logout token is an RS256 JWT with header `typ: logout+jwt` and claims `iss`, `aud`
 (the client ID), `sub`, `sid` (the client-scoped session ID from the ID token), `iat`,

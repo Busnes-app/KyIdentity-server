@@ -63,8 +63,9 @@ func scanLogoutDelivery(row interface{ Scan(...any) error }) (*LogoutDelivery, e
 	return d, err
 }
 
-// ClaimLogoutDelivery leases the oldest due delivery, or returns nil. A lapsed lease is
-// claimable again; a delivery out of attempts is marked failed rather than retried.
+// ClaimLogoutDelivery leases the oldest due delivery whose client has nothing in flight,
+// or returns nil, so one unresponsive receiver never holds more than one worker. A lapsed
+// lease is claimable again; a delivery out of attempts is marked failed rather than retried.
 func (s *Store) ClaimLogoutDelivery(lease time.Duration) (*LogoutDelivery, error) {
 	now := time.Now().UTC()
 	tx, err := s.db.Begin()
@@ -78,8 +79,9 @@ func (s *Store) ClaimLogoutDelivery(lease time.Duration) (*LogoutDelivery, error
 	}
 	token := uuid.NewString()
 	res, err := tx.Exec(`UPDATE logout_deliveries SET claim_token=?, lease_until=?, attempts=attempts+1, updated_at=?
- WHERE id=(SELECT id FROM logout_deliveries WHERE status='queued' AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) AND attempts<? ORDER BY created_at LIMIT 1)`,
-		token, now.Add(lease), now, now, now, logoutDeliveryAttempts)
+ WHERE id=(SELECT id FROM logout_deliveries WHERE status='queued' AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) AND attempts<?
+   AND client_id NOT IN (SELECT client_id FROM logout_deliveries WHERE status='queued' AND lease_until>?) ORDER BY created_at LIMIT 1)`,
+		token, now.Add(lease), now, now, now, logoutDeliveryAttempts, now)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +154,13 @@ func (s *Store) RetryLogoutDeliveryNow(userID, id string, audit *AuditEvent) (bo
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// DeleteLogoutDeliveriesOlderThan prunes finished deliveries, delivered or failed, last
+// touched before cutoff. Queued rows stay until they finish.
+func (s *Store) DeleteLogoutDeliveriesOlderThan(cutoff time.Time) error {
+	_, err := s.db.Exec(`DELETE FROM logout_deliveries WHERE status IN ('delivered','failed') AND updated_at<?`, cutoff)
+	return err
 }
 
 // ListLogoutDeliveries returns a user's most recent deliveries, newest first.

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Busness-app/kysignon-server/internal/netguard"
@@ -84,9 +85,27 @@ func (e *Engine) postLogout(ctx context.Context, target, clientID, subject, sid 
 	return errors.New("receiver answered " + resp.Status)
 }
 
+// logoutWorkers bounds concurrent deliveries. Claims are exclusive per client, so a
+// receiver that never answers ties up one worker while the others keep serving.
+const logoutWorkers = 4
+
+var logoutPollInterval = 3 * time.Second
+
 // StartLogoutWorker delivers queued logouts until ctx ends.
 func (e *Engine) StartLogoutWorker(ctx context.Context) {
-	ticker := time.NewTicker(3 * time.Second)
+	var wg sync.WaitGroup
+	for i := 0; i < logoutWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.deliverLoop(ctx)
+		}()
+	}
+	wg.Wait()
+}
+
+func (e *Engine) deliverLoop(ctx context.Context) {
+	ticker := time.NewTicker(logoutPollInterval)
 	defer ticker.Stop()
 	for {
 		select {

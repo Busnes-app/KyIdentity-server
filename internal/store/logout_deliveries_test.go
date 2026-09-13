@@ -218,3 +218,86 @@ func TestLogoutDeliverySuccessAndExpiredLeaseReclaim(t *testing.T) {
 		t.Fatalf("rows = %+v", rows)
 	}
 }
+
+// A client whose delivery is mid-flight is skipped, so one slow receiver holds at most
+// one worker; a lapsed lease does not count.
+func TestClaimSkipsClientsWithAnActiveLease(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	now := time.Now().UTC()
+	a := seedSession(t, s, u.ID, now.Add(time.Hour), now)
+	b := seedSession(t, s, u.ID, now.Add(time.Hour), now)
+	seedLogoutClient(t, s, "slow", "https://slow.example/bc")
+	seedLogoutClient(t, s, "fast", "https://fast.example/bc")
+	for _, sess := range []string{a, b} {
+		if _, err := s.EnsureClientSession("slow", sess, u.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.EnsureClientSession("fast", b, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeSession(u.ID, a, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeSession(u.ID, b, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := s.ClaimLogoutDelivery(time.Minute)
+	if err != nil || first == nil || first.ClientID != "slow" {
+		t.Fatalf("first claim: %+v %v", first, err)
+	}
+	second, err := s.ClaimLogoutDelivery(time.Minute)
+	if err != nil || second == nil || second.ClientID != "fast" {
+		t.Fatalf("second claim should skip the leased client: %+v %v", second, err)
+	}
+	if third, err := s.ClaimLogoutDelivery(time.Minute); err != nil || third != nil {
+		t.Fatalf("slow's second row was claimed while its first is in flight: %+v %v", third, err)
+	}
+	if err := s.FinishLogoutDelivery(first, nil); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := s.ClaimLogoutDelivery(time.Minute); err != nil || next == nil || next.ClientID != "slow" {
+		t.Fatalf("slow's second row after the first finished: %+v %v", next, err)
+	}
+}
+
+func TestPruningRemovesOnlyFinishedOldDeliveries(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	now := time.Now().UTC()
+	sess := seedSession(t, s, u.ID, now.Add(time.Hour), now)
+	seedLogoutClient(t, s, "a", "https://a.example/bc")
+	seedLogoutClient(t, s, "b", "https://b.example/bc")
+	seedLogoutClient(t, s, "c", "https://c.example/bc")
+	for _, c := range []string{"a", "b", "c"} {
+		if _, err := s.EnsureClientSession(c, sess, u.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RevokeSession(u.ID, sess, nil); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-8 * 24 * time.Hour)
+	if _, err := s.db.Exec(`UPDATE logout_deliveries SET status='delivered', updated_at=? WHERE client_id='a'`, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE logout_deliveries SET status='failed', updated_at=? WHERE client_id='b'`, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE logout_deliveries SET updated_at=? WHERE client_id='c'`, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if n := countDeliveries(t, s, `1=1`); n != 1 {
+		t.Fatalf("deliveries after prune = %d, want only the queued one", n)
+	}
+	if n := countDeliveries(t, s, `client_id='c' AND status='queued'`); n != 1 {
+		t.Fatal("the queued delivery was pruned")
+	}
+}

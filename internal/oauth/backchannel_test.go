@@ -206,3 +206,66 @@ func TestBackchannelDeliveryNeverFollowsRedirects(t *testing.T) {
 		t.Fatalf("a redirect is not an acknowledgement: %+v", rows[0])
 	}
 }
+
+// A receiver that accepts the connection and never answers holds one worker, not the
+// queue: the healthy app queued behind two of its rows is still told promptly.
+func TestATarpittedReceiverDoesNotBlockOtherApps(t *testing.T) {
+	netguard.AllowPrivate = true
+	t.Cleanup(func() { netguard.AllowPrivate = false })
+	e, db, cleanup := setupTestOAuthEngine(t)
+	defer cleanup()
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer fast.Close()
+
+	u := testUser(t, db)
+	for _, c := range []struct{ id, url string }{{"slow", slow.URL}, {"fast", fast.URL}} {
+		client := testClient(t, db, c.id, "public", []string{"https://app/cb"}, []string{"openid"})
+		client.BackchannelLogoutURI = c.url + "/backchannel"
+		if err := db.UpdateOAuthClient(client); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queue := func(clientID string) {
+		sess := oauthSession(t, db, u.ID)
+		if _, err := db.EnsureClientSession(clientID, sess, u.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.RevokeSession(u.ID, sess, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queue("slow")
+	queue("slow")
+	queue("fast")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	logoutPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { logoutPollInterval = 3 * time.Second })
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		e.StartLogoutWorker(ctx)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		rows, _ := db.ListLogoutDeliveries(u.ID, 10)
+		fastDone := false
+		for _, r := range rows {
+			fastDone = fastDone || (r.ClientID == "fast" && r.Status == "delivered")
+		}
+		if fastDone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fast app not told while slow app tarpits: %+v", rows)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	close(release)
+	<-stopped
+	slow.Close()
+}
