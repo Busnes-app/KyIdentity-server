@@ -101,6 +101,7 @@ func (s *Server) routes() *http.ServeMux {
 	}
 	devH := NewDeviceHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	adminH := NewAdminHandler(s.store, s.syncEngine, s.audit, s.middleware, s.cfg.IssuerURL)
+	onboardH := NewOnboardingHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL, s.cfg.EncryptionKey)
 	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
 	backupH := NewBackupHandler(s.cfg, s.store, s.audit, s.middleware)
@@ -125,6 +126,9 @@ func (s *Server) routes() *http.ServeMux {
 	// Auth Endpoints
 	mux.HandleFunc("GET /api/auth/csrf", authH.GetCSRFToken)
 	mux.Handle("POST /api/auth/login", s.middleware.RateLimit("login", 10, 0.2)(http.HandlerFunc(authH.Login)))
+	mux.Handle("POST /api/auth/activate", s.middleware.RateLimit("account_link", 10, 0.2)(onboardH.Redeem("activation")))
+	mux.Handle("POST /api/auth/password/reset", s.middleware.RateLimit("account_link", 10, 0.2)(onboardH.Redeem("reset")))
+	mux.Handle("POST /api/auth/password/forgot", s.middleware.RateLimit("password_forgot", 5, 0.05)(http.HandlerFunc(onboardH.Forgot)))
 	mux.Handle("POST /api/auth/mfa/totp/verify", s.middleware.RateLimit("mfa", 10, 0.2)(http.HandlerFunc(authH.VerifyTOTP)))
 	mux.Handle("POST /api/auth/mfa/recovery/verify", s.middleware.RateLimit("mfa", 5, 0.1)(http.HandlerFunc(authH.VerifyRecoveryCode)))
 	mux.Handle("POST /api/auth/mfa/push/poll", s.middleware.RateLimit("push_poll", 120, 2.0)(http.HandlerFunc(authH.PollPushChallenge)))
@@ -158,6 +162,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /api/user/mfa/totp/setup", authM(http.HandlerFunc(devH.SetupTOTP)))
 	mux.Handle("POST /api/user/mfa/totp/enable", authM(http.HandlerFunc(devH.EnableTOTP)))
 	mux.Handle("POST /api/user/recovery-codes", authM(http.HandlerFunc(devH.GenerateRecoveryCodes)))
+	mux.Handle("POST /api/user/password", authM(s.requireStepUp(http.HandlerFunc(onboardH.ChangePassword))))
 	mux.Handle("GET /api/user/applications", authM(http.HandlerFunc(devH.ListApplications)))
 	mux.Handle("GET /api/user/sessions", authM(http.HandlerFunc(sessH.ListOwn)))
 	mux.Handle("DELETE /api/user/sessions/{id}", authM(http.HandlerFunc(sessH.RevokeOwn)))
@@ -215,6 +220,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /api/admin/users/{id}/apps/{clientId}/revoke", adminM(http.HandlerFunc(sessH.AdminRevokeApp)))
 	mux.Handle("POST /api/admin/users/{id}/logouts/{deliveryId}/retry", adminM(http.HandlerFunc(sessH.AdminRetryLogout)))
 	mux.Handle("GET /api/admin/users/{id}/offboarding", adminM(http.HandlerFunc(adminH.UserOffboarding)))
+	mux.Handle("POST /api/admin/users/{id}/activation-link", adminStepUpM(onboardH.AdminIssueLink("activation")))
+	mux.Handle("POST /api/admin/users/{id}/reset-link", adminStepUpM(onboardH.AdminIssueLink("reset")))
+	mux.Handle("GET /api/admin/mail", adminM(http.HandlerFunc(onboardH.GetMail)))
+	mux.Handle("PUT /api/admin/mail", adminStepUpM(http.HandlerFunc(onboardH.PutMail)))
+	mux.Handle("POST /api/admin/mail/test", adminM(http.HandlerFunc(onboardH.TestMail)))
 	mux.Handle("DELETE /api/admin/users/{id}", adminStepUpM(http.HandlerFunc(adminH.DeleteUser)))
 
 	mux.Handle("GET /api/admin/systems/{id}/deliveries", adminM(http.HandlerFunc(adminH.ListSyncDeliveries)))

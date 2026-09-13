@@ -180,6 +180,41 @@ is [docs/RESTORE.md](docs/RESTORE.md).
 
 ---
 
+## Onboarding and passwords
+
+**Inviting.** Creating a user without a password invites them: the account is pending
+and disabled, holds no credential at all, and cannot sign in, be provisioned or hold app
+access until an activation link sets a password. Users → the link button issues the
+link (step-up required); it is shown once for hand-over, or mailed when mail delivery is
+configured. Activation links last 24 hours, reset links 30 minutes, and a new link of
+the same kind retires the previous one. Only the token's hash is stored, and the raw
+link never appears in the audit log. Opening a link only shows the form; submitting it
+spends the token and sets the password in one transaction, so a mail scanner that
+follows the link changes nothing. Activation makes the account active and, when the link
+was mailed, records the address as verified; the first sign-in then goes through any
+required factor enrollment before app access. An administrator setting a password on a
+pending account is the manual activation; flipping its status alone is refused.
+
+**Passwords.** Security and devices → Password changes your own password after a
+step-up; every other session, token and app grant ends, this browser stays signed in.
+"Forgot your password?" on the sign-in page always answers the same way whether or not
+the account exists or mail is configured, is limited per address and per account, and
+mails a 30-minute reset link when it can. Redeeming a reset link signs the account out
+everywhere and clears the lockout counter; it never removes a second factor. Losing a
+factor is a recovery-code sign-in or an administrator MFA reset, not a password reset.
+
+**Email verification.** `email_verified` in ID tokens and userinfo is true only after a
+link mailed to the address was redeemed; existing addresses start unverified. Changing
+an address clears verification and retires every outstanding link.
+
+**Mail delivery.** Administration → Mail delivery holds one SMTP relay (host, port,
+STARTTLS or implicit TLS, sender, optional credentials). The password is stored
+encrypted with the deployment key and is never returned; a blank password keeps the
+stored one and a blank host turns delivery off. "Send test to me" mails the signed-in
+administrator and audits the outcome. Cleartext SMTP is not offered: a relay without
+STARTTLS is refused before any credential is sent. Without mail delivery every link is
+handed over by an administrator and self-service reset is unavailable.
+
 ## Directory groups
 
 Administrators can create, rename and delete groups under **Groups**, manage each group's

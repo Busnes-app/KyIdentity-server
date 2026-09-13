@@ -1,6 +1,6 @@
 import React from 'react';
 import { User } from '../types';
-import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut } from 'lucide-react';
+import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut, Mail } from 'lucide-react';
 
 interface SidebarProps {
   user: User;
@@ -27,6 +27,7 @@ const ADMIN: Item[] = [
   ['admin-clients', 'OAuth clients', Key],
   ['admin-audit', 'Audit log', FileText],
   ['admin-backup', 'Disaster recovery', Archive],
+  ['admin-mail', 'Mail delivery', Mail],
 ];
 
 export const Brand: React.FC = () => (

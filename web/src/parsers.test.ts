@@ -1,4 +1,4 @@
-import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding } from './parsers';
+import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseGroupPage,
@@ -514,5 +514,22 @@ describe('parseOffboarding', () => {
     expect(() => parseOffboarding({ ...body, verified: undefined })).toThrow();
     expect(() => parseOffboarding({ ...body, targets: [{ ...target, observed: 'gone' }] })).toThrow();
     expect(() => parseOffboarding({ ...body, targets: [{ ...target, contradicted: undefined }] })).toThrow();
+  });
+});
+
+describe('onboarding parsers', () => {
+  it('reads pending accounts and account links', () => {
+    expect(parseUser({ id: 'u', username: 'x', role: 'user', status: 'disabled', pending: true }).pending).toBe(true);
+    expect(parseUser({ id: 'u', username: 'x', role: 'user', status: 'active' }).pending).toBe(false);
+    const link = parseAccountLink({ kind: 'activation', delivery: 'manual', link: 'https://id/activate?token=t', expiresAt: '2026-09-14T10:00:00Z' });
+    expect(link.link).toContain('token=t');
+    expect(() => parseAccountLink({ kind: 'magic', delivery: 'manual', expiresAt: 'x' })).toThrow();
+  });
+
+  it('reads mail settings without ever expecting a password', () => {
+    const m = parseMailSettings({ host: 'smtp', port: 465, username: 'u', from: 'a@b.test', security: 'tls', hasPassword: true, configured: true });
+    expect(m.hasPassword).toBe(true);
+    expect('password' in m).toBe(false);
+    expect(() => parseMailSettings({ host: 'smtp', port: 25, from: 'a@b.test', security: 'none', hasPassword: false, configured: true })).toThrow();
   });
 });

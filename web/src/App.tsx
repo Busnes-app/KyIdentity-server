@@ -15,6 +15,8 @@ import { AdminSystems } from './components/AdminSystems';
 import { AdminClients } from './components/AdminClients';
 import { AdminAudit } from './components/AdminAudit';
 import { AdminBackup } from './components/AdminBackup';
+import { AdminMail } from './components/AdminMail';
+import { AccountLinkView } from './components/AccountLinkView';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -22,6 +24,9 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [groupUser, setGroupUser] = useState<User | null>(null);
+
+  // Link pages need no session and must not wait for one.
+  const linkKind = window.location.pathname === '/activate' ? 'activation' : window.location.pathname === '/reset' ? 'reset' : null;
 
   const checkSession = async () => {
     try {
@@ -64,6 +69,8 @@ export const App: React.FC = () => {
       </div>
     );
   }
+
+  if (linkKind) return <AccountLinkView kind={linkKind} />;
 
   if (!currentUser || (window.location.pathname === '/login' && new URLSearchParams(window.location.search).has('interaction'))) {
     return <LoginView onLoginSuccess={(u) => { setCurrentUser(u); checkSession(); }} />;
@@ -109,6 +116,7 @@ export const App: React.FC = () => {
             {activeTab === 'admin-clients' && <AdminClients />}
             {activeTab === 'admin-audit' && <AdminAudit />}
             {activeTab === 'admin-backup' && <AdminBackup />}
+            {activeTab === 'admin-mail' && <AdminMail />}
           </>
         )}
       </main>
