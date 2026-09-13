@@ -70,6 +70,7 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 - CI builds, audits, and tests the web app, and rejects stale committed `web/dist` assets.
 - CI audits and typechecks both push Workers and runs their shared and provider behavior tests.
 - CI builds the production image, probes `/readyz`, and verifies public HTTP issuers fail closed.
+- On a push to the default branch that passes every job, the `publish` job pushes the image to `ghcr.io/busness-app/<repo>` as `:latest` and `:<commit sha>`; `docker-compose.yml` names that image.
 
 # DOX framework
 

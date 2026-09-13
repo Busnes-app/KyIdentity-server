@@ -2,6 +2,8 @@ name: kysignon-server
 
 services:
   kysignon-server:
+    # Pulled by `docker compose pull`; `docker compose up --build` still builds locally.
+    image: ghcr.io/busness-app/kysignon-server:latest
     build:
       context: .
       dockerfile: Dockerfile
