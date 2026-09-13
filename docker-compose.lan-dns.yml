@@ -3,7 +3,11 @@
 # replaces the host's resolvers for every lookup this container makes, which is why it lives
 # in its own file instead of a default.
 #
-#   KYSIGNON_DNS=192.168.1.1 docker compose -f docker-compose.yml -f docker-compose.lan-dns.yml up -d
+# Select it by appending it to COMPOSE_FILE in .env, never with -f: an explicit -f list
+# replaces COMPOSE_FILE outright and would drop the build overlay of a source install.
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml            (published image)
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml   (source)
+#   KYSIGNON_DNS=192.168.1.1 docker compose up -d --force-recreate
 services:
   kysignon-server:
     dns:
