@@ -276,8 +276,12 @@ func (e *Engine) deliverSCIM(ctx context.Context, sys *store.PairedSystem, secre
 	if err != nil {
 		return err
 	}
+	// Only a completion status proves the profile was applied; 202 stays pending.
 	base, _ := url.Parse(c.BaseURL)
-	_, _, err = e.scimRequest(ctx, c, http.MethodPut, base.JoinPath("Users", remoteID).String(), body)
+	status, _, err := e.scimRequest(ctx, c, http.MethodPut, base.JoinPath("Users", url.PathEscape(remoteID)).String(), body)
+	if err == nil && status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
+		return scim.ErrMalformedResponse
+	}
 	return err
 }
 

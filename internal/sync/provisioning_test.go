@@ -29,7 +29,7 @@ type fakeSCIM struct {
 	// userPosts keeps the raw body of every Users POST, keyed by externalId.
 	userPosts map[string][]byte
 	next      int
-	// putStatus, when set, is answered to every Group PUT without applying it.
+	// putStatus, when set, is answered to every User and Group PUT without applying it.
 	putStatus int
 	// failPage, when set, answers 500 to that unfiltered listing page (1-based).
 	failPage int
@@ -146,6 +146,10 @@ func (f *fakeSCIM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 		case "PUT":
+			if f.putStatus != 0 {
+				w.WriteHeader(f.putStatus)
+				return
+			}
 			_ = json.NewDecoder(r.Body).Decode(&u)
 			u.ID = id
 		case "PATCH":
@@ -719,5 +723,45 @@ func TestCreateCarriesTheExplicitRoleList(t *testing.T) {
 	pending, err := s.GetPendingSyncEvents(10)
 	if err != nil || len(pending) != 0 {
 		t.Fatal("undelivered work remains", pending, err)
+	}
+}
+
+// A 202 to the user replace is not an applied profile: the revocation stays pending
+// rather than being recorded as delivered.
+func TestUserReplaceRequiresCompletion(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	role, err := s.CreateAppRole(app.ID, "operator", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	remote.mu.Lock()
+	remote.putStatus = http.StatusAccepted
+	remote.mu.Unlock()
+	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	if got, _ := remote.userByExternal(u.ID); len(got.Roles) != 1 {
+		t.Fatalf("unapplied write changed the fake: %+v", got.Roles)
+	}
+	if pending, _ := s.GetPendingSyncEvents(10); len(pending) != 1 || pending[0].EventType != "user.updated" {
+		t.Fatalf("accepted replace recorded as delivered: %+v", pending)
 	}
 }
