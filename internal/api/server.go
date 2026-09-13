@@ -214,6 +214,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("DELETE /api/admin/users/{id}/sessions/{sid}", adminM(http.HandlerFunc(sessH.AdminRevokeSession)))
 	mux.Handle("POST /api/admin/users/{id}/apps/{clientId}/revoke", adminM(http.HandlerFunc(sessH.AdminRevokeApp)))
 	mux.Handle("POST /api/admin/users/{id}/logouts/{deliveryId}/retry", adminM(http.HandlerFunc(sessH.AdminRetryLogout)))
+	mux.Handle("GET /api/admin/users/{id}/offboarding", adminM(http.HandlerFunc(adminH.UserOffboarding)))
 	mux.Handle("DELETE /api/admin/users/{id}", adminStepUpM(http.HandlerFunc(adminH.DeleteUser)))
 
 	mux.Handle("GET /api/admin/systems/{id}/deliveries", adminM(http.HandlerFunc(adminH.ListSyncDeliveries)))

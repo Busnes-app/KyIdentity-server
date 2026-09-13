@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/oidc-logout)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/offboarding)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -16,9 +16,10 @@ PR08 is split into 08a (resource ordering and uncertain-write recovery, merged a
 GitHub PR #34) and 08b (assignment-aware desired state, revisions and group delivery,
 merged as GitHub PR #35). PR09 merged as GitHub PR #36. PR10 merged as GitHub PR #37 with CI
 passed and the security review cleared. PR11 is split into 11a (per-client `sid`,
-RP-initiated logout, post-logout redirect registration; implemented on feat/oidc-logout)
-and 11b (back-channel logout tokens and durable delivery; implemented on
-feat/backchannel-logout). PRs 12–23 and D1–D4 remain planned. Note for D1–D4: released
+RP-initiated logout, post-logout redirect registration; merged as GitHub PR #39)
+and 11b (back-channel logout tokens and durable delivery; merged as GitHub PR #41 with
+the security review's four findings fixed). PR12 (complete offboarding workflow) is
+implemented on feat/offboarding. PRs 13–23 and D1–D4 remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -423,6 +424,14 @@ Depends on: 08, 09, 10, 11. Touch: shared account lifecycle operations and admin
 Acceptance: disable while one app is offline, verify local denial immediately and remote
 convergence on return; prove no later stale work restores access; re-enable requires new
 login. Never show globally complete while a required target is pending or unsupported.
+
+Implementation: `offboardUserTx` (disable and delete; end dates can reuse it) revokes
+local access and queues inactive desired state or `user.deleted` for every connector
+with a state row or a remote mapping; deletion keeps `sync_resource_state` and
+`scim_user_links`. `GET /api/admin/users/{id}/offboarding` and the Users → Offboarding
+status modal show per-connector queued/acknowledged/observed with retries; `verified`
+needs a listing at or after the last delivery and is never true for unsupported
+verification. README.md "Offboarding". Account end dates remain PR 18.
 
 ### PRs D1–D4 — Downstream suite adoption, one PR per product
 

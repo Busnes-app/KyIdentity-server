@@ -7,6 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
+import type { Offboarding } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -657,4 +658,19 @@ export function parseReconcileJob(value: unknown): ReconcileJob {
 }
 export function parseReconcileJobs(value: unknown): ReconcileJob[] {
   return list(obj(value, 'a reconcile jobs response').jobs, job => parseReconcileJob({ job }));
+}
+
+export function parseOffboarding(value: unknown): Offboarding {
+  const o = obj(value, 'an offboarding view');
+  return {
+    userId: str(o, 'userId'), active: requiredBool(o, 'active'), deleted: requiredBool(o, 'deleted'), acknowledged: requiredBool(o, 'acknowledged'), verified: requiredBool(o, 'verified'),
+    logouts: list(o.logouts, parseLogoutDelivery),
+    targets: list(o.targets, item => {
+      const t = obj(item, 'an offboarding target');
+      return { systemId: str(t, 'systemId'), systemName: optStr(t, 'systemName') ?? str(t, 'systemId'), systemType: optStr(t, 'systemType') ?? '', systemStatus: optStr(t, 'systemStatus') ?? '',
+        revision: directoryCount(t, 'revision'), recorded: requiredBool(t, 'recorded'), acknowledged: requiredBool(t, 'acknowledged'), verified: requiredBool(t, 'verified'), blocked: requiredBool(t, 'blocked'),
+        observed: oneOf(t, 'observed', ['', 'present_active', 'present_inactive', 'absent', 'unsupported']), observedAt: optStr(t, 'observedAt'),
+        lastEvent: t.lastEvent == null ? undefined : parseProvisioningEvent(t.lastEvent) };
+    }),
+  };
 }

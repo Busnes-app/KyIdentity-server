@@ -728,6 +728,28 @@ Signed suite webhooks have no read contract. Their jobs record every held accoun
 **Scheduled repair every N hours** in Connection settings queues a repair job at that
 interval (0 disables it). The last twenty jobs per connector are kept.
 
+### Offboarding
+
+Disabling an account, deleting it, and (when it ships) an account end date all run the
+same transaction: every browser session ends and its back-channel logout is queued,
+every token, code and step-up grant is revoked, and an inactive desired state is
+recorded for every connector that holds the account, including a connector that only
+knows the user through a remote ID mapping and never had a tracked grant. Deletion sends
+`user.deleted` instead of an inactive profile and then removes the directory row; the
+completion state, the remote ID mappings and the audit trail outlive it so retries and
+reconciliation still work. Products are told to deactivate; nothing erases mail, notes
+or vaults. Re-enabling records a new desired-state revision, so a deactivation still in
+flight cannot land after the reactivation, and the user must sign in again.
+
+**Users → Offboarding status** (also opened automatically after a delete) shows, per
+connector, what was queued, whether the connector acknowledged it, and what the last
+listing observed, with attempts, next retry and a retry button; below it are the
+sign-out notifications. The summary reads *Pending* while any target is outstanding,
+*Acknowledged* once every connector and app accepted its delivery, and *Complete* only
+when a later listing verified the account inactive or absent at every connector. A
+connector whose listing is unsupported can be acknowledged but never verified, and the
+view says so rather than rounding up.
+
 ### SCIM Groups
 
 Generic SCIM connectors may enable **Deliver SCIM Groups** under Connection settings.

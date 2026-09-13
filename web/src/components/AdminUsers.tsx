@@ -4,7 +4,8 @@ import { apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { parseSessionInventory, parseUsers } from '../parsers';
 import { SessionList } from './SessionList';
-import { Users, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor } from 'lucide-react';
+import { OffboardingView } from './OffboardingView';
+import { Users, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX } from 'lucide-react';
 
 export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({ onManageGroups }) => {
   const [users, setUsers] = useState<User[]>([]);
@@ -13,6 +14,8 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [sessionsUser, setSessionsUser] = useState<User | null>(null);
   const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [], logouts: [] });
+  // Kept as id and name, not a User, so the view survives the row's deletion.
+  const [offboarding, setOffboarding] = useState<{ id: string; username: string } | null>(null);
 
   // Form State
   const [username, setUsername] = useState('');
@@ -173,6 +176,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
       const grant = await requestGrant(`Deleting '${u.username}' cannot be undone from here.`, `DELETE /api/admin/users/${u.id}`);
       await apiRequest(`/api/admin/users/${u.id}`, { method: 'DELETE', stepUpToken: grant });
       fetchUsers();
+      setOffboarding({ id: u.id, username: u.username });
     } catch (err) {
       if (isCancelled(err)) return;
       alert(errorMessage(err, 'Failed to delete user'));
@@ -247,6 +251,9 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
                     <button className="icon-btn" onClick={() => handleRevokeSessions(u)} title="Revoke Sessions">
                       <LogOut size={15} />
                     </button>
+                    <button className="icon-btn" onClick={() => setOffboarding({ id: u.id, username: u.username })} title="Offboarding status" aria-label={`Offboarding status for ${u.username}`}>
+                      <UserX size={15} />
+                    </button>
                     <button className="icon-btn danger" onClick={() => handleDeleteUser(u)} title="Delete User">
                       <Trash2 size={15} />
                     </button>
@@ -257,6 +264,8 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
           </tbody>
         </table>
       </div>
+
+      {offboarding && <OffboardingView userId={offboarding.id} username={offboarding.username} onClose={() => setOffboarding(null)} />}
 
       {sessionsUser && (
         <div className="modal-backdrop">

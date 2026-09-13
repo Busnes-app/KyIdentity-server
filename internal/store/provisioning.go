@@ -99,6 +99,8 @@ type desiredState struct {
 	// force sends even when the receiver already holds this state (resync); for users
 	// it sends user.created so a missing suite account is recreated.
 	force bool
+	// deleted announces removal from the directory instead of an inactive profile.
+	deleted bool
 }
 
 // queueDesiredStateTx records the new desired state and the outbox work that delivers it.
@@ -128,6 +130,8 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	}
 	eventType := "user.updated"
 	switch {
+	case d.deleted:
+		eventType = "user.deleted"
 	case d.kind == "group" && d.active:
 		eventType = "group.updated"
 	case d.kind == "group":

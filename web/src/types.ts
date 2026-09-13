@@ -256,3 +256,12 @@ export interface ReconcileJob {
   id: string; systemId: string; kind: 'preview' | 'repair'; status: 'queued' | 'running' | 'done' | 'failed';
   requestedBy: string; attempts: number; createdAt: string; startedAt?: string; finishedAt?: string; error?: string; result?: DriftReport;
 }
+
+export interface OffboardingTarget {
+  systemId: string; systemName: string; systemType: string; systemStatus: string; revision: number;
+  recorded: boolean; acknowledged: boolean; observed: ObservedState; observedAt?: string; verified: boolean; blocked: boolean;
+  lastEvent?: ProvisioningEvent;
+}
+export interface Offboarding {
+  userId: string; active: boolean; deleted: boolean; targets: OffboardingTarget[]; logouts: LogoutDelivery[]; acknowledged: boolean; verified: boolean;
+}

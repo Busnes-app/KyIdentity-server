@@ -1,4 +1,4 @@
-import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs } from './parsers';
+import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseGroupPage,
@@ -493,5 +493,23 @@ describe('parseOAuthClients backchannel', () => {
     const base = { id: 'app', clientName: 'App', clientType: 'public', redirectUrisJson: '[]', allowedScopesJson: '[]' };
     expect(parseOAuthClients({ clients: [{ ...base, backchannelLogoutUri: 'https://a/bc' }] })[0]?.backchannelLogoutUri).toBe('https://a/bc');
     expect(parseOAuthClients({ clients: [base] })[0]?.backchannelLogoutUri).toBeUndefined();
+  });
+});
+
+describe('parseOffboarding', () => {
+  const target = { systemId: 'notes', systemName: 'KyNotes', systemType: 'scim', systemStatus: 'active', revision: 2, recorded: true, acknowledged: true, verified: false, blocked: false, observed: '', lastEvent: { type: 'user.deleted', status: 'delivered', attempts: 1, updatedAt: '2026-09-13T10:00:00Z' } };
+  const body = { userId: 'u1', active: false, deleted: true, acknowledged: false, verified: false, targets: [target], logouts: [] };
+
+  it('reads targets and the completion flags', () => {
+    const off = parseOffboarding(body);
+    expect(off.deleted).toBe(true);
+    expect(off.targets[0]?.lastEvent?.type).toBe('user.deleted');
+    expect(off.verified).toBe(false);
+  });
+
+  // A completion flag the server did not send must not read as complete.
+  it('requires explicit completion flags', () => {
+    expect(() => parseOffboarding({ ...body, verified: undefined })).toThrow();
+    expect(() => parseOffboarding({ ...body, targets: [{ ...target, observed: 'gone' }] })).toThrow();
   });
 });
