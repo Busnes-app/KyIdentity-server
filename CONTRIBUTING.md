@@ -55,8 +55,11 @@ re-litigation in a PR:
 Docker is the only requirement to *run* KySignOn:
 
 ```bash
-cp .env.example .env
-docker compose up --build -d
+(umask 077; cp .env.example .env)
+(umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env)   # source build; omit to run the published image
+# Existing source install? Add that line before the first `up -d` on this checkout: the old
+# image name is gone and a bare `up -d` would pull the published image instead of rebuilding.
+docker compose up -d
 ```
 
 To work on the code outside the container you need Go 1.26.5+ and Node 22.

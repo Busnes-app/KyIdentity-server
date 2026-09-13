@@ -68,7 +68,7 @@ KySignOn relies on only **3 direct external packages**:
 ### 1. Configure Environment
 Clone the repository and copy the sample configuration:
 ```bash
-cp .env.example .env
+(umask 077; cp .env.example .env)   # .env holds secrets; keep it 0600
 ```
 
 Review and adjust variables in `.env`:
@@ -93,7 +93,11 @@ APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 
 ### 2. Start the Server
 ```bash
-docker compose up -d --build
+(umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env)   # source build; omit to run the published image
+# Existing source install? Add that line before the first `up -d` on this checkout: the old
+# image name is gone and a bare `up -d` would pull the published image instead of rebuilding.
+docker compose up -d
+docker compose pull && docker compose up -d   # update a published-image install
 ```
 
 ### 3. Retrieve Credentials & Log In
@@ -469,8 +473,8 @@ still required, the choice is recorded on every pairing, and loopback stays refu
 way, pin the key by hand from the ceremony page before pairing, or compare the key ID the
 screen shows with the fingerprint in the KyRecovery dashboard; a swapped key then fails
 loudly. In Docker, a name that exists only on your LAN may not resolve inside the container when the
-host uses a loopback stub resolver; add the `docker-compose.lan-dns.yml` override with
-`KYSIGNON_DNS` set to your LAN's resolver. It replaces the host's resolvers for every lookup
+host uses a loopback stub resolver; append `docker-compose.lan-dns.yml` to `COMPOSE_FILE` in
+`.env` (see the file's header) and recreate with `KYSIGNON_DNS` set to your LAN's resolver. It replaces the host's resolvers for every lookup
 the container makes, which is why it is an override and not the default.
 
 **Passkeys are bound to the issuer's origin.** The relying party ID is the hostname of
