@@ -380,6 +380,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateInboundSCIM(); err != nil {
 		return err
 	}
+	if err := s.migrateInboundSCIMGroups(); err != nil {
+		return err
+	}
 	if err := s.migrateLogoutDeliveries(); err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Busness-app/ky-primitives/scim"
@@ -253,7 +254,12 @@ func scanPairs(rows *sql.Rows, err error) ([]resourcePair, error) {
 // desired state to the state effective access now implies. It runs inside each access
 // mutation and periodically from the worker, so cascades that bypass a mutation path
 // (client deletion, foreign-key cascades) still converge.
+// reconcileRuns counts whole-directory reconciliations; tests use it to prove a batch
+// write reconciles once rather than once per row.
+var reconcileRuns atomic.Int64
+
 func reconcileProvisioningTx(tx *sql.Tx, now time.Time) error {
+	reconcileRuns.Add(1)
 	gains, err := scanPairs(tx.Query(`SELECT s.id,u.id FROM paired_systems s JOIN app_registry a ON a.system_id=s.id
  JOIN effective_app_access e ON e.app_id=a.id JOIN users u ON u.id=e.user_id
  LEFT JOIN sync_resource_state st ON st.system_id=s.id AND st.resource_id=u.id

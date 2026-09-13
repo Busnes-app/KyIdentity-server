@@ -850,7 +850,33 @@ effect only if the upstream also wants the account active. Upstream deactivation
 the full offboarding transaction. Local accounts, including emergency administrators,
 are outside every connector's reach by construction.
 
+**Groups.** `/scim/v2/Groups` maps onto the flat directory groups: create, get, list
+with one exact-match filter (`displayName`, `externalId` or `id`), replace, PATCH and
+delete. A group's `displayName` and member set belong to the upstream; every member must
+be a User of the same connector (a local account, another connector's account or a
+group is refused with a clear SCIM error and nothing is applied), and nested groups are
+refused. A PATCH is validated in full and applied as one replace, so an invalid
+operation anywhere means nothing changes. Weak ETags apply as for Users. Deleting a
+group removes what its memberships granted and never deletes a user. A group with a
+required MFA policy is refused to the upstream for any change, its name included, since
+only a local administrator with a compliant sign-in may change such a group. One request
+carries at most 1000 members; a conditional write (`If-Match`) is re-checked inside the
+write transaction, so two writes that read the same version cannot both land. Locally, an upstream group's name is
+read-only (`source_owned`); its description stays local. Group membership drives app
+assignment and downstream provisioning exactly as local membership does.
+
+**Setup.** Create the connector, issue a write token, and add a SCIM provisioning target
+in the upstream directory with tenant URL `<issuer>/scim/v2` and the token as the Bearer
+secret. Map `userName`, `externalId`, `displayName`/`name`, the primary email and
+`active` for users, and `displayName`, `externalId` and `members` for groups; do not map
+passwords or roles. Provisioned accounts appear pending on the Users page and take an
+activation link; groups appear on the Groups page marked SCIM. Every SCIM write is in
+the audit log under `scim.*` with the connector as actor. The supported profile is
+proven by the protocol test suite and a local curl run only; it has not yet been
+validated against a real upstream tenant, so do not claim compatibility with a
+particular directory product until that run is recorded.
+
 **Disconnecting** a connector requires a choice for the accounts it owned: keep them as
 ordinary local accounts as they are, or disable them first. Disabling is refused when it
-would leave no active administrator. Either way its tokens die with it and the choice is
-audited.
+would leave no active administrator. Its groups become ordinary local groups, its
+tokens die with it, and the choice is audited.

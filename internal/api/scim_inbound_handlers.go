@@ -127,11 +127,20 @@ func (h *SCIMHandler) ResourceTypes(w http.ResponseWriter, r *http.Request) {
 		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "User", "name": "User", "endpoint": "/Users",
 		"schema": scim.UserSchema, "meta": map[string]any{"resourceType": "ResourceType", "location": h.issuerURL + "/scim/v2/ResourceTypes/User"},
 	}
-	if strings.HasSuffix(r.URL.Path, "/User") {
-		scimJSON(w, http.StatusOK, user)
-		return
+	group := map[string]any{
+		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "Group", "name": "Group", "endpoint": "/Groups",
+		"schema": scimGroupSchema, "meta": map[string]any{"resourceType": "ResourceType", "location": h.issuerURL + "/scim/v2/ResourceTypes/Group"},
 	}
-	scimJSON(w, http.StatusOK, map[string]any{"schemas": []string{scimListSchema}, "totalResults": 1, "startIndex": 1, "itemsPerPage": 1, "Resources": []any{user}})
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/User"):
+		scimJSON(w, http.StatusOK, user)
+	case strings.HasSuffix(r.URL.Path, "/Group"):
+		scimJSON(w, http.StatusOK, group)
+	case strings.Contains(r.URL.Path, "/ResourceTypes/"):
+		scimError(w, http.StatusNotFound, "", "Unknown resource type")
+	default:
+		scimJSON(w, http.StatusOK, map[string]any{"schemas": []string{scimListSchema}, "totalResults": 2, "startIndex": 1, "itemsPerPage": 2, "Resources": []any{user, group}})
+	}
 }
 
 func (h *SCIMHandler) Schemas(w http.ResponseWriter, r *http.Request) {
@@ -153,15 +162,29 @@ func (h *SCIMHandler) Schemas(w http.ResponseWriter, r *http.Request) {
 		"attributes":  []map[string]any{userName, externalID, attr("displayName", "string", "readWrite", false), name, emails, attr("active", "boolean", "readWrite", false)},
 		"meta":        map[string]any{"resourceType": "Schema", "location": h.issuerURL + "/scim/v2/Schemas/" + scim.UserSchema},
 	}
+	members := attr("members", "complex", "readWrite", false)
+	members["multiValued"] = true
+	members["subAttributes"] = []map[string]any{attr("value", "string", "immutable", true), attr("type", "string", "immutable", false)}
+	groupExternal := attr("externalId", "string", "immutable", false)
+	groupExternal["uniqueness"] = "server"
+	groupSchema := map[string]any{
+		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}, "id": scimGroupSchema, "name": "Group",
+		"description": "KySignOn directory group. Members are Users of this connector only; nested groups are refused.",
+		"attributes":  []map[string]any{attr("displayName", "string", "readWrite", true), groupExternal, members},
+		"meta":        map[string]any{"resourceType": "Schema", "location": h.issuerURL + "/scim/v2/Schemas/" + scimGroupSchema},
+	}
 	if strings.Contains(r.URL.Path, "/Schemas/") {
-		if !strings.HasSuffix(r.URL.Path, scim.UserSchema) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, scim.UserSchema):
+			scimJSON(w, http.StatusOK, schema)
+		case strings.HasSuffix(r.URL.Path, scimGroupSchema):
+			scimJSON(w, http.StatusOK, groupSchema)
+		default:
 			scimError(w, http.StatusNotFound, "", "Unknown schema")
-			return
 		}
-		scimJSON(w, http.StatusOK, schema)
 		return
 	}
-	scimJSON(w, http.StatusOK, map[string]any{"schemas": []string{scimListSchema}, "totalResults": 1, "startIndex": 1, "itemsPerPage": 1, "Resources": []any{schema}})
+	scimJSON(w, http.StatusOK, map[string]any{"schemas": []string{scimListSchema}, "totalResults": 2, "startIndex": 1, "itemsPerPage": 2, "Resources": []any{schema, groupSchema}})
 }
 
 // resource renders an owned account as the upstream sees it: active means the upstream's

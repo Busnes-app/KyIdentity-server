@@ -16,6 +16,7 @@ type connectorView struct {
 	store.SCIMConnector
 	Tokens []store.SCIMConnectorToken `json:"tokens"`
 	Users  int                        `json:"users"`
+	Groups int                        `json:"groups"`
 }
 
 func (h *SCIMHandler) view(c *store.SCIMConnector) (*connectorView, error) {
@@ -27,7 +28,11 @@ func (h *SCIMHandler) view(c *store.SCIMConnector) (*connectorView, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &connectorView{SCIMConnector: *c, Tokens: tokens, Users: users}, nil
+	groups, err := h.store.CountSCIMConnectorGroups(c.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &connectorView{SCIMConnector: *c, Tokens: tokens, Users: users, Groups: groups}, nil
 }
 
 func (h *SCIMHandler) AdminList(w http.ResponseWriter, r *http.Request) {

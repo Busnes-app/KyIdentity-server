@@ -39,6 +39,8 @@ func writeGroupError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrEnrollmentPolicy), errors.Is(err, store.ErrEmergencyAdministrator):
 		enrollmentError(w, err)
+	case errors.Is(err, store.ErrGroupSourceOwned):
+		http.Error(w, `{"error":"source_owned","error_description":"This group's name is managed by its SCIM connector"}`, 400)
 	case errors.Is(err, store.ErrGroupNameExists):
 		http.Error(w, `{"error":"group_name_exists","error_description":"A group with that name already exists"}`, 409)
 	case errors.Is(err, store.ErrGroupTargetMissing):

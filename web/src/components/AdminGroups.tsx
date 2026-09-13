@@ -103,7 +103,8 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
           { name: name.trim(), description: description.trim() })) setEditor(null);
       }}>
         <div className="form-group"><label className="form-label" htmlFor="group-name">Name</label>
-          <input id="group-name" autoFocus className="form-input" value={name} maxLength={128} required disabled={busy} onChange={e => setName(e.target.value)} /></div>
+          <input id="group-name" autoFocus className="form-input" value={name} maxLength={128} required disabled={busy} readOnly={editor.kind === 'edit' && Boolean(editor.group.sourceConnectorId)} onChange={e => setName(e.target.value)} />
+          {editor.kind === 'edit' && editor.group.sourceConnectorId && <p className="text-muted">The name and members of this group are managed by its SCIM connector; only the description is local.</p>}</div>
         <div className="form-group"><label className="form-label" htmlFor="group-description">Description</label>
           <textarea id="group-description" className="form-input" value={description} maxLength={2048} disabled={busy} onChange={e => setDescription(e.target.value)} /></div>
         <div className="modal-footer">
@@ -119,7 +120,7 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
     <div className="table-card"><table className="admin-table">
       <thead><tr><th>Name</th><th>Description</th><th>Members</th><th>{user ? 'Membership' : 'Actions'}</th></tr></thead>
       <tbody>{page?.items.map(group => <tr key={group.id}>
-        <td style={{ overflowWrap: 'anywhere' }}>{group.name}</td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
+        <td style={{ overflowWrap: 'anywhere' }}>{group.name}{group.sourceConnectorId && <span className="status-badge warn" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}</td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
         <td><div className="action-buttons-wrap">
           {user ? <button className="secondary-btn sm" disabled={busy} onClick={() => mutate(
             `${group.member ? 'Remove' : 'Add'} '${user.username}' ${group.member ? 'from' : 'to'} '${group.name}'.`,

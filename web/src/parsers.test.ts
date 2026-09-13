@@ -536,9 +536,10 @@ describe('onboarding parsers', () => {
 
 describe('inbound SCIM parsers', () => {
   it('reads connectors with their tokens and never expects a raw token in listings', () => {
-    const page = parseSCIMConnectors({ endpoint: 'https://id/scim/v2', connectors: [{ id: 'c1', name: 'Up', status: 'active', createdAt: '2026-09-13T10:00:00Z', users: 2, tokens: [{ id: 't1', scope: 'write', createdAt: '2026-09-13T10:00:00Z', revokedAt: '2026-09-13T11:00:00Z' }] }] });
+    const page = parseSCIMConnectors({ endpoint: 'https://id/scim/v2', connectors: [{ id: 'c1', name: 'Up', status: 'active', createdAt: '2026-09-13T10:00:00Z', users: 2, groups: 0, tokens: [{ id: 't1', scope: 'write', createdAt: '2026-09-13T10:00:00Z', revokedAt: '2026-09-13T11:00:00Z' }] }] });
     expect(page.connectors[0]?.tokens[0]?.revokedAt).toBeDefined();
     expect(page.connectors[0]?.users).toBe(2);
+    expect(page.connectors[0]?.groups).toBe(0);
     expect(() => parseSCIMConnectors({ connectors: [{ id: 'c1', name: 'Up', status: 'weird', createdAt: 'x', users: 0, tokens: [] }] })).toThrow();
   });
 

@@ -191,6 +191,9 @@ export interface DirectoryGroup {
   id: string;
   name: string;
   description: string;
+  /** Set when an inbound SCIM connector owns the group's name and members. */
+  sourceConnectorId?: string;
+  externalId?: string;
   memberCount: number;
   member: boolean;
   createdAt: string;
@@ -277,4 +280,4 @@ export interface AccountLink { kind: 'activation' | 'reset'; delivery: 'manual' 
 export interface MailSettings { host: string; port: number; username: string; from: string; security: 'tls' | 'starttls'; hasPassword: boolean; configured: boolean }
 
 export interface SCIMToken { id: string; scope: 'read' | 'write'; createdAt: string; lastUsedAt?: string; revokedAt?: string }
-export interface SCIMConnector { id: string; name: string; status: 'active' | 'disabled'; createdAt: string; tokens: SCIMToken[]; users: number }
+export interface SCIMConnector { id: string; name: string; status: 'active' | 'disabled'; createdAt: string; tokens: SCIMToken[]; users: number; groups: number }
