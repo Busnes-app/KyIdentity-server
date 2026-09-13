@@ -25,3 +25,5 @@ web/node_modules/
 # Playwright MCP session artifacts (page snapshots record filled form values)
 .playwright-mcp/
 .env
+.env.*
+!.env.example

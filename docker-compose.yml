@@ -5,18 +5,25 @@ services:
     # The published, attested image. `pull` moves to the newest one; `up` uses what is
     # present, otherwise pulls. This file never builds: a source build would occupy this
     # name with unattested bytes, so it lives in docker-compose.build.yml under a local tag.
-    # Source installs put `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml` in .env; Compose
-    # reads it before every command. An explicit -f list replaces it outright, so never mix the two.
-    # To run only what CI attested, pin by digest and verify it first (gh logged in). The
-    # chain stops at the first failure. The new .env is staged outside the tree and renamed
-    # in only if the filtered copy was written in full, so a failed verify, an unreadable
-    # .env or a short write never replaces your secrets. Re-run it to move to a newer image,
-    # or delete the KYSIGNON_IMAGE line to follow :latest again. A source install is unaffected:
-    # docker-compose.build.yml's image wins over this pin.
-    #   d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:latest --format '{{.Manifest.Digest}}') \
+    # Source installs add docker-compose.build.yml to the COMPOSE_FILE chain in .env (other overlays
+    # may sit beside it); Compose reads it before every command. An explicit -f list replaces it
+    # outright, so never mix the two.
+    # To run only what CI attested, pin the commit you chose by digest and verify it first (gh
+    # logged in). Tags are movable, :<commit sha> included, so the digest comes from the tag but
+    # the guarantee comes from the attestation: it must verify against this workflow on master
+    # AND record your commit as its source, or the chain stops. The new .env is staged in this
+    # directory and renamed atomically over the old one only if the filtered copy was written
+    # in full, so a failed check, an unreadable .env or a short write never replaces your
+    # secrets. Re-run with a newer sha to move; delete the KYSIGNON_IMAGE line to follow :latest
+    # again. A source install is unaffected: the build overlay's image wins over this pin.
+    #   sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
+    #   d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:$sha --format '{{.Manifest.Digest}}') \
     #     && gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
     #          --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
-    #     && (umask 077; t=$(mktemp) && touch .env && { grep -v '^KYSIGNON_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
+    #     && [ "$(gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
+    #          --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
+    #          --format json --jq '.[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit')" = "$sha" ] \
+    #     && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYSIGNON_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
     #         && echo "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" >> "$t" && mv "$t" .env) \
     #     && grep -qxF "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" .env
     image: ${KYSIGNON_IMAGE:-ghcr.io/busness-app/kysignon-server:latest}
