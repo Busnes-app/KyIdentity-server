@@ -2,8 +2,12 @@ name: kysignon-server
 
 services:
   kysignon-server:
-    # Pulled by `docker compose pull`; `docker compose up --build` still builds locally.
+    # pull_policy missing: `up` uses the local image if present, otherwise pulls from
+    # GHCR, and builds from this checkout only if the pull fails. `up --build` always
+    # builds from source; `pull` moves to the newest published image. To pin, replace
+    # `latest` with a published `<commit sha>` tag; every push is attested (see ci.yml).
     image: ghcr.io/busness-app/kysignon-server:latest
+    pull_policy: missing
     build:
       context: .
       dockerfile: Dockerfile
