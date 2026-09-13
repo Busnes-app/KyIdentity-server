@@ -5,6 +5,8 @@ services:
     # The published, attested image. `pull` moves to the newest one; `up` uses what is
     # present, otherwise pulls. This file never builds: a source build would occupy this
     # name with unattested bytes, so it lives in docker-compose.build.yml under a local tag.
+    # Source installs put `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml` in .env so every
+    # `docker compose` command in the docs, recovery included, keeps using the local build.
     # To run only what CI attested, pin by digest and verify it first:
     #   d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:<commit sha> --format '{{.Manifest.Digest}}')
     #   gh attestation verify oci://ghcr.io/busness-app/kysignon-server@$d --repo Busness-app/kysignon-server \

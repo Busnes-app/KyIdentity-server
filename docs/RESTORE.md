@@ -13,6 +13,11 @@ Nobody can do this alone. KyRecovery cannot open a capsule. One custodian cannot
 that made the backup never could. That is the point, and it is also why you should run this
 procedure once as a drill before you ever need it.
 
+The `docker compose` commands below use the base file alone, which runs the published
+image. If this server was installed from source, `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml`
+must be in `.env` (see the install steps); otherwise a restore silently pulls a different
+binary than the one you built and are running.
+
 ## What a capsule holds
 
 Everything a fresh KySignOn needs to be the old one:

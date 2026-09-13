@@ -1,5 +1,7 @@
-# Source build. Layer over the base file:
-#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+# Source build. Set it once so every `docker compose` command, the recovery
+# procedure included, keeps using the local build instead of the published image:
+#   echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env
+# Or layer it per command: docker compose -f docker-compose.yml -f docker-compose.build.yml ...
 # The result is tagged kysignon-server:local so it never occupies the published name.
 services:
   kysignon-server:
