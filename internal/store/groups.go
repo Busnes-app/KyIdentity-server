@@ -156,11 +156,24 @@ func deleteGroupTx(tx *sql.Tx, id, sessionID string) (string, error) {
 			return "", ErrEmergencyAdministrator
 		}
 	}
+	// Deleting the group ends every role its members held through it; the follow-up runs
+	// once the cascade has removed the memberships and mappings it must not see.
+	apps, err := mappedRoleApps(tx, id)
+	if err != nil {
+		return "", err
+	}
+	members, err := scanStrings(tx.Query(`SELECT user_id FROM group_memberships WHERE group_id=?`, id))
+	if err != nil {
+		return "", err
+	}
 	var name string
 	if err = tx.QueryRow(`DELETE FROM directory_groups WHERE id=? RETURNING name`, id).Scan(&name); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrGroupTargetMissing
 		}
+		return "", err
+	}
+	if err = roleChangeForAppsTx(tx, apps, members); err != nil {
 		return "", err
 	}
 	if err = revokeLostAppAccessTx(tx); err != nil {
@@ -260,7 +273,52 @@ func applyGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, ses
 			return "", "", err
 		}
 	}
+	if changed > 0 {
+		if err = groupRoleChangeTx(tx, groupID, []string{userID}); err != nil {
+			return "", "", err
+		}
+	}
 	return groupName, username, nil
+}
+
+// mappedRoleApps lists the apps with a role mapped to the group.
+func mappedRoleApps(tx *sql.Tx, groupID string) ([]AppRecord, error) {
+	ids, err := scanStrings(tx.Query(`SELECT DISTINCT r.app_id FROM app_role_group_assignments a JOIN app_roles r ON r.id=a.role_id WHERE a.group_id=?`, groupID))
+	if err != nil {
+		return nil, err
+	}
+	apps := make([]AppRecord, 0, len(ids))
+	for _, id := range ids {
+		app, err := scanAppRecord(tx.QueryRow(appRecordSelect+appRecordFrom+` WHERE a.id=?`, id))
+		if err != nil {
+			return nil, err
+		}
+		apps = append(apps, app)
+	}
+	return apps, nil
+}
+
+// groupRoleChangeTx runs the role follow-up for every app that maps the group to one
+// of its roles: joining or leaving such a group changes those users' roles there.
+func groupRoleChangeTx(tx *sql.Tx, groupID string, users []string) error {
+	apps, err := mappedRoleApps(tx, groupID)
+	if err != nil {
+		return err
+	}
+	return roleChangeForAppsTx(tx, apps, users)
+}
+
+func roleChangeForAppsTx(tx *sql.Tx, apps []AppRecord, users []string) error {
+	if len(users) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	for _, app := range apps {
+		if err := roleChangeTx(tx, app, users, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Count and page share a read snapshot. userID optionally annotates membership for

@@ -59,6 +59,16 @@ func (s *Store) migrateProvisioning() error {
 }
 
 func scimUserPayload(u *User, active bool) ([]byte, error) {
+	var roles []scim.MultiValue
+	if u.Role != "" {
+		roles = []scim.MultiValue{{Value: u.Role, Primary: true}}
+	}
+	return scimUserPayloadWithRoles(u, active, roles)
+}
+
+// scimUserPayloadWithRoles always states the role list, empty included: a receiver that
+// merges attributes must see "no roles" as an assertion, not as a missing field.
+func scimUserPayloadWithRoles(u *User, active bool, roles []scim.MultiValue) ([]byte, error) {
 	res := scim.User{
 		Schemas: []string{scim.UserSchema}, ID: u.ID, ExternalID: u.ID, UserName: u.Username,
 		DisplayName: u.DisplayName, Name: &scim.Name{Formatted: u.DisplayName}, Active: active,
@@ -67,10 +77,13 @@ func scimUserPayload(u *User, active bool) ([]byte, error) {
 	if u.Email != "" {
 		res.Emails = []scim.MultiValue{{Value: u.Email, Type: "work", Primary: true}}
 	}
-	if u.Role != "" {
-		res.Roles = []scim.MultiValue{{Value: u.Role, Primary: true}}
+	if roles == nil {
+		roles = []scim.MultiValue{}
 	}
-	return json.Marshal(res)
+	return json.Marshal(struct {
+		scim.User
+		Roles []scim.MultiValue `json:"roles"`
+	}{res, roles})
 }
 
 // A deleted or unknown user still needs a body the receiver can act on.
@@ -162,10 +175,6 @@ func insertResourceEventTx(tx *sql.Tx, systemID, resourceID, eventType string, p
 // queueUserNotificationTx sends an event that carries no desired state (MFA reset) to
 // every connector that currently holds the account. It neither supersedes nor is superseded.
 func queueUserNotificationTx(tx *sql.Tx, u *User, eventType string, now time.Time) error {
-	payload, err := scimUserPayload(u, u.Status == "active")
-	if err != nil {
-		return err
-	}
 	rows, err := tx.Query(`SELECT st.system_id,st.revision FROM sync_resource_state st JOIN paired_systems s ON s.id=st.system_id
  WHERE st.resource_id=? AND st.kind='user' AND st.active AND s.status<>'disabled'`, u.ID)
 	if err != nil {
@@ -188,6 +197,10 @@ func queueUserNotificationTx(tx *sql.Tx, u *User, eventType string, now time.Tim
 		return err
 	}
 	for _, t := range targets {
+		payload, err := scimUserPayloadTx(tx, u, u.Status == "active", t.id)
+		if err != nil {
+			return err
+		}
 		if err := insertResourceEventTx(tx, t.id, u.ID, eventType, payload, t.rev, now); err != nil {
 			return err
 		}
@@ -204,11 +217,11 @@ func queueUserUpdateTx(tx *sql.Tx, u *User, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	payload, err := scimUserPayload(u, true)
-	if err != nil {
-		return err
-	}
 	for _, sys := range systems {
+		payload, err := scimUserPayloadTx(tx, u, true, sys)
+		if err != nil {
+			return err
+		}
 		if err := queueDesiredStateTx(tx, desiredState{systemID: sys, resourceID: u.ID, kind: "user", active: true, payload: payload}, now); err != nil {
 			return err
 		}
@@ -279,7 +292,7 @@ func reconcileProvisioningTx(tx *sql.Tx, now time.Time) error {
 		if err != nil || u == nil {
 			return err
 		}
-		payload, err := scimUserPayload(u, true)
+		payload, err := scimUserPayloadTx(tx, u, true, p.systemID)
 		if err != nil {
 			return err
 		}
@@ -441,7 +454,7 @@ func (s *Store) ResyncSystem(systemID string) error {
 		return err
 	}
 	for _, u := range users {
-		payload, err := scimUserPayload(u, true)
+		payload, err := scimUserPayloadTx(tx, u, true, systemID)
 		if err != nil {
 			return err
 		}

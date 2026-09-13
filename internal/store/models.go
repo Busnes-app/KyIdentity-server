@@ -174,6 +174,7 @@ type OAuthClient struct {
 type AuthorizationCode struct {
 	AuthenticationAppID          string     `json:"-"`
 	AuthenticationPolicyRevision int        `json:"-"`
+	RoleRevision                 int        `json:"-"`
 	InteractionHash              string     `json:"-"`
 	AuthenticationExpiresAt      *time.Time `json:"-"`
 	AuthenticationEvidence

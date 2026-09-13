@@ -226,6 +226,9 @@ export interface AppAuthenticationPolicy {
 export interface AppRecord {
  authentication: AppAuthenticationPolicy;
  authenticationRevision: number;
+ roleRevision: number;
+ legacyRoleClaim: boolean;
+ groupsClaim: boolean;
   accessMode: 'all_active_users' | 'assigned_only';
   enabled: boolean;
   id: string;
@@ -281,3 +284,6 @@ export interface MailSettings { host: string; port: number; username: string; fr
 
 export interface SCIMToken { id: string; scope: 'read' | 'write'; createdAt: string; lastUsedAt?: string; revokedAt?: string }
 export interface SCIMConnector { id: string; name: string; status: 'active' | 'disabled'; createdAt: string; tokens: SCIMToken[]; users: number; groups: number }
+
+export interface AppRolePrincipal { id: string; name: string }
+export interface AppRole { id: string; appId: string; name: string; description: string; createdAt: string; users: AppRolePrincipal[]; groups: AppRolePrincipal[] }
