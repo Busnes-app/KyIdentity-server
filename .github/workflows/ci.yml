@@ -113,6 +113,11 @@ jobs:
     needs: [go, web, relay, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    # One publish at a time, never cancelled: a run that has pushed :<sha> must
+    # be allowed to finish attesting it. Ordering is handled below, not here.
+    concurrency:
+      group: publish-master
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -133,17 +138,28 @@ jobs:
       # tag is what lets an operator pin a known-good image and roll back to it;
       # :latest alone gives them nowhere to go.
       - id: push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           name="ghcr.io/${GITHUB_REPOSITORY,,}"
           docker tag kysignon-ci "$name:$GITHUB_SHA"
           docker tag kysignon-ci "$name:latest"
           docker push "$name:$GITHUB_SHA"
-          docker push "$name:latest"
           digest="$(docker buildx imagetools inspect "$name:$GITHUB_SHA" --format '{{.Manifest.Digest}}')"
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "Published \`$name@$digest\` (\`:latest\`, \`:$GITHUB_SHA\`)" >> "$GITHUB_STEP_SUMMARY"
+          # :latest moves only to the current tip of master. Two runs are
+          # serialised but not ordered, so a slower run for an older commit
+          # would otherwise move :latest backwards. The :<sha> tag above and
+          # the attestation below are unconditional.
+          tip="$(gh api "repos/$GITHUB_REPOSITORY/branches/master" --jq .commit.sha)"
+          if [ "$tip" = "$GITHUB_SHA" ]; then
+            docker push "$name:latest"
+            echo "Published \`$name@$digest\` as \`:latest\` and \`:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Published \`$name@$digest\` as \`:$GITHUB_SHA\` only: master has moved on to $tip" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Binds the pushed manifest to this run and commit. Verifying it here, the
       # way an operator would, proves the attestation is usable and not just present.
