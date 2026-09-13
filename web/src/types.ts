@@ -41,6 +41,30 @@ export interface NativeDevice {
   createdAt: string;
 }
 
+export interface BrowserSession {
+  id: string;
+  current: boolean;
+  ipAddress: string;
+  userAgent: string;
+  factorMethod: string;
+  createdAt: string;
+  lastActiveAt: string;
+  expiresAt: string;
+}
+
+export interface AppGrant {
+  clientId: string;
+  clientName: string;
+  tokens: number;
+  issuedAt: string;
+  expiresAt: string;
+}
+
+export interface SessionInventory {
+  sessions: BrowserSession[];
+  apps: AppGrant[];
+}
+
 export interface Passkey {
   id: string;
   name: string;

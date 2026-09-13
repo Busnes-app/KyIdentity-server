@@ -582,15 +582,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		_ = h.store.DeleteSession(sess.ID)
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "kysignon_session",
-		Value:    "",
-		Path:     "/",
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-		SameSite: http.SameSiteLaxMode,
-		HttpOnly: true,
-	})
+	clearSessionCookies(w)
 
 	if user != nil {
 		h.audit.Record("auth.logout", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)

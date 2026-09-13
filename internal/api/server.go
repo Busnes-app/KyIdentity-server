@@ -101,6 +101,7 @@ func (s *Server) routes() *http.ServeMux {
 	}
 	devH := NewDeviceHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	adminH := NewAdminHandler(s.store, s.syncEngine, s.audit, s.middleware, s.cfg.IssuerURL)
+	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
 	backupH := NewBackupHandler(s.cfg, s.store, s.audit, s.middleware)
 	webauthnH := NewWebAuthnHandler(s.store, s.audit, s.mfaEngine, s.middleware, s.cfg.RPID, s.cfg.Origin)
@@ -158,6 +159,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /api/user/mfa/totp/enable", authM(http.HandlerFunc(devH.EnableTOTP)))
 	mux.Handle("POST /api/user/recovery-codes", authM(http.HandlerFunc(devH.GenerateRecoveryCodes)))
 	mux.Handle("GET /api/user/applications", authM(http.HandlerFunc(devH.ListApplications)))
+	mux.Handle("GET /api/user/sessions", authM(http.HandlerFunc(sessH.ListOwn)))
+	mux.Handle("DELETE /api/user/sessions/{id}", authM(http.HandlerFunc(sessH.RevokeOwn)))
+	mux.Handle("POST /api/user/sessions/revoke-others", authM(http.HandlerFunc(sessH.RevokeOthers)))
 
 	mux.Handle("POST /api/user/passkeys/register/begin", authM(s.middleware.RateLimit("passkey_enrol", 10, 0.2)(http.HandlerFunc(webauthnH.BeginRegistration))))
 	mux.Handle("POST /api/user/passkeys/register/finish", authM(s.middleware.RateLimit("passkey_enrol", 10, 0.2)(http.HandlerFunc(webauthnH.FinishRegistration))))
@@ -204,6 +208,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("PUT /api/admin/users/{id}", adminStepUpM(http.HandlerFunc(adminH.UpdateUser)))
 	mux.Handle("POST /api/admin/users/{id}/reset-mfa", adminStepUpM(http.HandlerFunc(adminH.ResetUserMFA)))
 	mux.Handle("POST /api/admin/users/{id}/revoke-sessions", adminM(http.HandlerFunc(adminH.RevokeUserSessions)))
+	mux.Handle("GET /api/admin/users/{id}/sessions", adminM(http.HandlerFunc(sessH.AdminList)))
+	mux.Handle("DELETE /api/admin/users/{id}/sessions/{sid}", adminM(http.HandlerFunc(sessH.AdminRevokeSession)))
+	mux.Handle("POST /api/admin/users/{id}/apps/{clientId}/revoke", adminM(http.HandlerFunc(sessH.AdminRevokeApp)))
 	mux.Handle("DELETE /api/admin/users/{id}", adminStepUpM(http.HandlerFunc(adminH.DeleteUser)))
 
 	mux.Handle("GET /api/admin/systems/{id}/deliveries", adminM(http.HandlerFunc(adminH.ListSyncDeliveries)))

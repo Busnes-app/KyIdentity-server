@@ -272,6 +272,20 @@ disabling a user, resetting their MFA, changing their password, or revoking thei
 invalidates all of theirs. Services that validate tokens offline against JWKS cannot see a
 revocation until expiry — call `/oauth/userinfo` where revocation must take effect at once.
 
+**Sessions.** Security and devices lists where an account is signed in: each live browser
+session with its address, browser, sign-in and last-activity times, expiry and the factor
+used, plus the apps currently holding access tokens. `GET /api/user/sessions`,
+`DELETE /api/user/sessions/{id}` and `POST /api/user/sessions/revoke-others` act on the
+caller's own account; revoking the current session also clears its cookies. Administrators
+use `GET /api/admin/users/{id}/sessions`, `DELETE /api/admin/users/{id}/sessions/{sid}` and
+`POST /api/admin/users/{id}/apps/{clientId}/revoke` (revoke one app's tokens and pending
+codes while the browser session survives). Revoking a session removes its authorization
+codes, tokens, step-up grants and pending authorization interactions in the same
+transaction as the audit event. These routes need CSRF but no step-up, like the emergency
+button. The app list is derived from issued tokens: it shows which apps can still call
+KySignOn, not whether the app's own login is alive, and downstream apps may keep their
+session until standard logout ships.
+
 **Authorization re-authentication (PR05a).** Ordinary requests reuse SSO. Following
 [OpenID Connect authentication requests](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest),
 `prompt=login` and `max_age=0` require a new password and any enrolled second factor
@@ -412,7 +426,8 @@ login supplies evidence. Pending legacy authorization codes and MFA flows are in
 users in those flows restart login. New codes and access tokens bind internally to the
 originating session: removing it blocks exchange and online UserInfo access. Already-issued
 legacy access tokens retain their previous expiry/revocation behavior. Internal session IDs
-are not published as logout `sid` claims; standard downstream logout remains future work.
+are listed to their owner and administrators for revocation but are not published as logout
+`sid` claims; standard downstream logout remains future work.
 
 **System pairing requires the PIN** shown next to the token, and callback URLs must be
 `https` and resolve off-network unless `KYSIGNON_ALLOW_PRIVATE_CALLBACKS=true` (the

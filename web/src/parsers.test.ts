@@ -1,4 +1,4 @@
-import { parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs } from './parsers';
+import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseGroupPage,
@@ -433,5 +433,30 @@ describe('reconcile jobs', () => {
     expect(() => parseReconcileJobs({ jobs: [{ ...job, kind: 'audit' }] })).toThrow(/kind/);
     expect(() => parseReconcileJobs({ jobs: [{ ...job, result: { ...result, missingCount: -1 } }] })).toThrow(/missingCount/);
     expect(() => parseReconcileJobs({ jobs: [{ ...job, result: { ...result, missing: [{ reason: 'x' }] } }] })).toThrow(/id/);
+  });
+});
+
+describe('parseSessionInventory', () => {
+  const session = {
+    id: 's1', current: true, ipAddress: '10.0.0.1', userAgent: 'Firefox', factorMethod: 'totp',
+    createdAt: '2026-09-12T10:00:00Z', lastActiveAt: '2026-09-12T11:00:00Z', expiresAt: '2026-09-13T10:00:00Z',
+  };
+  const app = { clientId: 'kynotes', clientName: 'KyNotes', tokens: 2, issuedAt: '2026-09-12T10:00:00Z', expiresAt: '2026-09-12T10:15:00Z' };
+
+  it('reads sessions and app grants', () => {
+    const inv = parseSessionInventory({ sessions: [session], apps: [app] });
+    expect(inv.sessions[0]?.current).toBe(true);
+    expect(inv.apps[0]?.tokens).toBe(2);
+  });
+
+  // "current" decides which row gets the sign-out-everywhere-else treatment; a missing flag
+  // must read as not current, never as current.
+  it('treats a missing current flag as another session', () => {
+    const { current: _omitted, ...rest } = session;
+    expect(parseSessionInventory({ sessions: [rest], apps: [] }).sessions[0]?.current).toBe(false);
+  });
+
+  it('rejects a session without an id', () => {
+    expect(() => parseSessionInventory({ sessions: [{ ...session, id: 1 }], apps: [] })).toThrow();
   });
 });
