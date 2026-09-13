@@ -165,7 +165,7 @@ func TestSendsOverStartTLSAndImplicitTLS(t *testing.T) {
 			}
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			if f.auth == "" || !strings.Contains(f.from, "id@example.test") || !strings.Contains(f.to, "ada@example.test") {
+			if f.auth == "" || f.from != "MAIL FROM:<id@example.test>" || !strings.Contains(f.to, "ada@example.test") {
 				t.Fatalf("auth=%q from=%q to=%q", f.auth, f.from, f.to)
 			}
 			if !strings.Contains(f.data, "Subject: Your link") || !strings.Contains(f.data, "token=abc") {
@@ -241,6 +241,16 @@ func TestSettingsRoundTripKeepsThePasswordServerSide(t *testing.T) {
 	}
 	if got, _ := Load(db, key); got.Password != "q" {
 		t.Fatal("new password not stored")
+	}
+	// A blank password does not follow the credential to a different relay.
+	if err := Save(db, key, &Settings{Host: "evil.example.test", Port: 465, From: "id@example.test", Security: "tls"}); err == nil {
+		t.Fatal("stored password carried to a new host")
+	}
+	if err := Save(db, key, &Settings{Host: "smtp.example.test", Port: 587, From: "id@example.test", Security: "starttls"}); err == nil {
+		t.Fatal("stored password carried to a new port and transport")
+	}
+	if got, _ := Load(db, key); got.Host != "smtp.example.test" || got.Port != 465 || got.Password != "q" {
+		t.Fatalf("rejected save changed settings: %+v", got)
 	}
 	for _, bad := range []Settings{{Port: 465, From: "a@b", Security: "tls"}, {Host: "h", Port: 0, From: "a@b", Security: "tls"}, {Host: "h", Port: 25, From: "nope", Security: "tls"}, {Host: "h", Port: 25, From: "a@b.test", Security: "none"}} {
 		b := bad

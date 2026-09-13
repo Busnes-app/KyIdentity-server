@@ -2,12 +2,15 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Busness-app/kysignon-server/internal/mail"
 	"github.com/Busness-app/kysignon-server/internal/store"
 )
 
@@ -242,5 +245,48 @@ func TestMailSettingsAreWriteOnlyAndAdminOnly(t *testing.T) {
 	}
 	if got := adminRequest(t, srv, "PUT", "/api/admin/mail", admin, `{"host":""}`); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"configured":false`) {
 		t.Fatalf("clear: %d %s", got.Code, got.Body.String())
+	}
+}
+
+// The relay is contacted after the generic answer is written, so a slow or dead relay
+// cannot turn response time into an account-existence oracle.
+func TestForgotAnswersBeforeTalkingToTheRelay(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() { time.Sleep(3 * time.Second); c.Close() }()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	p, _ := strconv.Atoi(port)
+	if err := mail.Save(db, srv.cfg.EncryptionKey, &mail.Settings{Host: "127.0.0.1", Port: p, From: "id@example.test", Security: "starttls"}); err != nil {
+		t.Fatal(err)
+	}
+	u := newUser(t, db, "user")
+	timed := func(identifier string) (time.Duration, *httptest.ResponseRecorder) {
+		start := time.Now()
+		rec := anonPost(t, srv, "/api/auth/password/forgot", map[string]string{"identifier": identifier})
+		return time.Since(start), rec
+	}
+	known, knownRec := timed(u.Username)
+	unknown, unknownRec := timed("nobody-here")
+	if knownRec.Code != http.StatusOK || unknownRec.Code != http.StatusOK || knownRec.Body.String() != unknownRec.Body.String() {
+		t.Fatalf("answers differ: %d %s / %d %s", knownRec.Code, knownRec.Body.String(), unknownRec.Code, unknownRec.Body.String())
+	}
+	if known > time.Second || unknown > time.Second {
+		t.Fatalf("forgot waited on the relay: known %v unknown %v", known, unknown)
+	}
+	if n := countAudit(t, db, "auth.password_reset_requested"); n != 1 {
+		t.Fatalf("reset link not issued for the known account: %d audit rows", n)
 	}
 }

@@ -215,10 +215,15 @@ func (h *OnboardingHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending.Committed()
-	if err := settings.Send(u.Email, h.subject("reset"), h.body(u, "reset", raw)); err != nil {
-		h.audit.Record("auth.password_reset_delivery", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"error": err.Error()})
-	}
+	// The answer goes out before the relay is contacted, so response time is the same
+	// for an account that exists and one that does not.
 	generic()
+	ip, ua := h.middleware.ClientIP(r), r.UserAgent()
+	go func() {
+		if err := settings.Send(u.Email, h.subject("reset"), h.body(u, "reset", raw)); err != nil {
+			h.audit.Record("auth.password_reset_delivery", u.ID, u.Username, u.ID, "user", ip, ua, "failure", map[string]any{"error": err.Error()})
+		}
+	}()
 }
 
 // ChangePassword is the signed-in path: current password plus a step-up grant, then every

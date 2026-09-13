@@ -2445,7 +2445,11 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 		now, userID); err != nil {
 		return err
 	}
-	return revokeSessionGrantsTx(tx, `user_id=?`, now, userID)
+	if err := revokeSessionGrantsTx(tx, `user_id=?`, now, userID); err != nil {
+		return err
+	}
+	// An outstanding activation or reset link is a credential too.
+	return expireAccountTokensTx(tx, now, `user_id=?`, userID)
 }
 
 // PingContext proves the database is reachable and readable within the caller's deadline.

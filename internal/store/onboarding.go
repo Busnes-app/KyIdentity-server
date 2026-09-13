@@ -76,9 +76,12 @@ func expireAccountTokensTx(tx *sql.Tx, now time.Time, where string, args ...any)
 }
 
 // RedeemAccountToken spends a live link of the given kind and sets the password in the
-// same transaction. Activation makes the account active; a link that was mailed proves
-// the address. Every session and grant ends, so a reset also evicts whoever held the
-// old password. Anything but a live link of that kind is ErrNotFound.
+// same transaction. The account must still be in the state the link was issued for
+// (pending for activation, active for reset): a link outlives neither a cancelled
+// invitation nor a password an administrator set meanwhile. Activation makes the
+// account active; a link that was mailed proves the address. Every session, grant and
+// remaining link ends, so a reset also evicts whoever held the old password. Anything
+// but a live link for an eligible account is ErrNotFound.
 func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditEvent) (*User, error) {
 	now := time.Now().UTC()
 	var user *User
@@ -98,9 +101,14 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 		if n, _ := res.RowsAffected(); n != 1 {
 			return ErrNotFound
 		}
-		if _, err := tx.Exec(`UPDATE users SET password_hash=?, pending=0, status=CASE WHEN ?='activation' THEN 'active' ELSE status END,
- email_verified_at=COALESCE(email_verified_at, CASE WHEN ?='email' THEN ? END), updated_at=? WHERE id=?`, passwordHash, kind, delivery, now, now, userID); err != nil {
+		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=0, status=CASE WHEN ?='activation' THEN 'active' ELSE status END,
+ email_verified_at=COALESCE(email_verified_at, CASE WHEN ?='email' THEN ? END), updated_at=?
+ WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending))`, passwordHash, kind, delivery, now, now, userID, kind, kind)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return ErrNotFound
 		}
 		if err := revokeUserAccessTx(tx, userID, now); err != nil {
 			return err

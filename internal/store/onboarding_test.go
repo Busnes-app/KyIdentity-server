@@ -246,3 +246,49 @@ func TestExpiredAccountTokensArePruned(t *testing.T) {
 		t.Fatalf("expired tokens left: %d", n)
 	}
 }
+
+// A link is only as good as the state it was issued for: revoking access retires it, and
+// a redeemed activation must still find the account pending.
+func TestLinksDieWithAccessRevocationAndStateChanges(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := pendingUser(t, s)
+	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	// "Revoke everything" on an invited account cancels the invitation.
+	if err := s.RevokeUserAccess(u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("link survived access revocation: %v", err)
+	}
+	stored, _ := s.GetUserByID(u.ID)
+	if stored.Status != "disabled" || !stored.Pending {
+		t.Fatalf("revoked invitation changed state: %+v", stored)
+	}
+
+	// An administrator setting the password activates manually; the older link is dead.
+	raw, _ = s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	stored.PasswordHash, stored.Pending, stored.Status = "admin-set", false, "active"
+	if err := s.UpdateUserWithSyncEvents(stored, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemAccountToken(raw, "activation", "link-set", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("activation link overwrote an admin-set password: %v", err)
+	}
+	if after, _ := s.GetUserByID(u.ID); after.PasswordHash != "admin-set" {
+		t.Fatalf("password changed by a dead link: %+v", after)
+	}
+
+	// A reset link issued while active is refused once the account is disabled, even if
+	// the token row itself is somehow still live.
+	reset, _ := s.IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil)
+	if _, err := s.db.Exec(`UPDATE users SET status='disabled' WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemAccountToken(reset, "reset", "x", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("reset redeemed on a disabled account: %v", err)
+	}
+	if n := count(t, s, `SELECT COUNT(*) FROM account_tokens WHERE user_id=? AND used_at IS NOT NULL`, u.ID); n != 0 {
+		t.Fatal("a refused redemption consumed the token")
+	}
+}

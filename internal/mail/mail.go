@@ -90,13 +90,22 @@ func Load(s *store.Store, key []byte) (*Settings, error) {
 	return &out, nil
 }
 
-// Save stores validated settings. An empty password keeps the one already stored.
+// Save stores validated settings. An empty password keeps the stored one only while the
+// relay it authenticates to is unchanged; pointing the settings elsewhere requires the
+// password again, so the stored credential can never be replayed to a chosen host.
 func Save(s *store.Store, key []byte, in *Settings) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
 	if in.Password == "" {
-		if current, err := Load(s, key); err == nil && current != nil {
+		current, err := Load(s, key)
+		if err != nil {
+			return err
+		}
+		if current != nil && current.Password != "" {
+			if current.Host != in.Host || current.Port != in.Port || current.Username != in.Username || current.Security != in.Security {
+				return errors.New("enter the password again when the relay, port, username or transport changes")
+			}
 			in.Password = current.Password
 		}
 	}
@@ -160,7 +169,12 @@ func (s *Settings) Send(to, subject, body string) error {
 			return err
 		}
 	}
-	if err := c.Mail(s.From); err != nil {
+	// The envelope takes the bare address; the display name belongs in the header only.
+	from, err := netmail.ParseAddress(s.From)
+	if err != nil {
+		return err
+	}
+	if err := c.Mail(from.Address); err != nil {
 		return err
 	}
 	if err := c.Rcpt(to); err != nil {

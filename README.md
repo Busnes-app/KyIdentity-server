@@ -188,7 +188,10 @@ access until an activation link sets a password. Users → the link button issue
 link (step-up required); it is shown once for hand-over, or mailed when mail delivery is
 configured. Activation links last 24 hours, reset links 30 minutes, and a new link of
 the same kind retires the previous one. Only the token's hash is stored, and the raw
-link never appears in the audit log. Opening a link only shows the form; submitting it
+link never appears in the audit log. A link is only redeemable while the account is
+still in the state it was issued for, and every link dies when access is revoked: to
+cancel an invitation, use the account's Revoke Sessions action (or delete it); setting a
+password on a pending account also retires its activation link. Opening a link only shows the form; submitting it
 spends the token and sets the password in one transaction, so a mail scanner that
 follows the link changes nothing. Activation makes the account active and, when the link
 was mailed, records the address as verified; the first sign-in then goes through any
@@ -210,7 +213,9 @@ an address clears verification and retires every outstanding link.
 **Mail delivery.** Administration → Mail delivery holds one SMTP relay (host, port,
 STARTTLS or implicit TLS, sender, optional credentials). The password is stored
 encrypted with the deployment key and is never returned; a blank password keeps the
-stored one and a blank host turns delivery off. "Send test to me" mails the signed-in
+stored one only while host, port, username and transport are unchanged, so the stored
+credential can never be pointed at a different relay, and a blank host turns delivery
+off. "Send test to me" mails the signed-in
 administrator and audits the outcome. Cleartext SMTP is not offered: a relay without
 STARTTLS is refused before any credential is sent. Without mail delivery every link is
 handed over by an administrator and self-service reset is unavailable.
