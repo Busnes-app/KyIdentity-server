@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -106,6 +107,18 @@ func TestUpstreamUsersAreKeyedByConnectorAndExternalID(t *testing.T) {
 	}
 	if err := s.CreateUpstreamUser(&User{Username: "nobody", Email: "n@up.test", SourceConnectorID: a.ID}, nil); err == nil {
 		t.Fatal("upstream account without external id accepted")
+	}
+	// An identifier may not shadow another account across the username/email boundary.
+	if err := s.CreateUpstreamUser(&User{Username: local.Email, Email: "shadow@up.test", SourceConnectorID: a.ID, ExternalID: "ext-4", SourceActive: true}, nil); !errors.Is(err, ErrUserConflict) {
+		t.Fatalf("userName equal to a local email accepted: %v", err)
+	}
+	if err := s.CreateUpstreamUser(&User{Username: "shadow", Email: local.Username, SourceConnectorID: a.ID, ExternalID: "ext-5", SourceActive: true}, nil); !errors.Is(err, ErrUserConflict) {
+		t.Fatalf("email equal to a local username accepted: %v", err)
+	}
+	renamed, _ := s.GetUserByID(u.ID)
+	renamed.Username = local.Email
+	if err := s.UpdateUpstreamUser(renamed, nil); !errors.Is(err, ErrUserConflict) {
+		t.Fatalf("rename onto a local email accepted: %v", err)
 	}
 	if got, _ := s.GetUpstreamUser(b.ID, u.ID); got != nil {
 		t.Fatal("another connector could read the account")
@@ -236,6 +249,23 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 		t.Fatal("tokens outlived the connector")
 	}
 
+	// Disabling the owned accounts may not remove the last active administrator.
+	promoted, _ := s.GetUserByID(d.ID)
+	promoted.Role = "admin"
+	if err := s.UpdateUserWithSyncEvents(promoted, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeleteSCIMConnector(drop.ID, true, nil); !errors.Is(err, ErrLastActiveAdmin) {
+		t.Fatalf("disconnect disabled the last administrator: %v", err)
+	}
+	if still, _ := s.GetUserByID(d.ID); still.Status != "active" || still.SourceConnectorID != drop.ID {
+		t.Fatalf("refused disconnect changed the account: %+v", still)
+	}
+	localAdmin := createTestUser(t, s)
+	localAdmin.Role = "admin"
+	if err := s.UpdateUserWithSyncEvents(localAdmin, false, nil); err != nil {
+		t.Fatal(err)
+	}
 	n, err = s.DeleteSCIMConnector(drop.ID, true, nil)
 	if err != nil || n != 1 {
 		t.Fatalf("deactivate: %d %v", n, err)
@@ -246,5 +276,50 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	}
 	if _, err := s.DeleteSCIMConnector(drop.ID, true, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("double delete: %v", err)
+	}
+}
+
+// A local disable that lands while the upstream is writing is never lost: whichever
+// commits last, the override and the disabled status survive.
+func TestLocalOverrideSurvivesAConcurrentUpstreamWrite(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	c, _ := s.CreateSCIMConnector("A", nil)
+	u := upstream(t, s, c.ID, "ext-1", "alice")
+	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
+		t.Fatal(err)
+	}
+	fromUpstream, _ := s.GetUserByID(u.ID)
+	fromAdmin, _ := s.GetUserByID(u.ID)
+	fromUpstream.SourceActive, fromUpstream.DisplayName = true, "Alice Upstream"
+	fromAdmin.LocallyDisabled = true
+	fromAdmin.ApplySourceState()
+
+	var start, done sync.WaitGroup
+	start.Add(1)
+	done.Add(2)
+	errs := make(chan error, 2)
+	go func() {
+		defer done.Done()
+		start.Wait()
+		errs <- s.UpdateUpstreamUser(fromUpstream, nil)
+	}()
+	go func() {
+		defer done.Done()
+		start.Wait()
+		errs <- s.UpdateUserWithSyncEvents(fromAdmin, true, nil)
+	}()
+	start.Done()
+	done.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, _ := s.GetUserByID(u.ID)
+	if !after.LocallyDisabled || after.Status != "disabled" {
+		t.Fatalf("override lost to a concurrent upstream write: %+v", after)
 	}
 }

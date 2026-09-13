@@ -837,7 +837,8 @@ does), and only then can it sign in, be provisioned or hold app access. `userNam
 `displayName`, `name`, the primary email and the `active` flag belong to the upstream
 and are read-only for local administrators; role is a local decision the upstream
 cannot make. A clash with an existing username or email, local or from another
-connector, is a 409: an upstream never takes over an account. A connector sees and
+connector, is a 409, and so is a `userName` equal to some account's email or the
+reverse: an upstream never takes over or shadows an account. A connector sees and
 touches only its own accounts. DELETE deactivates; nothing is erased.
 
 **Overrides.** A local administrator disabling an upstream account sets an override the
@@ -847,5 +848,6 @@ the full offboarding transaction. Local accounts, including emergency administra
 are outside every connector's reach by construction.
 
 **Disconnecting** a connector requires a choice for the accounts it owned: keep them as
-ordinary local accounts as they are, or disable them first. Either way its tokens die
-with it and the choice is audited.
+ordinary local accounts as they are, or disable them first. Disabling is refused when it
+would leave no active administrator. Either way its tokens die with it and the choice is
+audited.

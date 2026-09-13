@@ -82,6 +82,20 @@ func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
+// rejectCrossIdentityTx refuses a username or email that any other account already uses
+// as either its username or its email: an upstream must not shadow a local identifier.
+func rejectCrossIdentityTx(tx *sql.Tx, excludeID, username, email string) error {
+	var clash bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id<>? AND (username=? COLLATE NOCASE OR email=? COLLATE NOCASE OR username=? COLLATE NOCASE OR email=? COLLATE NOCASE))`,
+		excludeID, username, username, email, email).Scan(&clash); err != nil {
+		return err
+	}
+	if clash {
+		return ErrUserConflict
+	}
+	return nil
+}
+
 func (s *Store) CreateSCIMConnector(name string, audit *AuditEvent) (*SCIMConnector, error) {
 	now := time.Now().UTC()
 	c := &SCIMConnector{ID: uuid.NewString(), Name: strings.TrimSpace(name), Status: "active", CreatedAt: now, UpdatedAt: now}
@@ -265,6 +279,9 @@ func (s *Store) CreateUpstreamUser(u *User, audit *AuditEvent) error {
 	now := time.Now().UTC()
 	u.CreatedAt, u.UpdatedAt = now, now
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := rejectCrossIdentityTx(tx, u.ID, u.Username, u.Email); err != nil {
+			return err
+		}
 		_, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, source_connector_id, external_id, source_active, locally_disabled, created_at, updated_at)
  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.SourceConnectorID, u.ExternalID, u.SourceActive, u.LocallyDisabled, now, now)
 		if isUniqueViolation(err) {
@@ -338,23 +355,27 @@ func (s *Store) ListUpstreamUsers(connectorID, attribute, value string, startInd
 }
 
 // UpdateUpstreamUser writes the upstream's view of an owned account: profile fields and
-// its active flag. The effective status honours the local override, and a disable runs
-// the full offboarding transaction. The external id never changes.
+// its active flag. Local decisions (role, override, password, pending) are folded in
+// from the row as it is at write time, under the same lock, so a local disable landing
+// between the upstream's read and write is never lost. The external id never changes.
 func (s *Store) UpdateUpstreamUser(u *User, audit *AuditEvent) error {
-	current, err := s.GetUpstreamUser(u.SourceConnectorID, u.ID)
-	if err != nil {
-		return err
-	}
-	if current == nil {
+	err := s.updateUser(u, false, audit, func(tx *sql.Tx, current *User) error {
+		if current.SourceConnectorID == "" || current.SourceConnectorID != u.SourceConnectorID {
+			return ErrNotFound
+		}
+		if current.ExternalID != u.ExternalID {
+			return errors.New("external id is immutable")
+		}
+		if err := rejectCrossIdentityTx(tx, u.ID, u.Username, u.Email); err != nil {
+			return err
+		}
+		u.Role, u.LocallyDisabled, u.PasswordHash, u.Pending = current.Role, current.LocallyDisabled, current.PasswordHash, current.Pending
+		u.ApplySourceState()
+		return nil
+	})
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
-	if current.ExternalID != u.ExternalID {
-		return errors.New("external id is immutable")
-	}
-	// Local decisions stay local.
-	u.Role, u.LocallyDisabled, u.PasswordHash, u.Pending = current.Role, current.LocallyDisabled, current.PasswordHash, current.Pending
-	u.ApplySourceState()
-	err = s.UpdateUserWithSyncEvents(u, current.Status == "active" && u.Status != "active", audit)
 	if isUniqueViolation(err) {
 		return ErrUserConflict
 	}
@@ -384,6 +405,15 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
+		}
+		if disableUsers {
+			var total, ownedAdmins int
+			if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(source_connector_id=?),0) FROM users WHERE role='admin' AND status='active'`, id).Scan(&total, &ownedAdmins); err != nil {
+				return err
+			}
+			if ownedAdmins > 0 && ownedAdmins >= total {
+				return ErrLastActiveAdmin
+			}
 		}
 		for _, u := range owned {
 			if disableUsers && u.Status == "active" {

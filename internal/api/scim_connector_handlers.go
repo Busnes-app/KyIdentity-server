@@ -164,6 +164,10 @@ func (h *SCIMHandler) AdminDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"connector_not_found"}`, http.StatusNotFound)
 		return
 	}
+	if errors.Is(err, store.ErrLastActiveAdmin) {
+		http.Error(w, `{"error":"cannot_remove_last_admin","error_description":"Disabling these accounts would leave no active administrator; promote a local administrator first or keep the accounts"}`, http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		log.Printf("delete scim connector: %v", err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
