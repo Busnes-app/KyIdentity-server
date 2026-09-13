@@ -16,7 +16,7 @@ import (
 //
 // A relying party may only steer the browser somewhere it registered, exactly, and may
 // only end this browser's session silently when it proves, with an ID token this server
-// issued to it for this user, that it is acting for the person signed in here. Anything
+// issued to it for this very login, that it is acting for the session held here. Anything
 // weaker gets a confirmation page instead of a logout, and an unregistered redirect gets
 // an error instead of a redirect.
 func (h *OAuthHandler) EndSession(w http.ResponseWriter, r *http.Request) {
@@ -67,10 +67,23 @@ func (h *OAuthHandler) EndSession(w http.ResponseWriter, r *http.Request) {
 
 	user, sess := GetUserFromContext(r.Context()), GetSessionFromContext(r.Context())
 	if sess == nil {
+		if r.Method == http.MethodPost {
+			// A cross-site POST does not carry the SameSite=Lax session cookie, so the
+			// session to end is invisible here. Bounce to a top-level GET on this origin,
+			// which does carry it, rather than report a sign-out that did not happen.
+			bounce := url.Values{}
+			for _, k := range []string{"id_token_hint", "client_id", "post_logout_redirect_uri", "state"} {
+				if v := q.Get(k); v != "" {
+					bounce.Set(k, v)
+				}
+			}
+			http.Redirect(w, r, "/oauth/logout?"+bounce.Encode(), http.StatusSeeOther)
+			return
+		}
 		h.finishLogout(w, r, redirect, state)
 		return
 	}
-	if hint == nil || hint.Subject != user.ID {
+	if !h.hintNamesSession(hint, user.ID, sess.ID) {
 		cookie, _ := r.Cookie("kysignon_session")
 		confirm := q.Get("confirm")
 		if confirm == "" {
@@ -105,6 +118,17 @@ func (h *OAuthHandler) EndSession(w http.ResponseWriter, r *http.Request) {
 	}
 	clearSessionCookies(w)
 	h.finishLogout(w, r, redirect, state)
+}
+
+// hintNamesSession reports whether a hint was issued for exactly this login: its sid must
+// resolve to the current session of the current user. A hint for the same person from
+// another session, or with no sid, proves nothing about this browser.
+func (h *OAuthHandler) hintNamesSession(hint *oauth.IDTokenHint, userID, sessionID string) bool {
+	if hint == nil || hint.SID == "" || hint.Subject != userID {
+		return false
+	}
+	cs, err := h.store.GetClientSession(hint.SID)
+	return err == nil && cs != nil && cs.SessionID == sessionID && cs.UserID == userID && cs.ClientID == hint.ClientID
 }
 
 // finishLogout sends the browser to the validated post-logout URI, or shows a plain

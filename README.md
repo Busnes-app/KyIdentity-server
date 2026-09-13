@@ -293,9 +293,12 @@ Every ID token carries a `sid`: an opaque value minted per client and login, so 
 cannot correlate a user's sessions through it and no app learns the internal session ID.
 An app sends the browser to `/oauth/logout` with `id_token_hint`, optionally `client_id`,
 `post_logout_redirect_uri` and `state` (GET or POST). A hint this server signed for that
-client and for the person signed in here ends the browser session at once. Without such a
-hint, or with a hint for a different user, KySignOn shows a confirmation page whose form
-carries a session-bound token; a cross-site POST cannot confirm on the user's behalf.
+client whose `sid` names the session held in this browser ends it at once. Without such a
+hint, or with a hint for another user or another login of the same user, KySignOn shows a
+confirmation page whose form carries a session-bound token; a cross-site POST cannot
+confirm on the user's behalf. A cross-site POST carries no session cookie (`SameSite=Lax`),
+so it is answered with a 303 to the same request as a top-level GET on this origin rather
+than reported as a sign-out.
 `post_logout_redirect_uri` must match one of the client's registered post-logout URIs
 exactly (register them on the client, https or loopback http only); anything else is a 400
 page and nothing is changed, never a redirect. `state` is echoed on the redirect. Expired

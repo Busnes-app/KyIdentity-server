@@ -327,7 +327,7 @@ func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 			path == "/api/mfa/push/respond" ||
 			path == "/oauth/token" ||
 			path == "/oauth/revoke" ||
-			path == "/oauth/logout" { // RP-initiated logout POSTs cross-site by design; EndSession checks its own confirmation token.
+			path == "/oauth/logout" { // Its same-site confirmation form carries the session-bound token in a `confirm` field, checked by EndSession; a cross-site POST has no session cookie and is bounced to a GET.
 			next.ServeHTTP(w, r)
 			return
 		}
