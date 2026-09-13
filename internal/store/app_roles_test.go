@@ -236,3 +236,84 @@ func TestAppRolesReachProvisioningAndDeletingARoleRevokesIt(t *testing.T) {
 		t.Fatalf("link with roles present: %v", err)
 	}
 }
+
+// Leaving a group that is mapped to an app role is a role change: the user's live grants
+// for that app end and the provisioned account is re-sent without the role, even while
+// they keep access to the app on other grounds.
+func TestLeavingAMappedGroupRevokesTheRoleDownstream(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	appID := provisioningFixture(t, s, "target")
+	if err := s.SetAppPolicy(appID, "all_active_users", true, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	u := createTestUser(t, s)
+	if err := s.CreateGroup(&Group{ID: "ops", Name: "Ops"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	role, _ := s.CreateAppRole(appID, "operator", "", nil)
+	if err := s.SetAppRoleAssignment(appID, role.ID, "groups", "ops", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembership("ops", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	app, _ := s.GetAppRecord(appID)
+	revisionBefore := app.RoleRevision
+	if err := s.SetGroupMembership("ops", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	var payload string
+	if err := s.db.QueryRow(`SELECT payload_json FROM account_sync_events WHERE user_id=? AND status='pending' ORDER BY rowid DESC LIMIT 1`, u.ID).Scan(&payload); err != nil {
+		t.Fatalf("leaving the group queued nothing: %v", err)
+	}
+	if strings.Contains(payload, `"operator"`) {
+		t.Fatalf("revoked role still delivered: %s", payload)
+	}
+	if app, _ = s.GetAppRecord(appID); app.RoleRevision != revisionBefore+1 {
+		t.Fatalf("role revision not bumped by a membership change: %d -> %d", revisionBefore, app.RoleRevision)
+	}
+	// Deleting a mapped group does the same for every member.
+	if err := s.SetGroupMembership("ops", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	if err := s.DeleteGroup("ops", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT payload_json FROM account_sync_events WHERE user_id=? AND status='pending' ORDER BY rowid DESC LIMIT 1`, u.ID).Scan(&payload); err != nil || strings.Contains(payload, `"operator"`) {
+		t.Fatalf("group deletion did not revoke the role downstream: %s %v", payload, err)
+	}
+}
+
+// Unmapping the last of a user's roles sends an explicit empty list, never an omitted
+// attribute a merging receiver could read as unchanged.
+func TestRevokedRolesAreSentAsAnEmptyList(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	appID := provisioningFixture(t, s, "target")
+	u := createTestUser(t, s)
+	if err := s.SetAppPolicy(appID, "all_active_users", true, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	held, _ := s.CreateAppRole(appID, "held", "", nil)
+	if _, err := s.CreateAppRole(appID, "other", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppRoleAssignment(appID, held.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	if err := s.SetAppRoleAssignment(appID, held.ID, "users", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	var payload string
+	if err := s.db.QueryRow(`SELECT payload_json FROM account_sync_events WHERE user_id=? AND status='pending' ORDER BY rowid DESC LIMIT 1`, u.ID).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, `"roles":[]`) {
+		t.Fatalf("revocation not stated explicitly: %s", payload)
+	}
+}

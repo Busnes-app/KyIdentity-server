@@ -327,6 +327,14 @@ silently accepted. If the roles and groups mapped for a user do not fit in a tok
 (4 KiB of identity claims), the token request fails with `invalid_request` naming the
 counts rather than truncating a permission set.
 
+**Upgrade note.** Before this release every ID token and UserInfo answer carried the
+name and email claims regardless of scope. A relying party that requests only `openid`
+must now also request `profile` and `email` to keep receiving them; there is no switch
+for this, because emitting claims a client did not ask for is the defect being fixed.
+Group membership changes, including deletion of a mapped group and changes arriving
+over inbound SCIM, count as role changes for every app that maps the group, and a
+provisioned account whose roles are revoked receives an explicit empty `roles` list.
+
 **Per-app switches.** *Legacy global role claim* keeps the directory-wide `role`
 (`user` or `admin`) in the app's tokens; apps that existed before app roles keep it on,
 new apps start with it off, and it should be turned off for each app once that app reads

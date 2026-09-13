@@ -66,6 +66,8 @@ func scimUserPayload(u *User, active bool) ([]byte, error) {
 	return scimUserPayloadWithRoles(u, active, roles)
 }
 
+// scimUserPayloadWithRoles always states the role list, empty included: a receiver that
+// merges attributes must see "no roles" as an assertion, not as a missing field.
 func scimUserPayloadWithRoles(u *User, active bool, roles []scim.MultiValue) ([]byte, error) {
 	res := scim.User{
 		Schemas: []string{scim.UserSchema}, ID: u.ID, ExternalID: u.ID, UserName: u.Username,
@@ -75,8 +77,13 @@ func scimUserPayloadWithRoles(u *User, active bool, roles []scim.MultiValue) ([]
 	if u.Email != "" {
 		res.Emails = []scim.MultiValue{{Value: u.Email, Type: "work", Primary: true}}
 	}
-	res.Roles = roles
-	return json.Marshal(res)
+	if roles == nil {
+		roles = []scim.MultiValue{}
+	}
+	return json.Marshal(struct {
+		scim.User
+		Roles []scim.MultiValue `json:"roles"`
+	}{res, roles})
 }
 
 // A deleted or unknown user still needs a body the receiver can act on.
