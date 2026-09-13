@@ -1,7 +1,7 @@
 # Source build. Set it once and every `docker compose` command, the recovery procedure
-# included, keeps using the local build instead of the published image. .env also holds
-# secrets: the chmod makes it 0600 whether or not the file already existed.
-#   (umask 077; printf '\n%s\n' 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env); chmod 600 .env
+# included, keeps using the local build instead of the published image. The line is replaced
+# in place (never appended twice) and .env, which also holds secrets, is written at 0600.
+#   (umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)
 # Further overlays chain onto the same value, e.g. `:docker-compose.lan-dns.yml`;
 # an explicit `-f` list replaces COMPOSE_FILE entirely, so avoid mixing the two.
 # The result is tagged kysignon-server:local so it never occupies the published name. This

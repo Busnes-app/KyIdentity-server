@@ -1,14 +1,13 @@
 # Optional override: send the container's DNS lookups to your LAN's resolver, so names that
-# exist only there (a KyRecovery behind your own proxy) resolve inside the container. This
-# replaces the host's resolvers for every lookup this container makes, which is why it lives
-# in its own file instead of a default.
-#
-# Select it by appending it to COMPOSE_FILE in .env, never with -f: an explicit -f list
-# replaces COMPOSE_FILE outright and would drop the build overlay of a source install.
-# The resolver lives in .env too, since every later compose command needs it once this
-# file is in the chain. Source installs keep docker-compose.build.yml in the middle.
-#   (umask 077; printf '\nCOMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKYSIGNON_DNS=192.168.1.1\n' >> .env); chmod 600 .env
-#   docker compose up -d --force-recreate
+# exist only there (a KyRecovery behind your own proxy) resolve inside the container. It
+# replaces the host's resolvers for every lookup this container makes, which is why it is
+# not in the base file. Select it by adding it to COMPOSE_FILE in .env, never with -f: an
+# explicit -f list replaces COMPOSE_FILE outright and would drop a source install's build
+# overlay. The resolver live in .env too, since every later compose
+# command recreates the container from .env. The lines are replaced in place, never appended.
+# Pick ONE, then: docker compose up -d --force-recreate
+#   (umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KYSIGNON_DNS=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKYSIGNON_DNS=192.168.1.1\n' >> "$t" && mv "$t" .env)   # published image
+#   (umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KYSIGNON_DNS=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml\nKYSIGNON_DNS=192.168.1.1\n' >> "$t" && mv "$t" .env)   # source install
 services:
   kysignon-server:
     dns:

@@ -68,7 +68,7 @@ KySignOn relies on only **3 direct external packages**:
 ### 1. Configure Environment
 Clone the repository and copy the sample configuration:
 ```bash
-(umask 077; cp .env.example .env); chmod 600 .env   # .env holds secrets
+[ -e .env ] || (umask 077; cp .env.example .env); chmod 600 .env   # an existing .env is kept; it holds secrets
 ```
 
 Review and adjust variables in `.env`:
@@ -93,9 +93,10 @@ APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 
 ### 2. Start the Server
 ```bash
-(umask 077; printf '\n%s\n' 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env); chmod 600 .env   # source build; omit to run the published image
-# Existing source install? Add that line before the first `up -d` on this checkout: the old
-# image name is gone and a bare `up -d` would pull the published image instead of rebuilding.
+# Existing install? Your .env is kept: the copy below never overwrites one, and the COMPOSE_FILE line
+# is replaced in place. A source install must set it before its first `up -d` on this checkout,
+# or a bare `up -d` pulls the published image instead of rebuilding.
+(umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)   # source build; omit to run the published image
 docker compose up -d
 docker compose pull && docker compose up -d   # update a published-image install on the rolling tag
 # A digest-pinned install (KYSIGNON_IMAGE in .env) must re-run the pin recipe in docker-compose.yml

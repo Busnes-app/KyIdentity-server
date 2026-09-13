@@ -8,15 +8,16 @@ services:
     # Source installs put `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml` in .env; Compose
     # reads it before every command. An explicit -f list replaces it outright, so never mix the two.
     # To run only what CI attested, pin by digest and verify it first (gh logged in). The
-    # chain stops at the first failure and the pin is written whole or not at all, so a
-    # failed verify or a failed write never leaves .env without a pin. Re-run it to move
-    # to a newer image, or delete the KYSIGNON_IMAGE line to follow :latest again. A source
-    # install is unaffected: docker-compose.build.yml's image wins over this pin.
+    # chain stops at the first failure. The new .env is staged outside the tree and renamed
+    # in only if the filtered copy was written in full, so a failed verify, an unreadable
+    # .env or a short write never replaces your secrets. Re-run it to move to a newer image,
+    # or delete the KYSIGNON_IMAGE line to follow :latest again. A source install is unaffected:
+    # docker-compose.build.yml's image wins over this pin.
     #   d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:latest --format '{{.Manifest.Digest}}') \
     #     && gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
     #          --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
-    #     && (umask 077; touch .env; { grep -v '^KYSIGNON_IMAGE=' .env || true; echo "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d"; } > .env.tmp \
-    #         && chmod 600 .env.tmp && mv .env.tmp .env) \
+    #     && (umask 077; t=$(mktemp) && touch .env && { grep -v '^KYSIGNON_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
+    #         && echo "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" >> "$t" && mv "$t" .env) \
     #     && grep -qxF "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" .env
     image: ${KYSIGNON_IMAGE:-ghcr.io/busness-app/kysignon-server:latest}
     pull_policy: missing
