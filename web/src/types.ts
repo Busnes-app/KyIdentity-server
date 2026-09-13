@@ -259,7 +259,7 @@ export interface ReconcileJob {
 
 export interface OffboardingTarget {
   systemId: string; systemName: string; systemType: string; systemStatus: string; revision: number;
-  recorded: boolean; acknowledged: boolean; observed: ObservedState; observedAt?: string; verified: boolean; blocked: boolean;
+  recorded: boolean; acknowledged: boolean; observed: ObservedState; observedAt?: string; verified: boolean; contradicted: boolean; blocked: boolean;
   lastEvent?: ProvisioningEvent;
 }
 export interface Offboarding {

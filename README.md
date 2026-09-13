@@ -752,8 +752,9 @@ sign-out notifications. The summary reads *Pending* while any target is outstand
 *Acknowledged* once every connector and app accepted its delivery (decided over every
 delivery, not just the ones listed), and *Complete* only when a later listing verified
 the account inactive or absent at every connector. A
-connector whose listing is unsupported can be acknowledged but never verified, and the
-view says so rather than rounding up.
+connector whose listing is unsupported can be acknowledged but never verified, and a
+connector whose later listing still shows the account active is marked *Still active at
+target* and counts as neither; the view says so rather than rounding up.
 
 ### SCIM Groups
 

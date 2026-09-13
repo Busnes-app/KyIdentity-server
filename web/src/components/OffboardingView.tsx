@@ -12,6 +12,7 @@ const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : '');
 
 function targetBadge(t: OffboardingTarget): { cls: string; text: string } {
   if (!t.recorded) return { cls: 'warn', text: 'Still provisioned' };
+  if (t.contradicted) return { cls: 'disabled', text: 'Still active at target' };
   if (t.verified) return { cls: 'active', text: 'Verified' };
   if (t.acknowledged) return { cls: 'active', text: 'Acknowledged' };
   if (t.lastEvent?.status === 'failed') return { cls: 'disabled', text: 'Failed' };

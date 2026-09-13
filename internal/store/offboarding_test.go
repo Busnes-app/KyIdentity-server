@@ -300,3 +300,37 @@ func TestExhaustedLogoutOutlivesPruningAndKeepsCompletionFalse(t *testing.T) {
 		t.Fatalf("a pruned failure was read as success: %+v", off)
 	}
 }
+
+// A connector that answered 200 but still lists the account as active has not removed
+// it; the acknowledgement is contradicted, not merely unverified.
+func TestListingThatStillSeesTheAccountActiveContradictsTheAcknowledgement(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	provisionedUser(t, s, u, "assigned")
+	u.Status = "disabled"
+	if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	off, err := s.UserOffboarding(u.ID)
+	if err != nil || !off.Acknowledged || !off.Targets[0].Acknowledged {
+		t.Fatalf("before the listing: %+v %v", off, err)
+	}
+	if _, err := s.db.Exec(`UPDATE sync_resource_state SET observed='present_active',observed_at=? WHERE resource_id=?`, off.Targets[0].LastEvent.UpdatedAt.Add(time.Second), u.ID); err != nil {
+		t.Fatal(err)
+	}
+	off, _ = s.UserOffboarding(u.ID)
+	tgt := off.Targets[0]
+	if off.Acknowledged || off.Verified || tgt.Acknowledged || tgt.Verified || !tgt.Contradicted {
+		t.Fatalf("a contradicting listing was rounded up: %+v", off)
+	}
+	// A listing taken before the delivery says nothing about it.
+	if _, err := s.db.Exec(`UPDATE sync_resource_state SET observed_at=? WHERE resource_id=?`, tgt.LastEvent.UpdatedAt.Add(-time.Second), u.ID); err != nil {
+		t.Fatal(err)
+	}
+	off, _ = s.UserOffboarding(u.ID)
+	if !off.Acknowledged || off.Targets[0].Contradicted {
+		t.Fatalf("a stale listing contradicted a later delivery: %+v", off)
+	}
+}

@@ -668,7 +668,7 @@ export function parseOffboarding(value: unknown): Offboarding {
     targets: list(o.targets, item => {
       const t = obj(item, 'an offboarding target');
       return { systemId: str(t, 'systemId'), systemName: optStr(t, 'systemName') ?? str(t, 'systemId'), systemType: optStr(t, 'systemType') ?? '', systemStatus: optStr(t, 'systemStatus') ?? '',
-        revision: directoryCount(t, 'revision'), recorded: requiredBool(t, 'recorded'), acknowledged: requiredBool(t, 'acknowledged'), verified: requiredBool(t, 'verified'), blocked: requiredBool(t, 'blocked'),
+        revision: directoryCount(t, 'revision'), recorded: requiredBool(t, 'recorded'), acknowledged: requiredBool(t, 'acknowledged'), verified: requiredBool(t, 'verified'), contradicted: requiredBool(t, 'contradicted'), blocked: requiredBool(t, 'blocked'),
         observed: oneOf(t, 'observed', ['', 'present_active', 'present_inactive', 'absent', 'unsupported']), observedAt: optStr(t, 'observedAt'),
         lastEvent: t.lastEvent == null ? undefined : parseProvisioningEvent(t.lastEvent) };
     }),

@@ -43,7 +43,9 @@ func offboardUserTx(tx *sql.Tx, u *User, deleted bool, now time.Time) error {
 
 // OffboardingTarget is one connector's progress toward no longer serving the user.
 // Recorded means the inactive state was queued, Acknowledged that the connector accepted
-// the last delivery, Verified that a later listing saw the account inactive or gone.
+// the last delivery, Verified that a later listing saw the account inactive or gone, and
+// Contradicted that a later listing saw it still active: an acknowledgement a listing
+// contradicts is not one.
 type OffboardingTarget struct {
 	SystemID     string             `json:"systemId"`
 	SystemName   string             `json:"systemName"`
@@ -55,6 +57,7 @@ type OffboardingTarget struct {
 	Observed     string             `json:"observed"`
 	ObservedAt   *time.Time         `json:"observedAt,omitempty"`
 	Verified     bool               `json:"verified"`
+	Contradicted bool               `json:"contradicted"`
 	Blocked      bool               `json:"blocked"`
 	LastEvent    *ProvisioningEvent `json:"lastEvent,omitempty"`
 }
@@ -114,8 +117,10 @@ func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
 				t.LastEvent.NextAttempt = &at
 			}
 		}
-		t.Acknowledged = t.Recorded && t.LastEvent != nil && t.LastEvent.Status == "delivered"
-		t.Verified = t.Recorded && (t.Observed == "present_inactive" || t.Observed == "absent") && t.ObservedAt != nil && t.LastEvent != nil && !t.ObservedAt.Before(t.LastEvent.UpdatedAt)
+		listedAfter := t.ObservedAt != nil && t.LastEvent != nil && !t.ObservedAt.Before(t.LastEvent.UpdatedAt)
+		t.Contradicted = t.Recorded && listedAfter && t.Observed == "present_active"
+		t.Acknowledged = t.Recorded && t.LastEvent != nil && t.LastEvent.Status == "delivered" && !t.Contradicted
+		t.Verified = t.Recorded && listedAfter && (t.Observed == "present_inactive" || t.Observed == "absent")
 		off.Acknowledged = off.Acknowledged && t.Acknowledged
 		off.Verified = off.Verified && t.Verified
 		off.Targets = append(off.Targets, t)

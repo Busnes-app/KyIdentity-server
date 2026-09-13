@@ -497,7 +497,7 @@ describe('parseOAuthClients backchannel', () => {
 });
 
 describe('parseOffboarding', () => {
-  const target = { systemId: 'notes', systemName: 'KyNotes', systemType: 'scim', systemStatus: 'active', revision: 2, recorded: true, acknowledged: true, verified: false, blocked: false, observed: '', lastEvent: { type: 'user.deleted', status: 'delivered', attempts: 1, updatedAt: '2026-09-13T10:00:00Z' } };
+  const target = { systemId: 'notes', systemName: 'KyNotes', systemType: 'scim', systemStatus: 'active', revision: 2, recorded: true, acknowledged: true, verified: false, contradicted: false, blocked: false, observed: '', lastEvent: { type: 'user.deleted', status: 'delivered', attempts: 1, updatedAt: '2026-09-13T10:00:00Z' } };
   const logout = { id: 'd1', clientId: 'kynotes', clientName: 'KyNotes', status: 'queued', attempts: 0, lastError: '', nextAttemptAt: '2026-09-13T10:00:00Z', updatedAt: '2026-09-13T09:59:00Z' };
   const body = { userId: 'u1', active: false, deleted: true, acknowledged: false, verified: false, targets: [target], logouts: [logout] };
 
@@ -513,5 +513,6 @@ describe('parseOffboarding', () => {
   it('requires explicit completion flags', () => {
     expect(() => parseOffboarding({ ...body, verified: undefined })).toThrow();
     expect(() => parseOffboarding({ ...body, targets: [{ ...target, observed: 'gone' }] })).toThrow();
+    expect(() => parseOffboarding({ ...body, targets: [{ ...target, contradicted: undefined }] })).toThrow();
   });
 });
