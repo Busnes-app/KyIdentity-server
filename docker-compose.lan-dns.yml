@@ -2,12 +2,15 @@
 # exist only there (a KyRecovery behind your own proxy) resolve inside the container. It
 # replaces the host's resolvers for every lookup this container makes, which is why it is
 # not in the base file. Select it by adding it to COMPOSE_FILE in .env, never with -f: an
-# explicit -f list replaces COMPOSE_FILE outright and would drop a source install's build
-# overlay. The resolver live in .env too, since every later compose
-# command recreates the container from .env. The lines are replaced in place, never appended.
-# Pick ONE, then: docker compose up -d --force-recreate
-#   (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KYSIGNON_DNS=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKYSIGNON_DNS=192.168.1.1\n' >> "$t" && mv "$t" .env)   # published image
-#   (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KYSIGNON_DNS=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml\nKYSIGNON_DNS=192.168.1.1\n' >> "$t" && mv "$t" .env)   # source install
+# explicit -f list replaces COMPOSE_FILE outright. The snippet appends this file to whatever
+# chain .env already has (build overlay, local override) and touches nothing else; the
+# resolver are replaced in place next to it. Re-running it is a no-op.
+#   (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+#     && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+#     && case ":$cf:" in *:docker-compose.lan-dns.yml:*) ;; *) cf="$cf:docker-compose.lan-dns.yml";; esac \
+#     && { grep -v -e '^COMPOSE_FILE=' -e '^KYSIGNON_DNS=' .env || [ $? -eq 1 ]; } > "$t" \
+#     && printf 'COMPOSE_FILE=%s\nKYSIGNON_DNS=192.168.1.1\n' "$cf" >> "$t" && mv "$t" .env)
+#   docker compose up -d --force-recreate
 services:
   kysignon-server:
     dns:
