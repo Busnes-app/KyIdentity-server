@@ -373,3 +373,55 @@ func TestUpstreamDeactivationSurvivesAConcurrentLocalEdit(t *testing.T) {
 		t.Fatalf("upstream deactivation lost to a concurrent local edit: %+v", after)
 	}
 }
+
+// An upstream rename or address change that lands while an administrator edits the role
+// is kept, and the address the upstream just verified stays verified.
+func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	localAdmin := createTestUser(t, s)
+	localAdmin.Role = "admin"
+	if err := s.UpdateUserWithSyncEvents(localAdmin, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.CreateSCIMConnector("A", nil)
+	u := upstream(t, s, c.ID, "ext-1", "alice")
+	raw, _ := s.IssueAccountToken(u.ID, "activation", "email", time.Hour, nil)
+	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
+		t.Fatal(err)
+	}
+	fromUpstream, _ := s.GetUserByID(u.ID)
+	fromAdmin, _ := s.GetUserByID(u.ID)
+	if fromAdmin.EmailVerifiedAt == nil {
+		t.Fatal("mailed activation did not verify the address")
+	}
+	fromUpstream.Username, fromUpstream.DisplayName, fromUpstream.Email = "alice.moved", "Alice Moved", "alice.moved@up.test"
+	fromAdmin.Role = "admin"
+
+	var start, done sync.WaitGroup
+	start.Add(1)
+	done.Add(2)
+	errs := make(chan error, 2)
+	go func() {
+		defer done.Done()
+		start.Wait()
+		errs <- s.UpdateUpstreamUser(fromUpstream, nil)
+	}()
+	go func() {
+		defer done.Done()
+		start.Wait()
+		errs <- s.UpdateUserWithSyncEvents(fromAdmin, false, nil)
+	}()
+	start.Done()
+	done.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, _ := s.GetUserByID(u.ID)
+	if after.Username != "alice.moved" || after.DisplayName != "Alice Moved" || after.Email != "alice.moved@up.test" || after.Role != "admin" {
+		t.Fatalf("upstream profile lost to a concurrent local edit: %+v", after)
+	}
+}
