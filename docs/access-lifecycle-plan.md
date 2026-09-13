@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server (branch feat/provisioning-ordering)
+**Worktree:** /home/yoshi/busness.app/kysignon-server (branch feat/session-inventory)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -14,8 +14,8 @@ merged as GitHub PR #31) and 06b (group-specific requirements, merged as GitHub 
 PR07 merged as GitHub PR #33 with CI passed and both findings resolved.
 PR08 is split into 08a (resource ordering and uncertain-write recovery, merged as
 GitHub PR #34) and 08b (assignment-aware desired state, revisions and group delivery,
-merged as GitHub PR #35). PR09 is implemented on feat/provisioning-reconciliation.
-PRs 09–23 and D1–D4 remain planned.
+merged as GitHub PR #35). PR09 merged as GitHub PR #36. PR10 is implemented on
+feat/session-inventory. PRs 11–23 and D1–D4 remain planned.
 PR33 review limitations remain: truncated input omitted frontend source; the reviewer
 performed no dynamic real-target SCIM exercise. It was not an exhaustive whole-PR audit.
 PR32 review limitations remain: some frontend source hunks were omitted from review
@@ -303,8 +303,9 @@ confirmation plus empty lookup permits clearing a lost-create guard. See README.
 This conservative foundation does not claim automated convergence after uncertainty.
 08b implements the desired-state, scope, supersession, revision and group requirements
 below with `sync_resource_state`; README.md "Provisioning scope" and "SCIM Groups"
-describe the behavior. Conditional writes (`If-Match`) are not implemented; read-back
-and reconcile after uncertainty remain operator-driven until PR09.
+describe the behavior. Conditional writes (`If-Match`) are not implemented; PR09 added
+scheduled, leased reconciliation against remote listings, and read-back after uncertainty
+remains operator-driven.
 
 Depends on: 03, 04, 07. Touch: sync/store, app-to-system linking and assignment UI.
 
@@ -358,6 +359,13 @@ Depends on: 01, 04. Touch: session/token store, user/admin APIs and account secu
 
 Acceptance: one session's removal leaves another valid, self-revocation clears cookies,
 cross-user IDs fail, and token-exchange races cannot escape revocation.
+
+Implementation: `GET/DELETE /api/user/sessions`, `revoke-others`, admin session and
+per-app revocation routes, `SessionList` in Security and devices and the admin Users
+modal. Revocation removes the session with its codes, tokens, step-up grants and pending
+interactions in one audited transaction; account disable now shares that path. Browser
+device description is the recorded User-Agent string; app rows are derived from live
+tokens only. README.md "Sessions".
 
 ### PR 11 — Standard OIDC logout and durable downstream delivery
 

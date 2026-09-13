@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { NativeDevice, Passkey, User } from '../types';
+import { NativeDevice, Passkey, SessionInventory, User } from '../types';
 import { apiJson, apiRequest, errorMessage, isStepUpRequired } from '../api';
 import {
   parseBeginRegistration,
@@ -7,12 +7,14 @@ import {
   parsePairingToken,
   parsePasskeys,
   parseRecoveryCodes,
+  parseSessionInventory,
   parseSuccess,
   parseTOTPSetup,
 } from '../parsers';
 import { createPasskey, isPasskeySupported } from '../webauthn';
 import QRCode from 'qrcode';
 import { useStepUp, isCancelled } from './StepUpPrompt';
+import { SessionList } from './SessionList';
 import {
   Smartphone,
   ScanFace,
@@ -67,6 +69,37 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
 
   const { requestGrant, stepUpPrompt } = useStepUp();
 
+  const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [] });
+  const loadSessions = async () => {
+    try {
+      setInventory(await apiJson('/api/user/sessions', parseSessionInventory));
+    } catch {
+      // A failed refresh leaves the previous list on screen; nothing is lost.
+    }
+  };
+
+  const handleRevokeSession = async (id: string, current: boolean) => {
+    if (!confirm(current ? 'Sign out of this browser?' : 'Sign out that session?')) return;
+    try {
+      await apiRequest(`/api/user/sessions/${id}`, { method: 'DELETE' });
+      // The server cleared this browser's cookies; the app must stop treating it as signed in.
+      if (current) window.dispatchEvent(new CustomEvent('kysignon:unauthorized'));
+      else loadSessions();
+    } catch (err) {
+      alert(errorMessage(err, 'Failed to sign out session'));
+    }
+  };
+
+  const handleRevokeOthers = async () => {
+    if (!confirm('Sign out every other browser session? This one stays signed in.')) return;
+    try {
+      await apiRequest('/api/user/sessions/revoke-others', { method: 'POST' });
+      loadSessions();
+    } catch (err) {
+      alert(errorMessage(err, 'Failed to sign out other sessions'));
+    }
+  };
+
   const fetchDevices = async () => {
     try {
       setDevices(await apiJson('/api/user/devices', parseDevices));
@@ -92,6 +125,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
   useEffect(() => {
     fetchDevices();
     loadPasskeys();
+    loadSessions();
   }, []);
 
   // 90s Countdown Timer for Device Pairing
@@ -488,6 +522,18 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
             <span>Generate new codes</span>
           </button>
         </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="section-header">
+          <div className="section-title-wrap">
+            <h2>Where you are signed in</h2>
+          </div>
+          <button className="secondary-btn sm" disabled={inventory.sessions.length < 2} onClick={handleRevokeOthers}>
+            <span>Sign out other sessions</span>
+          </button>
+        </div>
+        <SessionList sessions={inventory.sessions} apps={inventory.apps} onRevokeSession={(sess) => handleRevokeSession(sess.id, sess.current)} />
       </div>
 
       {/* Device Pairing Modal (90s Ephemeral Key / QR) */}

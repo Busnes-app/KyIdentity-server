@@ -707,10 +707,7 @@ func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *Audi
 		return enrollmentMutationError(err)
 	}
 	if revokeAccess {
-		if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, u.ID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`UPDATE issued_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, u.ID); err != nil {
+		if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
 			return err
 		}
 	}
@@ -2446,8 +2443,9 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 	return tx.Commit()
 }
 
-// RevokeUserAccess deletes browser sessions, revokes issued access tokens, expires unused
-// device pairing tokens, and burns unused step-up tokens, in one transaction.
+// RevokeUserAccess deletes browser sessions, revokes issued access tokens and pending
+// codes/interactions, expires unused device pairing tokens, and burns unused step-up
+// tokens, in one transaction.
 func (s *Store) RevokeUserAccess(userID string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -2465,21 +2463,11 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 		return err
 	}
 	if _, err := tx.Exec(
-		`UPDATE issued_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`,
-		now, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(
 		`UPDATE device_pairing_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL`,
 		now, userID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(
-		`UPDATE step_up_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL`,
-		now, userID); err != nil {
-		return err
-	}
-	return nil
+	return revokeSessionGrantsTx(tx, `user_id=?`, now, userID)
 }
 
 // DeleteOtherUserSessions logs out every session for a user except keepSessionID, so

@@ -14,6 +14,9 @@ import type {
   GroupUser,
   Application,
   AuditEvent,
+  AppGrant,
+  BrowserSession,
+  SessionInventory,
   BackupDrillResult,
   BackupRunResult,
   BackupStatus,
@@ -142,6 +145,36 @@ export function parseDevice(value: unknown): NativeDevice {
 export function parseDevices(value: unknown): NativeDevice[] {
   const o = obj(value, 'a devices response');
   return list(o.devices, parseDevice);
+}
+
+function parseBrowserSession(value: unknown): BrowserSession {
+  const o = obj(value, 'a session');
+  return {
+    id: str(o, 'id'),
+    current: bool(o, 'current'),
+    ipAddress: optStr(o, 'ipAddress') ?? '',
+    userAgent: optStr(o, 'userAgent') ?? '',
+    factorMethod: optStr(o, 'factorMethod') ?? '',
+    createdAt: str(o, 'createdAt'),
+    lastActiveAt: str(o, 'lastActiveAt'),
+    expiresAt: str(o, 'expiresAt'),
+  };
+}
+
+function parseAppGrant(value: unknown): AppGrant {
+  const o = obj(value, 'an app grant');
+  return {
+    clientId: str(o, 'clientId'),
+    clientName: optStr(o, 'clientName') ?? str(o, 'clientId'),
+    tokens: typeof o.tokens === 'number' ? o.tokens : 0,
+    issuedAt: str(o, 'issuedAt'),
+    expiresAt: str(o, 'expiresAt'),
+  };
+}
+
+export function parseSessionInventory(value: unknown): SessionInventory {
+  const o = obj(value, 'a session inventory');
+  return { sessions: list(o.sessions, parseBrowserSession), apps: list(o.apps, parseAppGrant) };
 }
 
 export interface PairingToken {
