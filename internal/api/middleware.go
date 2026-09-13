@@ -299,18 +299,6 @@ func (m *MiddlewareManager) OptionalAuth(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAdmin ensures authenticated user has admin role.
-func (m *MiddlewareManager) RequireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(userContextKey).(*store.User)
-		if !ok || user == nil || user.Role != "admin" {
-			http.Error(w, `{"error":"forbidden","error_description":"Administrator access required"}`, http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // CSRFValidate enforces double-submit CSRF protection for non-GET/HEAD/OPTIONS methods.
 func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

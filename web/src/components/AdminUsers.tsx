@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { SessionInventory, User } from '../types';
+import { Access, SessionInventory, User } from '../types';
+import { DelegationEditor } from './DelegationEditor';
 import { apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { parseAccountLink, parseMailSettings, parseSessionInventory, parseUsers } from '../parsers';
 import type { AccountLink } from '../types';
 import { SessionList } from './SessionList';
 import { OffboardingView } from './OffboardingView';
-import { Users, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX, Link, Clock } from 'lucide-react';
+import { Users, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX, Link, Clock, UserCog } from 'lucide-react';
 
-export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({ onManageGroups }) => {
+export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User) => void }> = ({ access, onManageGroups }) => {
+  // Buttons hide as a convenience only; the server refuses what the actor may not do.
+  const full = Boolean(access?.admin);
   const [users, setUsers] = useState<User[]>([]);
+  const [delegating, setDelegating] = useState<User | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -46,8 +50,9 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
 
   useEffect(() => {
     fetchUsers();
-    apiJson('/api/admin/mail', parseMailSettings).then((m) => setMailConfigured(m.configured)).catch(() => setMailConfigured(false));
-  }, []);
+    // Mail settings are an administrator read; a delegate gets manual links only.
+    if (full) apiJson('/api/admin/mail', parseMailSettings).then((m) => setMailConfigured(m.configured)).catch(() => setMailConfigured(false));
+  }, [full]);
 
   // A link is minted server-side and returned once; mailing it mints a fresh one that
   // retires the shown link, so nothing shown here stays valid behind the owner's back.
@@ -213,7 +218,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
         <div>
           <h1 className="page-title">Users</h1>
         </div>
-        <button
+        {full && <button
           className="primary-btn sm"
           onClick={() => {
             resetForm();
@@ -222,7 +227,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
         >
           <Plus size={14} />
           <span>Create User</span>
-        </button>
+        </button>}
       </div>
 
       <div className="table-card">
@@ -263,12 +268,16 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
                 </td>
                 <td className="text-right">
                   <div className="action-buttons-wrap">
-                    <button className="icon-btn" onClick={() => onManageGroups(u)} title="Manage groups" aria-label={`Manage groups for ${u.username}`}>
+                    {full && <button className="icon-btn" onClick={() => onManageGroups(u)} title="Manage groups" aria-label={`Manage groups for ${u.username}`}>
                       <Users size={15} />
-                    </button>
-                    <button className="icon-btn" onClick={() => openEditModal(u)} title="Edit User">
+                    </button>}
+                    {full && <button className="icon-btn" onClick={() => openEditModal(u)} title="Edit User">
                       <Edit size={15} />
-                    </button>
+                    </button>}
+                    {full && <button className="icon-btn" onClick={() => setDelegating(u)} title="Delegated administration" aria-label={`Delegation for ${u.username}`}>
+                      <UserCog size={15} />
+                    </button>}
+                    {(full || u.role !== 'admin') && <>
                     <button className="icon-btn" onClick={() => handleResetMFA(u)} title="Reset MFA">
                       <KeyRound size={15} />
                     </button>
@@ -284,9 +293,10 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
                     <button className="icon-btn" onClick={() => setOffboarding({ id: u.id, username: u.username })} title="Offboarding status" aria-label={`Offboarding status for ${u.username}`}>
                       <UserX size={15} />
                     </button>
-                    <button className="icon-btn danger" onClick={() => handleDeleteUser(u)} title="Delete User">
+                    </>}
+                    {full && <button className="icon-btn danger" onClick={() => handleDeleteUser(u)} title="Delete User">
                       <Trash2 size={15} />
-                    </button>
+                    </button>}
                   </div>
                 </td>
               </tr>
@@ -324,6 +334,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
       )}
 
       {offboarding && <OffboardingView userId={offboarding.id} username={offboarding.username} onClose={() => setOffboarding(null)} />}
+      {delegating && <DelegationEditor user={delegating} onClose={() => setDelegating(null)} />}
 
       {sessionsUser && (
         <div className="modal-backdrop">

@@ -618,9 +618,15 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	for _, m := range mfaMethods {
 		methodTypes = append(methodTypes, m.MethodType)
 	}
+	access, err := accessFor(h.store, user)
+	if err != nil {
+		stepUpInternalError(w)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
+		"access":      access,
 		"enrollment":  enrollment,
 		"id":          user.ID,
 		"username":    user.Username,

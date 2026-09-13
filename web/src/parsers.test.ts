@@ -59,6 +59,13 @@ describe('parseUser', () => {
     expect(() => parseMe({ error: 'unauthorized' })).toThrow();
   });
 
+  it('reads delegated access and refuses a malformed block rather than inventing one', () => {
+    const access = { admin: false, helpdesk: true, auditor: false, appOwner: ['app-1'] };
+    expect(parseMe({ ...user, access }).access).toEqual(access);
+    expect(parseMe(user).access).toBeUndefined();
+    expect(() => parseMe({ ...user, access: { admin: 'yes' } })).toThrow(/admin/);
+  });
+
   it('rejects a users list containing one malformed entry', () => {
     expect(() => parseUsers({ users: [user, { ...user, role: 'wizard' }] })).toThrow(/role/);
   });

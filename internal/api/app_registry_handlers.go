@@ -24,7 +24,14 @@ func (h *AdminHandler) ListAppRecords(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
-	records, total, err := h.store.ListAppRecords(p.Query, p.Limit, p.Offset)
+	// An app owner sees the apps they own and nothing about the rest.
+	var records []store.AppRecord
+	var total int
+	if a := accessFromContext(r.Context()); a.Admin || a.Auditor {
+		records, total, err = h.store.ListAppRecords(p.Query, p.Limit, p.Offset)
+	} else {
+		records, total, err = h.store.ListAppRecordsOwnedBy(GetUserFromContext(r.Context()).ID, p.Query, p.Limit, p.Offset)
+	}
 	if err != nil {
 		writeAppRegistryError(w, err)
 		return

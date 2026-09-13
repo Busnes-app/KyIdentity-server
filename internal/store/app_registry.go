@@ -85,17 +85,23 @@ func scanAppRecord(row interface{ Scan(...any) error }) (AppRecord, error) {
 	return a, err
 }
 func (s *Store) ListAppRecords(query string, limit, offset int) ([]AppRecord, int, error) {
+	return s.listAppRecords("", nil, query, limit, offset)
+}
+
+// listAppRecords pages records matching the search, narrowed by an extra clause.
+func (s *Store) listAppRecords(extra string, extraArgs []any, query string, limit, offset int) ([]AppRecord, int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, 0, err
 	}
 	defer tx.Rollback()
-	where := ` WHERE instr(lower(COALESCE(c.client_name,'') || ' ' || COALESCE(l.name,'') || ' ' || COALESCE(s.name,'') || ' ' || a.id || ' ' || COALESCE(a.client_id,'') || ' ' || COALESCE(a.launcher_id,'') || ' ' || COALESCE(a.system_id,'')),lower(?))>0`
+	where := ` WHERE instr(lower(COALESCE(c.client_name,'') || ' ' || COALESCE(l.name,'') || ' ' || COALESCE(s.name,'') || ' ' || a.id || ' ' || COALESCE(a.client_id,'') || ' ' || COALESCE(a.launcher_id,'') || ' ' || COALESCE(a.system_id,'')),lower(?))>0` + extra
+	args := append([]any{query}, extraArgs...)
 	var total int
-	if err = tx.QueryRow(`SELECT COUNT(*)`+appRecordFrom+where, query).Scan(&total); err != nil {
+	if err = tx.QueryRow(`SELECT COUNT(*)`+appRecordFrom+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := tx.Query(appRecordSelect+appRecordFrom+where+` ORDER BY lower(COALESCE(l.name,c.client_name,s.name)),a.id LIMIT ? OFFSET ?`, query, limit, offset)
+	rows, err := tx.Query(appRecordSelect+appRecordFrom+where+` ORDER BY lower(COALESCE(l.name,c.client_name,s.name)),a.id LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
