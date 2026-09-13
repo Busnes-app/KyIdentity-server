@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -25,7 +26,9 @@ type fakeSCIM struct {
 	users  map[string]scim.User
 	groups map[string]scimGroup
 	posts  map[string]int
-	next   int
+	// userPosts keeps the raw body of every Users POST, keyed by externalId.
+	userPosts map[string][]byte
+	next      int
 	// putStatus, when set, is answered to every Group PUT without applying it.
 	putStatus int
 	// failPage, when set, answers 500 to that unfiltered listing page (1-based).
@@ -36,7 +39,7 @@ type fakeSCIM struct {
 }
 
 func newFakeSCIM() *fakeSCIM {
-	return &fakeSCIM{users: map[string]scim.User{}, groups: map[string]scimGroup{}, posts: map[string]int{}}
+	return &fakeSCIM{users: map[string]scim.User{}, groups: map[string]scimGroup{}, posts: map[string]int{}, userPosts: map[string][]byte{}}
 }
 
 func (f *fakeSCIM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +119,9 @@ func (f *fakeSCIM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"totalResults": len(found), "startIndex": 1, "Resources": found})
 	case r.Method == "POST" && collection == "Users":
 		var u scim.User
-		_ = json.NewDecoder(r.Body).Decode(&u)
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &u)
+		f.userPosts[u.ExternalID] = raw
 		f.next++
 		u.ID = "u" + strconv.Itoa(f.next)
 		f.users[u.ID] = u
@@ -663,6 +668,53 @@ func TestRevokedRolesReachTheTargetAsAnEmptyList(t *testing.T) {
 	got, _ := remote.userByExternal(u.ID)
 	if got.Roles == nil || len(got.Roles) != 0 {
 		t.Fatalf("revocation did not reach the target as an empty list: %+v", got.Roles)
+	}
+	pending, err := s.GetPendingSyncEvents(10)
+	if err != nil || len(pending) != 0 {
+		t.Fatal("undelivered work remains", pending, err)
+	}
+}
+
+// The create carries the role list too: a user who already holds roles is created with
+// them, and one who holds none is created with an explicit empty list.
+func TestCreateCarriesTheExplicitRoleList(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := &store.User{ID: uuid.NewString(), Username: "other", DisplayName: "Other", Email: "other@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := s.CreateUser(other); err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	role, err := s.CreateAppRole(app.ID, "operator", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The role is held before the account exists downstream.
+	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{u.ID, other.ID} {
+		if err := s.SetAppAssignment(app.ID, "users", id, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	drain(t, e)
+	if got, ok := remote.userByExternal(u.ID); !ok || len(got.Roles) != 1 || got.Roles[0].Value != "operator" {
+		t.Fatalf("created without the held role: %+v %v", got.Roles, ok)
+	}
+	remote.mu.Lock()
+	raw := string(remote.userPosts[other.ID])
+	remote.mu.Unlock()
+	if !strings.Contains(raw, `"roles":[]`) {
+		t.Fatalf("create for a user without roles did not state the empty list: %s", raw)
 	}
 	pending, err := s.GetPendingSyncEvents(10)
 	if err != nil || len(pending) != 0 {
