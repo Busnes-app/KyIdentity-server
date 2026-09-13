@@ -117,7 +117,8 @@ jobs:
     runs-on: ubuntu-latest
     # No concurrency group here on purpose: GitHub cancels a *pending* job when a
     # newer one queues into the same group, which would leave that commit with no
-    # :<sha> image and no attestation. Every commit that reaches this job gets both.
+    # :<sha> image and no attestation. Every commit whose run reaches this job
+    # gets both; a run superseded before it starts publishes nothing.
     outputs:
       name: ${{ steps.push.outputs.name }}
       digest: ${{ steps.push.outputs.digest }}
@@ -172,7 +173,7 @@ jobs:
   # to the current tip of master. Serialised here, not in publish: a pending
   # promote cancelled by a newer one queuing is harmless, since a newer run
   # existing is exactly what makes this commit no longer the tip. Promotion is
-  # by digest, so the bytes that move are the bytes that were attested.
+  # by digest and the result is asserted, so :latest is the attested manifest.
   promote:
     needs: publish
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -198,5 +199,15 @@ jobs:
             echo "Published \`$NAME@$DIGEST\` as \`:$GITHUB_SHA\` only: master has moved on to $tip" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          docker buildx imagetools create --tag "$NAME:latest" "$NAME@$DIGEST"
+          # --prefer-index=false: with the default, buildx wraps a single manifest in a
+          # new index whose digest the attestation does not cover. Then prove it, the
+          # way an operator would, on the tag they actually deploy.
+          docker buildx imagetools create --prefer-index=false --tag "$NAME:latest" "$NAME@$DIGEST"
+          latest="$(docker buildx imagetools inspect "$NAME:latest" --format '{{.Manifest.Digest}}')"
+          if [ "$latest" != "$DIGEST" ]; then
+            echo "::error:::latest resolves to $latest, attested digest is $DIGEST" >&2
+            exit 1
+          fi
+          gh attestation verify "oci://$NAME:latest" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"
           echo "Published \`$NAME@$DIGEST\` as \`:latest\` and \`:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"

@@ -93,7 +93,7 @@ APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 
 ### 2. Start the Server
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
 ```
 
 ### 3. Retrieve Credentials & Log In

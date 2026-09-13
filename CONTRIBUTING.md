@@ -56,7 +56,7 @@ Docker is the only requirement to *run* KySignOn:
 
 ```bash
 cp .env.example .env
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
 ```
 
 To work on the code outside the container you need Go 1.26.5+ and Node 22.

@@ -1,0 +1,10 @@
+# Source build. Layer over the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+# The result is tagged kysignon-server:local so it never occupies the published name.
+services:
+  kysignon-server:
+    image: kysignon-server:local
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
