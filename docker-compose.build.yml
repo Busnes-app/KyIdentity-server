@@ -1,7 +1,12 @@
 # Source build. Set it once and every `docker compose` command, the recovery procedure
-# included, keeps using the local build instead of the published image. The line is replaced
-# in place (never appended twice) and .env, which also holds secrets, is written at 0600.
-#   (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)
+# included, keeps using the local build instead of the published image. The overlay is appended
+# to whatever COMPOSE_FILE chain .env already holds (a LAN-DNS override survives), re-running is a
+# no-op, and .env, which also holds secrets, is written at 0600.
+#   (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+#     && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+#     && case ":$cf:" in *:docker-compose.build.yml:*) ;; *) cf="$cf:docker-compose.build.yml";; esac \
+#     && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" \
+#     && printf 'COMPOSE_FILE=%s\n' "$cf" >> "$t" && mv "$t" .env)
 # Further overlays chain onto the same value, e.g. `:docker-compose.lan-dns.yml`;
 # an explicit `-f` list replaces COMPOSE_FILE entirely, so avoid mixing the two.
 # The result is tagged kysignon-server:local so it never occupies the published name. This
