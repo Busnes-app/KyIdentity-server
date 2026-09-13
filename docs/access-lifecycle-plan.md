@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/offboarding)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/onboarding)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -18,8 +18,10 @@ merged as GitHub PR #35). PR09 merged as GitHub PR #36. PR10 merged as GitHub PR
 passed and the security review cleared. PR11 is split into 11a (per-client `sid`,
 RP-initiated logout, post-logout redirect registration; merged as GitHub PR #39)
 and 11b (back-channel logout tokens and durable delivery; merged as GitHub PR #41 with
-the security review's four findings fixed). PR12 (complete offboarding workflow) is
-implemented on feat/offboarding. PRs 13–23 and D1–D4 remain planned. Note for D1–D4: released
+the security review's four findings fixed). PR12 merged as GitHub PR #44 after five review rounds (durable
+acknowledgement, contradicting listings, wire shape, pruning, untracked holders). PR13
+(invitations, activation and password self-service) is implemented on feat/onboarding.
+PRs 14–23 and D1–D4 remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -484,6 +486,17 @@ Depends on: 02, 06, 12. Touch: account/token store, auth routes, config, login/u
 Acceptance: expired/replayed/cross-account links fail; a link cannot bypass MFA or
 activation state; password change revokes other access; delivery failure is visible;
 reset cannot enumerate users; no-email deployments can activate users manually.
+
+Implementation: `users.pending` + `email_verified_at`, `account_tokens` (hashes only,
+kind activation/reset, delivery manual/email); `internal/mail` SMTP sender with
+TLS-only transports and encrypted settings in `system_settings`; routes
+`POST /api/auth/activate`, `/api/auth/password/forgot|reset`, `POST /api/user/password`
+(step-up), `POST /api/admin/users/{id}/activation-link|reset-link` (step-up),
+`GET/PUT /api/admin/mail`, `POST /api/admin/mail/test`; SPA pages `/activate` and
+`/reset`, "Forgot your password?", Security → Password, Users link button and
+Mail delivery page. README.md "Onboarding and passwords". Enrollment grace still starts
+at account creation (trigger `enrollment_new_user`), so a late activation may land
+straight in restricted enrollment; deliberate. Lost-factor recovery is unchanged.
 
 ### PR 14 — Inbound SCIM connector security and Users
 

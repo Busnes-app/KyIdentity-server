@@ -10,6 +10,9 @@ export interface User {
   email: string;
   role: 'user' | 'admin';
   status?: 'active' | 'disabled';
+  /** Invited but no password yet; stays disabled until an activation link sets one. */
+  pending?: boolean;
+  emailVerifiedAt?: string;
   mfaMethods?: string[];
   createdAt?: string;
 }
@@ -265,3 +268,6 @@ export interface OffboardingTarget {
 export interface Offboarding {
   userId: string; active: boolean; deleted: boolean; targets: OffboardingTarget[]; logouts: LogoutDelivery[]; acknowledged: boolean; verified: boolean;
 }
+
+export interface AccountLink { kind: 'activation' | 'reset'; delivery: 'manual' | 'email'; link?: string; expiresAt: string }
+export interface MailSettings { host: string; port: number; username: string; from: string; security: 'tls' | 'starttls'; hasPassword: boolean; configured: boolean }

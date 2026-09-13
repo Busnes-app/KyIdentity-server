@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { Offboarding } from './types';
+import type { AccountLink, MailSettings, Offboarding } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -113,6 +113,8 @@ export function parseUser(value: unknown): User {
     email: optStr(o, 'email') ?? '',
     role: oneOf(o, 'role', ['admin', 'user'] as const),
     status: oneOf(o, 'status', ['active', 'disabled'] as const),
+    pending: o.pending === true,
+    emailVerifiedAt: optStr(o, 'emailVerifiedAt'),
     mfaMethods: strArray(o.mfaMethods),
     createdAt: optStr(o, 'createdAt'),
   };
@@ -673,4 +675,15 @@ export function parseOffboarding(value: unknown): Offboarding {
         lastEvent: t.lastEvent == null ? undefined : parseProvisioningEvent(t.lastEvent) };
     }),
   };
+}
+
+export function parseAccountLink(value: unknown): AccountLink {
+  const o = obj(value, 'an account link');
+  return { kind: oneOf(o, 'kind', ['activation', 'reset'] as const), delivery: oneOf(o, 'delivery', ['manual', 'email'] as const), link: optStr(o, 'link'), expiresAt: str(o, 'expiresAt') };
+}
+
+export function parseMailSettings(value: unknown): MailSettings {
+  const o = obj(value, 'mail settings');
+  return { host: optStr(o, 'host') ?? '', port: typeof o.port === 'number' ? o.port : 587, username: optStr(o, 'username') ?? '', from: optStr(o, 'from') ?? '',
+    security: oneOf(o, 'security', ['tls', 'starttls'] as const), hasPassword: requiredBool(o, 'hasPassword'), configured: requiredBool(o, 'configured') };
 }

@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { SessionInventory, User } from '../types';
 import { apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
-import { parseSessionInventory, parseUsers } from '../parsers';
+import { parseAccountLink, parseMailSettings, parseSessionInventory, parseUsers } from '../parsers';
+import type { AccountLink } from '../types';
 import { SessionList } from './SessionList';
 import { OffboardingView } from './OffboardingView';
-import { Users, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX } from 'lucide-react';
+import { Users, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX, Link, Clock } from 'lucide-react';
 
 export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({ onManageGroups }) => {
   const [users, setUsers] = useState<User[]>([]);
@@ -16,6 +17,10 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
   const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [], logouts: [] });
   // Kept as id and name, not a User, so the view survives the row's deletion.
   const [offboarding, setOffboarding] = useState<{ id: string; username: string } | null>(null);
+  // An issued activation or reset link, shown once for hand-over or mailing.
+  const [issued, setIssued] = useState<{ user: User; link: AccountLink } | null>(null);
+  const [mailConfigured, setMailConfigured] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Form State
   const [username, setUsername] = useState('');
@@ -41,7 +46,24 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
 
   useEffect(() => {
     fetchUsers();
+    apiJson('/api/admin/mail', parseMailSettings).then((m) => setMailConfigured(m.configured)).catch(() => setMailConfigured(false));
   }, []);
+
+  // A link is minted server-side and returned once; mailing it mints a fresh one that
+  // retires the shown link, so nothing shown here stays valid behind the owner's back.
+  const issueLink = async (u: User, send: boolean) => {
+    const kind = u.pending ? 'activation' : 'reset';
+    const path = `/api/admin/users/${u.id}/${kind}-link`;
+    try {
+      const grant = await requestGrant(`${send ? 'Mailing' : 'Issuing'} ${kind === 'activation' ? 'an activation' : 'a reset'} link for '${u.username}' lets whoever holds it set the password.`, `POST ${path}`);
+      const link = await apiJson(path, parseAccountLink, { method: 'POST', stepUpToken: grant, body: JSON.stringify({ send }) });
+      setCopiedLink(false);
+      setIssued({ user: u, link });
+    } catch (err) {
+      if (isCancelled(err)) return;
+      alert(errorMessage(err, `Failed to issue the ${kind} link`));
+    }
+  };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,9 +72,9 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
 
     try {
       const grant = await requestGrant(
-        `Creating '${username || 'a new account'}' adds a credential to this directory` +
-          (role === 'admin' ? ', with administrator rights.' : '.'), 'POST /api/admin/users');
-      await apiRequest('/api/admin/users', {
+        `Creating '${username || 'a new account'}' adds an account to this directory` +
+          (role === 'admin' ? ', with administrator rights.' : '.') + (password ? '' : ' It stays pending until its activation link sets a password.'), 'POST /api/admin/users');
+      const created = await apiJson('/api/admin/users', (v) => parseUsers({ users: [(v as { user: unknown }).user] })[0]!, {
         method: 'POST',
         body: JSON.stringify({ username, displayName, email, password, role, status }),
         stepUpToken: grant,
@@ -60,6 +82,7 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
       setShowCreateModal(false);
       resetForm();
       fetchUsers();
+      if (created.pending) await issueLink(created, false);
     } catch (err) {
       if (isCancelled(err)) return;
       setFormError(errorMessage(err, 'Failed to create user'));
@@ -224,7 +247,11 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
                   {u.role === 'admin' ? 'Administrator' : 'User'}
                 </td>
                 <td>
-                  {u.status === 'active' ? (
+                  {u.pending ? (
+                    <span className="status-badge warn">
+                      <Clock size={12} /> Pending
+                    </span>
+                  ) : u.status === 'active' ? (
                     <span className="status-badge active">
                       <CheckCircle size={12} /> Active
                     </span>
@@ -251,6 +278,9 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
                     <button className="icon-btn" onClick={() => handleRevokeSessions(u)} title="Revoke Sessions">
                       <LogOut size={15} />
                     </button>
+                    <button className="icon-btn" onClick={() => issueLink(u, false)} title={u.pending ? 'Activation link' : 'Password reset link'} aria-label={`${u.pending ? 'Activation' : 'Password reset'} link for ${u.username}`}>
+                      <Link size={15} />
+                    </button>
                     <button className="icon-btn" onClick={() => setOffboarding({ id: u.id, username: u.username })} title="Offboarding status" aria-label={`Offboarding status for ${u.username}`}>
                       <UserX size={15} />
                     </button>
@@ -264,6 +294,34 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
           </tbody>
         </table>
       </div>
+
+      {issued && (
+        <div className="modal-backdrop">
+          <div className="modal-card">
+            <div className="modal-header">
+              <h3>{issued.link.kind === 'activation' ? 'Activation link' : 'Password reset link'} for {issued.user.username}</h3>
+              <button className="close-btn" onClick={() => setIssued(null)} aria-label="Close">×</button>
+            </div>
+            <div className="modal-body">
+              {issued.link.delivery === 'email' ? (
+                <p>Sent to {issued.user.email}. It expires {new Date(issued.link.expiresAt).toLocaleString()}; any earlier link no longer works.</p>
+              ) : (
+                <>
+                  <p>Hand this to {issued.user.displayName || issued.user.username} over a channel you trust. It is shown once, expires {new Date(issued.link.expiresAt).toLocaleString()}, and any earlier link no longer works.</p>
+                  <div className="form-group">
+                    <input className="form-input font-mono" readOnly value={issued.link.link ?? ''} onFocus={(e) => e.currentTarget.select()} aria-label="Account link" />
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              {issued.link.delivery === 'manual' && <button type="button" className="secondary-btn" onClick={() => { navigator.clipboard?.writeText(issued.link.link ?? ''); setCopiedLink(true); }}>{copiedLink ? 'Copied' : 'Copy link'}</button>}
+              {issued.link.delivery === 'manual' && mailConfigured && <button type="button" className="secondary-btn" onClick={() => issueLink(issued.user, true)}>Mail a new link instead</button>}
+              <button type="button" className="primary-btn" onClick={() => setIssued(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {offboarding && <OffboardingView userId={offboarding.id} username={offboarding.username} onClose={() => setOffboarding(null)} />}
 
@@ -355,14 +413,14 @@ export const AdminUsers: React.FC<{ onManageGroups: (user: User) => void }> = ({
               </div>
 
               <div className="form-group">
-                <label className="form-label">Initial Password (min 12 chars)</label>
+                <label className="form-label">Initial password (min 12 chars; leave blank to invite with an activation link)</label>
                 <input
                   type="password"
                   className="form-input"
-                  placeholder="••••••••••••"
+                  placeholder="Blank: the user chooses one through a link"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required
                 />
               </div>
 

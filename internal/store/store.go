@@ -374,6 +374,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateClientSessions(); err != nil {
 		return err
 	}
+	if err := s.migrateOnboarding(); err != nil {
+		return err
+	}
 	if err := s.migrateLogoutDeliveries(); err != nil {
 		return err
 	}
@@ -601,12 +604,12 @@ func (s *Store) migrateSyncEventsUserReference() error {
 // User CRUD
 func (s *Store) CreateUser(u *User) error {
 	query := `
-	INSERT INTO users (id, username, display_name, email, password_hash, role, status, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	now := time.Now().UTC()
 	u.CreatedAt = now
 	u.UpdatedAt = now
-	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.CreatedAt, u.UpdatedAt)
+	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
@@ -619,7 +622,7 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 	defer tx.Rollback()
 	now := time.Now().UTC()
 	u.CreatedAt, u.UpdatedAt = now, now
-	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.CreatedAt, u.UpdatedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt); err != nil {
 		return err
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
@@ -632,38 +635,19 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 }
 
 func (s *Store) GetUserByID(id string) (*User, error) {
-	query := `SELECT id, username, display_name, email, password_hash, role, status, created_at, updated_at FROM users WHERE id = ?`
-	u := &User{}
-	err := s.db.QueryRow(query, id).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return u, err
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 }
 
 func (s *Store) GetUserByUsername(username string) (*User, error) {
-	query := `SELECT id, username, display_name, email, password_hash, role, status, created_at, updated_at FROM users WHERE username = ? COLLATE NOCASE`
-	u := &User{}
-	err := s.db.QueryRow(query, username).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return u, err
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE username = ? COLLATE NOCASE`, username))
 }
 
 func (s *Store) GetUserByEmail(email string) (*User, error) {
-	query := `SELECT id, username, display_name, email, password_hash, role, status, created_at, updated_at FROM users WHERE email = ? COLLATE NOCASE`
-	u := &User{}
-	err := s.db.QueryRow(query, email).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return u, err
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE email = ? COLLATE NOCASE`, email))
 }
 
 func (s *Store) ListUsers() ([]User, error) {
-	query := `SELECT id, username, display_name, email, password_hash, role, status, created_at, updated_at FROM users ORDER BY username ASC`
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(`SELECT ` + userColumns + ` FROM users ORDER BY username ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -671,11 +655,11 @@ func (s *Store) ListUsers() ([]User, error) {
 
 	var users []User
 	for rows.Next() {
-		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		users = append(users, u)
+		users = append(users, *u)
 	}
 	return users, nil
 }
@@ -695,8 +679,8 @@ func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *Audi
 		return err
 	}
 	defer tx.Rollback()
-	var oldRole, oldStatus string
-	if err := tx.QueryRow(`SELECT role, status FROM users WHERE id = ?`, u.ID).Scan(&oldRole, &oldStatus); err != nil {
+	var oldRole, oldStatus, oldEmail string
+	if err := tx.QueryRow(`SELECT role, status, email FROM users WHERE id = ?`, u.ID).Scan(&oldRole, &oldStatus, &oldEmail); err != nil {
 		return err
 	}
 	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active") {
@@ -710,8 +694,17 @@ func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *Audi
 	}
 	now := time.Now().UTC()
 	u.UpdatedAt = now
-	if _, err := tx.Exec(`UPDATE users SET display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, updated_at = ? WHERE id = ?`, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, now, u.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE users SET display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, updated_at = ? WHERE id = ?`, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, now, u.ID); err != nil {
 		return enrollmentMutationError(err)
+	}
+	if !strings.EqualFold(oldEmail, u.Email) {
+		// A new address is unproven, and a link mailed to the old one must not act on it.
+		if _, err := tx.Exec(`UPDATE users SET email_verified_at = NULL WHERE id = ?`, u.ID); err != nil {
+			return err
+		}
+		if err := expireAccountTokensTx(tx, now, `user_id=?`, u.ID); err != nil {
+			return err
+		}
 	}
 	stored, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, u.ID))
 	if err != nil || stored == nil {
@@ -2452,7 +2445,11 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 		now, userID); err != nil {
 		return err
 	}
-	return revokeSessionGrantsTx(tx, `user_id=?`, now, userID)
+	if err := revokeSessionGrantsTx(tx, `user_id=?`, now, userID); err != nil {
+		return err
+	}
+	// An outstanding activation or reset link is a credential too.
+	return expireAccountTokensTx(tx, now, `user_id=?`, userID)
 }
 
 // PingContext proves the database is reachable and readable within the caller's deadline.

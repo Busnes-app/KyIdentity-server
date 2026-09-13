@@ -75,8 +75,8 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	req.Email = strings.TrimSpace(req.Email)
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 
-	if req.Username == "" || req.Email == "" || req.Password == "" {
-		http.Error(w, `{"error":"missing_fields","error_description":"Username, email, and password are required"}`, http.StatusBadRequest)
+	if req.Username == "" || req.Email == "" {
+		http.Error(w, `{"error":"missing_fields","error_description":"Username and email are required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -87,25 +87,31 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		req.Status = "active"
 	}
 
-	passHash, err := auth.HashPassword(req.Password)
-	if err != nil {
-		http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
-		return
-	}
-
+	// No password invites the account: it stays pending and disabled until an activation
+	// link sets one, so no usable default credential ever exists.
 	user := &store.User{
-		ID:           uuid.New().String(),
-		Username:     req.Username,
-		DisplayName:  req.DisplayName,
-		Email:        req.Email,
-		PasswordHash: passHash,
-		Role:         req.Role,
-		Status:       req.Status,
+		ID:          uuid.New().String(),
+		Username:    req.Username,
+		DisplayName: req.DisplayName,
+		Email:       req.Email,
+		Role:        req.Role,
+		Status:      req.Status,
+	}
+	if req.Password == "" {
+		user.Pending, user.Status = true, "disabled"
+	} else {
+		passHash, err := auth.HashPassword(req.Password)
+		if err != nil {
+			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			return
+		}
+		user.PasswordHash = passHash
 	}
 
 	created := h.audit.Prepare("admin.user_created", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
 		"username": user.Username,
 		"role":     user.Role,
+		"pending":  user.Pending,
 	})
 	if err := h.syncEngine.CreateUserAndQueueSyncEvents(user, created.Row); err != nil {
 		http.Error(w, `{"error":"user_exists","error_description":"Username or email already exists"}`, http.StatusConflict)
@@ -167,6 +173,12 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		user.PasswordHash = passHash
+		// An administrator setting the password is the manual activation path.
+		user.Pending = false
+	}
+	if user.Pending && user.Status == "active" {
+		http.Error(w, `{"error":"account_pending","error_description":"A pending account activates through its link or by setting a password"}`, http.StatusBadRequest)
+		return
 	}
 
 	// Demotion is a revocation. An issued ID token carries "role":"admin" as a signed claim,

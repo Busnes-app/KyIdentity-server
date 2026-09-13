@@ -109,7 +109,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	if user.Status != "active" {
 		auth.DummyVerify(req.Password)
-		h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": "user_disabled"})
+		reason := "user_disabled"
+		if user.Pending {
+			reason = "user_pending"
+		}
+		h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": reason})
 		http.Error(w, `{"error":"invalid_credentials","error_description":"Invalid username or password"}`, http.StatusUnauthorized)
 		return
 	}

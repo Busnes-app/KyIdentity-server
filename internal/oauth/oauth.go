@@ -81,7 +81,7 @@ func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 		BackchannelLogoutSupported:        true,
 		BackchannelLogoutSessionSupported: true,
 		ClaimsSupported: []string{"sub", "iss", "aud", "exp", "iat", "jti", "nonce", "auth_time", "amr", "acr", "sid",
-			"preferred_username", "name", "email", "role"},
+			"preferred_username", "name", "email", "email_verified", "role"},
 	}
 	if e.SupportsRevocation() {
 		cfg.RevocationEndpoint = e.issuerURL + "/oauth/revoke"
@@ -391,6 +391,7 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 			"preferred_username": user.Username,
 			"name":               user.DisplayName,
 			"email":              user.Email,
+			"email_verified":     user.EmailVerifiedAt != nil,
 			"role":               user.Role,
 		}
 		addAuthenticationClaims(claims, authCode.AuthenticationEvidence)
@@ -477,7 +478,7 @@ func (e *Engine) GetUserinfo(tokenString string) (map[string]any, error) {
 		"preferred_username": user.Username,
 		"name":               user.DisplayName,
 		"email":              user.Email,
-		"email_verified":     true,
+		"email_verified":     user.EmailVerifiedAt != nil,
 		"role":               user.Role,
 	}, nil
 }

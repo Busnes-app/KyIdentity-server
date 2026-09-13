@@ -160,6 +160,7 @@ func main() {
 			_ = dbStore.DeleteExpiredAuthorizationCodes()
 			_ = dbStore.DeleteExpiredIssuedTokens()
 			_ = dbStore.DeleteExpiredDevicePairingTokens()
+			_ = dbStore.DeleteExpiredAccountTokens()
 			_ = dbStore.DeleteExpiredMFAChallenges()
 			_ = dbStore.DeleteExpiredWebAuthnChallenges()
 			_ = dbStore.DeleteDeliveredSyncEvents(time.Now().UTC().Add(-7 * 24 * time.Hour))

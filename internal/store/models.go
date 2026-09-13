@@ -5,15 +5,20 @@ import (
 )
 
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	DisplayName  string    `json:"displayName"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"`   // "user", "admin"
-	Status       string    `json:"status"` // "active", "disabled"
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	DisplayName  string `json:"displayName"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"-"`
+	Role         string `json:"role"`   // "user", "admin"
+	Status       string `json:"status"` // "active", "disabled"
+	// Pending accounts were invited but have no password yet; they stay disabled until
+	// an activation link sets one.
+	Pending bool `json:"pending"`
+	// EmailVerifiedAt is set only when a link mailed to the address was redeemed.
+	EmailVerifiedAt *time.Time `json:"emailVerifiedAt,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
 // AuthenticationEvidence records server-verified login facts. Nil timestamps mean

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ApiError, apiJson, apiRequest, isRecord, errorMessage } from '../api';
-import { parseAuthStep, parseBeginLogin, parsePushStatus } from '../parsers';
+import { parseAuthStep, parseBeginLogin, parsePushStatus, parseSuccess } from '../parsers';
 import { sameOriginPath } from '../returnTo';
 import { getPasskeyAssertion, isPasskeySupported } from '../webauthn';
 import type { User } from '../types';
@@ -39,11 +39,29 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [challengeId, setChallengeId] = useState('');
   const [matchDigits, setMatchDigits] = useState('');
+  const [forgot, setForgot] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   // return_to is only ever a same-origin path (the server sends the /oauth/authorize URL
   // it was asked for). Following anything else would bounce the user off the trusted
   // sign-in origin the moment they authenticate, which is a phisher's ideal ending.
   const returnTo = sameOriginPath(new URLSearchParams(window.location.search).get('return_to'));
+
+  // The answer is the same whether or not the account exists or mail is configured.
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await apiJson('/api/auth/password/forgot', parseSuccess, { method: 'POST', body: JSON.stringify({ identifier: username }) });
+      setForgotSent(true);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not request a reset'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,7 +286,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
           {interaction && <button type="button" className="text-btn" onClick={cancelInteraction}>Cancel sign-in</button>}
 
-          {!mfaRequired && (
+          {!mfaRequired && forgot && (
+            <form onSubmit={handleForgotSubmit} className="login-form">
+              <h2>Reset your password</h2>
+              {forgotSent ? (
+                <p className="text-muted">If that account exists and mail delivery is set up, a reset link is on its way and stays valid for 30 minutes. Otherwise ask an administrator for a link.</p>
+              ) : (
+                <>
+                  <p className="text-muted">Enter your username or email address.</p>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="forgot-identifier">Username or email</label>
+                    <input id="forgot-identifier" type="text" className="form-input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required />
+                  </div>
+                  <button type="submit" className="primary-btn full-width" disabled={loading}>{loading ? spinner : 'Send reset link'}</button>
+                </>
+              )}
+              <button type="button" className="text-btn" onClick={() => { setForgot(false); setForgotSent(false); setError(null); }}>Back to sign in</button>
+            </form>
+          )}
+
+          {!mfaRequired && !forgot && (
             <form onSubmit={handlePasswordSubmit} className="login-form">
               <h2>{interaction ? 'Verify your sign-in' : 'Sign in'}</h2>
               {interactionDetails && <p className="text-muted">Continue to {interactionDetails.appName}. {interactionDetails.requiresPasskey ? 'Use your password and an enrolled passkey. Other factors do not meet this request.' : interactionDetails.requiresMFA ? 'Use your password and an enrolled authenticator or passkey. Recovery codes do not meet this request.' : 'Enter your password and complete any enrolled second factor.'}</p>}
@@ -301,6 +338,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               <button type="submit" className="primary-btn full-width" disabled={loading || Boolean(interaction && !interactionDetails)}>
                 {loading ? spinner : 'Sign in'}
               </button>
+              {!interaction && <button type="button" className="text-btn" onClick={() => { setForgot(true); setError(null); }}>Forgot your password?</button>}
             </form>
           )}
 

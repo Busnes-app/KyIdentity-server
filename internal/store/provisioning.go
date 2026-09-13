@@ -83,13 +83,18 @@ func scimGroupPayload(groupID string) []byte {
 	return b
 }
 
-const userColumns = `id, username, display_name, email, password_hash, role, status, created_at, updated_at`
+const userColumns = `id, username, display_name, email, password_hash, role, status, pending, email_verified_at, created_at, updated_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
-	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	var verified sql.NullTime
+	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.Pending, &verified, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
+	}
+	if verified.Valid {
+		at := verified.Time
+		u.EmailVerifiedAt = &at
 	}
 	return u, err
 }
