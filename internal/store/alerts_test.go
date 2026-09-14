@@ -330,7 +330,7 @@ func TestLoginFailureReopenIsNotRemailed(t *testing.T) {
 	}
 }
 
-func TestDeliverAlertsStopsAtDeadline(t *testing.T) {
+func TestDeliverAlertsStopsAfterCancellation(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	var ids []string
@@ -342,12 +342,12 @@ func TestDeliverAlertsStopsAtDeadline(t *testing.T) {
 	}
 	audited(t, s, "admin.scim_token_issued", "root0", "c1", "scim_connector", "success", "")
 	evaluate(t, s)
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	slow := func(string, string, string) error { time.Sleep(50 * time.Millisecond); return nil }
-	n, err := s.DeliverAlerts(ctx, time.Now().UTC(), slow)
-	if err != nil || n == 0 || n >= 5 {
-		t.Fatal("a pass must stop at its deadline and leave the rest pending:", n, err)
+	send := func(string, string, string) error { cancel(); return nil }
+	n, err := s.DeliverAlerts(ctx, time.Now().UTC(), send)
+	if err != nil || n != 1 {
+		t.Fatal("a pass must stop after cancellation and leave the rest pending:", n, err)
 	}
 	if a := openAlerts(t, s)["connector_credentials/c1"]; a.Delivery.Delivered != n || a.Delivery.Pending != 5-n {
 		t.Fatalf("%+v", a.Delivery)
