@@ -127,7 +127,7 @@ func (s *Store) CreateUpstreamGroup(g *Group, members []string, audit *AuditEven
 			return groupWriteError(err)
 		}
 		for _, uid := range members {
-			if _, _, err := applyGroupMembershipTx(tx, g.ID, uid, true, ""); err != nil {
+			if _, _, err := applyGroupMembershipTx(tx, g.ID, uid, true, nil, ""); err != nil {
 				return err
 			}
 		}
@@ -297,7 +297,7 @@ func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []str
 		changed := false
 		for _, id := range have {
 			if !want[id] {
-				if _, _, err := applyGroupMembershipTx(tx, g.ID, id, false, ""); err != nil {
+				if _, _, err := applyGroupMembershipTx(tx, g.ID, id, false, nil, ""); err != nil {
 					return err
 				}
 				changed = true
@@ -305,7 +305,7 @@ func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []str
 			delete(want, id)
 		}
 		for id := range want {
-			if _, _, err := applyGroupMembershipTx(tx, g.ID, id, true, ""); err != nil {
+			if _, _, err := applyGroupMembershipTx(tx, g.ID, id, true, nil, ""); err != nil {
 				return err
 			}
 			changed = true

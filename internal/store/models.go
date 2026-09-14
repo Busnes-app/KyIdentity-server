@@ -24,10 +24,13 @@ type User struct {
 	// SourceActive is the upstream's active flag; LocallyDisabled is a local
 	// administrator's override that the upstream cannot lift. ApplySourceState derives
 	// Status from them.
-	SourceActive    bool      `json:"sourceActive"`
-	LocallyDisabled bool      `json:"locallyDisabled"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	SourceActive    bool `json:"sourceActive"`
+	LocallyDisabled bool `json:"locallyDisabled"`
+	// EndsAt is the account end date; once passed the account reads as disabled
+	// everywhere and the expiry follow-up ends it for real.
+	EndsAt    *time.Time `json:"endsAt,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 // AuthenticationEvidence records server-verified login facts. Nil timestamps mean

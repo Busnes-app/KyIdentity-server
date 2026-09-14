@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/delegated-admin)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/expiring-access)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -27,8 +27,10 @@ local copies, activation following source state). PR15 (inbound SCIM Groups and
 operational setup) merged as GitHub PR #47 after one review round. PR16 (app roles and
 bounded claim mappings) merged as GitHub PR #48 after four review rounds (membership
 changes as role changes, explicit empty roles end to end, first/last role re-push,
-completion status on the SCIM replace). PR17 (delegated administration) is in progress on
-feat/delegated-admin. PRs 18–23 and D1–D4 remain planned. Note for D1–D4: released
+completion status on the SCIM replace). PR17 (delegated administration) merged as GitHub PR #49 after one review
+round (delegates under the administrators MFA scope, helpdesk kept off administrators
+and other delegates). PR18 (expiring access and account end dates) is in progress on
+feat/expiring-access. PRs 19–23 and D1–D4 remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -644,6 +646,16 @@ Depends on: 08, 12, 16, 17. Touch: membership/assignment/user schema, policy, wo
 Acceptance: expiry works with the worker stopped, alternate grants preserve access,
 restart drains overdue removals, stale jobs cannot undo extensions, and timezone/DST
 input resolves to the intended UTC instant.
+
+Implementation: expiry instants on direct assignments, memberships and accounts, read
+by the access views with `unixepoch()` on every decision (worker-independent); tokens
+bounded to `AccessEndsAt` (latest live grant, capped by the account end date);
+`RunDueExpiries` as the follow-up at start and each minute (rows are the persisted due
+work; only removes, so a prior extension is untouched), with role, enrollment, logout,
+token and provisioning follow-ups and `expiry` audit rows; last administrator neither
+schedulable nor endable. Lost app access now also queues back-channel logout. SPA takes
+a datetime-local value and shows the exact UTC instant beside it. README.md "Expiring
+access and account end dates".
 
 ### PR 19 — Access requests and approvals
 

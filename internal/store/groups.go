@@ -34,6 +34,8 @@ type GroupUser struct {
 	Email       string `json:"email"`
 	Status      string `json:"status"`
 	Member      bool   `json:"member"`
+	// ExpiresAt bounds the membership; nil means it does not expire.
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 func groupWriteError(err error) error {
@@ -192,12 +194,25 @@ func (s *Store) SetGroupMembership(groupID, userID string, member bool, audit *A
 }
 
 func (s *Store) SetGroupMembershipForSession(groupID, userID string, member bool, sessionID string, audit *AuditEvent) error {
+	return s.setGroupMembership(groupID, userID, member, nil, sessionID, audit)
+}
+
+// SetGroupMembershipUntil adds a member until an instant (nil = no bound); repeating it
+// moves the instant.
+func (s *Store) SetGroupMembershipUntil(groupID, userID string, expiresAt *time.Time, sessionID string, audit *AuditEvent) error {
+	if err := checkExpiry(expiresAt, time.Now().UTC()); err != nil {
+		return err
+	}
+	return s.setGroupMembership(groupID, userID, true, expiresAt, sessionID, audit)
+}
+
+func (s *Store) setGroupMembership(groupID, userID string, member bool, expiresAt *time.Time, sessionID string, audit *AuditEvent) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	groupName, username, err := setGroupMembershipTx(tx, groupID, userID, member, sessionID)
+	groupName, username, err := setGroupMembershipTx(tx, groupID, userID, member, expiresAt, sessionID)
 	if err != nil {
 		return err
 	}
@@ -210,8 +225,8 @@ func (s *Store) SetGroupMembershipForSession(groupID, userID string, member bool
 
 // setGroupMembershipTx applies one membership change with its policy checks and the
 // grant/provisioning follow-up, returning the names for the audit row.
-func setGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, sessionID string) (groupName, username string, err error) {
-	if groupName, username, err = applyGroupMembershipTx(tx, groupID, userID, member, sessionID); err != nil {
+func setGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, expiresAt *time.Time, sessionID string) (groupName, username string, err error) {
+	if groupName, username, err = applyGroupMembershipTx(tx, groupID, userID, member, expiresAt, sessionID); err != nil {
 		return "", "", err
 	}
 	return groupName, username, reconcileAccessTx(tx)
@@ -229,10 +244,12 @@ func reconcileAccessTx(tx *sql.Tx) error {
 
 // applyGroupMembershipTx writes one membership row with its policy checks and nothing
 // else; the caller owes a reconcileAccessTx before committing.
-func applyGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, sessionID string) (groupName, username string, err error) {
+func applyGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, expiresAt *time.Time, sessionID string) (groupName, username string, err error) {
 	var result sql.Result
 	if member {
-		result, err = tx.Exec(`INSERT INTO group_memberships(group_id,user_id) VALUES (?,?) ON CONFLICT(group_id,user_id) DO NOTHING`, groupID, userID)
+		// A changed instant counts as a change: it re-runs the policy checks and the
+		// role follow-up like a fresh addition would.
+		result, err = tx.Exec(`INSERT INTO group_memberships(group_id,user_id,expires_at) VALUES (?,?,?) ON CONFLICT(group_id,user_id) DO UPDATE SET expires_at=excluded.expires_at WHERE expires_at IS NOT excluded.expires_at`, groupID, userID, unixOrNil(expiresAt))
 	} else {
 		result, err = tx.Exec(`DELETE FROM group_memberships WHERE group_id=? AND user_id=?`, groupID, userID)
 	}
@@ -390,17 +407,19 @@ func (s *Store) ListGroupUsers(groupID, query string, includeNonMembers bool, li
 	if err = tx.QueryRow(`SELECT COUNT(*)`+from, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.email,u.status,m.user_id IS NOT NULL`+from+` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.email,u.status,m.user_id IS NOT NULL,m.expires_at`+from+` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
 	users := []GroupUser{}
 	for rows.Next() {
 		var u GroupUser
-		if err = rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.Status, &u.Member); err != nil {
+		var expires sql.NullInt64
+		if err = rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.Status, &u.Member, &expires); err != nil {
 			rows.Close()
 			return nil, 0, err
 		}
+		u.ExpiresAt = timeFromUnix(expires)
 		users = append(users, u)
 	}
 	err = rows.Err()

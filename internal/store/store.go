@@ -709,6 +709,7 @@ func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepar
 		if err := prepare(tx, current); err != nil {
 			return err
 		}
+		u.EndsAt = current.EndsAt
 	} else {
 		// A local caller never owns the upstream's fields: take them from the row as it is
 		// now, so an upstream write landing since the caller's read is not undone.
@@ -719,7 +720,8 @@ func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepar
 		u.ApplySourceState()
 	}
 	oldRole, oldStatus, oldEmail := current.Role, current.Status, current.Email
-	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active") {
+	// Scheduling the last administrator's end is refused like removing them would be.
+	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active" || u.EndsAt != nil) {
 		var admins int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'`).Scan(&admins); err != nil {
 			return err
@@ -730,7 +732,7 @@ func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepar
 	}
 	now := time.Now().UTC()
 	u.UpdatedAt = now
-	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, source_active = ?, locally_disabled = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.SourceActive, u.LocallyDisabled, now, u.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
 		return enrollmentMutationError(err)
 	}
 	if !strings.EqualFold(oldEmail, u.Email) {
@@ -2104,7 +2106,7 @@ func (s *Store) RecordIssuedToken(t *IssuedToken) error {
 	query := `INSERT INTO issued_tokens (jti, user_id, client_id, expires_at, created_at, session_id)
  SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS
  (SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
- WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?)))`
+ WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND (users.ends_at IS NULL OR users.ends_at>unixepoch()) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?)))`
 	t.CreatedAt = time.Now().UTC()
 	res, err := s.db.Exec(query, t.JTI, t.UserID, t.ClientID, t.ExpiresAt, t.CreatedAt, t.SessionID, t.SessionID, t.UserID, t.CreatedAt, t.UserID, t.ClientID, t.AuthorizationCodeID, t.AuthorizationCodeID, t.SessionID, t.ClientID, t.UserID, t.CreatedAt, t.CreatedAt)
 	if err != nil {

@@ -267,7 +267,7 @@ func appRoleShapeChangeTx(tx *sql.Tx, app AppRecord, boundary int, now time.Time
 // roleHoldersTx lists every user who holds the role directly or through a group.
 func roleHoldersTx(tx *sql.Tx, roleID string) ([]string, error) {
 	return scanStrings(tx.Query(`SELECT user_id FROM app_role_user_assignments WHERE role_id=?
- UNION SELECT m.user_id FROM app_role_group_assignments a JOIN group_memberships m ON m.group_id=a.group_id WHERE a.role_id=?`, roleID, roleID))
+ UNION SELECT m.user_id FROM app_role_group_assignments a JOIN live_group_memberships m ON m.group_id=a.group_id WHERE a.role_id=?`, roleID, roleID))
 }
 
 func (s *Store) DeleteAppRole(appID, roleID string, audit *AuditEvent) error {
@@ -341,7 +341,7 @@ func (s *Store) SetAppRoleAssignment(appID, roleID, kind, principal string, assi
 		}
 		affected := []string{principal}
 		if kind == "groups" {
-			if affected, err = scanStrings(tx.Query(`SELECT user_id FROM group_memberships WHERE group_id=?`, principal)); err != nil {
+			if affected, err = scanStrings(tx.Query(`SELECT user_id FROM live_group_memberships WHERE group_id=?`, principal)); err != nil {
 				return err
 			}
 		}
@@ -398,7 +398,7 @@ func appClaimsTx(tx *sql.Tx, userID, appID string) (AppClaims, error) {
 	}
 	roles, err := scanStrings(tx.Query(`SELECT DISTINCT r.name FROM app_roles r WHERE r.app_id=? AND (
  EXISTS(SELECT 1 FROM app_role_user_assignments a WHERE a.role_id=r.id AND a.user_id=?)
- OR EXISTS(SELECT 1 FROM app_role_group_assignments a JOIN group_memberships m ON m.group_id=a.group_id WHERE a.role_id=r.id AND m.user_id=?))`, appID, userID, userID))
+ OR EXISTS(SELECT 1 FROM app_role_group_assignments a JOIN live_group_memberships m ON m.group_id=a.group_id WHERE a.role_id=r.id AND m.user_id=?))`, appID, userID, userID))
 	if err != nil {
 		return c, err
 	}
@@ -407,7 +407,7 @@ func appClaimsTx(tx *sql.Tx, userID, appID string) (AppClaims, error) {
 	if c.GroupsClaim {
 		// The app's allowed groups are the ones assigned to it or mapped to one of its
 		// roles; the user's other groups are none of the app's business.
-		groups, err := scanStrings(tx.Query(`SELECT DISTINCT g.name FROM directory_groups g JOIN group_memberships m ON m.group_id=g.id WHERE m.user_id=? AND (
+		groups, err := scanStrings(tx.Query(`SELECT DISTINCT g.name FROM directory_groups g JOIN live_group_memberships m ON m.group_id=g.id WHERE m.user_id=? AND (
  EXISTS(SELECT 1 FROM app_group_assignments a WHERE a.app_id=? AND a.group_id=g.id)
  OR EXISTS(SELECT 1 FROM app_role_group_assignments ra JOIN app_roles r ON r.id=ra.role_id WHERE r.app_id=? AND ra.group_id=g.id))`, userID, appID, appID))
 		if err != nil {

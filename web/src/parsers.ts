@@ -118,6 +118,7 @@ export function parseUser(value: unknown): User {
   const o = obj(value, 'a user object');
   return {
     access: o.access === undefined ? undefined : parseAccess(o.access),
+    endsAt: optStr(o, 'endsAt'),
     enrollment: o.enrollment === undefined ? undefined : parseEnrollmentStatus(o.enrollment),
     id: str(o, 'id'),
     username: str(o, 'username'),
@@ -543,7 +544,7 @@ export function parseGroupUserPage(value: unknown): DirectoryPage<GroupUser> {
   return directoryPage(value, 'users', item => {
     const o = obj(item, 'a group user');
     return { id: str(o, 'id'), username: str(o, 'username'), displayName: str(o, 'displayName'),
-      email: str(o, 'email'), status: oneOf(o, 'status', ['active', 'disabled']), member: directoryMember(o) };
+      email: str(o, 'email'), status: oneOf(o, 'status', ['active', 'disabled']), member: directoryMember(o), expiresAt: optStr(o, 'expiresAt') };
   });
 }
 
@@ -593,7 +594,7 @@ export function parseAppAccessPage(value: unknown): AppAccessPage {
   const u = obj(item, 'an app access user');
   return { id: str(u,'id'), username: str(u,'username'), displayName: str(u,'displayName'), status: oneOf(u,'status',['active','disabled']),
    direct: requiredBool(u,'direct'), groupAssigned: requiredBool(u,'groupAssigned'), effective: requiredBool(u,'effective'), preview: requiredBool(u,'preview'),
-   reason: oneOf(u,'reason',['user_disabled','app_disabled','client_disabled','all_active_users','direct_assignment','group_assignment','not_assigned']) };
+   reason: oneOf(u,'reason',['user_disabled','app_disabled','client_disabled','all_active_users','direct_assignment','group_assignment','not_assigned']), directExpiresAt: optStr(u,'directExpiresAt') };
  }), app: parseAppRecord(o.app), losingAccess: directoryCount(o,'losingAccess'), gainingAccess: directoryCount(o,'gainingAccess') };
 }
 export function parseAppAccessGroups(value: unknown): DirectoryPage<AppAccessGroup> {

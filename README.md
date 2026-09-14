@@ -367,6 +367,33 @@ names an app record; unlinking a connection into a new record ends ownership of 
 re-delegate after an unlink. The `GET /api/auth/me` answer carries an `access` block
 the SPA uses to show the pages a delegate can use; the server enforces every route.
 
+## Expiring access and account end dates
+
+A direct user assignment on an app connection and a membership in a group can each
+carry an expiry instant; an account can carry an end date. The operator enters a
+wall-clock time in their own zone and the page shows the exact UTC instant beside it,
+so a DST edge or a wrong zone is visible before it bites. Instants must lie in the
+future; repeating the grant moves or clears its instant.
+
+Expiry is decided where access is decided: the access views exclude an expired grant
+and an ended account on every authorize, token exchange, UserInfo and provisioning
+decision, so it holds even with no background work running. Access is a union, so an
+expired grant changes nothing while another live grant remains, and a token issued on
+bounded access ends with that access (`expires_in` and the ID token `exp` stop at the
+latest live grant, capped by the account end date).
+
+The expiry follow-up runs at start and once a minute: it removes expired assignments and
+memberships (roles mapped through the group end, MFA policy requirements lift), revokes
+the tokens and codes that depended on them, sends back-channel logout to the apps that
+saw those logins, deactivates the downstream accounts, and ends accounts past their end
+date (disabled, not deleted; sessions and grants revoked; profile deprovisioned). Every
+removal writes an audit row with actor `expiry`. The rows themselves are the persisted
+due work, so a restart drains overdue expiries first and an instant extended before the
+follow-up runs is simply not due. The last active administrator can neither be scheduled
+to end nor ended by the follow-up: the schedule is refused with `cannot_remove_last_admin`,
+and an end date that would remove the last administrator is cleared and audited as
+`account.end_refused`.
+
 ## Integration Requirements
 
 These rules are enforced strictly. Each is a constraint on how a client integrates.
