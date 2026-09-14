@@ -444,6 +444,31 @@ authorization is audited with the reason and the access, authentication and role
 revisions of that moment, so an old denial is never explained with today's policy, and
 the redirect tells a user of a requestable app to ask from their dashboard.
 
+## Audit search and export
+
+The audit log page filters by actor (id or username), target id, action prefix (for
+example `oauth.` covers every OAuth event), outcome and a time range entered in the
+operator's zone. Filters are bounded, indexed, and paged in a total order (time, then
+id), so paging never repeats or skips a row under tied timestamps. *Export CSV* and
+*Export JSONL* carry the same filter as the page, over `GET
+/api/admin/audit-events/export?format=csv|jsonl&…`, at most 50,000 rows and 30 seconds
+per export (response headers `X-KySignOn-Export-Total`, `-Limit` and `-Truncated` say
+when a filter exceeded the bound), with a burst of five exports refilling at about six a
+minute per address and sixty listing calls a minute. An export that stopped short of the
+filtered set, whether by the row bound, the deadline or a failed write, ends with an
+in-band marker (`_export: incomplete` with the reason and row counts) so a downloaded
+file is never mistaken for a complete one. Each export is recorded before the first
+byte leaves (`admin.audit_export_started`; if that row cannot be written the export is
+refused) and again when it ends (`admin.audit_exported` with the outcome and row count). Details whose keys look like
+credential material (`secret`, `token`, `password`, `hash`, `credential`, `private`) are
+redacted at any depth, CSV cells that start with `=`, `+`, `-`, `@`, tab or carriage
+return are prefixed with a quote so no spreadsheet treats them as formulas, and the
+recorded rows carry the filter and row count. Administrators
+and auditors may search and export; nobody else. Retention is unchanged: rows older
+than the configured cutoff are trimmed by the existing housekeeping, and any change to
+that period is a separate decision, not part of search or export. For external log
+collection use the structured process log; there is no second audit delivery path.
+
 ## Integration Requirements
 
 These rules are enforced strictly. Each is a constraint on how a client integrates.

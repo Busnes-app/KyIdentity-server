@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/explain-access)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/audit-search)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -33,8 +33,10 @@ and other delegates). PR18 (expiring access and account end dates) merged as Git
 review rounds (one active-administrator definition, per-item expiry follow-up, unchanged
 end dates not treated as schedules). PR19 (access requests and approvals) merged as GitHub PR #51,
 cleared by the security review on its first pass. PR20 (explain effective access and
-authentication decisions) is in progress on feat/explain-access. PRs 21–23 and D1–D4
-remain planned. Note for D1–D4: released
+authentication decisions) merged as GitHub PR #52 after one review round (uniform
+user-facing denial with a rate limit, roles named only via assigned groups). PR21 (audit
+search and export) is in progress on feat/audit-search. PRs 22–23 and D1–D4 remain
+planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -734,6 +736,15 @@ Depends on: 17, 20. Touch: audit queries/indexes, admin audit UI/export endpoint
 Acceptance: pagination has no duplicates under tied timestamps, scopes apply equally to
 UI and export, malicious CSV values cannot execute formulas, and large exports remain
 bounded without blocking authentication.
+
+Implementation: `AuditFilter` shared by listing and export (actor, target, target type,
+action prefix, outcome, time range), total order by time then id with matching indexes
+checked by `EXPLAIN QUERY PLAN` at 6,000 rows, streamed CSV/JSONL export bounded to
+50,000 rows and 30 seconds with truncation headers, credential-shaped detail keys
+redacted, formula-leading CSV cells quoted, one `admin.audit_exported` row per export,
+both under the `read` permission (administrators and auditors) with a per-IP limiter.
+Retention untouched (`DeleteAuditEventsOlderThan`). Audit page gains a filter bar and
+export links. README.md "Audit search and export".
 
 ### PR 22 — Actionable security and provisioning alerts
 
