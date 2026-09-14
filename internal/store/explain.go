@@ -54,7 +54,8 @@ type AccessExplanation struct {
 // explanation share it so they can never disagree.
 const accessReasonSQL = `CASE WHEN NOT f.active THEN 'user_disabled' WHEN NOT f.enabled THEN 'app_disabled' WHEN NOT f.client_enabled THEN 'client_disabled' WHEN f.access_mode='all_active_users' THEN 'all_active_users' WHEN f.direct THEN 'direct_assignment' WHEN f.group_assigned THEN 'group_assignment' ELSE 'not_assigned' END`
 
-// ExplainAccess explains one user's access to one app as it stands now.
+// ExplainAccess explains one user's access to one app as it stands now. Group names
+// appear only for groups assigned to the app, in grants and in role sources alike.
 func (s *Store) ExplainAccess(userID, appID string) (*AccessExplanation, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -115,7 +116,7 @@ func (s *Store) ExplainAccess(userID, appID string) (*AccessExplanation, error) 
 		e.Reason = "grants_expired"
 	}
 	rows, err = tx.Query(`SELECT r.name,'direct','' FROM app_roles r JOIN app_role_user_assignments a ON a.role_id=r.id WHERE r.app_id=? AND a.user_id=?
- UNION ALL SELECT r.name,'group',g.name FROM app_roles r JOIN app_role_group_assignments a ON a.role_id=r.id JOIN live_group_memberships m ON m.group_id=a.group_id JOIN directory_groups g ON g.id=a.group_id WHERE r.app_id=? AND m.user_id=? ORDER BY 1,2,3`, appID, userID, appID, userID)
+ UNION ALL SELECT r.name,'group',g.name FROM app_roles r JOIN app_role_group_assignments a ON a.role_id=r.id JOIN app_group_assignments ga ON ga.app_id=r.app_id AND ga.group_id=a.group_id JOIN live_group_memberships m ON m.group_id=a.group_id JOIN directory_groups g ON g.id=a.group_id WHERE r.app_id=? AND m.user_id=? ORDER BY 1,2,3`, appID, userID, appID, userID)
 	if err != nil {
 		return nil, err
 	}

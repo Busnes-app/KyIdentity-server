@@ -168,7 +168,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /api/user/password", authM(s.requireStepUp(http.HandlerFunc(onboardH.ChangePassword))))
 	mux.Handle("GET /api/user/applications", authM(http.HandlerFunc(devH.ListApplications)))
 	mux.Handle("GET /api/user/access-requests", authM(http.HandlerFunc(requestH.ListOwn)))
-	mux.Handle("GET /api/user/access-explanation", authM(http.HandlerFunc(requestH.OwnAccessExplanation)))
+	mux.Handle("GET /api/user/access-explanation", authM(s.middleware.RateLimit("access_explanation", 10, 0.2)(http.HandlerFunc(requestH.OwnAccessExplanation))))
 	mux.Handle("POST /api/user/access-requests", authM(s.middleware.RateLimit("access_request", 10, 0.2)(http.HandlerFunc(requestH.Create))))
 	mux.Handle("DELETE /api/user/access-requests/{id}", authM(http.HandlerFunc(requestH.Cancel)))
 	mux.Handle("GET /api/user/sessions", authM(http.HandlerFunc(sessH.ListOwn)))

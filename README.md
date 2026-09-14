@@ -435,9 +435,11 @@ shows who would lose or gain access under a proposed policy without changing it.
 Explanations follow viewer permissions: administrators and auditors may explain any app,
 an app owner only their apps, and the answer names only groups assigned to that app,
 which the same viewers already see. A user can ask `GET
-/api/user/access-explanation?clientId=…` about themselves and gets the verdict, the
-reason and whether the app is requestable; the app is named only when they have access
-or may request it, and no group, user or policy detail is included. A denied
+/api/user/access-explanation?clientId=…` about themselves, ten times a minute, and gets
+the verdict and whether the app is requestable; every denial reads the same
+(`no_access`) whatever its cause, a client that does not exist reads like a denial,
+and the app is named only when they have access or may request it, so the answer
+discloses nothing an authorize attempt would not. A denied
 authorization is audited with the reason and the access, authentication and role
 revisions of that moment, so an old denial is never explained with today's policy, and
 the redirect tells a user of a requestable app to ask from their dashboard.

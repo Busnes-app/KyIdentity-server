@@ -49,12 +49,28 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "staff", true, nil); err != nil {
 		t.Fatal(err)
 	}
+	// A role mapped through a group that is not assigned to the app names no group.
+	if err := s.CreateGroup(&Group{ID: "hidden", Name: "Hidden Project"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembership("hidden", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "hidden", true, nil); err != nil {
+		t.Fatal(err)
+	}
 	e = check("direct and group", true, "direct_assignment")
 	if len(e.Grants) != 2 || e.Grants[1].Kind != "group" || e.Grants[1].GroupName != "Staff" || e.AccessEndsAt != nil {
 		t.Fatalf("union explanation = %+v", e)
 	}
 	if len(e.Roles) != 1 || e.Roles[0].Role != "operator" || e.Roles[0].Via != "group" || e.Roles[0].GroupName != "Staff" {
 		t.Fatalf("roles = %+v", e.Roles)
+	}
+	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "hidden", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembership("hidden", u.ID, false, nil); err != nil {
+		t.Fatal(err)
 	}
 	// The direct grant expires: the group still carries access and the lapsed grant is shown as such.
 	if _, err := s.db.Exec(`UPDATE app_user_assignments SET expires_at=unixepoch()-1 WHERE user_id=?`, u.ID); err != nil {

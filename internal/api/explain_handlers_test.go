@@ -65,7 +65,7 @@ func TestExplanationsFollowViewerPermissions(t *testing.T) {
 		t.Fatalf("own explanation: %d %s", own.Code, own.Body.String())
 	}
 	own = call(t, srv, userCookie, "GET", "/api/user/access-explanation?clientId=app-b")
-	if own.Code != http.StatusOK || !strings.Contains(own.Body.String(), `"allowed":false`) || strings.Contains(own.Body.String(), "appName") || !strings.Contains(own.Body.String(), `"requestable":false`) {
+	if own.Code != http.StatusOK || !strings.Contains(own.Body.String(), `"allowed":false`) || strings.Contains(own.Body.String(), "appName") || !strings.Contains(own.Body.String(), `"requestable":false`) || !strings.Contains(own.Body.String(), `"reason":"no_access"`) {
 		t.Fatalf("own denial: %d %s", own.Code, own.Body.String())
 	}
 	if err := db.SetAppRequestable(appB[0].ID, true, appB[0].Revision, nil); err != nil {
@@ -75,8 +75,8 @@ func TestExplanationsFollowViewerPermissions(t *testing.T) {
 	if !strings.Contains(own.Body.String(), `"requestable":true`) || !strings.Contains(own.Body.String(), `"appName":"app-b"`) {
 		t.Fatalf("own actionable denial: %s", own.Body.String())
 	}
-	if res := call(t, srv, userCookie, "GET", "/api/user/access-explanation?clientId=nope"); res.Code != http.StatusNotFound {
-		t.Fatalf("unknown client: %d", res.Code)
+	if res := call(t, srv, userCookie, "GET", "/api/user/access-explanation?clientId=nope"); res.Code != http.StatusOK || strings.Contains(res.Body.String(), "appName") {
+		t.Fatalf("unknown client distinguishable: %d %s", res.Code, res.Body.String())
 	}
 
 	// A denied authorization is audited with the reason and revisions of that moment,
@@ -94,5 +94,53 @@ func TestExplanationsFollowViewerPermissions(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("denial audit lacks the reason and revisions")
+	}
+}
+
+// The user's own view answers a disabled app, an unassigned app and a client that does
+// not exist with one and the same body, and stops answering past its burst.
+func TestOwnAccessExplanationIsNotAnOracle(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	u := newUser(t, db, "user")
+	cookie := newSession(t, db, u, time.Now().UTC().Add(time.Hour))
+	for _, id := range []string{"off-app", "closed-app", "open-off-app"} {
+		if err := db.CreateOAuthClient(&store.OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	off, _, _ := db.ListAppRecords("off-app", 1, 0)
+	if err := db.SetAppPolicy(off[0].ID, "assigned_only", false, off[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Requestable but disabled: still nothing to ask for, so still the same answer.
+	openOff, _, _ := db.ListAppRecords("open-off-app", 1, 0)
+	if err := db.SetAppRequestable(openOff[0].ID, true, openOff[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	openOff, _, _ = db.ListAppRecords("open-off-app", 1, 0)
+	if err := db.SetAppPolicy(openOff[0].ID, "assigned_only", false, openOff[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	bodies := map[string]bool{}
+	for _, id := range []string{"off-app", "closed-app", "open-off-app", "does-not-exist"} {
+		res := call(t, srv, cookie, "GET", "/api/user/access-explanation?clientId="+id)
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", id, res.Code, res.Body.String())
+		}
+		bodies[res.Body.String()] = true
+	}
+	if len(bodies) != 1 {
+		t.Fatalf("denials are distinguishable: %v", bodies)
+	}
+	limited := false
+	for i := 0; i < 12; i++ {
+		if call(t, srv, cookie, "GET", "/api/user/access-explanation?clientId=closed-app").Code == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("no limiter on the explanation route")
 	}
 }

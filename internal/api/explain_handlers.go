@@ -24,8 +24,9 @@ func (h *AdminHandler) ExplainAppAccess(w http.ResponseWriter, r *http.Request) 
 }
 
 // OwnAccessExplanation tells the signed-in user whether they can open an app and what
-// to do about it. It names the app only when they have access or may request it, and
-// never lists groups, other users or policy internals.
+// to do about it. A denial reads the same whatever its cause, an unknown client reads
+// like a denial, and the app is named only when they have access or may request it, so
+// the answer discloses nothing an authorize attempt would not.
 func (h *AccessRequestHandler) OwnAccessExplanation(w http.ResponseWriter, r *http.Request) {
 	clientID := r.URL.Query().Get("clientId")
 	if clientID == "" || len(clientID) > 200 {
@@ -33,19 +34,24 @@ func (h *AccessRequestHandler) OwnAccessExplanation(w http.ResponseWriter, r *ht
 		return
 	}
 	user := GetUserFromContext(r.Context())
+	denied := map[string]any{"allowed": false, "reason": "no_access", "requestable": false}
 	e, err := h.store.ExplainClientAccess(user.ID, clientID)
 	switch {
 	case errors.Is(err, store.ErrAppRecordMissing):
-		http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		writeGroupJSON(w, denied)
 		return
 	case err != nil:
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	out := map[string]any{"allowed": e.Allowed, "reason": e.Reason, "requestable": e.Requestable && !e.Allowed}
-	if e.Allowed || e.Requestable {
-		out["appName"] = e.AppName
+	if !e.Allowed {
+		if e.Requestable && e.AppEnabled && e.ClientEnabled && e.AccessMode == "assigned_only" {
+			denied["requestable"], denied["appName"] = true, e.AppName
+		}
+		writeGroupJSON(w, denied)
+		return
 	}
+	out := map[string]any{"allowed": true, "reason": e.Reason, "requestable": false, "appName": e.AppName}
 	if e.AccessEndsAt != nil {
 		out["accessEndsAt"] = e.AccessEndsAt
 	}
