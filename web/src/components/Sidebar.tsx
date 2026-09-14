@@ -1,5 +1,5 @@
 import React from 'react';
-import { User } from '../types';
+import { Access, User } from '../types';
 import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database } from 'lucide-react';
 
 interface SidebarProps {
@@ -43,7 +43,20 @@ export const Brand: React.FC = () => (
   </div>
 );
 
+/** Navigation is a convenience; the server enforces every route. */
+function adminItems(a: Access | undefined): Item[] {
+  if (!a) return [];
+  if (a.admin || a.auditor) return ADMIN;
+  return ADMIN.filter(([tab]) => (tab === 'admin-users' && a.helpdesk) || (tab === 'admin-app-registry' && a.appOwner.length > 0));
+}
+
+function roleLabel(user: User): string {
+  if (user.role === 'admin') return 'Administrator';
+  return adminItems(user.access).length > 0 ? 'Delegated administrator' : 'User';
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onLogout }) => {
+  const admin = adminItems(user.access);
   const group = (title: string, items: Item[]) => (
     <nav className="side-nav" aria-label={title}>
       <h4>{title}</h4>
@@ -64,11 +77,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
     <aside className="side">
       <Brand />
       {group('Your account', ACCOUNT)}
-      {user.role === 'admin' && group('Administration', ADMIN)}
+      {admin.length > 0 && group('Administration', admin)}
       <div className="side-me">
         <div className="side-who">
           <b>{user.username}</b>
-          <span>{user.role === 'admin' ? 'Administrator' : 'User'}</span>
+          <span>{roleLabel(user)}</span>
         </div>
         <button className="icon-btn" onClick={onLogout} title="Sign out" aria-label="Sign out">
           <LogOut size={16} />

@@ -22,6 +22,7 @@ import (
 )
 
 type Server struct {
+	adminRoutes []adminRoute
 	cfg         *config.Config
 	store       *store.Store
 	keyManager  *crypto.JWTKeyManager
@@ -185,56 +186,101 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /oauth/userinfo", s.middleware.RateLimit("oauth_userinfo", 120, 2.0)(http.HandlerFunc(oauthH.Userinfo)))
 	mux.Handle("POST /oauth/revoke", s.middleware.RateLimit("oauth_revoke", 30, 1.0)(http.HandlerFunc(oauthH.Revoke)))
 
-	// Admin Routes (Auth + Admin check)
-	adminM := func(h http.Handler) http.Handler {
-		return authM(s.middleware.RequireAdmin(h))
-	}
-
-	// Destructive and secret-bearing admin routes additionally spend a step-up grant.
+	// Admin routes: every one names its permission and whether it spends a step-up grant.
 	//
-	// "Is this session an admin" is the wrong question for creating an administrator,
-	// resetting someone else's MFA, rotating a client secret, or exporting recovery material:
-	// a stolen cookie answers it. The grant costs the password plus an enrolled factor,
+	// Destructive and secret-bearing routes additionally spend a step-up grant. "Is this
+	// session an admin" is the wrong question for creating an administrator, resetting
+	// someone else's MFA, rotating a client secret, or exporting recovery material: a
+	// stolen cookie answers it. The grant costs the password plus an enrolled factor,
 	// binds to this session and operation, and authorizes exactly one change.
-	adminStepUpM := func(h http.Handler) http.Handler {
-		return adminM(s.requireStepUp(h))
+	s.adminRoutes = []adminRoute{
+		{"GET", "/api/admin/enrollment-policies", permRead, false, http.HandlerFunc(adminH.ListEnrollmentPolicies)},
+		{"POST", "/api/admin/enrollment-policies/preview", permAdmin, false, http.HandlerFunc(adminH.PreviewEnrollmentPolicy)},
+		{"PUT", "/api/admin/enrollment-policies", permAdmin, true, http.HandlerFunc(adminH.SetEnrollmentPolicy)},
+		{"GET", "/api/admin/groups", permDirectory, false, http.HandlerFunc(adminH.ListGroups)},
+		{"POST", "/api/admin/groups", permAdmin, true, http.HandlerFunc(adminH.CreateGroup)},
+		{"PUT", "/api/admin/groups/{id}", permAdmin, true, http.HandlerFunc(adminH.UpdateGroup)},
+		{"DELETE", "/api/admin/groups/{id}", permAdmin, true, http.HandlerFunc(adminH.DeleteGroup)},
+		{"GET", "/api/admin/groups/{id}/members", permDirectory, false, http.HandlerFunc(adminH.ListGroupUsers)},
+		{"PUT", "/api/admin/groups/{id}/members/{userId}", permAdmin, true, http.HandlerFunc(adminH.SetGroupMembership)},
+		{"DELETE", "/api/admin/groups/{id}/members/{userId}", permAdmin, true, http.HandlerFunc(adminH.SetGroupMembership)},
+		{"GET", "/api/admin/users", permDirectory, false, http.HandlerFunc(adminH.ListUsers)},
+		{"POST", "/api/admin/users", permAdmin, true, http.HandlerFunc(adminH.CreateUser)},
+		{"PUT", "/api/admin/users/{id}", permAdmin, true, http.HandlerFunc(adminH.UpdateUser)},
+		{"POST", "/api/admin/users/{id}/reset-mfa", permRecovery, true, http.HandlerFunc(adminH.ResetUserMFA)},
+		{"POST", "/api/admin/users/{id}/revoke-sessions", permRecovery, false, http.HandlerFunc(adminH.RevokeUserSessions)},
+		{"GET", "/api/admin/users/{id}/sessions", permUserRead, false, http.HandlerFunc(sessH.AdminList)},
+		{"DELETE", "/api/admin/users/{id}/sessions/{sid}", permRecovery, false, http.HandlerFunc(sessH.AdminRevokeSession)},
+		{"POST", "/api/admin/users/{id}/apps/{clientId}/revoke", permRecovery, false, http.HandlerFunc(sessH.AdminRevokeApp)},
+		{"POST", "/api/admin/users/{id}/logouts/{deliveryId}/retry", permRecovery, false, http.HandlerFunc(sessH.AdminRetryLogout)},
+		{"GET", "/api/admin/users/{id}/offboarding", permUserRead, false, http.HandlerFunc(adminH.UserOffboarding)},
+		{"POST", "/api/admin/users/{id}/activation-link", permRecovery, true, onboardH.AdminIssueLink("activation")},
+		{"POST", "/api/admin/users/{id}/reset-link", permRecovery, true, onboardH.AdminIssueLink("reset")},
+		{"GET", "/api/admin/app-registry/{id}/roles", permAppRead, false, http.HandlerFunc(adminH.ListAppRoles)},
+		{"POST", "/api/admin/app-registry/{id}/roles", permAppGrants, true, http.HandlerFunc(adminH.CreateAppRole)},
+		{"DELETE", "/api/admin/app-registry/{id}/roles/{roleId}", permAppGrants, true, http.HandlerFunc(adminH.DeleteAppRole)},
+		{"PUT", "/api/admin/app-registry/{id}/roles/{roleId}/assignments/{kind}/{principal}", permAppGrants, true, http.HandlerFunc(adminH.SetAppRoleAssignment)},
+		{"DELETE", "/api/admin/app-registry/{id}/roles/{roleId}/assignments/{kind}/{principal}", permAppGrants, true, http.HandlerFunc(adminH.SetAppRoleAssignment)},
+		{"PUT", "/api/admin/app-registry/{id}/claims", permAdmin, true, http.HandlerFunc(adminH.SetAppClaimSettings)},
+		{"GET", "/api/admin/scim-connectors", permRead, false, http.HandlerFunc(scimH.AdminList)},
+		{"POST", "/api/admin/scim-connectors", permAdmin, true, http.HandlerFunc(scimH.AdminCreate)},
+		{"PUT", "/api/admin/scim-connectors/{id}", permAdmin, true, http.HandlerFunc(scimH.AdminUpdate)},
+		{"POST", "/api/admin/scim-connectors/{id}/tokens", permAdmin, true, http.HandlerFunc(scimH.AdminIssueToken)},
+		{"DELETE", "/api/admin/scim-connectors/{id}/tokens/{tokenId}", permAdmin, false, http.HandlerFunc(scimH.AdminRevokeToken)},
+		{"DELETE", "/api/admin/scim-connectors/{id}", permAdmin, true, http.HandlerFunc(scimH.AdminDelete)},
+		{"GET", "/api/admin/mail", permRead, false, http.HandlerFunc(onboardH.GetMail)},
+		{"PUT", "/api/admin/mail", permAdmin, true, http.HandlerFunc(onboardH.PutMail)},
+		{"POST", "/api/admin/mail/test", permAdmin, false, http.HandlerFunc(onboardH.TestMail)},
+		{"DELETE", "/api/admin/users/{id}", permAdmin, true, http.HandlerFunc(adminH.DeleteUser)},
+		{"GET", "/api/admin/systems/{id}/deliveries", permRead, false, http.HandlerFunc(adminH.ListSyncDeliveries)},
+		{"POST", "/api/admin/systems/{id}/deliveries/{token}/read-back", permAdmin, false, http.HandlerFunc(adminH.ReadBackSyncDelivery)},
+		{"POST", "/api/admin/systems/{id}/deliveries/{token}/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeSyncDelivery)},
+		{"GET", "/api/admin/systems/{id}/provisioning", permRead, false, http.HandlerFunc(adminH.ListProvisioningState)},
+		{"POST", "/api/admin/systems/{id}/provisioning/{userId}/retry", permAdmin, false, http.HandlerFunc(adminH.RetryProvisioning)},
+		{"GET", "/api/admin/systems/{id}/reconcile", permRead, false, http.HandlerFunc(adminH.ListReconcileJobs)},
+		{"POST", "/api/admin/systems/{id}/reconcile/preview", permAdmin, false, adminH.startReconcile("preview")},
+		{"POST", "/api/admin/systems/{id}/reconcile/repair", permAdmin, true, adminH.startReconcile("repair")},
+		{"GET", "/api/admin/systems", permRead, false, http.HandlerFunc(adminH.ListPairedSystems)},
+		{"PUT", "/api/admin/systems/{id}/connection", permAdmin, true, http.HandlerFunc(adminH.ConfigureSystem)},
+		{"POST", "/api/admin/systems/{id}/test", permAdmin, false, http.HandlerFunc(adminH.TestSystem)},
+		{"POST", "/api/admin/systems", permAdmin, true, http.HandlerFunc(adminH.CreatePairedSystem)},
+		{"POST", "/api/admin/systems/{id}/resync", permAdmin, false, http.HandlerFunc(adminH.ResyncSystem)},
+		{"DELETE", "/api/admin/systems/{id}", permAdmin, true, http.HandlerFunc(adminH.DeletePairedSystem)},
+		{"GET", "/api/admin/clients", permRead, false, http.HandlerFunc(adminH.ListOAuthClients)},
+		{"POST", "/api/admin/clients", permAdmin, true, http.HandlerFunc(adminH.CreateOAuthClient)},
+		{"PUT", "/api/admin/clients/{id}", permAdmin, true, http.HandlerFunc(adminH.UpdateOAuthClient)},
+		{"DELETE", "/api/admin/clients/{id}", permAdmin, true, http.HandlerFunc(adminH.DeleteOAuthClient)},
+		{"PUT", "/api/admin/clients/{id}/launcher", permAdmin, false, http.HandlerFunc(adminH.UpdateClientLauncher)},
+		{"GET", "/api/admin/app-registry/{id}/access-users", permAppRead, false, http.HandlerFunc(adminH.ListAppAccessUsers)},
+		{"GET", "/api/admin/app-registry/{id}/access-groups", permAppRead, false, http.HandlerFunc(adminH.ListAppAccessGroups)},
+		{"PUT", "/api/admin/app-registry/{id}/access-policy", permAdmin, true, http.HandlerFunc(adminH.SetAppPolicy)},
+		{"PUT", "/api/admin/app-registry/{id}/assignments/{kind}/{principal}", permAppGrants, true, http.HandlerFunc(adminH.SetAppAssignment)},
+		{"DELETE", "/api/admin/app-registry/{id}/assignments/{kind}/{principal}", permAppGrants, true, http.HandlerFunc(adminH.SetAppAssignment)},
+		{"PUT", "/api/admin/app-registry/{id}/authentication-policy", permAdmin, true, http.HandlerFunc(adminH.SetAppAuthenticationPolicy)},
+		{"GET", "/api/admin/app-registry", permDirectory, false, http.HandlerFunc(adminH.ListAppRecords)},
+		{"POST", "/api/admin/app-registry/{id}/link", permAdmin, true, http.HandlerFunc(adminH.LinkAppRecords)},
+		{"POST", "/api/admin/app-registry/{id}/unlink", permAdmin, true, http.HandlerFunc(adminH.UnlinkAppRecord)},
+		{"GET", "/api/admin/applications", permRead, false, http.HandlerFunc(adminH.ListApplications)},
+		{"POST", "/api/admin/applications", permAdmin, false, http.HandlerFunc(adminH.CreateApplication)},
+		{"PUT", "/api/admin/applications/{id}", permAdmin, false, http.HandlerFunc(adminH.UpdateApplication)},
+		{"DELETE", "/api/admin/applications/{id}", permAdmin, false, http.HandlerFunc(adminH.DeleteApplication)},
+		{"POST", "/api/admin/icons", permAdmin, false, s.middleware.RateLimit("icon_upload", 20, 0.1)(http.HandlerFunc(adminH.UploadIcon))},
+		{"GET", "/api/admin/audit-events", permRead, false, http.HandlerFunc(adminH.ListAuditEvents)},
+		{"POST", "/api/admin/backup/drill", permAdmin, false, http.HandlerFunc(backupH.RunDrill)},
+		{"GET", "/api/admin/backup/export-capsule", permAdmin, true, http.HandlerFunc(backupH.ExportCapsule)},
+		{"POST", "/api/admin/backup/pair-remote", permAdmin, true, http.HandlerFunc(backupH.PairRemote)},
+		{"POST", "/api/admin/backup/deposit", permAdmin, true, http.HandlerFunc(backupH.Deposit)},
+		{"DELETE", "/api/admin/backup/pairing", permAdmin, true, http.HandlerFunc(backupH.Unpair)},
+		{"POST", "/api/admin/backup/pin-key", permAdmin, true, http.HandlerFunc(backupH.PinKey)},
+		{"PUT", "/api/admin/backup/schedule", permAdmin, true, http.HandlerFunc(backupH.SetSchedule)},
+		{"GET", "/api/admin/backup/status", permRead, false, http.HandlerFunc(backupH.Status)},
+		{"GET", "/api/admin/users/{id}/delegations", permAdmin, false, http.HandlerFunc(adminH.GetDelegations)},
+		{"PUT", "/api/admin/users/{id}/delegations", permAdmin, true, http.HandlerFunc(adminH.SetDelegations)},
 	}
-
-	mux.Handle("GET /api/admin/enrollment-policies", adminM(http.HandlerFunc(adminH.ListEnrollmentPolicies)))
-	mux.Handle("POST /api/admin/enrollment-policies/preview", adminM(http.HandlerFunc(adminH.PreviewEnrollmentPolicy)))
-	mux.Handle("PUT /api/admin/enrollment-policies", adminStepUpM(http.HandlerFunc(adminH.SetEnrollmentPolicy)))
-	mux.Handle("GET /api/admin/groups", adminM(http.HandlerFunc(adminH.ListGroups)))
-	mux.Handle("POST /api/admin/groups", adminStepUpM(http.HandlerFunc(adminH.CreateGroup)))
-	mux.Handle("PUT /api/admin/groups/{id}", adminStepUpM(http.HandlerFunc(adminH.UpdateGroup)))
-	mux.Handle("DELETE /api/admin/groups/{id}", adminStepUpM(http.HandlerFunc(adminH.DeleteGroup)))
-	mux.Handle("GET /api/admin/groups/{id}/members", adminM(http.HandlerFunc(adminH.ListGroupUsers)))
-	mux.Handle("PUT /api/admin/groups/{id}/members/{userId}", adminStepUpM(http.HandlerFunc(adminH.SetGroupMembership)))
-	mux.Handle("DELETE /api/admin/groups/{id}/members/{userId}", adminStepUpM(http.HandlerFunc(adminH.SetGroupMembership)))
-
-	mux.Handle("GET /api/admin/users", adminM(http.HandlerFunc(adminH.ListUsers)))
-	mux.Handle("POST /api/admin/users", adminStepUpM(http.HandlerFunc(adminH.CreateUser)))
-	mux.Handle("PUT /api/admin/users/{id}", adminStepUpM(http.HandlerFunc(adminH.UpdateUser)))
-	mux.Handle("POST /api/admin/users/{id}/reset-mfa", adminStepUpM(http.HandlerFunc(adminH.ResetUserMFA)))
-	mux.Handle("POST /api/admin/users/{id}/revoke-sessions", adminM(http.HandlerFunc(adminH.RevokeUserSessions)))
-	mux.Handle("GET /api/admin/users/{id}/sessions", adminM(http.HandlerFunc(sessH.AdminList)))
-	mux.Handle("DELETE /api/admin/users/{id}/sessions/{sid}", adminM(http.HandlerFunc(sessH.AdminRevokeSession)))
-	mux.Handle("POST /api/admin/users/{id}/apps/{clientId}/revoke", adminM(http.HandlerFunc(sessH.AdminRevokeApp)))
-	mux.Handle("POST /api/admin/users/{id}/logouts/{deliveryId}/retry", adminM(http.HandlerFunc(sessH.AdminRetryLogout)))
-	mux.Handle("GET /api/admin/users/{id}/offboarding", adminM(http.HandlerFunc(adminH.UserOffboarding)))
-	mux.Handle("POST /api/admin/users/{id}/activation-link", adminStepUpM(onboardH.AdminIssueLink("activation")))
-	mux.Handle("POST /api/admin/users/{id}/reset-link", adminStepUpM(onboardH.AdminIssueLink("reset")))
-	mux.Handle("GET /api/admin/app-registry/{id}/roles", adminM(http.HandlerFunc(adminH.ListAppRoles)))
-	mux.Handle("POST /api/admin/app-registry/{id}/roles", adminStepUpM(http.HandlerFunc(adminH.CreateAppRole)))
-	mux.Handle("DELETE /api/admin/app-registry/{id}/roles/{roleId}", adminStepUpM(http.HandlerFunc(adminH.DeleteAppRole)))
-	mux.Handle("PUT /api/admin/app-registry/{id}/roles/{roleId}/assignments/{kind}/{principal}", adminStepUpM(http.HandlerFunc(adminH.SetAppRoleAssignment)))
-	mux.Handle("DELETE /api/admin/app-registry/{id}/roles/{roleId}/assignments/{kind}/{principal}", adminStepUpM(http.HandlerFunc(adminH.SetAppRoleAssignment)))
-	mux.Handle("PUT /api/admin/app-registry/{id}/claims", adminStepUpM(http.HandlerFunc(adminH.SetAppClaimSettings)))
-	mux.Handle("GET /api/admin/scim-connectors", adminM(http.HandlerFunc(scimH.AdminList)))
-	mux.Handle("POST /api/admin/scim-connectors", adminStepUpM(http.HandlerFunc(scimH.AdminCreate)))
-	mux.Handle("PUT /api/admin/scim-connectors/{id}", adminStepUpM(http.HandlerFunc(scimH.AdminUpdate)))
-	mux.Handle("POST /api/admin/scim-connectors/{id}/tokens", adminStepUpM(http.HandlerFunc(scimH.AdminIssueToken)))
-	mux.Handle("DELETE /api/admin/scim-connectors/{id}/tokens/{tokenId}", adminM(http.HandlerFunc(scimH.AdminRevokeToken)))
-	mux.Handle("DELETE /api/admin/scim-connectors/{id}", adminStepUpM(http.HandlerFunc(scimH.AdminDelete)))
+	for _, rt := range s.adminRoutes {
+		mux.Handle(rt.method+" "+rt.path, s.require(rt.perm, rt.stepUp, rt.h))
+	}
+	mux.Handle("GET /api/icons/{id}", authM(http.HandlerFunc(adminH.ServeIcon)))
 
 	// Inbound SCIM: Bearer connector tokens only, never cookies. Discovery is readable
 	// with any live token; Users need write scope to change anything.
@@ -255,61 +301,6 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("PUT /scim/v2/Groups/{id}", scimH.Authenticate(true, scimH.ReplaceGroup))
 	mux.Handle("PATCH /scim/v2/Groups/{id}", scimH.Authenticate(true, scimH.PatchGroup))
 	mux.Handle("DELETE /scim/v2/Groups/{id}", scimH.Authenticate(true, scimH.DeleteGroup))
-
-	mux.Handle("GET /api/admin/mail", adminM(http.HandlerFunc(onboardH.GetMail)))
-	mux.Handle("PUT /api/admin/mail", adminStepUpM(http.HandlerFunc(onboardH.PutMail)))
-	mux.Handle("POST /api/admin/mail/test", adminM(http.HandlerFunc(onboardH.TestMail)))
-	mux.Handle("DELETE /api/admin/users/{id}", adminStepUpM(http.HandlerFunc(adminH.DeleteUser)))
-
-	mux.Handle("GET /api/admin/systems/{id}/deliveries", adminM(http.HandlerFunc(adminH.ListSyncDeliveries)))
-	mux.Handle("POST /api/admin/systems/{id}/deliveries/{token}/read-back", adminM(http.HandlerFunc(adminH.ReadBackSyncDelivery)))
-	mux.Handle("POST /api/admin/systems/{id}/deliveries/{token}/resume", adminStepUpM(http.HandlerFunc(adminH.ResumeSyncDelivery)))
-	mux.Handle("GET /api/admin/systems/{id}/provisioning", adminM(http.HandlerFunc(adminH.ListProvisioningState)))
-	mux.Handle("POST /api/admin/systems/{id}/provisioning/{userId}/retry", adminM(http.HandlerFunc(adminH.RetryProvisioning)))
-	mux.Handle("GET /api/admin/systems/{id}/reconcile", adminM(http.HandlerFunc(adminH.ListReconcileJobs)))
-	mux.Handle("POST /api/admin/systems/{id}/reconcile/preview", adminM(adminH.startReconcile("preview")))
-	mux.Handle("POST /api/admin/systems/{id}/reconcile/repair", adminStepUpM(adminH.startReconcile("repair")))
-	mux.Handle("GET /api/admin/systems", adminM(http.HandlerFunc(adminH.ListPairedSystems)))
-	mux.Handle("PUT /api/admin/systems/{id}/connection", adminStepUpM(http.HandlerFunc(adminH.ConfigureSystem)))
-	mux.Handle("POST /api/admin/systems/{id}/test", adminM(http.HandlerFunc(adminH.TestSystem)))
-	mux.Handle("POST /api/admin/systems", adminStepUpM(http.HandlerFunc(adminH.CreatePairedSystem)))
-	mux.Handle("POST /api/admin/systems/{id}/resync", adminM(http.HandlerFunc(adminH.ResyncSystem)))
-	mux.Handle("DELETE /api/admin/systems/{id}", adminStepUpM(http.HandlerFunc(adminH.DeletePairedSystem)))
-
-	mux.Handle("GET /api/admin/clients", adminM(http.HandlerFunc(adminH.ListOAuthClients)))
-	mux.Handle("POST /api/admin/clients", adminStepUpM(http.HandlerFunc(adminH.CreateOAuthClient)))
-	mux.Handle("PUT /api/admin/clients/{id}", adminStepUpM(http.HandlerFunc(adminH.UpdateOAuthClient)))
-	mux.Handle("DELETE /api/admin/clients/{id}", adminStepUpM(http.HandlerFunc(adminH.DeleteOAuthClient)))
-	// Launcher presentation only. Deliberately outside the step-up gate; see UpdateClientLauncher.
-	mux.Handle("PUT /api/admin/clients/{id}/launcher", adminM(http.HandlerFunc(adminH.UpdateClientLauncher)))
-
-	mux.Handle("GET /api/admin/app-registry/{id}/access-users", adminM(http.HandlerFunc(adminH.ListAppAccessUsers)))
-	mux.Handle("GET /api/admin/app-registry/{id}/access-groups", adminM(http.HandlerFunc(adminH.ListAppAccessGroups)))
-	mux.Handle("PUT /api/admin/app-registry/{id}/access-policy", adminStepUpM(http.HandlerFunc(adminH.SetAppPolicy)))
-	mux.Handle("PUT /api/admin/app-registry/{id}/assignments/{kind}/{principal}", adminStepUpM(http.HandlerFunc(adminH.SetAppAssignment)))
-	mux.Handle("DELETE /api/admin/app-registry/{id}/assignments/{kind}/{principal}", adminStepUpM(http.HandlerFunc(adminH.SetAppAssignment)))
-	mux.Handle("PUT /api/admin/app-registry/{id}/authentication-policy", adminStepUpM(http.HandlerFunc(adminH.SetAppAuthenticationPolicy)))
-	mux.Handle("GET /api/admin/app-registry", adminM(http.HandlerFunc(adminH.ListAppRecords)))
-	mux.Handle("POST /api/admin/app-registry/{id}/link", adminStepUpM(http.HandlerFunc(adminH.LinkAppRecords)))
-	mux.Handle("POST /api/admin/app-registry/{id}/unlink", adminStepUpM(http.HandlerFunc(adminH.UnlinkAppRecord)))
-	mux.Handle("GET /api/admin/applications", adminM(http.HandlerFunc(adminH.ListApplications)))
-	mux.Handle("POST /api/admin/applications", adminM(http.HandlerFunc(adminH.CreateApplication)))
-	mux.Handle("PUT /api/admin/applications/{id}", adminM(http.HandlerFunc(adminH.UpdateApplication)))
-	mux.Handle("DELETE /api/admin/applications/{id}", adminM(http.HandlerFunc(adminH.DeleteApplication)))
-	mux.Handle("POST /api/admin/icons", adminM(s.middleware.RateLimit("icon_upload", 20, 0.1)(http.HandlerFunc(adminH.UploadIcon))))
-	mux.Handle("GET /api/icons/{id}", authM(http.HandlerFunc(adminH.ServeIcon)))
-
-	mux.Handle("GET /api/admin/audit-events", adminM(http.HandlerFunc(adminH.ListAuditEvents)))
-	mux.Handle("POST /api/admin/backup/drill", adminM(http.HandlerFunc(backupH.RunDrill)))
-	// The capsule carries the whole identity directory and its keys, sealed to the suite
-	// recovery key; exporting it, pairing, and depositing each spend a step-up grant.
-	mux.Handle("GET /api/admin/backup/export-capsule", adminStepUpM(http.HandlerFunc(backupH.ExportCapsule)))
-	mux.Handle("POST /api/admin/backup/pair-remote", adminStepUpM(http.HandlerFunc(backupH.PairRemote)))
-	mux.Handle("POST /api/admin/backup/deposit", adminStepUpM(http.HandlerFunc(backupH.Deposit)))
-	mux.Handle("DELETE /api/admin/backup/pairing", adminStepUpM(http.HandlerFunc(backupH.Unpair)))
-	mux.Handle("POST /api/admin/backup/pin-key", adminStepUpM(http.HandlerFunc(backupH.PinKey)))
-	mux.Handle("PUT /api/admin/backup/schedule", adminStepUpM(http.HandlerFunc(backupH.SetSchedule)))
-	mux.Handle("GET /api/admin/backup/status", adminM(http.HandlerFunc(backupH.Status)))
 
 	// Static CSS & Fonts from filesystem if present
 	cssDir := http.Dir("./css")

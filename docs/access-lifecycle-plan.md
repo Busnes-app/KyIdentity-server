@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/app-roles)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/delegated-admin)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -25,8 +25,10 @@ acknowledgement, contradicting listings, wire shape, pruning, untracked holders)
 rounds (atomic upstream writes, identifier shadowing, last-admin on disconnect, stale
 local copies, activation following source state). PR15 (inbound SCIM Groups and
 operational setup) merged as GitHub PR #47 after one review round. PR16 (app roles and
-bounded claim mappings) is implemented on feat/app-roles. PRs 17–23 and D1–D4 remain
-planned. Note for D1–D4: released
+bounded claim mappings) merged as GitHub PR #48 after four review rounds (membership
+changes as role changes, explicit empty roles end to end, first/last role re-push,
+completion status on the SCIM replace). PR17 (delegated administration) is in progress on
+feat/delegated-admin. PRs 18–23 and D1–D4 remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -611,6 +613,18 @@ Depends on: 02, 04, 12, 16. Touch: API permissions, store role bindings, admin n
 Acceptance: a permission matrix covers every admin route; guessed IDs and direct calls
 cannot cross scope; helpdesk cannot reset a global admin; demotion takes effect without
 requiring the old session to expire; the final admin invariant still holds.
+
+Implementation: `admin_delegations` (helpdesk, auditor, app owner per app record) set
+only by global administrators with step-up and an atomic audit row; the global
+`users.role` is untouched, so the last-administrator invariant is unchanged. Every admin
+route is a table row naming one of seven fixed permissions; `require` computes access
+from the users row and delegation rows on each request, so a demotion or removed
+delegation is refused on the next call. Helpdesk recovery routes refuse administrator
+targets; app-owner routes are scoped to the path's app and the app list is narrowed to
+owned apps. `TestPermissionMatrixCoversEveryAdminRoute` exercises all 82 routes with
+six actor kinds, cross-app ownership and immediate revocation. Users → delegation
+editor in the SPA; navigation follows the `access` block from `/api/auth/me`.
+README.md "Delegated administration".
 
 ### PR 18 — Expiring access and account end dates
 

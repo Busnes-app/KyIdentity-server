@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -103,9 +103,21 @@ function list<T>(value: unknown, parse: (item: unknown) => T): T[] {
   return arr(value, 'an array').map(parse);
 }
 
+export function parseAccess(value: unknown): Access {
+  const o = obj(value, 'an access object');
+  return { admin: requiredBool(o, 'admin'), helpdesk: requiredBool(o, 'helpdesk'), auditor: requiredBool(o, 'auditor'), appOwner: strArray(o.appOwner) };
+}
+
+export function parseDelegations(value: unknown): Delegations {
+  const o = obj(value, 'a delegations response');
+  const d = obj(o.delegations, 'a delegations object');
+  return { helpdesk: requiredBool(d, 'helpdesk'), auditor: requiredBool(d, 'auditor'), appOwner: strArray(d.appOwner) };
+}
+
 export function parseUser(value: unknown): User {
   const o = obj(value, 'a user object');
   return {
+    access: o.access === undefined ? undefined : parseAccess(o.access),
     enrollment: o.enrollment === undefined ? undefined : parseEnrollmentStatus(o.enrollment),
     id: str(o, 'id'),
     username: str(o, 'username'),

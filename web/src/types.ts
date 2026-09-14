@@ -2,7 +2,16 @@ export interface EnrollmentStatus { required: boolean; allowedMethods: string[];
 export interface EnrollmentPolicy { scope: 'organization' | 'administrators' | `group:${string}`; required: boolean; allowedMethods: string[]; graceSeconds: number; revision: number }
 export interface EnrollmentPreview { affected: number; missingFactor: number; restrictedSessions: number; canActivate: boolean }
 
+/** What the signed-in user may administer, computed by the server on every request. */
+export interface Access { admin: boolean; helpdesk: boolean; auditor: boolean; appOwner: string[] }
+export interface Delegations { helpdesk: boolean; auditor: boolean; appOwner: string[] }
+
+export function canAdminister(a: Access | undefined): boolean {
+  return Boolean(a && (a.admin || a.helpdesk || a.auditor || a.appOwner.length > 0));
+}
+
 export interface User {
+  access?: Access;
   enrollment?: EnrollmentStatus;
   id: string;
   username: string;

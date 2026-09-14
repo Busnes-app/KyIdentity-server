@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { User } from './types';
+import { User, canAdminister } from './types';
 import { apiJson, apiRequest } from './api';
 import { parseMe } from './parsers';
 import { Sidebar } from './components/Sidebar';
@@ -106,10 +106,10 @@ export const App: React.FC = () => {
 
         {activeTab === 'appearance' && <Appearance />}
 
-        {currentUser.role === 'admin' && (
+        {canAdminister(currentUser.access) && (
           <>
             {activeTab === 'admin-enrollment' && <AdminEnrollmentPolicies />}
-            {activeTab === 'admin-users' && <AdminUsers onManageGroups={user => { setGroupUser(user); setActiveTab('admin-groups'); }} />}
+            {activeTab === 'admin-users' && <AdminUsers access={currentUser.access} onManageGroups={user => { setGroupUser(user); setActiveTab('admin-groups'); }} />}
             {activeTab === 'admin-groups' && <AdminGroups key={groupUser?.id ?? 'all'} user={groupUser} onClearUser={() => setGroupUser(null)} />}
             {activeTab === 'admin-app-registry' && <AdminAppRegistry onManageLaunchers={() => setActiveTab('admin-launchers')} />}
             {activeTab === 'admin-launchers' && <UserDashboard key="manage-launchers" manage user={currentUser} onNavigateToDevices={() => setActiveTab('devices')} />}
