@@ -720,14 +720,16 @@ func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepar
 		u.ApplySourceState()
 	}
 	oldRole, oldStatus, oldEmail := current.Role, current.Status, current.Email
-	// A back-dated end is not a schedule; it is refused like any past instant.
-	if u.EndsAt != nil && (current.EndsAt == nil || !u.EndsAt.Equal(*current.EndsAt)) {
+	// A newly set end date is a schedule: it must lie ahead, and scheduling the last
+	// administrator's end is refused like removing them would be. An end date the row
+	// already carries is left alone so the account stays editable.
+	schedulingEnd := u.EndsAt != nil && (current.EndsAt == nil || !u.EndsAt.Equal(*current.EndsAt))
+	if schedulingEnd {
 		if err := checkExpiry(u.EndsAt, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
-	// Scheduling the last administrator's end is refused like removing them would be.
-	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active" || u.EndsAt != nil) {
+	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active" || schedulingEnd) {
 		var admins int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
 			return err

@@ -370,3 +370,37 @@ func TestAccessEndsAtFollowsTheUnion(t *testing.T) {
 		t.Fatalf("account end date not applied: %v", end)
 	}
 }
+
+// An end date the row already carries is not a new schedule: the sole remaining
+// administrator with one stays editable, and only a fresh schedule trips the guard.
+func TestUnchangedScheduleDoesNotTripTheGuard(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	first, second := createTestUserNamed(t, s, "first"), createTestUserNamed(t, s, "second")
+	for _, a := range []*User{first, second} {
+		a.Role = "admin"
+		if err := s.UpdateUserWithSyncEvents(a, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first.EndsAt = future(time.Hour)
+	if err := s.UpdateUserWithSyncEvents(first, false, nil); err != nil {
+		t.Fatalf("scheduling one of two administrators: %v", err)
+	}
+	second.Role = "user"
+	if err := s.UpdateUserWithSyncEvents(second, false, nil); err != nil {
+		t.Fatalf("demoting the unscheduled administrator: %v", err)
+	}
+	stored, _ := s.GetUserByID(first.ID)
+	stored.DisplayName = "Renamed"
+	if err := s.UpdateUserWithSyncEvents(stored, false, nil); err != nil {
+		t.Fatalf("editing the scheduled sole administrator: %v", err)
+	}
+	if again, _ := s.GetUserByID(first.ID); again.DisplayName != "Renamed" || again.EndsAt == nil || !again.EndsAt.Equal(*first.EndsAt) {
+		t.Fatalf("edit lost the schedule: %+v", again)
+	}
+	stored.EndsAt = future(2 * time.Hour)
+	if err := s.UpdateUserWithSyncEvents(stored, false, nil); !errors.Is(err, ErrLastActiveAdmin) {
+		t.Fatalf("new schedule on the sole administrator accepted: %v", err)
+	}
+}

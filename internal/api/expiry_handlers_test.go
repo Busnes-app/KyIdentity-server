@@ -88,6 +88,27 @@ func TestExpiringAccessAdminAPI(t *testing.T) {
 	if users := adminRequestWithStepUp(t, srv, "GET", "/api/admin/users", admin, "", ""); strings.Contains(users.Body.String(), `"endsAt"`) {
 		t.Fatal("end date survived being cleared")
 	}
+	// An ended account re-submitting its stored past instant stays editable; a
+	// different past instant is still refused.
+	soon := time.Now().UTC().Add(2 * time.Second).Truncate(time.Second)
+	stored := soon.Format(time.RFC3339)
+	if res := adminRequest(t, srv, "PUT", userPath, admin, `{"displayName":"`+u.DisplayName+`","email":"`+u.Email+`","role":"user","status":"active","endsAt":"`+stored+`"}`); res.Code != http.StatusOK {
+		t.Fatalf("near end date: %d %s", res.Code, res.Body.String())
+	}
+	time.Sleep(time.Until(soon) + 1500*time.Millisecond)
+	ended, _ := db.GetUserByID(u.ID)
+	if ended.Status != "disabled" {
+		t.Fatalf("account past its end still reads %s", ended.Status)
+	}
+	if res := adminRequest(t, srv, "PUT", userPath, admin, `{"displayName":"Ended","email":"`+u.Email+`","role":"user","status":"disabled","endsAt":"`+stored+`"}`); res.Code != http.StatusOK {
+		t.Fatalf("editing an ended account with its stored instant: %d %s", res.Code, res.Body.String())
+	}
+	if after, _ := db.GetUserByID(u.ID); after.DisplayName != "Ended" || after.EndsAt == nil || !after.EndsAt.Equal(*ended.EndsAt) {
+		t.Fatalf("edit changed the stored instant: %+v", after)
+	}
+	if res := adminRequest(t, srv, "PUT", userPath, admin, `{"displayName":"Ended","email":"`+u.Email+`","role":"user","status":"disabled","endsAt":"`+past+`"}`); res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "expiry_in_past") {
+		t.Fatalf("different past instant accepted: %d %s", res.Code, res.Body.String())
+	}
 	// The last administrator cannot be scheduled to end.
 	if res := adminRequest(t, srv, "PUT", "/api/admin/users/"+me.ID, admin, `{"displayName":"`+me.DisplayName+`","email":"`+me.Email+`","role":"admin","status":"active","endsAt":"`+future+`"}`); res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "cannot_remove_last_admin") {
 		t.Fatalf("last admin scheduled: %d %s", res.Code, res.Body.String())
