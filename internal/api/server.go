@@ -251,6 +251,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/systems/{id}/test", permAdmin, false, http.HandlerFunc(adminH.TestSystem)},
 		{"POST", "/api/admin/systems", permAdmin, true, http.HandlerFunc(adminH.CreatePairedSystem)},
 		{"POST", "/api/admin/systems/{id}/resync", permAdmin, false, http.HandlerFunc(adminH.ResyncSystem)},
+		{"POST", "/api/admin/systems/{id}/provisioning/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeProvisioning)},
 		{"DELETE", "/api/admin/systems/{id}", permAdmin, true, http.HandlerFunc(adminH.DeletePairedSystem)},
 		{"GET", "/api/admin/clients", permRead, false, http.HandlerFunc(adminH.ListOAuthClients)},
 		{"POST", "/api/admin/clients", permAdmin, true, http.HandlerFunc(adminH.CreateOAuthClient)},
