@@ -149,6 +149,11 @@ describe('parsePairedSystems', () => {
     expect(parsePairedSystems({ systems: [{ ...system, groupsEnabled: true }] })[0].groupsEnabled).toBe(true);
   });
 
+  it('defaults provisioningHold to false, and reads a connector held after a restore', () => {
+    expect(parsePairedSystems({ systems: [system] })[0].provisioningHold).toBe(false);
+    expect(parsePairedSystems({ systems: [{ ...system, provisioningHold: true }] })[0].provisioningHold).toBe(true);
+  });
+
   it('defaults reconcileHours to 0 and refuses negative or fractional values', () => {
     expect(parsePairedSystems({ systems: [system] })[0].reconcileHours).toBe(0);
     expect(parsePairedSystems({ systems: [{ ...system, reconcileHours: 24 }] })[0].reconcileHours).toBe(24);

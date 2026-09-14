@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/alerts)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/release-verify)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -37,8 +37,12 @@ authentication decisions) merged as GitHub PR #52 after one review round (unifor
 user-facing denial with a rate limit, roles named only via assigned groups). PR21 (audit
 search and export) merged as GitHub PR #53 after two review rounds (in-band incomplete
 marker, deadline-aware queries, intent row before the first byte, row bound detected
-from the stream). PR22 (actionable security and provisioning alerts) is open on
-feat/alerts. PR23 and D1–D4 remain planned. Note for D1–D4: released
+from the stream). PR22 (actionable security and provisioning alerts) merged as GitHub
+PR #54 after three review rounds (login alerts keyed by account or source rather than
+the submitted name, alerts on their own goroutine under a pass budget, retention for
+alerts and deliveries, login mail capped per rule per cooldown). PR23 (upgrade, restore
+and end-to-end release verification) is next, on feat/release-verify. D1–D4 remain
+planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -807,6 +811,23 @@ Depends on: 01–22 and D1–D4. Touch: migrations/tests, existing backup drill 
 Acceptance: restored policy and ownership are intact; stale secrets/grants cannot log in;
 restored queues cannot re-enable a departed user; all release scenarios pass through
 real HTTP routes and all four adopted products.
+
+Implementation: `TestUpgradeFromPreFeatureDatabase` migrates a pre-feature database
+(sessions, clients, launcher apps, queued deliveries, outbox still foreign-keyed to
+users) twice, and compares schema fingerprints with a fresh install; it found and fixed
+a real defect, a second migration resurrecting the pre-group `scim_remote_user` index
+and with it a uniqueness rule that refuses a group and a user sharing a remote id.
+`kysignon restore` writes a restore marker; the next start invalidates the capsule's
+sessions, tokens, links, challenges and queued logouts, closes out the queued outbound
+deliveries, holds provisioning per connector and audits `system.restored` in the same
+transaction. A held connector delivers nothing until a repair reconciliation releases
+it; a preview or a failed run does not. The drill now checks policy, groups, app
+linkage, remote mappings, job state and the encrypted relay configuration.
+`docs/RUNBOOKS.md` covers app policy migration, SCIM setup, emergency administrator
+recovery, offboarding failure, restore reconciliation and downstream limitations;
+`docs/RELEASE-EVIDENCE.md` records suite versions, the automated evidence and the gates
+that stay open. Not done: the external gates (relying parties, upstream tenant,
+D1–D4, custodian ceremony) are named as open rather than claimed from fixtures.
 
 ## Dependency and delivery strategy
 

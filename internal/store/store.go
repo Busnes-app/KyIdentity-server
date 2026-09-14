@@ -407,7 +407,10 @@ func (s *Store) migrate() error {
 	if err := s.migrateReconcile(); err != nil {
 		return err
 	}
-	return s.migrateAlerts()
+	if err := s.migrateAlerts(); err != nil {
+		return err
+	}
+	return s.migrateRestoreHold()
 }
 
 // migrateSyncEventLease adds the delivery lease column to pre-existing databases.
@@ -1014,9 +1017,9 @@ func (s *Store) CreatePairedSystem(ps *PairedSystem) error {
 }
 
 func (s *Store) GetPairedSystemByID(id string) (*PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems WHERE id = ?`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours, provisioning_hold FROM paired_systems WHERE id = ?`
 	ps := &PairedSystem{}
-	err := s.db.QueryRow(query, id).Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours)
+	err := s.db.QueryRow(query, id).Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours, &ps.ProvisioningHold)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1024,7 +1027,7 @@ func (s *Store) GetPairedSystemByID(id string) (*PairedSystem, error) {
 }
 
 func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems ORDER BY created_at ASC`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours, provisioning_hold FROM paired_systems ORDER BY created_at ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -1034,7 +1037,7 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 	var systems []PairedSystem
 	for rows.Next() {
 		var ps PairedSystem
-		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours); err != nil {
+		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours, &ps.ProvisioningHold); err != nil {
 			return nil, err
 		}
 		systems = append(systems, ps)
@@ -1043,7 +1046,7 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 }
 
 func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems WHERE status != 'disabled' ORDER BY created_at ASC`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours, provisioning_hold FROM paired_systems WHERE status != 'disabled' ORDER BY created_at ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -1053,7 +1056,7 @@ func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
 	var systems []PairedSystem
 	for rows.Next() {
 		var ps PairedSystem
-		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours); err != nil {
+		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours, &ps.ProvisioningHold); err != nil {
 			return nil, err
 		}
 		systems = append(systems, ps)
@@ -1156,7 +1159,8 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
             WHERE older.system_id=account_sync_events.system_id AND older.user_id=account_sync_events.user_id
             AND older.status='pending' AND older.attempts<5 AND older.rowid<account_sync_events.rowid)
           AND NOT EXISTS (SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id
-            AND (p.status='disabled' OR p.system_type NOT IN ('scim','suite_webhook','kypost','kypasswords','kybookmarks','kynotes')))
+            AND (p.status='disabled' OR p.provisioning_hold
+             OR p.system_type NOT IN ('scim','suite_webhook','kypost','kypasswords','kybookmarks','kynotes')))
 		  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 		  AND (lease_until IS NULL OR lease_until <= ?)
 		ORDER BY created_at ASC LIMIT ?`, now, now, limit)

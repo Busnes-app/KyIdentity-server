@@ -150,8 +150,17 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 			"sqlite_paths":           []string{dbRelPath},
 			"required_files":         reqFiles,
 			// The drill asserts these tables exist and the admin directory is non-empty.
-			// PRAGMA integrity_check only proves the file is not corrupt.
-			"required_tables":   []string{"users", "oauth_clients", "mfa_methods", "paired_systems"},
+			// PRAGMA integrity_check only proves the file is not corrupt. A restore that
+			// can authenticate but has lost policy, group membership, app linkage or the
+			// remote identity mappings is not a restore of this directory.
+			"required_tables": []string{
+				"users", "oauth_clients", "mfa_methods", "paired_systems",
+				"enrollment_policies", "directory_groups", "group_memberships",
+				"app_registry", "app_user_assignments", "app_group_assignments", "app_roles",
+				"admin_delegations", "access_requests",
+				"scim_connectors", "scim_user_links", "sync_resource_state", "sync_reconcile_jobs",
+				"audit_events", "alerts", "system_settings",
+			},
 			"require_any_admin": true,
 			// Proving the restored bytes are also usable: the encrypted columns still read
 			// and the service could issue a token.

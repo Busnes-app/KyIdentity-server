@@ -31,8 +31,7 @@ func (s *Store) migrateProvisioning() error {
 		{`SELECT COUNT(*) FROM pragma_table_info('paired_systems') WHERE name='groups_enabled'`, `ALTER TABLE paired_systems ADD COLUMN groups_enabled BOOLEAN NOT NULL DEFAULT 0`},
 		{`SELECT COUNT(*) FROM pragma_table_info('account_sync_events') WHERE name='revision'`, `ALTER TABLE account_sync_events ADD COLUMN revision INTEGER NOT NULL DEFAULT 0`},
 		{`SELECT COUNT(*) FROM pragma_table_info('scim_user_links') WHERE name='kind'`, `ALTER TABLE scim_user_links ADD COLUMN kind TEXT NOT NULL DEFAULT 'user';
- DROP INDEX IF EXISTS scim_remote_user;
- CREATE UNIQUE INDEX scim_remote_resource ON scim_user_links(system_id,kind,remote_id) WHERE remote_id<>''`},
+ CREATE UNIQUE INDEX IF NOT EXISTS scim_remote_resource ON scim_user_links(system_id,kind,remote_id) WHERE remote_id<>''`},
 		{`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sync_resource_state'`, `CREATE TABLE sync_resource_state (
  system_id TEXT NOT NULL REFERENCES paired_systems(id) ON DELETE CASCADE,
  resource_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'user',
@@ -54,6 +53,12 @@ func (s *Store) migrateProvisioning() error {
 				return err
 			}
 		}
+	}
+	// scim_remote_user predates group links and its uniqueness rule refuses a group and
+	// a user that share a remote id. Dropping it unconditionally repairs a database
+	// where an earlier start recreated it after the column probe had gone quiet.
+	if _, err = tx.Exec(`DROP INDEX IF EXISTS scim_remote_user`); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

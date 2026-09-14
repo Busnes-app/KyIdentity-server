@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -92,6 +93,11 @@ func main() {
 	}
 
 	auditLogger := audit.NewLogger(dbStore)
+	// A restored directory is applied before anything can authenticate against it or
+	// deliver from it.
+	if err := applyRestoreMarker(cfg.DataDir, dbStore, auditLogger); err != nil {
+		log.Fatalf("Applying the restored state failed, refusing to start: %v", err)
+	}
 	syncEngine := sync.NewEngine(dbStore, cfg.EncryptionKey)
 	mfaEngine := mfa.NewEngine(dbStore, cfg.EncryptionKey)
 	relaySender, err := mfa.NewRelaySender(
@@ -474,6 +480,63 @@ func stdinIsTerminal() bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
+// restoreMarkerName is dropped into the restored data directory by `kysignon restore`
+// and read once by the next start. It is the seam between unpacking a capsule and
+// putting it into service: the restore command cannot reach the running server, and the
+// server cannot otherwise tell a restored directory from the one it wrote itself.
+const restoreMarkerName = "restored.json"
+
+type restoreMarker struct {
+	Capsule    string    `json:"capsule"`
+	Service    string    `json:"service"`
+	RestoredAt time.Time `json:"restoredAt"`
+}
+
+// writeRestoreMarker records that this directory came out of a capsule. It holds no
+// secret: the capsule path, the service name and the time.
+func writeRestoreMarker(targetDir, capsulePath, service string) error {
+	body, err := json.Marshal(restoreMarker{Capsule: filepath.Base(capsulePath), Service: service, RestoredAt: time.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	dataDir := filepath.Join(targetDir, "data")
+	if _, err := os.Stat(dataDir); err != nil {
+		// A capsule that unpacked no data directory is not something to paper over.
+		return err
+	}
+	return os.WriteFile(filepath.Join(dataDir, restoreMarkerName), body, 0600)
+}
+
+// applyRestoreMarker invalidates the ephemeral credentials a restored snapshot carries
+// and holds outbound provisioning until each connector has been reconciled. The marker
+// is removed only after that has committed, so a crash midway repeats the work rather
+// than skipping it.
+func applyRestoreMarker(dataDir string, s *store.Store, auditLogger *audit.Logger) error {
+	path := filepath.Join(dataDir, restoreMarkerName)
+	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var marker restoreMarker
+	if err := json.Unmarshal(body, &marker); err != nil {
+		// An unreadable marker still means a restore happened. Apply it.
+		log.Printf("Restore marker at %s is unreadable (%v); applying the restore anyway", path, err)
+	}
+	event := auditLogger.Prepare("system.restored", "", "restore", "", "system", "", "", "success",
+		map[string]any{"capsule": marker.Capsule, "restoredAt": marker.RestoredAt})
+	report, err := s.ApplyRestoredState(time.Now().UTC(), event.Row)
+	if err != nil {
+		return err
+	}
+	event.Committed()
+	log.Printf("Restored directory applied: %d credential(s) invalidated, %d queued delivery/deliveries closed, provisioning held on %v until each is reconciled; review their stored credentials for rotation",
+		report.Credentials, report.QueuedDeliveries, report.Connectors)
+	return os.Remove(path)
+}
+
 // restore is the one place in this server that combines custodian shares and opens a capsule
 // sealed to the suite key; the decrypt guard test pins that.
 func restore(capsulePath, targetDir, expectService string, shares []string, stdout io.Writer) error {
@@ -515,4 +578,8 @@ func runRestore(args []string) {
 	if err := restore(*capsulePath, *target, *service, shares, os.Stdout); err != nil {
 		log.Fatalf("Restore: %v", err)
 	}
+	if err := writeRestoreMarker(*target, *capsulePath, *service); err != nil {
+		log.Fatalf("Restore unpacked but the restore marker could not be written (%v); the next start would treat the old sessions, tokens and queued deliveries as live", err)
+	}
+	fmt.Fprintln(os.Stdout, "Restored. On first start the server invalidates the sessions, tokens and invitations this capsule contains and holds outbound provisioning until each connector is reconciled.")
 }

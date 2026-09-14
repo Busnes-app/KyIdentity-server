@@ -509,6 +509,35 @@ deliveries are trimmed with the audit retention period; live alerts are kept wha
 their age. There is no second alert transport and no per-rule switch; the process log
 remains the place for external collection.
 
+## Upgrades and restores
+
+Upgrading is starting the new image on the existing data directory: migrations run at
+startup, identifiers are stable, and an app that existed before per-app access modes is
+marked `all_active_users` rather than quietly locked down, because that is what the old
+server did. Running the migrations again changes nothing, which is checked by comparing
+the schema of a twice-upgraded database with a fresh one.
+
+Restoring is two commands and one deliberate consequence. `kysignon restore -capsule
+<file> -to <dir>` unpacks a capsule (custodian shares on stdin, never argv) and marks
+the directory as restored. The next start reads that marker once and invalidates what
+the capsule carried: sessions, issued tokens, authorization codes and interactions,
+MFA and step-up challenges and grants, invitation and reset links, device pairing
+tokens, queued back-channel logouts and in-flight delivery fences. Queued outbound
+deliveries are closed out with a reason rather than sent, and outbound provisioning is
+held on every connector that is not disabled. A `system.restored` audit row records the
+counts, and the marker is removed only after that has committed, so an interrupted
+start repeats the work rather than skipping it.
+
+A held connector delivers nothing until a repair reconciliation has compared this
+directory with what is really on the far side; the Suite sync page shows the hold, a
+preview does not release it, and a failed run does not either. This is what stops a
+restored outbox from recreating accounts that have since left. Passwords, enrolled
+factors and recovery codes are in the capsule and keep working, so the restore runbook
+asks for connector credentials to be reviewed for rotation before delivery resumes.
+Procedures are in [docs/RUNBOOKS.md](docs/RUNBOOKS.md) and
+[docs/RESTORE.md](docs/RESTORE.md); what has and has not been verified for a release is
+in [docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md).
+
 ## Integration Requirements
 
 These rules are enforced strictly. Each is a constraint on how a client integrates.

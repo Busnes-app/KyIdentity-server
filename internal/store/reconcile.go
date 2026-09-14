@@ -211,6 +211,11 @@ func (s *Store) FinishReconcileJob(job *ReconcileJob, report *DriftReport, runEr
 	if n, _ := r.RowsAffected(); n != 1 {
 		return errors.New("reconciliation job changed")
 	}
+	if job.Kind == "repair" && runErr == nil {
+		if err := releaseProvisioningHoldTx(tx, job.SystemID); err != nil {
+			return err
+		}
+	}
 	if job.Kind == "repair" {
 		details := map[string]any{"jobId": job.ID, "requestedBy": job.RequestedBy, "status": status}
 		outcome := "success"

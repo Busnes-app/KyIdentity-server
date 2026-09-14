@@ -45,6 +45,8 @@ export interface PairedSystem {
   groupsEnabled: boolean;
   /** Scheduled repair interval; 0 = off. Only meaningful for SCIM. */
   reconcileHours: number;
+  /** Set by a restore: nothing is delivered until a repair reconciliation has run. */
+  provisioningHold: boolean;
 }
 
 export interface NativeDevice {

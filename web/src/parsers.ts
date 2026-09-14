@@ -337,6 +337,7 @@ export function parsePairedSystems(value: unknown): PairedSystem[] {
       lastSyncedAt: optStr(s, 'lastSyncedAt'),
       createdAt: optStr(s, 'createdAt') ?? '',
       groupsEnabled: bool(s, 'groupsEnabled'),
+      provisioningHold: bool(s, 'provisioningHold'),
       reconcileHours: s.reconcileHours === undefined ? 0 : directoryCount(s, 'reconcileHours'),
     };
   });

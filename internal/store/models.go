@@ -69,6 +69,9 @@ type PairedSystem struct {
 	GroupsEnabled bool `json:"groupsEnabled"`
 	// ReconcileHours schedules a repair reconciliation at this interval; 0 disables it.
 	ReconcileHours int `json:"reconcileHours"`
+	// ProvisioningHold stops outbound delivery until a repair reconciliation has
+	// compared this connector with what is really there. A restore sets it.
+	ProvisioningHold bool `json:"provisioningHold"`
 }
 
 type AccountSyncEvent struct {
