@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, OwnAccessRequests } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -575,12 +575,33 @@ export function parseAppRecord(value: unknown): AppRecord {
     groupsClaim: requiredBool(a, 'groupsClaim'),
     accessMode: oneOf(a, 'accessMode', ['all_active_users', 'assigned_only']),
     enabled: requiredBool(a, 'enabled'),
+    requestable: requiredBool(a, 'requestable'),
     clientId: str(a, 'clientId'), clientName: str(a, 'clientName'),
     launcherId: str(a, 'launcherId'), launcherName: str(a, 'launcherName'),
     systemId: str(a, 'systemId'), systemName: str(a, 'systemName'),
   };
   if (!record.id || (!record.clientId && !record.launcherId && !record.systemId)) return fail('an app with a connection');
   return record;
+}
+export function parseAccessRequest(value: unknown): AccessRequest {
+  const r = obj(value, 'an access request');
+  return {
+    id: str(r, 'id'), appId: str(r, 'appId'), appName: str(r, 'appName'), userId: str(r, 'userId'), username: str(r, 'username'),
+    reason: str(r, 'reason'), durationSeconds: directoryCount(r, 'durationSeconds'),
+    status: oneOf(r, 'status', ['pending', 'approved', 'denied', 'cancelled', 'expired'] as const),
+    createdAt: str(r, 'createdAt'), expiresAt: str(r, 'expiresAt'),
+    decidedAt: optStr(r, 'decidedAt'), decidedBy: optStr(r, 'decidedBy'), decisionNote: optStr(r, 'decisionNote'),
+  };
+}
+export function parseOwnAccessRequests(value: unknown): OwnAccessRequests {
+  const o = obj(value, 'an access requests response');
+  return {
+    requestable: list(o.requestable, item => { const a = obj(item, 'a requestable app'); return { appId: str(a, 'appId'), name: str(a, 'name'), pending: requiredBool(a, 'pending') }; }),
+    requests: list(o.requests, parseAccessRequest),
+  };
+}
+export function parseAccessRequestPage(value: unknown): DirectoryPage<AccessRequest> {
+  return directoryPage(value, 'requests', parseAccessRequest);
 }
 export function parseAppRecordPage(value: unknown): DirectoryPage<AppRecord> {
  return directoryPage(value, 'records', parseAppRecord);

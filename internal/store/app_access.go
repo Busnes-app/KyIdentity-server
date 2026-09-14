@@ -163,52 +163,13 @@ func (s *Store) SetAppAssignmentUntil(id, kind, principal string, expiresAt *tim
 }
 
 func (s *Store) setAppAssignment(id, kind, principal string, assigned bool, expiresAt *time.Time, audit *AuditEvent) error {
-	table, column, source, name := "", "", "", ""
-	switch kind {
-	case "users":
-		table, column, source, name = "app_user_assignments", "user_id", "users", "username"
-	case "groups":
-		table, column, source, name = "app_group_assignments", "group_id", "directory_groups", "name"
-	default:
-		return ErrAppLinkConflict
-	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE app_registry SET revision=revision+1 WHERE id=?`, id)
+	principalName, err := applyAppAssignmentTx(tx, id, kind, principal, assigned, expiresAt)
 	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return ErrAppRecordMissing
-	}
-	var principalName string
-	if err = tx.QueryRow(`SELECT `+name+` FROM `+source+` WHERE id=?`, principal).Scan(&principalName); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrAppRecordMissing
-		}
-		return err
-	}
-	if assigned && kind == "users" {
-		_, err = tx.Exec(`INSERT INTO app_user_assignments(app_id,user_id,expires_at) VALUES(?,?,?) ON CONFLICT(app_id,user_id) DO UPDATE SET expires_at=excluded.expires_at`, id, principal, unixOrNil(expiresAt))
-	} else if assigned {
-		_, err = tx.Exec(`INSERT INTO `+table+`(app_id,`+column+`) VALUES(?,?) ON CONFLICT DO NOTHING`, id, principal)
-	} else {
-		_, err = tx.Exec(`DELETE FROM `+table+` WHERE app_id=? AND `+column+`=?`, id, principal)
-	}
-	if err != nil {
-		return err
-	}
-	if err = revokeLostAppAccessTx(tx); err != nil {
-		return err
-	}
-	if err = reconcileProvisioningTx(tx, time.Now().UTC()); err != nil {
 		return err
 	}
 	app, err := scanAppRecord(tx.QueryRow(appRecordSelect+appRecordFrom+` WHERE a.id=?`, id))
@@ -371,4 +332,47 @@ func ensureAppLinkPoliciesTx(tx *sql.Tx, target, source AppRecord) error {
 		return fmt.Errorf("%w: claim settings differ", ErrAppLinkConflict)
 	}
 	return nil
+}
+
+// applyAppAssignmentTx is the one way a grant row is written: it bumps the app's
+// revision, writes or removes the row, and runs the grant and provisioning follow-up.
+// Manual grants and approved access requests both come through here.
+func applyAppAssignmentTx(tx *sql.Tx, id, kind, principal string, assigned bool, expiresAt *time.Time) (string, error) {
+	table, column, source, name := "", "", "", ""
+	switch kind {
+	case "users":
+		table, column, source, name = "app_user_assignments", "user_id", "users", "username"
+	case "groups":
+		table, column, source, name = "app_group_assignments", "group_id", "directory_groups", "name"
+	default:
+		return "", ErrAppLinkConflict
+	}
+	result, err := tx.Exec(`UPDATE app_registry SET revision=revision+1 WHERE id=?`, id)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return "", ErrAppRecordMissing
+	}
+	var principalName string
+	if err = tx.QueryRow(`SELECT `+name+` FROM `+source+` WHERE id=?`, principal).Scan(&principalName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrAppRecordMissing
+		}
+		return "", err
+	}
+	if assigned && kind == "users" {
+		_, err = tx.Exec(`INSERT INTO app_user_assignments(app_id,user_id,expires_at) VALUES(?,?,?) ON CONFLICT(app_id,user_id) DO UPDATE SET expires_at=excluded.expires_at`, id, principal, unixOrNil(expiresAt))
+	} else if assigned {
+		_, err = tx.Exec(`INSERT INTO `+table+`(app_id,`+column+`) VALUES(?,?) ON CONFLICT DO NOTHING`, id, principal)
+	} else {
+		_, err = tx.Exec(`DELETE FROM `+table+` WHERE app_id=? AND `+column+`=?`, id, principal)
+	}
+	if err != nil {
+		return "", err
+	}
+	if err = revokeLostAppAccessTx(tx); err != nil {
+		return "", err
+	}
+	return principalName, reconcileProvisioningTx(tx, time.Now().UTC())
 }

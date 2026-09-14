@@ -1,6 +1,6 @@
 import React from 'react';
 import { Access, User } from '../types';
-import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database } from 'lucide-react';
+import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox } from 'lucide-react';
 
 interface SidebarProps {
   user: User;
@@ -23,6 +23,7 @@ const ADMIN: Item[] = [
   ['admin-enrollment', 'MFA policies', Shield],
   ['admin-groups', 'Groups', Users],
   ['admin-app-registry', 'App connections', LayoutGrid],
+  ['admin-requests', 'Access requests', Inbox],
   ['admin-systems', 'Suite sync', RefreshCw],
   ['admin-scim', 'Inbound SCIM', Database],
   ['admin-clients', 'OAuth clients', Key],
@@ -47,7 +48,7 @@ export const Brand: React.FC = () => (
 function adminItems(a: Access | undefined): Item[] {
   if (!a) return [];
   if (a.admin || a.auditor) return ADMIN;
-  return ADMIN.filter(([tab]) => (tab === 'admin-users' && a.helpdesk) || (tab === 'admin-app-registry' && a.appOwner.length > 0));
+  return ADMIN.filter(([tab]) => (tab === 'admin-users' && a.helpdesk) || ((tab === 'admin-app-registry' || tab === 'admin-requests') && a.appOwner.length > 0));
 }
 
 function roleLabel(user: User): string {

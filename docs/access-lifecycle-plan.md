@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/expiring-access)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/access-requests)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -29,8 +29,10 @@ bounded claim mappings) merged as GitHub PR #48 after four review rounds (member
 changes as role changes, explicit empty roles end to end, first/last role re-push,
 completion status on the SCIM replace). PR17 (delegated administration) merged as GitHub PR #49 after one review
 round (delegates under the administrators MFA scope, helpdesk kept off administrators
-and other delegates). PR18 (expiring access and account end dates) is in progress on
-feat/expiring-access. PRs 19–23 and D1–D4 remain planned. Note for D1–D4: released
+and other delegates). PR18 (expiring access and account end dates) merged as GitHub PR #50 after two
+review rounds (one active-administrator definition, per-item expiry follow-up, unchanged
+end dates not treated as schedules). PR19 (access requests and approvals) is in progress
+on feat/access-requests. PRs 20–23 and D1–D4 remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -672,6 +674,18 @@ Depends on: 17, 18. Touch: request store, user request view, app-owner/admin inb
 Acceptance: approval grants exactly the requested app/duration once; revoked approver
 authority blocks stale forms; cancellation/expiry cannot race into a grant; private apps
 are not disclosed through search or IDs.
+
+Implementation: `app_registry.requestable` set by global administrators; `access_requests`
+with one pending row per app and user, a cap of five pending per user, a rate limit on
+filing and a fourteen-day expiry closed by the expiry follow-up; `RequestableApps` names
+only requestable assigned-only apps the user lacks, and a closed app answers like a
+missing one; `DecideAccessRequest` re-reads authority, requester, state and app policy
+under the write lock and grants through `applyAppAssignmentTx`, the manual-grant path,
+with the requested duration as the assignment expiry; inbox and decisions under the
+`requests` permission (administrators and app owners, scoped server-side), step-up and
+audit on every decision, mail to the requester when configured. Dashboard "Request
+access" panel and an administration "Access requests" inbox. README.md "Access requests
+and approvals".
 
 Release D gate: a delegated app owner approves temporary access, mapped roles reach
 only the correct app, and expiry removes access without intervention.

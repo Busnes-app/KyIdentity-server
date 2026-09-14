@@ -190,6 +190,9 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 	// The shared follow-up is set-based: it converges grants and downstream state for
 	// everything the views now deny, whichever items above succeeded.
 	if err := s.auditedTx(nil, func(tx *sql.Tx) error {
+		if err := expireAccessRequestsTx(tx, now); err != nil {
+			return err
+		}
 		if err := revokeLostAppAccessTx(tx); err != nil {
 			return err
 		}

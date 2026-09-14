@@ -103,6 +103,7 @@ func (s *Server) routes() *http.ServeMux {
 	devH := NewDeviceHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	adminH := NewAdminHandler(s.store, s.syncEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	onboardH := NewOnboardingHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL, s.cfg.EncryptionKey)
+	requestH := NewAccessRequestHandler(s.store, s.audit, s.middleware, s.cfg.EncryptionKey)
 	scimH := NewSCIMHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
 	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
@@ -166,6 +167,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /api/user/recovery-codes", authM(http.HandlerFunc(devH.GenerateRecoveryCodes)))
 	mux.Handle("POST /api/user/password", authM(s.requireStepUp(http.HandlerFunc(onboardH.ChangePassword))))
 	mux.Handle("GET /api/user/applications", authM(http.HandlerFunc(devH.ListApplications)))
+	mux.Handle("GET /api/user/access-requests", authM(http.HandlerFunc(requestH.ListOwn)))
+	mux.Handle("POST /api/user/access-requests", authM(s.middleware.RateLimit("access_request", 10, 0.2)(http.HandlerFunc(requestH.Create))))
+	mux.Handle("DELETE /api/user/access-requests/{id}", authM(http.HandlerFunc(requestH.Cancel)))
 	mux.Handle("GET /api/user/sessions", authM(http.HandlerFunc(sessH.ListOwn)))
 	mux.Handle("DELETE /api/user/sessions/{id}", authM(http.HandlerFunc(sessH.RevokeOwn)))
 	mux.Handle("POST /api/user/sessions/revoke-others", authM(http.HandlerFunc(sessH.RevokeOthers)))
@@ -276,6 +280,10 @@ func (s *Server) routes() *http.ServeMux {
 		{"GET", "/api/admin/backup/status", permRead, false, http.HandlerFunc(backupH.Status)},
 		{"GET", "/api/admin/users/{id}/delegations", permAdmin, false, http.HandlerFunc(adminH.GetDelegations)},
 		{"PUT", "/api/admin/users/{id}/delegations", permAdmin, true, http.HandlerFunc(adminH.SetDelegations)},
+		{"PUT", "/api/admin/app-registry/{id}/requestable", permAdmin, true, http.HandlerFunc(adminH.SetAppRequestable)},
+		{"GET", "/api/admin/access-requests", permRequests, false, http.HandlerFunc(requestH.Inbox)},
+		{"POST", "/api/admin/access-requests/{id}/approve", permRequests, true, requestH.Decide(true)},
+		{"POST", "/api/admin/access-requests/{id}/deny", permRequests, true, requestH.Decide(false)},
 	}
 	for _, rt := range s.adminRoutes {
 		mux.Handle(rt.method+" "+rt.path, s.require(rt.perm, rt.stepUp, rt.h))

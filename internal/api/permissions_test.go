@@ -54,6 +54,7 @@ func TestPermissionMatrixCoversEveryAdminRoute(t *testing.T) {
 		"recovery":   {"admin", "helpdesk"},
 		"app_read":   {"admin", "auditor", "ownerA"},
 		"app_grants": {"admin", "ownerA"},
+		"requests":   {"admin", "ownerA", "ownerB"},
 	}
 	forbidden := func(method, path, cookie string) bool {
 		res := adminRequestWithStepUp(t, srv, method, path, cookie, `{}`, mintStepUp(t, srv, cookie, method+" "+path))

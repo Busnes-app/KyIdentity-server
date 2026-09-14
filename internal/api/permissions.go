@@ -37,6 +37,8 @@ var (
 	permRecovery  = permission{name: "recovery", helpdesk: true, protectAdmins: true}
 	permAppRead   = permission{name: "app_read", auditor: true, appOwner: true}
 	permAppGrants = permission{name: "app_grants", appOwner: true}
+	// requests: the inbox and decisions; the store narrows an owner to their apps.
+	permRequests = permission{name: "requests", anyOwner: true}
 )
 
 // Access is what the acting user may do right now.
