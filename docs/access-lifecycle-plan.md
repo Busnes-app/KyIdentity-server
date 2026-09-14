@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/audit-search)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/alerts)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -35,8 +35,10 @@ end dates not treated as schedules). PR19 (access requests and approvals) merged
 cleared by the security review on its first pass. PR20 (explain effective access and
 authentication decisions) merged as GitHub PR #52 after one review round (uniform
 user-facing denial with a rate limit, roles named only via assigned groups). PR21 (audit
-search and export) is in progress on feat/audit-search. PRs 22–23 and D1–D4 remain
-planned. Note for D1–D4: released
+search and export) merged as GitHub PR #53 after two review rounds (in-band incomplete
+marker, deadline-aware queries, intent row before the first byte, row bound detected
+from the stream). PR22 (actionable security and provisioning alerts) is open on
+feat/alerts. PR23 and D1–D4 remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -762,6 +764,26 @@ Depends on: 09, 12, 13, 19, 21. Touch: persisted alert delivery, admin inbox/con
 Acceptance: one prolonged outage produces a useful incident rather than mail floods;
 restart cannot lose a critical alert; failed SMTP remains visible; privileged details do
 not reach ordinary app owners; recovery use creates an alert without exposing the code.
+
+Implementation: a trigger queues every audit insert into `alert_queue`; `EvaluateAlerts`
+classifies the queue with fixed rules (privilege change, recovery use, connector
+credentials, login failures over a configurable threshold, failed access removal),
+writes `alerts` and drains the queue in one transaction, then derives outage alerts
+from connector and logout delivery state and resolves them when clear. One live alert
+per rule and key; repeats count, acknowledged alerts reopen, outages neither. Alert text
+is names only, never audit details. `DeliverAlerts` mails configured recipients
+(administrators or auditors, re-checked per message) through the existing relay with
+backoff and a visible failure after eight attempts, on its own goroutine under a pass
+budget. Login failures key by account id or source address, never by the submitted
+name, with a ceiling on live alerts past which sources share one alert, resolve once
+their source is quiet for a window, and mail at most once per cooldown for the whole
+rule. Resolved alerts and finished
+deliveries follow audit retention. `admin.user_updated` gains
+`roleChanged` and `admin.system_configured` gains `credentialRotated` so the rules need
+no diffing. Inbox and settings under `read`/`admin` permissions, settings with step-up;
+worker evaluates and delivers on its 3-second tick. Alerts page in the SPA. README.md
+"Alerts". Not done: per-app alert scoping for owners (owners see no alerts), a second
+transport, per-rule switches.
 
 ### PR 23 — Upgrade, restore and end-to-end release verification
 

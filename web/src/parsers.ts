@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, OwnAccessRequests, AccessExplanation } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, OwnAccessRequests, AccessExplanation } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -602,6 +602,27 @@ export function parseOwnAccessRequests(value: unknown): OwnAccessRequests {
 }
 export function parseAccessRequestPage(value: unknown): DirectoryPage<AccessRequest> {
   return directoryPage(value, 'requests', parseAccessRequest);
+}
+export function parseAlert(value: unknown): Alert {
+  const a = obj(value, 'an alert');
+  const d = obj(a.delivery, 'an alert delivery summary');
+  return {
+    id: str(a, 'id'), rule: str(a, 'rule'), key: str(a, 'key'), severity: oneOf(a, 'severity', ['critical', 'warning'] as const),
+    title: str(a, 'title'), summary: str(a, 'summary'), status: oneOf(a, 'status', ['open', 'acknowledged', 'resolved'] as const),
+    count: directoryCount(a, 'count'), firstSeen: str(a, 'firstSeen'), lastSeen: str(a, 'lastSeen'),
+    acknowledgedAt: optStr(a, 'acknowledgedAt'), acknowledgedBy: optStr(a, 'acknowledgedBy'), resolvedAt: optStr(a, 'resolvedAt'),
+    delivery: { pending: directoryCount(d, 'pending'), delivered: directoryCount(d, 'delivered'), failed: directoryCount(d, 'failed'), skipped: directoryCount(d, 'skipped'), lastError: optStr(d, 'lastError') ?? '' },
+  };
+}
+export function parseAlertPage(value: unknown): DirectoryPage<Alert> {
+  return directoryPage(value, 'alerts', parseAlert);
+}
+export function parseAlertSettings(value: unknown): AlertSettings {
+  const o = obj(value, 'alert settings');
+  return {
+    loginFailureThreshold: directoryCount(o, 'loginFailureThreshold'), loginFailureWindowSeconds: directoryCount(o, 'loginFailureWindowSeconds'),
+    recipients: list(o.recipients, item => { const r = obj(item, 'an alert recipient'); return { id: str(r, 'id'), username: str(r, 'username') }; }),
+  };
 }
 export function parseAccessExplanation(value: unknown): AccessExplanation {
   const o = obj(value, 'an access explanation response');
