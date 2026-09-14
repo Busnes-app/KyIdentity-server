@@ -823,7 +823,9 @@ deliveries, holds provisioning per connector and audits `system.restored` in the
 transaction. A held connector delivers nothing until a repair reconciliation that listed the far
 side completely and wrote through releases it; a preview, a failed run, a refused or
 truncated listing and an unlistable connector kind do not, and the last of those is
-resumed deliberately through an audited administrator route instead. The drill now checks policy, groups, app
+resumed deliberately through an audited administrator route instead. The capsule's
+outbox is marked with a sentinel revision so the worker's safety net cannot re-pend it
+behind any of those paths. The drill now checks policy, groups, app
 linkage, remote mappings, job state and the encrypted relay configuration.
 `docs/RUNBOOKS.md` covers app policy migration, SCIM setup, emergency administrator
 recovery, offboarding failure, restore reconciliation and downstream limitations;

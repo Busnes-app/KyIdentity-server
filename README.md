@@ -538,7 +538,15 @@ read back — would otherwise stay held forever, so `POST
 /api/admin/systems/{id}/provisioning/resume` (administrators, step-up) lifts the hold on
 the operator's word instead, recorded as `admin.provisioning_resumed`. Connectors that
 were disabled at snapshot time are held too, so re-enabling one later does not deliver
-what was queued before it was disabled. Passwords, enrolled
+what was queued before it was disabled.
+
+The capsule's own outbox never delivers, on any of those paths. Closing a row out is not
+enough by itself: the worker re-pends exhausted work that still matches a connector's
+desired state, and a restore leaves every row eligible for that. So the closed-out rows
+are marked with a revision no connector can carry, which the re-pending cannot match and
+the next pass deletes. Deletions and MFA resets carry no desired state and do still
+retry, which only ever removes access. What reaches a resumed connector is what this
+directory wants now, not what the capsule was in the middle of. Passwords, enrolled
 factors and recovery codes are in the capsule and keep working, so the restore runbook
 asks for connector credentials to be reviewed for rotation before delivery resumes.
 Procedures are in [docs/RUNBOOKS.md](docs/RUNBOOKS.md) and

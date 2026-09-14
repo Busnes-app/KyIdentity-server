@@ -14,6 +14,10 @@ import (
 // and holds outbound provisioning until the operator has reconciled each connector
 // against what is really on the far side.
 
+// restoredRevision marks an outbox row as coming from a capsule. No sync_resource_state
+// row can carry it, so the re-pending in reconcileProvisioningTx can never match it.
+const restoredRevision = -1
+
 // restoredCleared is every table whose rows are a credential or a queued task that
 // cannot survive a restore. Long-lived credentials the user holds (passwords, enrolled
 // factors, recovery codes) are deliberately absent: they are what the operator still
@@ -79,10 +83,17 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 			}
 			report.Credentials += int(n)
 		}
-		// The outbox is closed out rather than deleted: an operator reading it after a
-		// restore should see why nothing was sent, and reconciliation re-derives the work.
-		res, err := tx.Exec(`UPDATE account_sync_events SET status='failed', last_error=?, updated_at=?, lease_until=NULL, claim_token='' WHERE status='pending'`,
-			"superseded by a restore; reconcile the connector to re-derive the work", now)
+		// Every undelivered event is closed out rather than deleted: an operator reading
+		// the outbox after a restore should see why nothing was sent, and reconciliation
+		// re-derives the work. The sentinel revision is what keeps it closed: the
+		// worker's safety net re-pends exhausted work whose revision still matches the
+		// connector's desired state (provisioning.go), and after a restore every row is
+		// unfenced, so without this the capsule's queue would come back and deliver the
+		// moment a hold lifted. A revision no state row can carry never matches, and the
+		// same pass deletes the row once a real revision exists. Deletions and MFA resets
+		// carry no desired state and still retry, which only ever removes access.
+		res, err := tx.Exec(`UPDATE account_sync_events SET status='failed', revision=?, last_error=?, updated_at=?, lease_until=NULL, claim_token='' WHERE status IN ('pending','failed') AND revision<>?`,
+			restoredRevision, "superseded by a restore; reconcile the connector to re-derive the work", now, restoredRevision)
 		if err != nil {
 			return err
 		}

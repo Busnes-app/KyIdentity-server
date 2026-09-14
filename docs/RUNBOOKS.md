@@ -94,8 +94,10 @@ A connector whose remote cannot be listed at all — a suite webhook has nothing
 back — can never produce that evidence. Rather than stay held forever, it is resumed
 deliberately: `POST /api/admin/systems/{id}/provisioning/resume`, administrators with
 step-up, recorded as `admin.provisioning_resumed`. That is you accepting the capsule's
-view of that connector; the queue the restore closed out is not revived, and the next
-change in the directory is what reaches it. A connector that was disabled when the
+view of that connector. The capsule's outbox still does not deliver: those rows are
+marked so the worker cannot re-pend them, and what reaches the connector is what this
+directory wants now. The exception is deletions and MFA resets, which carry no desired
+state and retry, and only ever remove access. A connector that was disabled when the
 snapshot was taken is held as well, so re-enabling it later does not quietly deliver
 work queued before it was disabled.
 

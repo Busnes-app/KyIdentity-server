@@ -47,11 +47,23 @@ func restoreFixture(t *testing.T) (*Store, func()) {
 	if err := s.CreateOAuthClient(&OAuthClient{ID: "client-1", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://app.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	seedEphemeral(t, s, u.ID, "client-1")
-	provisioningFixture(t, s, "hr")
-	if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,status) VALUES('ev-old',?,'hr','user.created','{}','pending')`, u.ID); err != nil {
+	// The user genuinely has access through the connector's app, so the capsule's view
+	// of them is still what this directory wants: nothing supersedes the queued work,
+	// which is what makes it eligible to be re-pended after a restore.
+	app := provisioningFixture(t, s, "hr")
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
+	var revision int
+	if err := s.db.QueryRow(`SELECT revision FROM sync_resource_state WHERE system_id='hr' AND resource_id=?`, u.ID).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,status,revision) VALUES('ev-old',?,'hr','user.created','{}','pending',?)`, u.ID, revision); err != nil {
+		t.Fatal(err)
+	}
+	// Last, so that setting up access does not revoke one of them on the way past: a
+	// grant recalculates access and clears what the user can no longer reach.
+	seedEphemeral(t, s, u.ID, "client-1")
 	return s, cleanup
 }
 
@@ -71,8 +83,10 @@ func TestRestoreInvalidatesEphemeralCredentialsAndHoldsProvisioning(t *testing.T
 		}
 	}
 	// Twelve of the fourteen seeded rows are deleted directly; the client session and
-	// the step-up challenge hang off the session and go with it by cascade.
-	if report.Credentials != 12 || report.QueuedDeliveries != 1 || report.HeldConnectors != 1 {
+	// the step-up challenge hang off the session and go with it by cascade. Two
+	// deliveries are queued: the assignment's own and the one standing in for the
+	// capsule's.
+	if report.Credentials != 12 || report.QueuedDeliveries != 2 || report.HeldConnectors != 1 {
 		t.Fatalf("report: %+v", report)
 	}
 	if len(report.Connectors) != 1 || report.Connectors[0] != "hr" {
@@ -200,10 +214,25 @@ func TestProvisioningHoldCanBeResumedDeliberately(t *testing.T) {
 	if err != nil || len(events) != 1 {
 		t.Fatalf("resume audit: %d %v", len(events), err)
 	}
-	// Resuming is not reconciling: the queue that was closed out stays closed out.
-	var status string
-	if err := s.db.QueryRow(`SELECT status FROM account_sync_events WHERE id='ev-old'`).Scan(&status); err != nil || status != "failed" {
-		t.Fatalf("resume revived the capsule's queue: %q %v", status, err)
+	// Resuming is not reconciling. The worker's safety net re-pends exhausted work that
+	// still matches desired state, and after a restore every closed-out row is unfenced,
+	// so without a marker the capsule's queue would come back and deliver the moment the
+	// hold lifted — on the one path where nothing was compared with the far side.
+	if err := s.ReconcileProvisioning(); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.ClaimDueSyncEvents(10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range due {
+		if ev.ID == "ev-old" {
+			t.Fatal("a resume delivered the capsule's queue")
+		}
+	}
+	var revived int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM account_sync_events WHERE id='ev-old' AND status='pending'`).Scan(&revived); err != nil || revived != 0 {
+		t.Fatalf("the capsule's queue came back: %d %v", revived, err)
 	}
 }
 
