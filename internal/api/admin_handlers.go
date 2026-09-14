@@ -137,8 +137,9 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		Role        string `json:"role"`
 		Status      string `json:"status"`
 		Password    string `json:"password,omitempty"`
-		// EndsAt schedules the account's end; empty clears a scheduled end.
-		EndsAt string `json:"endsAt"`
+		// EndsAt schedules the account's end: absent keeps the current schedule, an
+		// empty string clears it, an instant sets it.
+		EndsAt *string `json:"endsAt"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -167,12 +168,15 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Role == "user" || req.Role == "admin" {
 		user.Role = req.Role
 	}
-	endsAt, err := parseInstant(req.EndsAt)
-	if err != nil {
-		http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
-		return
+	endsAtBefore := user.EndsAt
+	if req.EndsAt != nil {
+		endsAt, err := parseInstant(*req.EndsAt)
+		if err != nil {
+			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
+			return
+		}
+		user.EndsAt = endsAt
 	}
-	user.EndsAt = endsAt
 	wasActive := user.Status == "active"
 	if req.Status == "active" || req.Status == "disabled" {
 		user.Status = req.Status
@@ -211,6 +215,7 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		"role":          user.Role,
 		"status":        user.Status,
 		"endsAt":        user.EndsAt,
+		"endsAtBefore":  endsAtBefore,
 		"demoted":       demoted,
 		"accessRevoked": revokeAccess,
 	})
@@ -219,6 +224,8 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			enrollmentError(w, err)
 		} else if errors.Is(err, store.ErrLastActiveAdmin) {
 			http.Error(w, `{"error":"cannot_remove_last_admin"}`, http.StatusBadRequest)
+		} else if errors.Is(err, store.ErrExpiryInPast) {
+			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
 		} else {
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		}

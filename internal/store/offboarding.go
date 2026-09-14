@@ -81,7 +81,7 @@ type Offboarding struct {
 func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
 	off := &Offboarding{UserID: userID, Targets: []OffboardingTarget{}, Acknowledged: true, Verified: true}
 	var exists, active bool
-	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id=?),EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')`, userID, userID).Scan(&exists, &active); err != nil {
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id=?),EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND (ends_at IS NULL OR ends_at>unixepoch()))`, userID, userID).Scan(&exists, &active); err != nil {
 		return nil, err
 	}
 	off.Deleted, off.Active = !exists, active

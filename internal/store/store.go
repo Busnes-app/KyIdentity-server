@@ -720,10 +720,16 @@ func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepar
 		u.ApplySourceState()
 	}
 	oldRole, oldStatus, oldEmail := current.Role, current.Status, current.Email
+	// A back-dated end is not a schedule; it is refused like any past instant.
+	if u.EndsAt != nil && (current.EndsAt == nil || !u.EndsAt.Equal(*current.EndsAt)) {
+		if err := checkExpiry(u.EndsAt, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
 	// Scheduling the last administrator's end is refused like removing them would be.
 	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active" || u.EndsAt != nil) {
 		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'`).Scan(&admins); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
 			return err
 		}
 		if admins <= 1 {
@@ -784,7 +790,7 @@ func (s *Store) UpdateUserStatus(userID, status string) error {
 
 func (s *Store) CountAdmins() (int, error) {
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'`).Scan(&count)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&count)
 	return count, err
 }
 
@@ -812,7 +818,7 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 	}
 	if u.Role == "admin" && u.Status == "active" {
 		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'`).Scan(&admins); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
 			return err
 		}
 		if admins <= 1 {

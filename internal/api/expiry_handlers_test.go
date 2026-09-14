@@ -74,7 +74,15 @@ func TestExpiringAccessAdminAPI(t *testing.T) {
 	if users := adminRequestWithStepUp(t, srv, "GET", "/api/admin/users", admin, "", ""); !strings.Contains(users.Body.String(), `"endsAt":"`+future+`"`) {
 		t.Fatalf("user listing lacks the end date: %s", users.Body.String())
 	}
-	if res := adminRequest(t, srv, "PUT", userPath, admin, `{"displayName":"`+u.DisplayName+`","email":"`+u.Email+`","role":"user","status":"active"}`); res.Code != http.StatusOK {
+	// A partial update that says nothing about the end date keeps the schedule.
+	if res := adminRequest(t, srv, "PUT", userPath, admin, `{"displayName":"Renamed","email":"`+u.Email+`","role":"user","status":"active"}`); res.Code != http.StatusOK {
+		t.Fatalf("partial update: %d", res.Code)
+	}
+	if users := adminRequestWithStepUp(t, srv, "GET", "/api/admin/users", admin, "", ""); !strings.Contains(users.Body.String(), `"endsAt":"`+future+`"`) {
+		t.Fatal("partial update cancelled the scheduled end")
+	}
+	// Only an explicit empty value clears it.
+	if res := adminRequest(t, srv, "PUT", userPath, admin, `{"displayName":"`+u.DisplayName+`","email":"`+u.Email+`","role":"user","status":"active","endsAt":""}`); res.Code != http.StatusOK {
 		t.Fatalf("clear end date: %d", res.Code)
 	}
 	if users := adminRequestWithStepUp(t, srv, "GET", "/api/admin/users", admin, "", ""); strings.Contains(users.Body.String(), `"endsAt"`) {

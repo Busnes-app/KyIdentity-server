@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,11 @@ import (
 // are the persisted due work; a restart simply runs the follow-up again.
 
 var ErrExpiryInPast = errors.New("expiry must be in the future")
+
+// activeAdminSQL is the one definition of an administrator who can still act: the role,
+// an active row, and an end date that has not passed. Every last-administrator count
+// uses it, so an ended administrator the follow-up has not yet processed never counts.
+const activeAdminSQL = `role='admin' AND status='active' AND (ends_at IS NULL OR ends_at>unixepoch())`
 
 // ExpiryRun counts what one follow-up pass removed.
 type ExpiryRun struct {
@@ -51,129 +57,147 @@ func expiryAudit(tx *sql.Tx, now time.Time, action, targetID, targetType, outcom
 	return recordAuditTx(tx, &AuditEvent{ID: uuid.NewString(), ActorUsername: "expiry", Action: action, TargetID: targetID, TargetType: targetType, Outcome: outcome, DetailsJSON: string(b), CreatedAt: now})
 }
 
-// RunDueExpiries applies every expiry whose instant has passed. It is idempotent and
-// only ever removes: an instant extended before the run is not due and is untouched.
+type idPair struct{ a, b string }
+
+func scanIDPairs(rows *sql.Rows, err error) ([]idPair, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []idPair
+	for rows.Next() {
+		var p idPair
+		if err := rows.Scan(&p.a, &p.b); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// RunDueExpiries applies every expiry whose instant has passed. Each item commits on
+// its own, so one row that cannot be processed neither blocks the rest nor hides: its
+// failure is audited and returned, and the next pass retries it. The pass only ever
+// removes; an instant extended before the run is not due and is untouched.
 func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 	var run ExpiryRun
-	tx, err := s.db.Begin()
-	if err != nil {
-		return run, err
-	}
-	defer tx.Rollback()
+	var errs []error
 	unix := now.Unix()
+	fail := func(action, targetID, targetType string, err error) {
+		errs = append(errs, fmt.Errorf("%s %s: %w", action, targetID, err))
+		_ = s.auditedTx(nil, func(tx *sql.Tx) error {
+			return expiryAudit(tx, now, action, targetID, targetType, "failure", map[string]any{"error": err.Error()})
+		})
+	}
 
 	// Accounts past their end date are disabled and offboarded. The last administrator
 	// is kept and the refusal audited; the invariant outranks the schedule.
-	ended, err := scanUsers(tx.Query(`SELECT `+userColumns+` FROM users WHERE ends_at IS NOT NULL AND ends_at<=? AND status='active'`, unix))
+	ended, err := scanUsers(s.db.Query(`SELECT `+userColumns+` FROM users WHERE ends_at IS NOT NULL AND ends_at<=? AND status='active'`, unix))
 	if err != nil {
 		return run, err
 	}
 	for _, u := range ended {
-		if u.Role == "admin" {
-			var others int
-			if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role='admin' AND status='active' AND id<>? AND (ends_at IS NULL OR ends_at>?)`, u.ID, unix).Scan(&others); err != nil {
-				return run, err
-			}
-			if others == 0 {
-				if _, err := tx.Exec(`UPDATE users SET ends_at=NULL, updated_at=? WHERE id=?`, now, u.ID); err != nil {
-					return run, err
+		var endedNow bool
+		err := s.auditedTx(nil, func(tx *sql.Tx) error {
+			if u.Role == "admin" {
+				var others int
+				if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE `+activeAdminSQL+` AND id<>?`, u.ID).Scan(&others); err != nil {
+					return err
 				}
-				if err := expiryAudit(tx, now, "account.end_refused", u.ID, "user", "denied", map[string]any{"username": u.Username, "reason": "last_active_admin"}); err != nil {
-					return run, err
+				if others == 0 {
+					if _, err := tx.Exec(`UPDATE users SET ends_at=NULL, updated_at=? WHERE id=?`, now, u.ID); err != nil {
+						return err
+					}
+					return expiryAudit(tx, now, "account.end_refused", u.ID, "user", "denied", map[string]any{"username": u.Username, "reason": "last_active_admin"})
 				}
-				continue
 			}
+			if _, err := tx.Exec(`UPDATE users SET status='disabled', locally_disabled=1, updated_at=? WHERE id=?`, now, u.ID); err != nil {
+				return err
+			}
+			u.Status, u.LocallyDisabled = "disabled", true
+			if err := offboardUserTx(tx, u, false, now); err != nil {
+				return err
+			}
+			if err := queueUserUpdateTx(tx, u, now); err != nil {
+				return err
+			}
+			endedNow = true
+			return expiryAudit(tx, now, "account.ended", u.ID, "user", "success", map[string]any{"username": u.Username})
+		})
+		if err != nil {
+			fail("account.end_failed", u.ID, "user", err)
+			continue
 		}
-		if _, err := tx.Exec(`UPDATE users SET status='disabled', locally_disabled=1, updated_at=? WHERE id=?`, now, u.ID); err != nil {
-			return run, err
+		if endedNow {
+			run.Accounts++
 		}
-		u.Status, u.LocallyDisabled = "disabled", true
-		if err := offboardUserTx(tx, u, false, now); err != nil {
-			return run, err
-		}
-		if err := queueUserUpdateTx(tx, u, now); err != nil {
-			return run, err
-		}
-		if err := expiryAudit(tx, now, "account.ended", u.ID, "user", "success", map[string]any{"username": u.Username}); err != nil {
-			return run, err
-		}
-		run.Accounts++
 	}
 
 	// Expired memberships leave the group the way a removal does: roles mapped through
 	// the group end, and a required MFA policy no longer applies. The administrator who
 	// scheduled the instant already spent step-up; no live session is needed now.
-	type pair struct{ a, b string }
-	var expiredMembers []pair
-	rows, err := tx.Query(`SELECT group_id,user_id FROM group_memberships WHERE expires_at IS NOT NULL AND expires_at<=?`, unix)
+	members, err := scanIDPairs(s.db.Query(`SELECT group_id,user_id FROM group_memberships WHERE expires_at IS NOT NULL AND expires_at<=?`, unix))
 	if err != nil {
-		return run, err
+		return run, errors.Join(append(errs, err)...)
 	}
-	for rows.Next() {
-		var p pair
-		if err := rows.Scan(&p.a, &p.b); err != nil {
-			rows.Close()
-			return run, err
-		}
-		expiredMembers = append(expiredMembers, p)
-	}
-	rows.Close()
-	for _, m := range expiredMembers {
-		if _, err := tx.Exec(`DELETE FROM group_memberships WHERE group_id=? AND user_id=?`, m.a, m.b); err != nil {
-			return run, err
-		}
-		if err := groupRoleChangeTx(tx, m.a, []string{m.b}); err != nil {
-			return run, err
-		}
-		var required bool
-		if err := tx.QueryRow(`SELECT COALESCE((SELECT required FROM enrollment_policies WHERE group_id=?),0)`, m.a).Scan(&required); err != nil {
-			return run, err
-		}
-		if required {
-			if err := invalidateUserEnrollmentTx(tx, m.b); err != nil {
-				return run, err
+	for _, m := range members {
+		err := s.auditedTx(nil, func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`DELETE FROM group_memberships WHERE group_id=? AND user_id=?`, m.a, m.b); err != nil {
+				return err
 			}
-		}
-		if err := expiryAudit(tx, now, "group.membership_expired", m.a, "group", "success", map[string]any{"userId": m.b}); err != nil {
-			return run, err
+			if err := groupRoleChangeTx(tx, m.a, []string{m.b}); err != nil {
+				return err
+			}
+			var required bool
+			if err := tx.QueryRow(`SELECT COALESCE((SELECT required FROM enrollment_policies WHERE group_id=?),0)`, m.a).Scan(&required); err != nil {
+				return err
+			}
+			if required {
+				if err := invalidateUserEnrollmentTx(tx, m.b); err != nil {
+					return err
+				}
+			}
+			return expiryAudit(tx, now, "group.membership_expired", m.a, "group", "success", map[string]any{"userId": m.b})
+		})
+		if err != nil {
+			fail("group.membership_expiry_failed", m.a, "group", err)
+			continue
 		}
 		run.Memberships++
 	}
 
-	var expiredAssignments []pair
-	rows, err = tx.Query(`SELECT app_id,user_id FROM app_user_assignments WHERE expires_at IS NOT NULL AND expires_at<=?`, unix)
+	assignments, err := scanIDPairs(s.db.Query(`SELECT app_id,user_id FROM app_user_assignments WHERE expires_at IS NOT NULL AND expires_at<=?`, unix))
 	if err != nil {
-		return run, err
+		return run, errors.Join(append(errs, err)...)
 	}
-	for rows.Next() {
-		var p pair
-		if err := rows.Scan(&p.a, &p.b); err != nil {
-			rows.Close()
-			return run, err
-		}
-		expiredAssignments = append(expiredAssignments, p)
-	}
-	rows.Close()
-	for _, d := range expiredAssignments {
-		if _, err := tx.Exec(`DELETE FROM app_user_assignments WHERE app_id=? AND user_id=?`, d.a, d.b); err != nil {
-			return run, err
-		}
-		if _, err := tx.Exec(`UPDATE app_registry SET revision=revision+1 WHERE id=?`, d.a); err != nil {
-			return run, err
-		}
-		if err := expiryAudit(tx, now, "app.assignment_expired", d.a, "application", "success", map[string]any{"userId": d.b}); err != nil {
-			return run, err
+	for _, d := range assignments {
+		err := s.auditedTx(nil, func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`DELETE FROM app_user_assignments WHERE app_id=? AND user_id=?`, d.a, d.b); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`UPDATE app_registry SET revision=revision+1 WHERE id=?`, d.a); err != nil {
+				return err
+			}
+			return expiryAudit(tx, now, "app.assignment_expired", d.a, "application", "success", map[string]any{"userId": d.b})
+		})
+		if err != nil {
+			fail("app.assignment_expiry_failed", d.a, "application", err)
+			continue
 		}
 		run.Assignments++
 	}
 
-	if err := revokeLostAppAccessTx(tx); err != nil {
-		return run, err
+	// The shared follow-up is set-based: it converges grants and downstream state for
+	// everything the views now deny, whichever items above succeeded.
+	if err := s.auditedTx(nil, func(tx *sql.Tx) error {
+		if err := revokeLostAppAccessTx(tx); err != nil {
+			return err
+		}
+		return reconcileProvisioningTx(tx, now)
+	}); err != nil {
+		fail("access.expiry_reconcile_failed", "", "directory", err)
 	}
-	if err := reconcileProvisioningTx(tx, now); err != nil {
-		return run, err
-	}
-	return run, tx.Commit()
+	return run, errors.Join(errs...)
 }
 
 func scanUsers(rows *sql.Rows, err error) ([]*User, error) {

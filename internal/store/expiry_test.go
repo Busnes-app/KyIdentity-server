@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -227,6 +228,108 @@ func TestAccountEndDate(t *testing.T) {
 	}
 	if !denied {
 		t.Fatal("refusal not audited")
+	}
+	// A back-dated end is refused by the store itself and leaves the row untouched.
+	var before sql.NullInt64
+	if err := s.db.QueryRow(`SELECT ends_at FROM users WHERE id=?`, u.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := s.GetUserByID(u.ID)
+	fresh.EndsAt = future(-time.Minute)
+	if err := s.UpdateUserWithSyncEvents(fresh, false, nil); !errors.Is(err, ErrExpiryInPast) {
+		t.Fatalf("past end date accepted by the store: %v", err)
+	}
+	var stored sql.NullInt64
+	if err := s.db.QueryRow(`SELECT ends_at FROM users WHERE id=?`, u.ID).Scan(&stored); err != nil || stored != before {
+		t.Fatalf("refused write changed the row: %v -> %v %v", before, stored, err)
+	}
+}
+
+// An administrator whose end has passed but who the follow-up has not yet processed is
+// no administrator for the invariant: the other one cannot step down.
+func TestEndedAdministratorDoesNotCount(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	first, second := createTestUserNamed(t, s, "first"), createTestUserNamed(t, s, "second")
+	for _, a := range []*User{first, second} {
+		a.Role = "admin"
+		if err := s.UpdateUserWithSyncEvents(a, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE users SET ends_at=unixepoch()-1 WHERE id=?`, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	stepDown, _ := s.GetUserByID(first.ID)
+	stepDown.Role = "user"
+	if err := s.UpdateUserWithSyncEvents(stepDown, false, nil); !errors.Is(err, ErrLastActiveAdmin) {
+		t.Fatalf("phantom ended administrator satisfied the guard: %v", err)
+	}
+	if n, _ := s.CountAdmins(); n != 1 {
+		t.Fatalf("CountAdmins counted the ended administrator: %d", n)
+	}
+}
+
+// One item the pass cannot process is audited and retried later; everything else due
+// is still applied in the same pass.
+func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	apps, _, _ := s.ListAppRecords("client", 1, 0)
+	stuck, fine, ending := createTestUserNamed(t, s, "stuck"), createTestUserNamed(t, s, "fine"), createTestUserNamed(t, s, "ending")
+	for _, u := range []*User{stuck, fine} {
+		if err := s.SetAppAssignmentUntil(apps[0].ID, "users", u.ID, future(time.Hour), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembershipUntil("staff", fine.ID, future(time.Hour), "", nil); err != nil {
+		t.Fatal(err)
+	}
+	ending.EndsAt = future(time.Hour)
+	if err := s.UpdateUserWithSyncEvents(ending, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE app_user_assignments SET expires_at=unixepoch()-1; UPDATE group_memberships SET expires_at=unixepoch()-1; UPDATE users SET ends_at=unixepoch()-1 WHERE id=?`, ending.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`CREATE TRIGGER stuck_row BEFORE DELETE ON app_user_assignments WHEN OLD.user_id='` + stuck.ID + `' BEGIN SELECT RAISE(ABORT,'row is stuck'); END`); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.RunDueExpiries(time.Now().UTC())
+	if err == nil || !strings.Contains(err.Error(), "row is stuck") {
+		t.Fatalf("stuck row not reported: %v", err)
+	}
+	if run.Assignments != 1 || run.Memberships != 1 || run.Accounts != 1 {
+		t.Fatalf("other due items not applied: %+v", run)
+	}
+	var left int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM app_user_assignments`).Scan(&left); err != nil || left != 1 {
+		t.Fatalf("assignments left = %d %v", left, err)
+	}
+	events, _, _ := s.ListAuditEvents(20, 0)
+	failed := 0
+	for _, e := range events {
+		if e.Action == "app.assignment_expiry_failed" && e.Outcome == "failure" && e.TargetID == apps[0].ID {
+			failed++
+		}
+	}
+	if failed != 1 {
+		t.Fatalf("failure audit rows = %d", failed)
+	}
+	if run, err = s.RunDueExpiries(time.Now().UTC()); err == nil || run.Assignments+run.Memberships+run.Accounts != 0 {
+		t.Fatalf("second pass: %+v %v", run, err)
+	}
+	if _, err := s.db.Exec(`DROP TRIGGER stuck_row`); err != nil {
+		t.Fatal(err)
+	}
+	if run, err = s.RunDueExpiries(time.Now().UTC()); err != nil || run.Assignments != 1 {
+		t.Fatalf("recovered pass: %+v %v", run, err)
 	}
 }
 

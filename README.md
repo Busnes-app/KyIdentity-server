@@ -387,12 +387,16 @@ memberships (roles mapped through the group end, MFA policy requirements lift), 
 the tokens and codes that depended on them, sends back-channel logout to the apps that
 saw those logins, deactivates the downstream accounts, and ends accounts past their end
 date (disabled, not deleted; sessions and grants revoked; profile deprovisioned). Every
-removal writes an audit row with actor `expiry`. The rows themselves are the persisted
-due work, so a restart drains overdue expiries first and an instant extended before the
-follow-up runs is simply not due. The last active administrator can neither be scheduled
-to end nor ended by the follow-up: the schedule is refused with `cannot_remove_last_admin`,
-and an end date that would remove the last administrator is cleared and audited as
-`account.end_refused`.
+removal writes an audit row with actor `expiry`. Each item commits on its own: one row
+the follow-up cannot process is audited as a `*_failed` row with outcome `failure`,
+returned to the log, and retried next minute, while everything else due still lands.
+The rows themselves are the persisted due work, so a restart drains overdue expiries
+first and an instant extended before the follow-up runs is simply not due. The last
+active administrator, counted as an administrator whose end date has not passed, can
+neither be scheduled to end nor ended by the follow-up: the schedule is refused with
+`cannot_remove_last_admin`, and an end date that would remove the last administrator is
+cleared and audited as `account.end_refused`. Over the API, omitting `endsAt` keeps the
+current schedule; an empty string clears it.
 
 ## Integration Requirements
 

@@ -408,7 +408,7 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 		}
 		if disableUsers {
 			var total, ownedAdmins int
-			if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(source_connector_id=?),0) FROM users WHERE role='admin' AND status='active'`, id).Scan(&total, &ownedAdmins); err != nil {
+			if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(source_connector_id=?),0) FROM users WHERE `+activeAdminSQL, id).Scan(&total, &ownedAdmins); err != nil {
 				return err
 			}
 			if ownedAdmins > 0 && ownedAdmins >= total {
