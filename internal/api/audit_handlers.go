@@ -132,7 +132,10 @@ func jsonlSink(w http.ResponseWriter) exportSink {
 		},
 		finish: func() error { return nil },
 		mark: func(reason string, rows, total int) {
-			_ = enc.Encode(map[string]any{"_export": "incomplete", "reason": reason, "rows": rows, "total": total})
+			// Shaped so a consumer decoding events sees id "_export" and action
+			// "incomplete", not a blank event.
+			_ = enc.Encode(map[string]any{"_export": "incomplete", "reason": reason, "rows": rows, "total": total,
+				"id": "_export", "action": "incomplete", "outcome": reason, "detailsJson": `{"reason":"` + reason + `","rows":` + strconv.Itoa(rows) + `,"total":` + strconv.Itoa(total) + `}`})
 		},
 	}
 }
@@ -154,8 +157,7 @@ func (h *AdminHandler) ExportAuditEvents(w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), auditExportTimeout)
 	defer cancel()
-	f.Limit = 1
-	_, total, err := h.store.SearchAuditEventsContext(ctx, f)
+	total, err := h.store.CountAuditEvents(ctx, f)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -178,10 +180,19 @@ func (h *AdminHandler) ExportAuditEvents(w http.ResponseWriter, r *http.Request)
 	if format == "csv" {
 		sink = csvSink(w)
 	}
-	rows, streamErr := h.store.StreamAuditEvents(ctx, f, auditExportMaxRows, func(e store.AuditEvent) error {
+	// The row bound is detected from the stream itself: one probe row past the bound is
+	// never written, only noted. A count taken earlier is advisory, since rows keep
+	// arriving (the export's own intent row among them).
+	limited, rows := false, 0
+	_, streamErr := h.store.StreamAuditEvents(ctx, f, auditExportMaxRows+1, func(e store.AuditEvent) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if rows == auditExportMaxRows {
+			limited = true
+			return nil
+		}
+		rows++
 		return sink.write(e)
 	})
 	if err := sink.finish(); err != nil && streamErr == nil {
@@ -193,7 +204,7 @@ func (h *AdminHandler) ExportAuditEvents(w http.ResponseWriter, r *http.Request)
 		reason = "timeout"
 	case streamErr != nil:
 		reason = "error"
-	case total > rows:
+	case limited:
 		reason = "limit"
 	}
 	if reason != "" {

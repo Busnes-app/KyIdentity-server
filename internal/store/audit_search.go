@@ -79,6 +79,14 @@ func (s *Store) SearchAuditEvents(f AuditFilter) ([]AuditEvent, int, error) {
 	return s.SearchAuditEventsContext(context.Background(), f)
 }
 
+// CountAuditEvents counts the filtered trail under the caller's deadline.
+func (s *Store) CountAuditEvents(ctx context.Context, f AuditFilter) (int, error) {
+	where, args := f.where()
+	var total int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events`+where, args...).Scan(&total)
+	return total, err
+}
+
 // SearchAuditEventsContext is SearchAuditEvents under the caller's deadline.
 func (s *Store) SearchAuditEventsContext(ctx context.Context, f AuditFilter) ([]AuditEvent, int, error) {
 	where, args := f.where()

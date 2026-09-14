@@ -134,6 +134,19 @@ func TestAuditExportMarksIncompleteOutput(t *testing.T) {
 	if err != nil || len(records) != 5 || records[4][0] != "_export" || records[4][3] != "limit" {
 		t.Fatalf("csv marker rows = %d %v: %v", len(records), err, records)
 	}
+	// The bound equals the count taken before the export's own intent row lands: the
+	// stream itself must notice the overflow, and the oldest row must be missing.
+	_, exact, _ := db.SearchAuditEvents(store.AuditFilter{Limit: 1})
+	oldest, _, _ := db.SearchAuditEvents(store.AuditFilter{Limit: 1, Offset: exact - 1})
+	auditExportMaxRows = exact
+	res = call(t, srv, admin, "GET", "/api/admin/audit-events/export?format=jsonl")
+	m = lastLine(res.Body.String())
+	if res.Code != http.StatusOK || m["_export"] != "incomplete" || m["reason"] != "limit" || m["id"] != "_export" || m["action"] != "incomplete" {
+		t.Fatalf("exact-bound marker = %v (%d)", m, res.Code)
+	}
+	if strings.Contains(res.Body.String(), `"id":"`+oldest[0].ID+`"`) {
+		t.Fatal("oldest row survived an export that overflowed the bound")
+	}
 	auditExportMaxRows = 50000
 	// Deadline already passed: nothing streams, the marker says timeout.
 	auditExportTimeout = 0
