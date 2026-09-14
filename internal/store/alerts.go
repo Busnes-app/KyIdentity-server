@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,10 @@ const (
 	alertSettingsKey      = "alert_settings"
 	alertDeliveryAttempts = 8
 	alertBatch            = 500
+	alertMaxBatches       = 10
+	// loginAlertCeiling bounds live login-failure alerts: past it, further sources
+	// fold into one alert rather than each minting an alert and its mail.
+	loginAlertCeiling = 10
 )
 
 type Alert struct {
@@ -192,22 +197,24 @@ type alertSpec struct {
 	count                               int
 }
 
-// EvaluateAlerts applies the rules to every audit event queued since the last pass and
-// to the connectors' current state. Safe to run at any cadence.
+// EvaluateAlerts applies the rules to the audit events queued since the last pass (a
+// bounded number of batches; the rest wait for the next pass) and to the connectors'
+// current state. Safe to run at any cadence.
 func (s *Store) EvaluateAlerts(now time.Time) error {
 	settings, err := s.AlertSettings()
 	if err != nil {
 		return err
 	}
-	for {
+	for i := 0; i < alertMaxBatches; i++ {
 		n, err := s.evaluateBatch(now, settings)
 		if err != nil {
 			return err
 		}
 		if n < alertBatch {
-			return s.evaluateOutages(now, settings)
+			break
 		}
 	}
+	return s.evaluateOutages(now, settings)
 }
 
 func (s *Store) evaluateBatch(now time.Time, settings AlertSettings) (int, error) {
@@ -325,24 +332,37 @@ func classifyTx(tx *sql.Tx, e queuedEvent, settings AlertSettings, now time.Time
 		if success {
 			return alertSpec{}, nil
 		}
-		key := alertText(e.actor)
-		if key == "" {
-			key = alertText(e.ip)
+		// The key is never the submitted name: a known account keys by its id, anything
+		// else by source address, so an attacker cannot mint alerts by cycling names.
+		by, val, key, subject := "target_id", e.target, e.target, "for "+user()
+		if e.target == "" {
+			by, val, key = "ip_address", e.ip, alertText(e.ip)
+			if key == "" {
+				key = "unknown-source"
+			}
+			subject = "from " + key
 		}
 		var n int
 		since := now.Add(-time.Duration(settings.LoginFailureWindowSeconds) * time.Second)
-		by, val := "actor_username", e.actor
-		if e.actor == "" {
-			by, val = "ip_address", e.ip
-		}
 		// Only failures up to this one count, so a batch evaluated together opens the
 		// alert once at the threshold and folds the rest in one at a time.
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action='auth.login' AND outcome<>'success' AND `+by+`=? AND created_at>? AND (created_at<? OR (created_at=? AND id<=?))`, val, since, e.created, e.created, e.id).Scan(&n); err != nil {
 			return alertSpec{}, err
 		}
-		if n >= settings.LoginFailureThreshold {
-			return alertSpec{"login_failures", key, "warning", "Repeated login failures for " + key, fmt.Sprintf("%d failed sign-ins for %s within %d minutes.", n, key, settings.LoginFailureWindowSeconds/60), n}, nil
+		if n < settings.LoginFailureThreshold {
+			return alertSpec{}, nil
 		}
+		spec := alertSpec{"login_failures", key, "warning", "Repeated login failures " + subject, fmt.Sprintf("%d failed sign-ins %s within %d minutes.", n, subject, settings.LoginFailureWindowSeconds/60), n}
+		// Past the ceiling, a source without a live alert folds into one shared alert
+		// instead of opening its own and mailing everyone again.
+		var live, recent int
+		if err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND key=? AND status<>'resolved'), (SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND key<>'many-sources' AND first_seen>?)`, key, since).Scan(&live, &recent); err != nil {
+			return alertSpec{}, err
+		}
+		if live == 0 && recent >= loginAlertCeiling {
+			spec = alertSpec{"login_failures", "many-sources", "warning", "Repeated login failures from many sources", fmt.Sprintf("Failed sign-ins are arriving from more than %d accounts or addresses within %d minutes; sources past that share this alert.", loginAlertCeiling, settings.LoginFailureWindowSeconds/60), 1}
+		}
+		return spec, nil
 	case "account.end_failed", "group.membership_expiry_failed", "app.assignment_expiry_failed", "access.expiry_reconcile_failed":
 		key := e.target
 		if key == "" {
@@ -565,12 +585,12 @@ func alertBackoff(attempts int) time.Duration {
 	return min(d, 6*time.Hour)
 }
 
-// DeliverAlerts sends every due message through send, one attempt each, and returns
-// how many were attempted. A recipient who can no longer read alerts is skipped, a
+// DeliverAlerts sends every due message through send, one attempt each, until ctx
+// ends, and returns how many were attempted. A recipient who can no longer read alerts is skipped, a
 // failed send is retried with growing delay, and a message that keeps failing is
 // marked failed rather than retried forever. The message names the alert, never the
 // audit details behind it.
-func (s *Store) DeliverAlerts(now time.Time, send func(to, subject, body string) error) (int, error) {
+func (s *Store) DeliverAlerts(ctx context.Context, now time.Time, send func(to, subject, body string) error) (int, error) {
 	type due struct {
 		id                                       int64
 		userID, kind, title, summary, sev, state string
@@ -618,6 +638,10 @@ func (s *Store) DeliverAlerts(now time.Time, send func(to, subject, body string)
 			continue
 		}
 		tx.Rollback()
+		if ctx.Err() != nil {
+			// Out of budget for this pass; the rest stay pending for the next one.
+			return sent, nil
+		}
 		subject := "KySignOn alert: " + d.title
 		if d.kind == "resolved" {
 			subject = "KySignOn alert resolved: " + d.title
@@ -640,4 +664,14 @@ func (s *Store) DeliverAlerts(now time.Time, send func(to, subject, body string)
 		}
 	}
 	return sent, nil
+}
+
+// DeleteAlertsOlderThan trims resolved alerts (their deliveries cascade) and finished
+// deliveries of live alerts past the cutoff. Live alerts are kept whatever their age.
+func (s *Store) DeleteAlertsOlderThan(cutoff time.Time) error {
+	if _, err := s.db.Exec(`DELETE FROM alerts WHERE status='resolved' AND resolved_at<?`, cutoff); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM alert_deliveries WHERE status<>'pending' AND updated_at<?`, cutoff)
+	return err
 }

@@ -773,7 +773,10 @@ from connector and logout delivery state and resolves them when clear. One live 
 per rule and key; repeats count, acknowledged alerts reopen, outages neither. Alert text
 is names only, never audit details. `DeliverAlerts` mails configured recipients
 (administrators or auditors, re-checked per message) through the existing relay with
-backoff and a visible failure after eight attempts. `admin.user_updated` gains
+backoff and a visible failure after eight attempts, on its own goroutine under a pass
+budget. Login failures key by account id or source address, never by the submitted
+name, with a ceiling past which sources share one alert. Resolved alerts and finished
+deliveries follow audit retention. `admin.user_updated` gains
 `roleChanged` and `admin.system_configured` gains `credentialRotated` so the rules need
 no diffing. Inbox and settings under `read`/`admin` permissions, settings with step-up;
 worker evaluates and delivers on its 3-second tick. Alerts page in the SPA. README.md

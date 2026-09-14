@@ -563,9 +563,19 @@ func (e *Engine) ResyncAllAccounts(systemID string) error {
 
 // StartWorker runs the background sync dispatcher. The slower reconcile tick catches
 // effective-access changes that arrived through cascades rather than a mutation path.
+// alertPassBudget bounds one alert pass; a stuck relay costs the alert goroutine one
+// budget, never the dispatcher. alertSender is the mail hook tests replace.
+var (
+	alertPassBudget = 20 * time.Second
+	alertSender     = func(s *mail.Settings) func(to, subject, body string) error { return s.Send }
+)
+
 // runAlerts derives alerts from the audit queue and connector state, then mails what
-// is due. A missing mail configuration is a visible delivery failure, not a silent skip.
+// is due within the pass budget. A missing mail configuration is a visible delivery
+// failure, not a silent skip.
 func (e *Engine) runAlerts(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, alertPassBudget)
+	defer cancel()
 	now := time.Now().UTC()
 	if err := e.store.EvaluateAlerts(now); err != nil && ctx.Err() == nil {
 		log.Printf("alert evaluation failed: %v", err)
@@ -576,8 +586,23 @@ func (e *Engine) runAlerts(ctx context.Context) {
 		log.Printf("alert mail settings unreadable: %v", err)
 		return
 	}
-	if _, err := e.store.DeliverAlerts(now, settings.Send); err != nil && ctx.Err() == nil {
+	if _, err := e.store.DeliverAlerts(ctx, now, alertSender(settings)); err != nil && ctx.Err() == nil {
 		log.Printf("alert delivery failed: %v", err)
+	}
+}
+
+// alertWorker runs alert passes on its own goroutine so mail latency never holds up
+// dispatch or expiry follow-up. Passes are sequential, so they cannot overlap.
+func (e *Engine) alertWorker(ctx context.Context) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			e.runAlerts(ctx)
+		}
 	}
 }
 
@@ -587,6 +612,7 @@ func (e *Engine) StartWorker(ctx context.Context) {
 	reconcile := time.NewTicker(time.Minute)
 	defer reconcile.Stop()
 	go e.reconcileWorker(ctx)
+	go e.alertWorker(ctx)
 	// Overdue expiries are applied at start, so a restart drains them before anything else.
 	if _, err := e.store.RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
 		log.Printf("expiry follow-up failed: %v", err)
@@ -613,7 +639,6 @@ func (e *Engine) StartWorker(ctx context.Context) {
 				// only unsent claims become available when their leases expire.
 				log.Printf(`{"level":"ERROR","component":"sync","error":%q}`, err.Error())
 			}
-			e.runAlerts(ctx)
 		}
 	}
 }
