@@ -15,6 +15,7 @@ import (
 	"github.com/Busness-app/ky-primitives/scim"
 	"github.com/Busness-app/ky-primitives/syncauth"
 	"github.com/Busness-app/kysignon-server/internal/crypto"
+	"github.com/Busness-app/kysignon-server/internal/mail"
 	"github.com/Busness-app/kysignon-server/internal/netguard"
 	"github.com/Busness-app/kysignon-server/internal/store"
 	"github.com/google/uuid"
@@ -562,6 +563,24 @@ func (e *Engine) ResyncAllAccounts(systemID string) error {
 
 // StartWorker runs the background sync dispatcher. The slower reconcile tick catches
 // effective-access changes that arrived through cascades rather than a mutation path.
+// runAlerts derives alerts from the audit queue and connector state, then mails what
+// is due. A missing mail configuration is a visible delivery failure, not a silent skip.
+func (e *Engine) runAlerts(ctx context.Context) {
+	now := time.Now().UTC()
+	if err := e.store.EvaluateAlerts(now); err != nil && ctx.Err() == nil {
+		log.Printf("alert evaluation failed: %v", err)
+		return
+	}
+	settings, err := mail.Load(e.store, e.encryptionKey)
+	if err != nil && ctx.Err() == nil {
+		log.Printf("alert mail settings unreadable: %v", err)
+		return
+	}
+	if _, err := e.store.DeliverAlerts(now, settings.Send); err != nil && ctx.Err() == nil {
+		log.Printf("alert delivery failed: %v", err)
+	}
+}
+
 func (e *Engine) StartWorker(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
@@ -594,6 +613,7 @@ func (e *Engine) StartWorker(ctx context.Context) {
 				// only unsent claims become available when their leases expire.
 				log.Printf(`{"level":"ERROR","component":"sync","error":%q}`, err.Error())
 			}
+			e.runAlerts(ctx)
 		}
 	}
 }

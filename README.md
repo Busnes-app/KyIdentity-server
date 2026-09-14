@@ -469,6 +469,36 @@ than the configured cutoff are trimmed by the existing housekeeping, and any cha
 that period is a separate decision, not part of search or export. For external log
 collection use the structured process log; there is no second audit delivery path.
 
+## Alerts
+
+The alerts page turns the audit trail and connector state into a short list an
+administrator or auditor can act on: privilege changes (an account made or unmade an
+administrator, delegations changed), recovery use (a recovery code consumed, a second
+factor reset by an administrator, a password reset link redeemed), connector credential
+changes (inbound SCIM tokens issued or revoked, an outbound connector created or its
+bearer token rotated, the mail relay changed), repeated login failures for one name or
+address (threshold and window configurable, default ten in ten minutes), failed or
+refused scheduled access removal, and outages (a connector whose deliveries are failing
+or given up, a client whose back-channel logouts were given up). Every audit insert
+queues its id through a trigger, the evaluator writes alerts and drains the queue in one
+transaction, and the worker runs it every few seconds, so a crash can repeat work but
+never skip a trigger, and history recorded before this version is not re-alerted.
+Repeats fold into one open alert per rule and subject with a count; an acknowledged
+alert reopens on the next occurrence rather than hiding it; an outage stays one alert
+for its whole duration, resolves itself when deliveries succeed again, and a later
+failure opens a fresh one. Alert text names the account, connector or app and nothing
+else: the audit details behind it, and any recovery code or credential, never reach the
+alert, the mail or the page. Recipients (`PUT /api/admin/alerts/settings`, administrators
+with step-up, usernames on the wire) must be administrators or auditors when configured
+and are checked again before each message; anyone who has since lost that access is
+skipped and the skip is shown. Mail goes through the existing relay when one is
+configured, with growing retry delays and a visible failure after eight attempts, so a
+broken relay or a missing configuration shows on the alert rather than silently
+dropping it. Administrators and auditors read the inbox (`GET /api/admin/alerts`), only
+administrators acknowledge (`POST /api/admin/alerts/{id}/acknowledge`), and both
+settings changes and acknowledgements are audited. There is no second alert transport
+and no per-rule switch; the process log remains the place for external collection.
+
 ## Integration Requirements
 
 These rules are enforced strictly. Each is a constraint on how a client integrates.

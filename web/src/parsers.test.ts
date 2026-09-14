@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   parseAccessExplanation,
   parseAccessRequest,
+  parseAlert,
+  parseAlertPage,
+  parseAlertSettings,
   parseGroupPage,
   parseGroupUserPage,
   parseApplications,
@@ -586,6 +589,24 @@ describe('parseAccessRequest', () => {
   });
   it.each(['granted', '', undefined])('refuses the unknown status %p rather than showing it as pending', (status) => {
     expect(() => parseAccessRequest({ ...request, status })).toThrow(/status/);
+  });
+});
+
+describe('parseAlert', () => {
+  const alert = { id: 'al1', rule: 'recovery_use', key: 'u1', severity: 'warning', title: 'Recovery used for ada', summary: 'A recovery code was used to sign in as ada.', status: 'open', count: 2, firstSeen: '2026-06-01T07:30:00Z', lastSeen: '2026-06-01T07:31:00Z', delivery: { pending: 1, delivered: 0, failed: 0, skipped: 0, lastError: '' } };
+  it('reads an alert, its delivery summary and the acknowledgement', () => {
+    expect(parseAlert(alert).delivery.pending).toBe(1);
+    expect(parseAlert({ ...alert, status: 'acknowledged', acknowledgedBy: 'root', acknowledgedAt: '2026-06-01T08:00:00Z' }).acknowledgedBy).toBe('root');
+    expect(parseAlertPage({ alerts: [alert], total: 1, limit: 50, offset: 0 }).items).toHaveLength(1);
+    expect(parseAlertSettings({ loginFailureThreshold: 10, loginFailureWindowSeconds: 600, recipients: [{ id: 'u1', username: 'root' }] }).recipients[0]?.username).toBe('root');
+  });
+  it.each(['closed', '', undefined])('refuses the unknown status %p', (status) => {
+    expect(() => parseAlert({ ...alert, status })).toThrow(/status/);
+  });
+  it('refuses a missing delivery summary or a bad severity', () => {
+    expect(() => parseAlert({ ...alert, delivery: undefined })).toThrow(/delivery/);
+    expect(() => parseAlert({ ...alert, severity: 'fatal' })).toThrow(/severity/);
+    expect(() => parseAlertSettings({ loginFailureThreshold: -1, loginFailureWindowSeconds: 600, recipients: [] })).toThrow();
   });
 });
 

@@ -244,6 +244,15 @@ export interface AccessRequest {
 }
 export interface OwnAccessRequests { requestable: RequestableApp[]; requests: AccessRequest[] }
 
+export interface AlertDelivery { pending: number; delivered: number; failed: number; skipped: number; lastError: string }
+export interface Alert {
+  id: string; rule: string; key: string; severity: 'critical' | 'warning'; title: string; summary: string;
+  status: 'open' | 'acknowledged' | 'resolved'; count: number; firstSeen: string; lastSeen: string;
+  acknowledgedAt?: string; acknowledgedBy?: string; resolvedAt?: string; delivery: AlertDelivery;
+}
+export interface AlertRecipient { id: string; username: string }
+export interface AlertSettings { loginFailureThreshold: number; loginFailureWindowSeconds: number; recipients: AlertRecipient[] }
+
 export interface AccessGrant { kind: 'direct' | 'group'; groupId?: string; groupName?: string; sourceConnectorId?: string; expiresAt?: string; live: boolean }
 export interface RoleGrant { role: string; via: 'direct' | 'group'; groupName?: string }
 export interface AccessExplanation {

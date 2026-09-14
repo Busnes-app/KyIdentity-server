@@ -104,6 +104,7 @@ func (s *Server) routes() *http.ServeMux {
 	adminH := NewAdminHandler(s.store, s.syncEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	onboardH := NewOnboardingHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL, s.cfg.EncryptionKey)
 	requestH := NewAccessRequestHandler(s.store, s.audit, s.middleware, s.cfg.EncryptionKey)
+	alertH := NewAlertHandler(s.store, s.audit, s.middleware)
 	scimH := NewSCIMHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
 	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
@@ -272,6 +273,10 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/icons", permAdmin, false, s.middleware.RateLimit("icon_upload", 20, 0.1)(http.HandlerFunc(adminH.UploadIcon))},
 		{"GET", "/api/admin/audit-events", permRead, false, s.middleware.RateLimit("audit_list", 60, 1)(http.HandlerFunc(adminH.ListAuditEvents))},
 		{"GET", "/api/admin/audit-events/export", permRead, false, s.middleware.RateLimit("audit_export", 5, 0.1)(http.HandlerFunc(adminH.ExportAuditEvents))},
+		{"GET", "/api/admin/alerts", permRead, false, http.HandlerFunc(alertH.List)},
+		{"POST", "/api/admin/alerts/{id}/acknowledge", permAdmin, false, http.HandlerFunc(alertH.Acknowledge)},
+		{"GET", "/api/admin/alerts/settings", permRead, false, http.HandlerFunc(alertH.GetSettings)},
+		{"PUT", "/api/admin/alerts/settings", permAdmin, true, http.HandlerFunc(alertH.PutSettings)},
 		{"POST", "/api/admin/backup/drill", permAdmin, false, http.HandlerFunc(backupH.RunDrill)},
 		{"GET", "/api/admin/backup/export-capsule", permAdmin, true, http.HandlerFunc(backupH.ExportCapsule)},
 		{"POST", "/api/admin/backup/pair-remote", permAdmin, true, http.HandlerFunc(backupH.PairRemote)},

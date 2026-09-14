@@ -164,7 +164,7 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Email != "" {
 		user.Email = req.Email
 	}
-	wasAdmin := user.Role == "admin"
+	wasAdmin, wasRole := user.Role == "admin", user.Role
 	if req.Role == "user" || req.Role == "admin" {
 		user.Role = req.Role
 	}
@@ -218,6 +218,7 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		"endsAt":        user.EndsAt,
 		"endsAtBefore":  endsAtBefore,
 		"demoted":       demoted,
+		"roleChanged":   user.Role != wasRole,
 		"accessRevoked": revokeAccess,
 	})
 	if err := h.syncEngine.UpdateUserAndQueueSyncEvents(user, revokeAccess, updated.Row); err != nil {
@@ -1095,7 +1096,7 @@ func (h *AdminHandler) ConfigureSystem(w http.ResponseWriter, r *http.Request) {
 		hours = *req.ReconcileHours
 	}
 	admin := GetUserFromContext(r.Context())
-	event := h.audit.Prepare("admin.system_configured", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"systemName": sys.Name, "systemType": req.SystemType, "groups": groups, "reconcileHours": hours})
+	event := h.audit.Prepare("admin.system_configured", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"systemName": sys.Name, "systemType": req.SystemType, "groups": groups, "reconcileHours": hours, "credentialRotated": req.BearerToken != ""})
 	if err = h.syncEngine.ReviewSystem(sys, req.SystemType, req.BearerToken, groups, hours, event.Row); err != nil {
 		protocol := req.SystemType
 		if protocol != "scim" && protocol != "suite_webhook" {

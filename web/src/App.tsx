@@ -18,6 +18,7 @@ import { AdminBackup } from './components/AdminBackup';
 import { AdminMail } from './components/AdminMail';
 import { AdminSCIM } from './components/AdminSCIM';
 import { AdminAccessRequests } from './components/AdminAccessRequests';
+import { AdminAlerts } from './components/AdminAlerts';
 import { AccountLinkView } from './components/AccountLinkView';
 import { RefreshCw } from 'lucide-react';
 
@@ -121,6 +122,7 @@ export const App: React.FC = () => {
             {activeTab === 'admin-mail' && <AdminMail />}
             {activeTab === 'admin-scim' && <AdminSCIM />}
             {activeTab === 'admin-requests' && <AdminAccessRequests />}
+            {activeTab === 'admin-alerts' && <AdminAlerts access={currentUser.access} />}
           </>
         )}
       </main>
