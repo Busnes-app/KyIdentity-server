@@ -21,7 +21,9 @@ const restoredRevision = -1
 // restoredCleared is every table whose rows are a credential or a queued task that
 // cannot survive a restore. Long-lived credentials the user holds (passwords, enrolled
 // factors, recovery codes) are deliberately absent: they are what the operator still
-// has to work with, and the runbook covers rotating them.
+// has to work with, and the runbook covers rotating them. Queued back-channel logouts
+// are absent for a different reason: they are work this server owes a relying party,
+// and nothing would re-derive them.
 var restoredCleared = []string{
 	"sessions", // cascades oidc_client_sessions
 	"issued_tokens",
@@ -35,7 +37,6 @@ var restoredCleared = []string{
 	"account_tokens",
 	"device_pairing_tokens",
 	"login_failures",
-	"logout_deliveries",
 	"sync_delivery_attempts",
 }
 
@@ -45,6 +46,9 @@ type RestoreReport struct {
 	Credentials int
 	// QueuedDeliveries counts outbox rows closed out rather than delivered.
 	QueuedDeliveries int
+	// LogoutsQueued counts back-channel logouts newly queued for the logins this
+	// restore ended. Logouts already owed are kept, not counted again.
+	LogoutsQueued int
 	// HeldConnectors counts connectors whose outbound provisioning is now held, and
 	// Connectors names them: their stored credentials are in the capsule and the
 	// runbook asks the operator to review them for rotation.
@@ -72,6 +76,30 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 	var report RestoreReport
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
 		report = RestoreReport{}
+		// Before the sessions go: every login this restore ends is announced to the
+		// relying parties that saw it, because a receiver told nothing keeps its own
+		// session until its own timeout. The sid mapping cascades away with the
+		// sessions, so this cannot be done afterwards. A logout only ever removes
+		// access, so re-announcing one is safe; a login already announced is not
+		// queued twice.
+		res, err := tx.Exec(`INSERT INTO logout_deliveries (id, client_id, user_id, sid, status, attempts, next_attempt_at, created_at, updated_at)
+ SELECT lower(hex(randomblob(16))), cs.client_id, cs.user_id, cs.sid, 'queued', 0, ?, ?, ?
+ FROM oidc_client_sessions cs JOIN oauth_clients c ON c.id=cs.client_id
+ WHERE c.enabled AND c.backchannel_logout_uri<>''
+ AND NOT EXISTS (SELECT 1 FROM logout_deliveries d WHERE d.client_id=cs.client_id AND d.sid=cs.sid AND d.status<>'delivered')`, now, now, now)
+		if err != nil {
+			return err
+		}
+		queued, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		report.LogoutsQueued = int(queued)
+		// A delivery that was in flight when the snapshot was taken is owed by a process
+		// that no longer exists: release the lease and let it go out again.
+		if _, err := tx.Exec(`UPDATE logout_deliveries SET claim_token='', lease_until=NULL, attempts=0, next_attempt_at=?, updated_at=? WHERE status='queued'`, now, now); err != nil {
+			return err
+		}
 		for _, table := range restoredCleared {
 			res, err := tx.Exec(`DELETE FROM ` + table)
 			if err != nil {
@@ -83,16 +111,17 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 			}
 			report.Credentials += int(n)
 		}
-		// Every undelivered event is closed out rather than deleted: an operator reading
-		// the outbox after a restore should see why nothing was sent, and reconciliation
-		// re-derives the work. The sentinel revision is what keeps it closed: the
+		// Every undelivered provisioning event is closed out rather than deleted: an
+		// operator reading the outbox after a restore should see why nothing was sent,
+		// and reconciliation re-derives the work. Back-channel logouts are the opposite
+		// case, handled above: nothing re-derives them, so they are kept and redelivered. The sentinel revision is what keeps it closed: the
 		// worker's safety net re-pends exhausted work whose revision still matches the
 		// connector's desired state (provisioning.go), and after a restore every row is
 		// unfenced, so without this the capsule's queue would come back and deliver the
 		// moment a hold lifted. A revision no state row can carry never matches, and the
 		// same pass deletes the row once a real revision exists. Deletions and MFA resets
 		// carry no desired state and still retry, which only ever removes access.
-		res, err := tx.Exec(`UPDATE account_sync_events SET status='failed', revision=?, last_error=?, updated_at=?, lease_until=NULL, claim_token='' WHERE status IN ('pending','failed') AND revision<>?`,
+		res, err = tx.Exec(`UPDATE account_sync_events SET status='failed', revision=?, last_error=?, updated_at=?, lease_until=NULL, claim_token='' WHERE status IN ('pending','failed') AND revision<>?`,
 			restoredRevision, "superseded by a restore; reconcile the connector to re-derive the work", now, restoredRevision)
 		if err != nil {
 			return err
@@ -139,6 +168,7 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 			}
 			details["credentialsInvalidated"] = report.Credentials
 			details["queuedDeliveriesClosed"] = report.QueuedDeliveries
+			details["logoutsQueued"] = report.LogoutsQueued
 			details["connectorsHeld"] = report.Connectors
 			body, err := json.Marshal(details)
 			if err != nil {

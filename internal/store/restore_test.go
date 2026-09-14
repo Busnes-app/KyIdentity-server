@@ -21,6 +21,10 @@ func seedEphemeral(t *testing.T, s *Store, userID, clientID string) {
 	}{
 		{`INSERT INTO sessions(id,user_id,session_token_hash,ip_address,user_agent,expires_at) VALUES('sess-1',?,'hash-1','::1','ua',?)`, []any{userID, soon}},
 		{`INSERT INTO oidc_client_sessions(sid,client_id,session_id,user_id,created_at) VALUES('sid-1',?,'sess-1',?,?)`, []any{clientID, userID, now}},
+		// A second relying party with a live login and nothing owed to it yet: the
+		// restore is about to end that login and has to say so.
+		{`INSERT INTO sessions(id,user_id,session_token_hash,ip_address,user_agent,expires_at) VALUES('sess-2',?,'hash-2','::1','ua',?)`, []any{userID, soon}},
+		{`INSERT INTO oidc_client_sessions(sid,client_id,session_id,user_id,created_at) VALUES('sid-2','client-2','sess-2',?,?)`, []any{userID, now}},
 		{`INSERT INTO issued_tokens(jti,user_id,client_id,expires_at) VALUES('jti-1',?,?,?)`, []any{userID, clientID, soon}},
 		{`INSERT INTO authorization_codes(id,code_hash,client_id,user_id,redirect_uri,scope,code_challenge,code_challenge_method,expires_at) VALUES('code-1','ch-1',?,?,'https://app.test/cb','openid','c','S256',?)`, []any{clientID, userID, soon}},
 		{`INSERT INTO authorization_interactions(hash,browser_hash,user_id,request,created_at,expires_at) VALUES('int-1','bh-1',?,'{}',?,?)`, []any{userID, now, soon}},
@@ -44,8 +48,10 @@ func restoreFixture(t *testing.T) (*Store, func()) {
 	t.Helper()
 	s, cleanup := setupTestStore(t)
 	u := createTestUserNamed(t, s, "staff")
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "client-1", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://app.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
-		t.Fatal(err)
+	for _, c := range []struct{ id, name string }{{"client-1", "App"}, {"client-2", "Other"}} {
+		if err := s.CreateOAuthClient(&OAuthClient{ID: c.id, ClientName: c.name, ClientType: "public", RedirectURIsJSON: `["https://app.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true, BackchannelLogoutURI: "https://app.test/logout"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// The user genuinely has access through the connector's app, so the capsule's view
 	// of them is still what this directory wants: nothing supersedes the queued work,
@@ -118,6 +124,41 @@ func TestRestoreInvalidatesEphemeralCredentialsAndHoldsProvisioning(t *testing.T
 	}
 	if sys, _ := s.GetPairedSystemByID("hr"); sys == nil || !sys.ProvisioningHold {
 		t.Fatal("second apply released the hold")
+	}
+}
+
+// A restore ends every login here. A relying party that was told nothing keeps its own
+// session until its own timeout, so the logouts this server already owed are kept and
+// the logins it is about to end are announced.
+func TestRestoreAnnouncesTheLoginsItEnds(t *testing.T) {
+	s, cleanup := restoreFixture(t)
+	defer cleanup()
+	report, err := s.ApplyRestoredState(time.Now().UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One new delivery, for the login nothing was owed for yet. The one already queued
+	// is not duplicated and not thrown away.
+	if report.LogoutsQueued != 1 {
+		t.Fatalf("logouts queued: %+v", report)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM logout_deliveries`); n != 2 {
+		t.Fatalf("logout deliveries after the restore: %d", n)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM logout_deliveries WHERE id='ld-1' AND status='queued' AND attempts=0 AND claim_token=''`); n != 1 {
+		t.Fatal("the delivery this server already owed was lost or left in flight")
+	}
+	// Both are deliverable: one per client, which is the worker's own limit.
+	seen := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		d, err := s.ClaimLogoutDelivery(time.Minute)
+		if err != nil || d == nil {
+			t.Fatalf("claim %d: %+v %v", i, d, err)
+		}
+		seen[d.ClientID] = true
+	}
+	if !seen["client-1"] || !seen["client-2"] {
+		t.Fatalf("both relying parties must be told: %v", seen)
 	}
 }
 

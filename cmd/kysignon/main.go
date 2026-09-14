@@ -532,8 +532,8 @@ func applyRestoreMarker(dataDir string, s *store.Store, auditLogger *audit.Logge
 		return err
 	}
 	event.Committed()
-	log.Printf("Restored directory applied: %d credential(s) invalidated, %d queued delivery/deliveries closed, provisioning held on %v until each is reconciled; review their stored credentials for rotation",
-		report.Credentials, report.QueuedDeliveries, report.Connectors)
+	log.Printf("Restored directory applied: %d credential(s) invalidated, %d queued delivery/deliveries closed, %d back-channel logout(s) queued for the logins it ended, provisioning held on %v until each is reconciled; review their stored credentials for rotation",
+		report.Credentials, report.QueuedDeliveries, report.LogoutsQueued, report.Connectors)
 	return os.Remove(path)
 }
 

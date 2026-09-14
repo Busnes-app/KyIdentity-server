@@ -74,10 +74,21 @@ delivery or a reconciliation.
 
 `kysignon restore` unpacks a capsule and marks the directory as restored. The next start
 invalidates the credentials the capsule carried (sessions, tokens, authorization codes,
-step-up and MFA challenges, invitation and reset links, device pairing tokens, queued
-back-channel logouts), closes out the queued outbound deliveries with a reason, and
-holds outbound provisioning on every connector. It records `system.restored` with the
-counts, naming the connectors you have to act on now.
+step-up and MFA challenges, invitation and reset links, device pairing tokens), closes
+out the queued outbound deliveries with a reason, and holds outbound provisioning on
+every connector. It records `system.restored` with the counts, naming the connectors you
+have to act on now.
+
+Ending every login here is not something the relying parties can see, so the restore
+queues a back-channel logout for each login it ends, to the clients that registered a
+receiver, and keeps any logout it already owed. Expect those deliveries to go out
+shortly after the start; a client that is down raises the usual failed-delivery alert.
+
+Two things the capsule brings back that are not credentials of the operator's: an
+inbound SCIM token revoked after the snapshot is live again, and so is any connector
+credential rotated after it. Clearing the inbound tokens would break every upstream
+sync, so they are kept; if a token was revoked because it leaked, revoke it again as
+the first thing you do after the restore.
 
 While a connector is held, nothing is delivered to it. The console shows the hold on the
 Suite sync page. To resume:

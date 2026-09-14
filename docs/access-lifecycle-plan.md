@@ -818,8 +818,8 @@ users) twice, and compares schema fingerprints with a fresh install; it found an
 a real defect, a second migration resurrecting the pre-group `scim_remote_user` index
 and with it a uniqueness rule that refuses a group and a user sharing a remote id.
 `kysignon restore` writes a restore marker; the next start invalidates the capsule's
-sessions, tokens, links, challenges and queued logouts, closes out the queued outbound
-deliveries, holds provisioning per connector and audits `system.restored` in the same
+sessions, tokens, links and challenges, queues a back-channel logout for every login it
+ends and keeps the ones already owed, closes out the queued outbound deliveries, holds provisioning per connector and audits `system.restored` in the same
 transaction. A held connector delivers nothing until a repair reconciliation that listed the far
 side completely and wrote through releases it; a preview, a failed run, a refused or
 truncated listing and an unlistable connector kind do not, and the last of those is

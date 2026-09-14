@@ -25,6 +25,7 @@ attested and promoted).
 | A pre-feature database upgrades with stable identifiers, states its legacy broad access, invents no authentication evidence, and lands on the schema of a fresh install | `TestUpgradeFromPreFeatureDatabase` (store) |
 | Running the migrations twice changes nothing, including the indexes | same test: schema fingerprints after each run, and a group and a user sharing a remote id still insert |
 | A restore invalidates the sessions, tokens, links and queued work a capsule carries | `TestRestoreInvalidatesEphemeralCredentialsAndHoldsProvisioning` (store) |
+| A restore announces the logins it ends to the relying parties that saw them, and keeps the logouts it already owed | `TestRestoreAnnouncesTheLoginsItEnds` (store) |
 | Outbound provisioning stays held after a restore until a repair reconciliation that actually compared the far side | `TestProvisioningHoldIsReleasedByReconciliation` (store), `TestReleaseRestoreScenario` (api, real HTTP routes) |
 | A connector that cannot be listed is resumed only by a deliberate, audited operator act, and the capsule's outbox still does not deliver | `TestProvisioningHoldCanBeResumedDeliberately` (store), which runs the worker's safety net before resuming |
 | A connector disabled at snapshot time is held too, so re-enabling it delivers nothing | `TestRestoreHoldsAConnectorThatWasDisabled` (store) |

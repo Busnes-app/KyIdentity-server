@@ -522,7 +522,11 @@ Restoring is two commands and one deliberate consequence. `kysignon restore -cap
 the directory as restored. The next start reads that marker once and invalidates what
 the capsule carried: sessions, issued tokens, authorization codes and interactions,
 MFA and step-up challenges and grants, invitation and reset links, device pairing
-tokens, queued back-channel logouts and in-flight delivery fences. Queued outbound
+tokens and in-flight delivery fences. Back-channel logouts go the other way: a restore
+ends every login here, so before the sessions go it queues a logout for each one to the
+relying parties that saw it, and keeps the logouts it already owed rather than deleting
+them. Nothing else would re-derive that work, and a receiver told nothing keeps its own
+session until its own timeout. Queued outbound
 deliveries are closed out with a reason rather than sent, and outbound provisioning is
 held on every connector that is not disabled. A `system.restored` audit row records the
 counts, and the marker is removed only after that has committed, so an interrupted

@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +85,20 @@ func TestIDTokenHintAcceptsExpiredButNotForgedOrForeignTokens(t *testing.T) {
 		t.Fatal("an access token is not an ID token hint")
 	}
 	parts := strings.Split(resp.IDToken, ".")
-	if _, err := e.ParseIDTokenHint(parts[0] + "." + parts[1] + "." + parts[2][:len(parts[2])-2] + "AA"); err == nil {
+	// Tamper a byte of the signature, not a character of its encoding: the last base64
+	// character of a 256-byte signature carries two significant bits and four that the
+	// decoder discards, so rewriting it can leave the signature unchanged and the
+	// assertion below passing for no reason.
+	raw, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(raw) == 0 {
+		t.Fatal("signature did not decode:", err)
+	}
+	raw[0] ^= 0x01
+	tampered := parts[0] + "." + parts[1] + "." + base64.RawURLEncoding.EncodeToString(raw)
+	if tampered == resp.IDToken {
+		t.Fatal("the tampered token is the original")
+	}
+	if _, err := e.ParseIDTokenHint(tampered); err == nil {
 		t.Fatal("tampered signature accepted")
 	}
 
