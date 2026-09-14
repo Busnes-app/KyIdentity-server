@@ -215,7 +215,7 @@ func (s *Store) ListAccessRequests(f AccessRequestFilter) ([]AccessRequest, int,
 		where, args = where+` AND r.user_id=?`, append(args, f.UserID)
 	}
 	if f.ActorID != "" {
-		where = where + ` AND (EXISTS(SELECT 1 FROM users x WHERE x.id=? AND x.role='admin') OR r.app_id IN (SELECT d.app_id FROM admin_delegations d WHERE d.user_id=? AND d.kind='app_owner'))`
+		where = where + ` AND (EXISTS(SELECT 1 FROM users x WHERE x.id=? AND ` + activeAdminSQL + `) OR r.app_id IN (SELECT d.app_id FROM admin_delegations d WHERE d.user_id=? AND d.kind='app_owner'))`
 		args = append(args, f.ActorID, f.ActorID)
 	}
 	if f.Status != "" {
@@ -279,7 +279,7 @@ func (s *Store) DecideAccessRequest(id, actorID string, approve bool, note strin
 		}
 		var may bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND `+activeAdminSQL+`)
- OR EXISTS(SELECT 1 FROM admin_delegations d JOIN users x ON x.id=d.user_id WHERE d.user_id=? AND d.kind='app_owner' AND d.app_id=? AND x.status='active')`, actorID, actorID, req.AppID).Scan(&may); err != nil {
+ OR EXISTS(SELECT 1 FROM admin_delegations d JOIN users x ON x.id=d.user_id WHERE d.user_id=? AND d.kind='app_owner' AND d.app_id=? AND x.status='active' AND (x.ends_at IS NULL OR x.ends_at>unixepoch()))`, actorID, actorID, req.AppID).Scan(&may); err != nil {
 			return err
 		}
 		if !may {

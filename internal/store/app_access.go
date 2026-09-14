@@ -243,7 +243,7 @@ func (s *Store) ListAppAccessUsers(id, query, previewMode string, previewEnabled
 	if err = tx.QueryRow(`SELECT COUNT(*)`+from, id, query, query).Scan(&p.Total); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.status,f.direct,f.group_assigned,(`+current+`),(`+proposed+`),CASE WHEN NOT f.active THEN 'user_disabled' WHEN NOT f.enabled THEN 'app_disabled' WHEN NOT f.client_enabled THEN 'client_disabled' WHEN f.access_mode='all_active_users' THEN 'all_active_users' WHEN f.direct THEN 'direct_assignment' WHEN f.group_assigned THEN 'group_assignment' ELSE 'not_assigned' END,
+	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.status,f.direct,f.group_assigned,(`+current+`),(`+proposed+`),`+accessReasonSQL+`,
  (SELECT d.expires_at FROM app_user_assignments d WHERE d.app_id=f.app_id AND d.user_id=u.id)`+from+` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, enabled, mode, id, query, query, limit, offset)
 	if err != nil {
 		return nil, err

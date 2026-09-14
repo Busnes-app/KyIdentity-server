@@ -244,6 +244,15 @@ export interface AccessRequest {
 }
 export interface OwnAccessRequests { requestable: RequestableApp[]; requests: AccessRequest[] }
 
+export interface AccessGrant { kind: 'direct' | 'group'; groupId?: string; groupName?: string; sourceConnectorId?: string; expiresAt?: string; live: boolean }
+export interface RoleGrant { role: string; via: 'direct' | 'group'; groupName?: string }
+export interface AccessExplanation {
+  appId: string; appName: string; userId: string; username: string; allowed: boolean; reason: string;
+  accessMode: 'all_active_users' | 'assigned_only'; appEnabled: boolean; clientEnabled: boolean; userStatus: string; userEndsAt?: string;
+  grants: AccessGrant[]; roles: RoleGrant[]; accessEndsAt?: string; authentication: AppAuthenticationPolicy;
+  revision: number; authenticationRevision: number; roleRevision: number; requestable: boolean;
+}
+
 export interface AppRecord {
  /** Users who lack access may ask for this app. */
  requestable: boolean;

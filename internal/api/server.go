@@ -168,6 +168,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /api/user/password", authM(s.requireStepUp(http.HandlerFunc(onboardH.ChangePassword))))
 	mux.Handle("GET /api/user/applications", authM(http.HandlerFunc(devH.ListApplications)))
 	mux.Handle("GET /api/user/access-requests", authM(http.HandlerFunc(requestH.ListOwn)))
+	mux.Handle("GET /api/user/access-explanation", authM(http.HandlerFunc(requestH.OwnAccessExplanation)))
 	mux.Handle("POST /api/user/access-requests", authM(s.middleware.RateLimit("access_request", 10, 0.2)(http.HandlerFunc(requestH.Create))))
 	mux.Handle("DELETE /api/user/access-requests/{id}", authM(http.HandlerFunc(requestH.Cancel)))
 	mux.Handle("GET /api/user/sessions", authM(http.HandlerFunc(sessH.ListOwn)))
@@ -281,6 +282,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"GET", "/api/admin/users/{id}/delegations", permAdmin, false, http.HandlerFunc(adminH.GetDelegations)},
 		{"PUT", "/api/admin/users/{id}/delegations", permAdmin, true, http.HandlerFunc(adminH.SetDelegations)},
 		{"PUT", "/api/admin/app-registry/{id}/requestable", permAdmin, true, http.HandlerFunc(adminH.SetAppRequestable)},
+		{"GET", "/api/admin/app-registry/{id}/access-users/{userId}/explain", permAppRead, false, http.HandlerFunc(adminH.ExplainAppAccess)},
 		{"GET", "/api/admin/access-requests", permRequests, false, http.HandlerFunc(requestH.Inbox)},
 		{"POST", "/api/admin/access-requests/{id}/approve", permRequests, true, requestH.Decide(true)},
 		{"POST", "/api/admin/access-requests/{id}/deny", permRequests, true, requestH.Decide(false)},
