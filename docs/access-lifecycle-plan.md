@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/access-requests)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/explain-access)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -31,8 +31,10 @@ completion status on the SCIM replace). PR17 (delegated administration) merged a
 round (delegates under the administrators MFA scope, helpdesk kept off administrators
 and other delegates). PR18 (expiring access and account end dates) merged as GitHub PR #50 after two
 review rounds (one active-administrator definition, per-item expiry follow-up, unchanged
-end dates not treated as schedules). PR19 (access requests and approvals) is in progress
-on feat/access-requests. PRs 20–23 and D1–D4 remain planned. Note for D1–D4: released
+end dates not treated as schedules). PR19 (access requests and approvals) merged as GitHub PR #51,
+cleared by the security review on its first pass. PR20 (explain effective access and
+authentication decisions) is in progress on feat/explain-access. PRs 21–23 and D1–D4
+remain planned. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
@@ -707,6 +709,15 @@ Depends on: 05, 06, 15, 16, 17, 18. Touch: shared decision output, admin user/ap
 Acceptance: displayed decisions equal actual authorization for direct/group/expired/
 disabled cases; historical reasons survive edits; unauthorized viewers cannot enumerate
 groups, users or private apps via explanations.
+
+Implementation: `ExplainAccess` reads the verdict from the access view and the reason
+from the expression the listing uses, lists grants with expiry and liveness, roles with
+their source, the authentication policy, the access end and the three revisions; an
+Explain modal on the app access page (administrators, auditors, owners of that app) and
+a user-facing endpoint that returns only verdict, reason and requestability; denied
+authorizations are audited with the reason and revisions of that moment and point users
+of requestable apps at the request path. The existing policy preview covers proposed
+access-policy changes. README.md "Explaining access decisions".
 
 ### PR 21 — Audit search and export
 

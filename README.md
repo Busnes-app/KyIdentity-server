@@ -355,7 +355,7 @@ on that user's next call without waiting for their session to end.
 |---|---|---|
 | Helpdesk | List users and groups; view a user's sessions and offboarding status; reset MFA, revoke sessions and app grants, retry logouts, issue activation and reset links, for ordinary users | Touch an administrator's or another delegate's account in any of those ways; create, edit or delete users; assign privileges |
 | Auditor | Read every administration page: users, groups, app connections, provisioning, connectors, clients, policies, mail settings, backup status, audit log | Change anything, including step-up protected writes and the recovery capsule export |
-| App owner (per app) | List users and groups to pick principals; see the owned app's access and roles; assign users and groups to the app; create and delete its roles and map principals to them | See or touch any other app; change the app's access mode, authentication policy, claim switches, links, OAuth credentials or provisioning connection |
+| App owner (per app) | List users and groups to pick principals; see the owned app's access, roles and access explanations; assign users and groups to the app; create and delete its roles and map principals to them; decide access requests for the app | See or touch any other app; change the app's access mode, authentication policy, claim switches, links, OAuth credentials or provisioning connection |
 
 Everyone holding a delegation falls under the *administrators* MFA enrollment policy
 from the moment it is granted: a required policy restricts their session until they
@@ -418,6 +418,31 @@ an owner whose delegation was withdrawn cannot approve from a stale form, an app
 to requests in the meantime cannot be approved, and a request withdrawn or expired
 before the click grants nothing. The requester is told by mail when delivery is
 configured.
+
+## Explaining access decisions
+
+*Explain* on a user's row of an app's access page shows why that user can or cannot
+open the app, read from the same rows that decide it: the verdict and reason, every
+direct and group grant with its expiry and whether it is still live (an upstream-managed
+membership is marked), the app roles held and through which group, when access ends,
+the account's status and end date, the app's authentication policy, and the access,
+authentication and role revisions. The reason words are the ones the listing uses
+(`user_disabled`, `account_ended`, `app_disabled`, `client_disabled`,
+`all_active_users`, `direct_assignment`, `group_assignment`, `not_assigned`,
+`grants_expired`), so the two never disagree. The access page's policy preview still
+shows who would lose or gain access under a proposed policy without changing it.
+
+Explanations follow viewer permissions: administrators and auditors may explain any app,
+an app owner only their apps, and the answer names only groups assigned to that app,
+which the same viewers already see. A user can ask `GET
+/api/user/access-explanation?clientId=…` about themselves, ten times a minute, and gets
+the verdict and whether the app is requestable; every denial reads the same
+(`no_access`) whatever its cause, a client that does not exist reads like a denial,
+and the app is named only when they have access or may request it, so the answer
+discloses nothing an authorize attempt would not. A denied
+authorization is audited with the reason and the access, authentication and role
+revisions of that moment, so an old denial is never explained with today's policy, and
+the redirect tells a user of a requestable app to ask from their dashboard.
 
 ## Integration Requirements
 

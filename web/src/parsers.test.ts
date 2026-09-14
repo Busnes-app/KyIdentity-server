@@ -1,6 +1,7 @@
 import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
+  parseAccessExplanation,
   parseAccessRequest,
   parseGroupPage,
   parseGroupUserPage,
@@ -585,5 +586,19 @@ describe('parseAccessRequest', () => {
   });
   it.each(['granted', '', undefined])('refuses the unknown status %p rather than showing it as pending', (status) => {
     expect(() => parseAccessRequest({ ...request, status })).toThrow(/status/);
+  });
+});
+
+describe('parseAccessExplanation', () => {
+  const explanation = { appId: 'a', appName: 'Billing', userId: 'u', username: 'ada', allowed: false, reason: 'grants_expired', accessMode: 'assigned_only', appEnabled: true, clientEnabled: true, userStatus: 'active',
+    grants: [{ kind: 'direct', expiresAt: '2026-06-01T07:30:00Z', live: false }], roles: [], authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, revision: 3, authenticationRevision: 1, roleRevision: 0, requestable: true };
+  it('reads a denial with its lapsed grant', () => {
+    const e = parseAccessExplanation({ explanation });
+    expect(e.allowed).toBe(false);
+    expect(e.grants[0].live).toBe(false);
+  });
+  it('refuses a verdict it cannot trust rather than showing access as allowed', () => {
+    expect(() => parseAccessExplanation({ explanation: { ...explanation, allowed: 'yes' } })).toThrow(/allowed/);
+    expect(() => parseAccessExplanation({ explanation: { ...explanation, grants: [{ kind: 'magic', live: true }] } })).toThrow(/kind/);
   });
 });

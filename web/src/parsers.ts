@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, OwnAccessRequests } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, OwnAccessRequests, AccessExplanation } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -602,6 +602,21 @@ export function parseOwnAccessRequests(value: unknown): OwnAccessRequests {
 }
 export function parseAccessRequestPage(value: unknown): DirectoryPage<AccessRequest> {
   return directoryPage(value, 'requests', parseAccessRequest);
+}
+export function parseAccessExplanation(value: unknown): AccessExplanation {
+  const o = obj(value, 'an access explanation response');
+  const e = obj(o.explanation, 'an access explanation');
+  return {
+    appId: str(e, 'appId'), appName: str(e, 'appName'), userId: str(e, 'userId'), username: str(e, 'username'),
+    allowed: requiredBool(e, 'allowed'), reason: str(e, 'reason'),
+    accessMode: oneOf(e, 'accessMode', ['all_active_users', 'assigned_only'] as const),
+    appEnabled: requiredBool(e, 'appEnabled'), clientEnabled: requiredBool(e, 'clientEnabled'), userStatus: str(e, 'userStatus'), userEndsAt: optStr(e, 'userEndsAt'),
+    grants: list(e.grants, item => { const g = obj(item, 'a grant'); return { kind: oneOf(g, 'kind', ['direct', 'group'] as const), groupId: optStr(g, 'groupId'), groupName: optStr(g, 'groupName'), sourceConnectorId: optStr(g, 'sourceConnectorId'), expiresAt: optStr(g, 'expiresAt'), live: requiredBool(g, 'live') }; }),
+    roles: list(e.roles, item => { const r = obj(item, 'a role grant'); return { role: str(r, 'role'), via: oneOf(r, 'via', ['direct', 'group'] as const), groupName: optStr(r, 'groupName') }; }),
+    accessEndsAt: optStr(e, 'accessEndsAt'), authentication: parseAppAuthenticationPolicy(e.authentication),
+    revision: directoryCount(e, 'revision'), authenticationRevision: directoryCount(e, 'authenticationRevision'), roleRevision: directoryCount(e, 'roleRevision'),
+    requestable: requiredBool(e, 'requestable'),
+  };
 }
 export function parseAppRecordPage(value: unknown): DirectoryPage<AppRecord> {
  return directoryPage(value, 'records', parseAppRecord);
