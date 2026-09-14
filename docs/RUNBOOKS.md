@@ -76,8 +76,8 @@ delivery or a reconciliation.
 invalidates the credentials the capsule carried (sessions, tokens, authorization codes,
 step-up and MFA challenges, invitation and reset links, device pairing tokens, queued
 back-channel logouts), closes out the queued outbound deliveries with a reason, and
-holds outbound provisioning on every connector that is not disabled. It records
-`system.restored` with the counts.
+holds outbound provisioning on every connector. It records `system.restored` with the
+counts, naming the connectors you have to act on now.
 
 While a connector is held, nothing is delivered to it. The console shows the hold on the
 Suite sync page. To resume:
@@ -86,8 +86,18 @@ Suite sync page. To resume:
    token or signing secret that has been in a capsule handled by custodians as due for
    rotation, and rotate it before you resume delivery, not after.
 2. Run a preview reconciliation to see the drift between this directory and the far end.
-3. Run a repair reconciliation. A completed repair releases the hold; a preview does
-   not, and a failed run does not.
+3. Run a repair reconciliation. Only a repair that listed the far side completely and
+   wrote the difference through releases the hold. A preview does not, a failed run
+   does not, and a listing that was refused or truncated does not.
+
+A connector whose remote cannot be listed at all — a suite webhook has nothing to read
+back — can never produce that evidence. Rather than stay held forever, it is resumed
+deliberately: `POST /api/admin/systems/{id}/provisioning/resume`, administrators with
+step-up, recorded as `admin.provisioning_resumed`. That is you accepting the capsule's
+view of that connector; the queue the restore closed out is not revived, and the next
+change in the directory is what reaches it. A connector that was disabled when the
+snapshot was taken is held as well, so re-enabling it later does not quietly deliver
+work queued before it was disabled.
 
 The hold exists because a restored outbox is a list of decisions made before the
 snapshot. Replaying it would recreate accounts that have since left and miss the ones

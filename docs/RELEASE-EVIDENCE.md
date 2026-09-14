@@ -25,7 +25,9 @@ attested and promoted).
 | A pre-feature database upgrades with stable identifiers, states its legacy broad access, invents no authentication evidence, and lands on the schema of a fresh install | `TestUpgradeFromPreFeatureDatabase` (store) |
 | Running the migrations twice changes nothing, including the indexes | same test: schema fingerprints after each run, and a group and a user sharing a remote id still insert |
 | A restore invalidates the sessions, tokens, links and queued work a capsule carries | `TestRestoreInvalidatesEphemeralCredentialsAndHoldsProvisioning` (store) |
-| Outbound provisioning stays held after a restore until a repair reconciliation | `TestProvisioningHoldIsReleasedByReconciliation` (store), `TestReleaseRestoreScenario` (api, real HTTP routes) |
+| Outbound provisioning stays held after a restore until a repair reconciliation that actually compared the far side | `TestProvisioningHoldIsReleasedByReconciliation` (store), `TestReleaseRestoreScenario` (api, real HTTP routes) |
+| A connector that cannot be listed is resumed only by a deliberate, audited operator act | `TestProvisioningHoldCanBeResumedDeliberately` (store) |
+| A connector disabled at snapshot time is held too, so re-enabling it delivers nothing | `TestRestoreHoldsAConnectorThatWasDisabled` (store) |
 | The restore marker is applied once, audited, and then gone | `TestRestoreMarkerAppliesOnceAndIsThenGone` (cmd) |
 | A restore drill checks policy, groups, app linkage, remote mappings, job state and the encrypted relay configuration, not just that somebody can log in | `TestDrillCoversLifecycleStateAndEncryptedConfiguration` (backup) |
 | A capsule carries everything a restore needs and the restored bytes are usable | `TestCollectSealableCarriesEverythingARestoreNeeds`, `TestDrillProvesARestoreIsUsable` (backup) |

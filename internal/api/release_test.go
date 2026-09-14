@@ -119,7 +119,7 @@ func TestReleaseRestoreScenario(t *testing.T) {
 	if err != nil || job == nil {
 		t.Fatal("claim:", err)
 	}
-	if err := db.FinishReconcileJob(job, &store.DriftReport{}, nil); err != nil {
+	if err := db.FinishReconcileJob(job, &store.DriftReport{Supported: true, Complete: true, Repaired: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if systems().ProvisioningHold {

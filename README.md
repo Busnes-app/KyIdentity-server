@@ -529,9 +529,16 @@ counts, and the marker is removed only after that has committed, so an interrupt
 start repeats the work rather than skipping it.
 
 A held connector delivers nothing until a repair reconciliation has compared this
-directory with what is really on the far side; the Suite sync page shows the hold, a
-preview does not release it, and a failed run does not either. This is what stops a
-restored outbox from recreating accounts that have since left. Passwords, enrolled
+directory with what is really on the far side and written the difference through; the
+Suite sync page shows the hold. Nothing else releases it: not a preview, not a failed
+run, not a listing that was refused or truncated, and not a connector whose kind cannot
+be listed at all. This is what stops a restored outbox from recreating accounts that
+have since left. A connector that cannot be listed — a suite webhook has no directory to
+read back — would otherwise stay held forever, so `POST
+/api/admin/systems/{id}/provisioning/resume` (administrators, step-up) lifts the hold on
+the operator's word instead, recorded as `admin.provisioning_resumed`. Connectors that
+were disabled at snapshot time are held too, so re-enabling one later does not deliver
+what was queued before it was disabled. Passwords, enrolled
 factors and recovery codes are in the capsule and keep working, so the restore runbook
 asks for connector credentials to be reviewed for rotation before delivery resumes.
 Procedures are in [docs/RUNBOOKS.md](docs/RUNBOOKS.md) and

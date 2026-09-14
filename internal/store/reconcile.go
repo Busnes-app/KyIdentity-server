@@ -211,7 +211,11 @@ func (s *Store) FinishReconcileJob(job *ReconcileJob, report *DriftReport, runEr
 	if n, _ := r.RowsAffected(); n != 1 {
 		return errors.New("reconciliation job changed")
 	}
-	if job.Kind == "repair" && runErr == nil {
+	// A hold says this connector was compared with what is really there. Only a repair
+	// that listed the far side completely and wrote through is that evidence: a
+	// connector whose kind cannot be listed, a listing that failed or truncated, and a
+	// read-only pass all finish without an error while comparing nothing.
+	if job.Kind == "repair" && runErr == nil && report != nil && report.Repaired && report.ListingError == "" {
 		if err := releaseProvisioningHoldTx(tx, job.SystemID); err != nil {
 			return err
 		}

@@ -110,7 +110,11 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 			return err
 		}
 		report.HeldConnectors = len(report.Connectors)
-		if _, err = tx.Exec(`UPDATE paired_systems SET provisioning_hold=1 WHERE status<>'disabled'`); err != nil {
+		// Every connector is held, including one that was disabled when the snapshot was
+		// taken: its queue survived too, and re-enabling it must not deliver capsule-era
+		// work without a reconciliation. Only the connectors an operator must act on now
+		// are reported.
+		if _, err = tx.Exec(`UPDATE paired_systems SET provisioning_hold=1`); err != nil {
 			return err
 		}
 		// The caller's details say which capsule this came from; the counts join them
@@ -142,6 +146,24 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 func releaseProvisioningHoldTx(tx *sql.Tx, systemID string) error {
 	_, err := tx.Exec(`UPDATE paired_systems SET provisioning_hold=0 WHERE id=? AND provisioning_hold=1`, systemID)
 	return err
+}
+
+// ResumeProvisioning lifts a hold without the evidence a reconciliation would give.
+// It exists for connectors whose remote cannot be listed at all, where no reconciliation
+// can ever produce that evidence; it is an operator's decision to accept what was in the
+// capsule, and the audit row is the record of it. It does not revive the queue the
+// restore closed out.
+func (s *Store) ResumeProvisioning(systemID string, audit *AuditEvent) error {
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM paired_systems WHERE id=?)`, systemID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return sql.ErrNoRows
+		}
+		return releaseProvisioningHoldTx(tx, systemID)
+	})
 }
 
 // HeldConnectors names the connectors whose outbound provisioning is waiting on a
