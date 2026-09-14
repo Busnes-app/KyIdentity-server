@@ -398,6 +398,27 @@ neither be scheduled to end nor ended by the follow-up: the schedule is refused 
 cleared and audited as `account.end_refused`. Over the API, omitting `endsAt` keeps the
 current schedule; an empty string clears it.
 
+## Access requests and approvals
+
+An administrator opens an assigned-only app to requests with *Users may request access*
+on its access page. A user who lacks access then sees the app under *Request access* on
+their dashboard, states a reason and picks a duration (none, 1, 7, 30 or 90 days);
+apps that are not open to requests are never named, whether by listing or by guessed
+ID. One pending request per app, at most five pending per user, ten filings per
+minute, and a request nobody answers expires after fourteen days.
+
+Owners of the app and global administrators see the request in *Access requests*; a
+delegate's inbox holds only their apps. Approving or denying spends a step-up grant and
+writes an audit row. An approval is an ordinary direct assignment with the requested
+expiry, written through the same path a manual grant takes, so there is no second way
+to hold access and everything in "Expiring access" applies to it. The decision re-reads
+the approver's current authority, the app's policy and the request's state under the
+write lock: a requester cannot approve their own request, a request is decided once,
+an owner whose delegation was withdrawn cannot approve from a stale form, an app closed
+to requests in the meantime cannot be approved, and a request withdrawn or expired
+before the click grants nothing. The requester is told by mail when delivery is
+configured.
+
 ## Integration Requirements
 
 These rules are enforced strictly. Each is a constraint on how a client integrates.

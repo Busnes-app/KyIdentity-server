@@ -236,7 +236,17 @@ export interface AppAuthenticationPolicy {
  factorMaxAge: number;
 }
 
+export interface RequestableApp { appId: string; name: string; pending: boolean }
+export interface AccessRequest {
+  id: string; appId: string; appName: string; userId: string; username: string; reason: string;
+  durationSeconds: number; status: 'pending' | 'approved' | 'denied' | 'cancelled' | 'expired';
+  createdAt: string; expiresAt: string; decidedAt?: string; decidedBy?: string; decisionNote?: string;
+}
+export interface OwnAccessRequests { requestable: RequestableApp[]; requests: AccessRequest[] }
+
 export interface AppRecord {
+ /** Users who lack access may ask for this app. */
+ requestable: boolean;
  authentication: AppAuthenticationPolicy;
  authenticationRevision: number;
  roleRevision: number;

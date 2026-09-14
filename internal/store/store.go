@@ -389,6 +389,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateDelegations(); err != nil {
 		return err
 	}
+	if err := s.migrateAccessRequests(); err != nil {
+		return err
+	}
 	if err := s.migrateLogoutDeliveries(); err != nil {
 		return err
 	}
