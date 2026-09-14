@@ -80,3 +80,58 @@ func TestDelegationsFollowUserAndApp(t *testing.T) {
 		t.Fatal("delegations outlived the user", n, err)
 	}
 }
+
+// A delegate holds administrative power, so the administrators MFA policy covers them
+// from the moment the delegation lands and stops when it goes.
+func TestDelegatesFallUnderTheAdministratorPolicy(t *testing.T) {
+	s, u, _ := enrollmentFixture(t)
+	if err := s.SetEnrollmentPolicy(enrollmentPolicy("administrators", 0), "admin-session", nil); err != nil {
+		t.Fatal(err)
+	}
+	status, err := s.SessionEnrollmentStatus(u.ID, "session")
+	if err != nil || status.Required {
+		t.Fatalf("ordinary user under the administrator policy: %+v %v", status, err)
+	}
+	if err := s.SetDelegations(u.ID, Delegations{Helpdesk: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	status, err = s.SessionEnrollmentStatus(u.ID, "session")
+	if err != nil || !status.Required || !status.Restricted {
+		t.Fatalf("delegate escaped the administrator policy: %+v %v", status, err)
+	}
+	if err := s.SetDelegations(u.ID, Delegations{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ = s.SessionEnrollmentStatus(u.ID, "session"); status.Required {
+		t.Fatalf("policy outlived the delegation: %+v", status)
+	}
+	// A user whose group policy leaves no factor in common with the administrator policy
+	// cannot be delegated to: the trigger aborts the way a role change would.
+	if err := s.CreateWebAuthnCredential(&WebAuthnCredential{ID: "admin-key", UserID: "emergency", CredentialID: "admin-key", PublicKeySPKI: "test", Name: "key"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	totpOnly := enrollmentPolicy("administrators", 0)
+	totpOnly.AllowedMethods = []string{"totp"}
+	totpOnly.Revision = 2
+	if err := s.SetEnrollmentPolicy(totpOnly, "admin-session", nil); err != nil {
+		t.Fatal(err)
+	}
+	group := &Group{ID: "key-only", Name: "Key only"}
+	if err := s.CreateGroup(group, nil); err != nil {
+		t.Fatal(err)
+	}
+	gp := enrollmentPolicy("group:key-only", 0)
+	gp.AllowedMethods = []string{"webauthn"}
+	if err := s.SetEnrollmentPolicy(gp, "admin-session", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembershipForSession("key-only", u.ID, true, "admin-session", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDelegations(u.ID, Delegations{Auditor: true}, nil); !errors.Is(err, ErrEnrollmentPolicy) {
+		t.Fatalf("conflicting policies accepted: %v", err)
+	}
+	if d, _ := s.Delegations(u.ID); d.Auditor {
+		t.Fatal("refused delegation persisted")
+	}
+}

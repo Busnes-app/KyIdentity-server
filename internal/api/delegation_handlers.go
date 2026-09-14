@@ -53,6 +53,9 @@ func (h *AdminHandler) SetDelegations(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, store.ErrAppRecordMissing):
 		http.Error(w, `{"error":"unknown_app","error_description":"One of the apps does not exist"}`, http.StatusBadRequest)
 		return
+	case errors.Is(err, store.ErrEnrollmentPolicy):
+		http.Error(w, `{"error":"enrollment_policy_conflict","error_description":"This user cannot satisfy the administrator MFA policy"}`, http.StatusConflict)
+		return
 	case err != nil:
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

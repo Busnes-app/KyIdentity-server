@@ -25,6 +25,10 @@ func TestPermissionMatrixCoversEveryAdminRoute(t *testing.T) {
 	appB, _, _ := db.ListAppRecords("app-b", 1, 0)
 	target := newUser(t, db, "user")
 	targetAdmin := newUser(t, db, "admin")
+	targetAuditor := newUser(t, db, "user")
+	if err := db.SetDelegations(targetAuditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	delegate := func(d store.Delegations) (*store.User, string) {
 		u := newUser(t, db, "user")
@@ -83,10 +87,16 @@ func TestPermissionMatrixCoversEveryAdminRoute(t *testing.T) {
 				t.Errorf("%s %s as %s: forbidden=%v want %v", rt.method, path, name, got, want)
 			}
 		}
-		// Helpdesk may recover ordinary accounts, never administrators.
+		// Helpdesk may recover ordinary accounts, never administrators or other delegates.
 		if rt.perm.protectAdmins {
 			if !forbidden(rt.method, pathFor(rt, targetAdmin.ID), helpdesk) {
 				t.Errorf("%s %s: helpdesk reached an administrator", rt.method, rt.path)
+			}
+			if !forbidden(rt.method, pathFor(rt, targetAuditor.ID), helpdesk) {
+				t.Errorf("%s %s: helpdesk reached a delegate", rt.method, rt.path)
+			}
+			if forbidden(rt.method, pathFor(rt, targetAuditor.ID), admin) {
+				t.Errorf("%s %s: admin blocked from a delegate", rt.method, rt.path)
 			}
 			if forbidden(rt.method, pathFor(rt, targetAdmin.ID), admin) {
 				t.Errorf("%s %s: admin blocked from an administrator", rt.method, rt.path)

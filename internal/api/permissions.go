@@ -24,7 +24,8 @@ type permission struct {
 	appOwner bool
 	// anyOwner: directory reads an owner needs to pick principals.
 	anyOwner bool
-	// protectAdmins: {id} names a user; only a global admin may act on an administrator.
+	// protectAdmins: {id} names a user; only a global admin may act on an administrator
+	// or on anyone holding a delegation, since recovering such an account inherits it.
 	protectAdmins bool
 }
 
@@ -32,7 +33,7 @@ var (
 	permAdmin     = permission{name: "admin"}
 	permRead      = permission{name: "read", auditor: true}
 	permDirectory = permission{name: "directory", auditor: true, helpdesk: true, anyOwner: true}
-	permUserRead  = permission{name: "user_read", auditor: true, helpdesk: true}
+	permUserRead  = permission{name: "user_read", auditor: true, helpdesk: true, protectAdmins: true}
 	permRecovery  = permission{name: "recovery", helpdesk: true, protectAdmins: true}
 	permAppRead   = permission{name: "app_read", auditor: true, appOwner: true}
 	permAppGrants = permission{name: "app_grants", appOwner: true}
@@ -110,6 +111,17 @@ func (s *Server) require(p permission, stepUp bool, h http.Handler) http.Handler
 			if target != nil && target.Role == "admin" {
 				writeForbidden(w)
 				return
+			}
+			if target != nil {
+				d, err := s.store.Delegations(target.ID)
+				if err != nil {
+					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+					return
+				}
+				if d.Helpdesk || d.Auditor || len(d.AppOwner) > 0 {
+					writeForbidden(w)
+					return
+				}
 			}
 		}
 		r = r.WithContext(context.WithValue(r.Context(), accessContextKey, a))

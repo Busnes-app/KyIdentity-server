@@ -353,12 +353,15 @@ on that user's next call without waiting for their session to end.
 
 | Delegation | May | May not |
 |---|---|---|
-| Helpdesk | List users and groups; view a user's sessions and offboarding status; reset MFA, revoke sessions and app grants, retry logouts, issue activation and reset links, for ordinary users | Touch an administrator's account in any of those ways; create, edit or delete users; assign privileges |
+| Helpdesk | List users and groups; view a user's sessions and offboarding status; reset MFA, revoke sessions and app grants, retry logouts, issue activation and reset links, for ordinary users | Touch an administrator's or another delegate's account in any of those ways; create, edit or delete users; assign privileges |
 | Auditor | Read every administration page: users, groups, app connections, provisioning, connectors, clients, policies, mail settings, backup status, audit log | Change anything, including step-up protected writes and the recovery capsule export |
 | App owner (per app) | List users and groups to pick principals; see the owned app's access and roles; assign users and groups to the app; create and delete its roles and map principals to them | See or touch any other app; change the app's access mode, authentication policy, claim switches, links, OAuth credentials or provisioning connection |
 
-Nobody but a global administrator can change delegations, global MFA policy, connector
-secrets, mail settings, recovery material or OAuth credentials. Writes keep their step-up
+Everyone holding a delegation falls under the *administrators* MFA enrollment policy
+from the moment it is granted: a required policy restricts their session until they
+enrol, and a user who cannot satisfy it cannot be delegated to. Nobody but a global
+administrator can change delegations, global MFA policy, connector secrets, mail
+settings, recovery material or OAuth credentials. Writes keep their step-up
 requirement and audit row (`admin.delegations_updated` records each change). Ownership
 names an app record; unlinking a connection into a new record ends ownership of it, so
 re-delegate after an unlink. The `GET /api/auth/me` answer carries an `access` block

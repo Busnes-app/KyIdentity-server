@@ -12,6 +12,8 @@ import (
 // app owners manage grants and role mappings of the apps named here. The rows are
 // read on every request, so removing one takes effect on the next call, and the
 // global `admin` role stays the only thing the last-administrator invariant counts.
+// Anyone holding a delegation falls under the `administrators` MFA enrollment scope:
+// the powers are administrative even when the role is not.
 
 var ErrUserMissing = errors.New("user not found")
 
@@ -78,7 +80,7 @@ func (s *Store) SetDelegations(userID string, d Delegations, audit *AuditEvent) 
 				continue
 			}
 			if _, err := tx.Exec(`INSERT INTO admin_delegations(user_id,kind,created_at) VALUES(?,?,?)`, userID, kind, now); err != nil {
-				return err
+				return enrollmentMutationError(err)
 			}
 		}
 		for i, appID := range apps {
@@ -92,8 +94,12 @@ func (s *Store) SetDelegations(userID string, d Delegations, audit *AuditEvent) 
 				return ErrAppRecordMissing
 			}
 			if _, err := tx.Exec(`INSERT INTO admin_delegations(user_id,kind,app_id,created_at) VALUES(?,'app_owner',?,?)`, userID, appID, now); err != nil {
-				return err
+				return enrollmentMutationError(err)
 			}
+		}
+		// A changed requirement set invalidates outstanding grants, as membership does.
+		if err := invalidateUserEnrollmentTx(tx, userID); err != nil {
+			return err
 		}
 		return appRegistryAudit(audit, map[string]any{"user": userID, "helpdesk": d.Helpdesk, "auditor": d.Auditor, "appOwner": apps})
 	})
