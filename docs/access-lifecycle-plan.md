@@ -1,5 +1,5 @@
 **Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (branch feat/release-verify)
+**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (on merged master; no server PR outstanding)
 
 # KySignOn access and identity lifecycle implementation plan
 
@@ -41,8 +41,12 @@ from the stream). PR22 (actionable security and provisioning alerts) merged as G
 PR #54 after three review rounds (login alerts keyed by account or source rather than
 the submitted name, alerts on their own goroutine under a pass budget, retention for
 alerts and deliveries, login mail capped per rule per cooldown). PR23 (upgrade, restore
-and end-to-end release verification) is next, on feat/release-verify. D1–D4 remain
-planned. Note for D1–D4: released
+and end-to-end release verification) merged as GitHub PR #55 after three review rounds
+(the provisioning hold released only by a repair that compared the far side, every
+connector held including disabled ones, the capsule's outbox marked so the worker cannot
+re-pend it, and the logins a restore ends announced to the relying parties rather than
+their queued logouts deleted). Every server PR in the plan is now merged; D1–D4 remain
+planned, and the external release gates stay open in docs/RELEASE-EVIDENCE.md. Note for D1–D4: released
 ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
 receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
