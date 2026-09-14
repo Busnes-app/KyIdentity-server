@@ -19,7 +19,12 @@ func audited(t *testing.T, s *Store, action, actorName, targetID, targetType, ou
 
 func auditedFrom(t *testing.T, s *Store, ip, action, actorName, targetID, targetType, outcome string, details string) {
 	t.Helper()
-	if err := s.RecordAuditEvent(&AuditEvent{ID: uuid.NewString(), ActorUsername: actorName, Action: action, TargetID: targetID, TargetType: targetType, IPAddress: ip, Outcome: outcome, DetailsJSON: details, CreatedAt: time.Now().UTC()}); err != nil {
+	auditedAt(t, s, time.Now().UTC(), ip, action, actorName, targetID, targetType, outcome, details)
+}
+
+func auditedAt(t *testing.T, s *Store, at time.Time, ip, action, actorName, targetID, targetType, outcome string, details string) {
+	t.Helper()
+	if err := s.RecordAuditEvent(&AuditEvent{ID: uuid.NewString(), ActorUsername: actorName, Action: action, TargetID: targetID, TargetType: targetType, IPAddress: ip, Outcome: outcome, DetailsJSON: details, CreatedAt: at}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -214,6 +219,70 @@ func TestLoginFailureFloodIsBounded(t *testing.T) {
 	many := openAlerts(t, s)["login_failures/many-sources"]
 	if many.ID == "" || many.Count < 2*loginAlertCeiling {
 		t.Fatalf("further sources should fold into one alert: %+v", many)
+	}
+}
+
+// The ceiling bounds live login alerts absolutely, not per window, and a login alert
+// whose source has gone quiet for a window resolves, so retention can reclaim it and
+// a later burst opens a fresh alert.
+func TestLoginFailureAlertsResolveAndStayBounded(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	window := 600 * time.Second
+	if err := s.SetAlertSettings(AlertSettings{LoginFailureThreshold: 3, LoginFailureWindowSeconds: 600}, nil); err != nil {
+		t.Fatal(err)
+	}
+	burst := func(at time.Time, prefix string) {
+		for i := 0; i < 3*loginAlertCeiling; i++ {
+			for j := 0; j < 3; j++ {
+				auditedAt(t, s, at, fmt.Sprintf("%s.%d", prefix, i), "auth.login", "x", "", "user", "failure", `{"reason":"user_not_found"}`)
+			}
+		}
+	}
+	live := func() int {
+		return countRows(t, s, `SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND status<>'resolved'`)
+	}
+	t0 := time.Now().UTC().Add(-3 * window)
+	burst(t0, "203.0.113")
+	if err := s.EvaluateAlerts(t0); err != nil {
+		t.Fatal(err)
+	}
+	if n := live(); n != loginAlertCeiling+1 {
+		t.Fatal("first burst live alerts:", n)
+	}
+	// Half a window later the sources are still inside their window: nothing resolves,
+	// and new sources cannot push past the ceiling just because time moved on.
+	burst(t0.Add(window/2), "198.51.100")
+	if err := s.EvaluateAlerts(t0.Add(window / 2)); err != nil {
+		t.Fatal(err)
+	}
+	if n := live(); n != loginAlertCeiling+1 {
+		t.Fatal("ceiling is per window, not absolute:", n)
+	}
+	// Two windows later the old sources are quiet: their alerts resolve, a new burst
+	// opens fresh ones, and the live bound still holds.
+	t2 := t0.Add(2 * window)
+	burst(t2, "192.0.2")
+	if err := s.EvaluateAlerts(t2); err != nil {
+		t.Fatal(err)
+	}
+	if n := live(); n != loginAlertCeiling+1 {
+		t.Fatal("live alerts after resolution and a new burst:", n)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND status='resolved' AND resolved_at IS NOT NULL`); n != loginAlertCeiling {
+		t.Fatal("quiet sources should have resolved:", n)
+	}
+	if err := s.EvaluateAlerts(t2.Add(2 * window)); err != nil {
+		t.Fatal(err)
+	}
+	if n := live(); n != 0 {
+		t.Fatal("all quiet, still live:", n)
+	}
+	if err := s.DeleteAlertsOlderThan(t2.Add(3 * window)); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM alerts`); n != 0 {
+		t.Fatal("retention could not reclaim login alerts:", n)
 	}
 }
 

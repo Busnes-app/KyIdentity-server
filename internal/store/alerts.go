@@ -205,6 +205,9 @@ func (s *Store) EvaluateAlerts(now time.Time) error {
 	if err != nil {
 		return err
 	}
+	if err := s.resolveQuietLoginAlerts(now, settings); err != nil {
+		return err
+	}
 	for i := 0; i < alertMaxBatches; i++ {
 		n, err := s.evaluateBatch(now, settings)
 		if err != nil {
@@ -215,6 +218,17 @@ func (s *Store) EvaluateAlerts(now time.Time) error {
 		}
 	}
 	return s.evaluateOutages(now, settings)
+}
+
+// resolveQuietLoginAlerts closes login alerts whose source has recorded no failure for
+// a whole window, so retention can reclaim them and a later burst opens a fresh alert.
+// Resolution is not mailed: a quiet attacker is not news.
+func (s *Store) resolveQuietLoginAlerts(now time.Time, settings AlertSettings) error {
+	since := now.Add(-time.Duration(settings.LoginFailureWindowSeconds) * time.Second)
+	_, err := s.db.Exec(`UPDATE alerts SET status='resolved', resolved_at=?, last_seen=? WHERE rule='login_failures' AND status<>'resolved'
+ AND NOT EXISTS (SELECT 1 FROM audit_events e WHERE e.action='auth.login' AND e.outcome<>'success' AND e.created_at>?
+ AND (alerts.key='many-sources' OR e.target_id=alerts.key OR e.ip_address=alerts.key))`, now, now, since)
+	return err
 }
 
 func (s *Store) evaluateBatch(now time.Time, settings AlertSettings) (int, error) {
@@ -353,13 +367,13 @@ func classifyTx(tx *sql.Tx, e queuedEvent, settings AlertSettings, now time.Time
 			return alertSpec{}, nil
 		}
 		spec := alertSpec{"login_failures", key, "warning", "Repeated login failures " + subject, fmt.Sprintf("%d failed sign-ins %s within %d minutes.", n, subject, settings.LoginFailureWindowSeconds/60), n}
-		// Past the ceiling, a source without a live alert folds into one shared alert
-		// instead of opening its own and mailing everyone again.
-		var live, recent int
-		if err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND key=? AND status<>'resolved'), (SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND key<>'many-sources' AND first_seen>?)`, key, since).Scan(&live, &recent); err != nil {
+		// Past the ceiling of live login alerts, a source without one of its own folds
+		// into one shared alert instead of opening its own and mailing everyone again.
+		var live, total int
+		if err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND key=? AND status<>'resolved'), (SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND key<>'many-sources' AND status<>'resolved')`, key).Scan(&live, &total); err != nil {
 			return alertSpec{}, err
 		}
-		if live == 0 && recent >= loginAlertCeiling {
+		if live == 0 && total >= loginAlertCeiling {
 			spec = alertSpec{"login_failures", "many-sources", "warning", "Repeated login failures from many sources", fmt.Sprintf("Failed sign-ins are arriving from more than %d accounts or addresses within %d minutes; sources past that share this alert.", loginAlertCeiling, settings.LoginFailureWindowSeconds/60), 1}
 		}
 		return spec, nil
