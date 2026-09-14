@@ -9,8 +9,8 @@ import (
 	"github.com/Busness-app/kysignon-server/internal/store"
 )
 
-// A stuck relay costs the alert goroutine one pass budget, never the dispatcher: the
-// pass returns at its deadline with the rest of the mail still pending.
+// An expired budget prevents delivery; cancellation during a send leaves the rest
+// pending. Neither assertion depends on database work beating a wall-clock timer.
 func TestAlertPassReturnsAtItsBudget(t *testing.T) {
 	e, db, admin, cleanup := setupSync(t)
 	defer cleanup()
@@ -24,24 +24,46 @@ func TestAlertPassReturnsAtItsBudget(t *testing.T) {
 	}
 	oldSender, oldBudget := alertSender, alertPassBudget
 	defer func() { alertSender, alertPassBudget = oldSender, oldBudget }()
-	alertPassBudget = 100 * time.Millisecond
+	alertPassBudget = 0
 	alertSender = func(*mail.Settings) func(string, string, string) error {
-		return func(string, string, string) error { time.Sleep(80 * time.Millisecond); return nil }
+		return func(string, string, string) error {
+			t.Fatal("sent mail after the pass budget expired")
+			return nil
+		}
 	}
-	start := time.Now()
 	e.runAlerts(context.Background())
-	if took := time.Since(start); took > 400*time.Millisecond {
-		t.Fatal("pass ran past its budget:", took)
-	}
 	alerts, _, err := db.ListAlerts("open", 10, 0)
 	if err != nil || len(alerts) != 3 {
 		t.Fatal(alerts, err)
 	}
-	pending := 0
+	for _, a := range alerts {
+		if a.Delivery.Pending != 1 || a.Delivery.Delivered != 0 {
+			t.Fatalf("expired budget changed delivery state: %+v", a.Delivery)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	alertPassBudget = time.Hour
+	sent := 0
+	alertSender = func(*mail.Settings) func(string, string, string) error {
+		return func(string, string, string) error {
+			sent++
+			cancel()
+			return nil
+		}
+	}
+	e.runAlerts(ctx)
+	alerts, _, err = db.ListAlerts("open", 10, 0)
+	if err != nil || len(alerts) != 3 {
+		t.Fatal(alerts, err)
+	}
+	pending, delivered := 0, 0
 	for _, a := range alerts {
 		pending += a.Delivery.Pending
+		delivered += a.Delivery.Delivered
 	}
-	if pending == 0 || pending == 3 {
-		t.Fatal("some mail should have gone out and the rest stay pending:", pending)
+	if sent != 1 || delivered != 1 || pending != 2 {
+		t.Fatalf("cancellation must leave the remaining mail pending: sent=%d delivered=%d pending=%d", sent, delivered, pending)
 	}
 }
