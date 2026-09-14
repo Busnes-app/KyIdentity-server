@@ -3,6 +3,7 @@ import { Access, SessionInventory, User } from '../types';
 import { DelegationEditor } from './DelegationEditor';
 import { apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
+import { describeInstant, instantFromLocal, localInputValue, localZone } from '../instant';
 import { parseAccountLink, parseMailSettings, parseSessionInventory, parseUsers } from '../parsers';
 import type { AccountLink } from '../types';
 import { SessionList } from './SessionList';
@@ -33,6 +34,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
   const [status, setStatus] = useState<'active' | 'disabled'>('active');
+  const [endsAt, setEndsAt] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -107,7 +109,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
         `Changing '${selectedUser.username}' can alter their password, role, or access.`, `PUT /api/admin/users/${selectedUser.id}`);
       await apiRequest(`/api/admin/users/${selectedUser.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ displayName, email, role, status, password: password || undefined }),
+        body: JSON.stringify({ displayName, email, role, status, password: password || undefined, endsAt: instantFromLocal(endsAt) ?? '' }),
         stepUpToken: grant,
       });
       setShowEditModal(false);
@@ -140,6 +142,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
     setPassword('');
     setRole(u.role);
     setStatus(u.status || 'active');
+    setEndsAt(localInputValue(u.endsAt));
     setShowEditModal(true);
   };
 
@@ -265,6 +268,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                       <XCircle size={12} /> Disabled
                     </span>
                   )}
+                  {u.endsAt && <div className="text-muted text-sm">Ends {describeInstant(u.endsAt)}</div>}
                 </td>
                 <td className="text-right">
                   <div className="action-buttons-wrap">
@@ -545,6 +549,12 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                     <option value="disabled">Disabled</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="user-ends-at">Account end date (optional, {localZone()})</label>
+                <input id="user-ends-at" type="datetime-local" className="form-input" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
+                {instantFromLocal(endsAt) && <p className="text-muted text-sm">Ends at {describeInstant(instantFromLocal(endsAt)!)}. Sessions and app access end then; the account is disabled, not deleted.</p>}
               </div>
 
               <div className="modal-footer">

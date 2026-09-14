@@ -12,6 +12,8 @@ export function canAdminister(a: Access | undefined): boolean {
 
 export interface User {
   access?: Access;
+  /** UTC instant after which the account is ended; absent means never. */
+  endsAt?: string;
   enrollment?: EnrollmentStatus;
   id: string;
   username: string;
@@ -216,6 +218,8 @@ export interface GroupUser {
   email: string;
   status: 'active' | 'disabled';
   member: boolean;
+  /** UTC instant the membership ends; absent means it does not expire. */
+  expiresAt?: string;
 }
 
 export interface DirectoryPage<T> {
@@ -252,6 +256,8 @@ export interface AppRecord {
 
 export interface AppAccessUser {
  id: string; username: string; displayName: string; status: 'active' | 'disabled';
+ /** UTC instant the direct grant ends; absent means it does not expire. */
+ directExpiresAt?: string;
  direct: boolean; groupAssigned: boolean; effective: boolean; preview: boolean;
  reason: 'user_disabled' | 'app_disabled' | 'client_disabled' | 'all_active_users' | 'direct_assignment' | 'group_assignment' | 'not_assigned';
 }

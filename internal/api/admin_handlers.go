@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Busness-app/kysignon-server/internal/audit"
 	"github.com/Busness-app/kysignon-server/internal/auth"
@@ -137,6 +138,9 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		Role        string `json:"role"`
 		Status      string `json:"status"`
 		Password    string `json:"password,omitempty"`
+		// EndsAt schedules the account's end: absent keeps the current schedule, an
+		// empty string clears it, an instant sets it.
+		EndsAt *string `json:"endsAt"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -164,6 +168,16 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	wasAdmin := user.Role == "admin"
 	if req.Role == "user" || req.Role == "admin" {
 		user.Role = req.Role
+	}
+	endsAtBefore := user.EndsAt
+	if req.EndsAt != nil && !sameInstant(*req.EndsAt, user.EndsAt) {
+		// The store is the rule; this is the early answer for a changed value.
+		endsAt, err := parseInstant(*req.EndsAt)
+		if err != nil {
+			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
+			return
+		}
+		user.EndsAt = endsAt
 	}
 	wasActive := user.Status == "active"
 	if req.Status == "active" || req.Status == "disabled" {
@@ -202,6 +216,8 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		"username":      user.Username,
 		"role":          user.Role,
 		"status":        user.Status,
+		"endsAt":        user.EndsAt,
+		"endsAtBefore":  endsAtBefore,
 		"demoted":       demoted,
 		"accessRevoked": revokeAccess,
 	})
@@ -210,6 +226,8 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			enrollmentError(w, err)
 		} else if errors.Is(err, store.ErrLastActiveAdmin) {
 			http.Error(w, `{"error":"cannot_remove_last_admin"}`, http.StatusBadRequest)
+		} else if errors.Is(err, store.ErrExpiryInPast) {
+			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
 		} else {
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		}
@@ -1165,4 +1183,14 @@ func knownScopes(scopes []string) bool {
 		}
 	}
 	return true
+}
+
+// sameInstant reports whether raw names the instant the row already carries, so an
+// edit that re-submits a stored (possibly past) end date is not a new schedule.
+func sameInstant(raw string, current *time.Time) bool {
+	if raw == "" || current == nil {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	return err == nil && at.Equal(*current)
 }

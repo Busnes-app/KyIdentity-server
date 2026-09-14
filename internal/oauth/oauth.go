@@ -349,6 +349,12 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 
 	now := time.Now().UTC()
 	exp := now.Add(AccessTokenTTL)
+	// A token never outlives the access it carries: the union's end or the account's.
+	if end, err := e.store.AccessEndsAt(user.ID, clientID); err != nil {
+		return nil, err
+	} else if end != nil && end.Before(exp) {
+		exp = *end
+	}
 	accessJTI := uuid.New().String()
 
 	// Register the token before handing it out, so revocation has something to revoke.
@@ -402,7 +408,7 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 	return &TokenResponse{
 		AccessToken: accessToken,
 		TokenType:   "Bearer",
-		ExpiresIn:   int(AccessTokenTTL.Seconds()),
+		ExpiresIn:   int(exp.Sub(now).Seconds()),
 		IDToken:     idToken,
 		Scope:       authCode.Scope,
 	}, nil

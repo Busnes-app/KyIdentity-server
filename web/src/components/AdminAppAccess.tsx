@@ -4,6 +4,7 @@ import { parseAppAccessPage, parseAppAccessGroups } from '../parsers';
 import type { AppRecord } from '../types';
 import { pageSize, Pager, useDirectoryPage } from './DirectoryPage';
 import { isCancelled, useStepUp } from './StepUpPrompt';
+import { describeInstant, instantFromLocal, localZone } from '../instant';
 
 export function AdminAppAccess({ app, onClose, onChanged }: { app: AppRecord; onClose: () => void; onChanged: () => void }) {
  const [mode,setMode]=useState(app.accessMode);
@@ -13,6 +14,8 @@ export function AdminAppAccess({ app, onClose, onChanged }: { app: AppRecord; on
  const [offset,setOffset]=useState(0);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState<string|null>(null);
+ const [until,setUntil]=useState('');
+ const untilInstant=instantFromLocal(until);
  const heading=useRef<HTMLHeadingElement|null>(null);
  useEffect(()=>{heading.current?.focus();},[]);
  const {requestGrant,stepUpPrompt}=useStepUp();
@@ -45,9 +48,10 @@ export function AdminAppAccess({ app, onClose, onChanged }: { app: AppRecord; on
    <button className="primary-btn" disabled={busy||!changed||!users.page} onClick={()=>{if(users.page)void mutate('PUT',`${base}/access-policy`,`Set app ${app.id} to ${enabled?'enabled':'disabled'}, ${mode==='all_active_users'?'all active users':'assigned users only'}. ${users.page.losingAccess} users currently lose access.`,{mode,enabled,revision:users.page.app.revision});}}>Apply policy</button>
   </div></section>
   <div className="action-buttons-wrap"><button className="secondary-btn" aria-pressed={view==='users'} onClick={()=>{setView('users');setOffset(0);setQuery('');}}>Users and access preview</button><button className="secondary-btn" aria-pressed={view==='groups'} onClick={()=>{setView('groups');setOffset(0);setQuery('');}}>Group assignments</button></div>
+  {view==='users'&&<div className="form-group"><label className="form-label" htmlFor="access-until">Direct assignments made now expire at (optional, {localZone()})</label><input id="access-until" type="datetime-local" className="form-input" value={until} disabled={busy} onChange={e=>setUntil(e.target.value)}/>{untilInstant&&<p className="text-muted">Exact instant: {describeInstant(untilInstant)}. Access ends then unless another grant still applies.</p>}</div>}
   <div className="form-group"><label className="form-label" htmlFor="access-search">Search {view}</label><input id="access-search" className="form-input" value={query} maxLength={200} disabled={busy} onChange={e=>{setQuery(e.target.value);setOffset(0);}}/></div>
   <div className="table-card"><table className="admin-table" style={{minWidth:'40rem'}}>
-   {view==='users'?<><thead><tr><th>User</th><th>Current access</th><th>Policy preview</th><th>Direct assignment</th></tr></thead><tbody>{users.page?.items.map(u=><tr key={u.id}><td>{u.displayName||u.username}<div className="text-muted">{u.username}</div></td><td>{u.effective?'Allowed':'Denied'}<div className="text-muted">{u.reason.replaceAll('_',' ')}</div>{u.groupAssigned&&<div>Group assignment also applies</div>}</td><td>{u.preview?'Allowed':'Denied'}</td><td><button className="secondary-btn sm" disabled={busy} onClick={()=>mutate(u.direct?'DELETE':'PUT',`${base}/assignments/users/${encodeURIComponent(u.id)}`,`${u.direct?'Remove':'Add'} direct assignment for ${u.username} (${u.id}) on app ${app.id}. Other assignments still grant access.`)}>{u.direct?'Remove direct assignment':'Assign user'}</button></td></tr>)}</tbody></>
+   {view==='users'?<><thead><tr><th>User</th><th>Current access</th><th>Policy preview</th><th>Direct assignment</th></tr></thead><tbody>{users.page?.items.map(u=><tr key={u.id}><td>{u.displayName||u.username}<div className="text-muted">{u.username}</div></td><td>{u.effective?'Allowed':'Denied'}<div className="text-muted">{u.reason.replaceAll('_',' ')}</div>{u.groupAssigned&&<div>Group assignment also applies</div>}</td><td>{u.preview?'Allowed':'Denied'}</td><td>{u.directExpiresAt&&<div className="text-muted">Until {describeInstant(u.directExpiresAt)}</div>}<div className="action-buttons-wrap"><button className="secondary-btn sm" disabled={busy} onClick={()=>mutate(u.direct?'DELETE':'PUT',`${base}/assignments/users/${encodeURIComponent(u.id)}`,`${u.direct?'Remove':'Add'} direct assignment for ${u.username} (${u.id}) on app ${app.id}${!u.direct&&untilInstant?` until ${untilInstant}`:''}. Other assignments still grant access.`,!u.direct&&untilInstant?{expiresAt:untilInstant}:undefined)}>{u.direct?'Remove direct assignment':'Assign user'}</button>{u.direct&&<button className="secondary-btn sm" disabled={busy} onClick={()=>mutate('PUT',`${base}/assignments/users/${encodeURIComponent(u.id)}`,`Set the direct assignment for ${u.username} on app ${app.id} to ${untilInstant?`end at ${untilInstant}`:'never expire'}.`,untilInstant?{expiresAt:untilInstant}:undefined)}>{untilInstant?'Set expiry':'Remove expiry'}</button>}</div></td></tr>)}</tbody></>
    :<><thead><tr><th>Group</th><th>Assignment</th></tr></thead><tbody>{groups.page?.items.map(g=><tr key={g.id}><td style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{g.name}<div className="text-muted"><code>{g.id}</code></div></td><td><button className="secondary-btn sm" disabled={busy} onClick={()=>mutate(g.assigned?'DELETE':'PUT',`${base}/assignments/groups/${encodeURIComponent(g.id)}`,`${g.assigned?'Remove':'Add'} group assignment ${g.name} (${g.id}) on app ${app.id}. Other assignments still grant access.`)}>{g.assigned?'Remove group assignment':'Assign group'}</button></td></tr>)}</tbody></>}
   </table></div>
   {page?.items.length===0&&<p className="empty-box">No matching {view}.</p>}

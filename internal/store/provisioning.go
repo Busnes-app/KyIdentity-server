@@ -97,13 +97,16 @@ func scimGroupPayload(groupID string) []byte {
 	return b
 }
 
-const userColumns = `id, username, display_name, email, password_hash, role, status, pending, email_verified_at, source_connector_id, external_id, source_active, locally_disabled, created_at, updated_at`
+const userColumns = `id, username, display_name, email, password_hash, role, status, pending, email_verified_at, source_connector_id, external_id, source_active, locally_disabled, ends_at, created_at, updated_at`
 
+// scanUser reads a user row. An account past its end date reads as disabled, so every
+// decision that checks status honours the end date without a worker.
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
 	var verified sql.NullTime
 	var source, external sql.NullString
-	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.Pending, &verified, &source, &external, &u.SourceActive, &u.LocallyDisabled, &u.CreatedAt, &u.UpdatedAt)
+	var endsAt sql.NullInt64
+	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.Pending, &verified, &source, &external, &u.SourceActive, &u.LocallyDisabled, &endsAt, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -112,6 +115,9 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 		u.EmailVerifiedAt = &at
 	}
 	u.SourceConnectorID, u.ExternalID = source.String, external.String
+	if u.EndsAt = timeFromUnix(endsAt); u.EndsAt != nil && !u.EndsAt.After(time.Now()) {
+		u.Status = "disabled"
+	}
 	return u, err
 }
 
@@ -357,7 +363,7 @@ func desiredGroupsTx(tx *sql.Tx, systemID string) ([]desiredGroup, error) {
 // The hash covers the name and the in-scope member set, so any change re-queues the
 // group once. Delivery reads the live membership again, so a stale snapshot is harmless.
 func groupMembersHashTx(tx *sql.Tx, g desiredGroup) (string, error) {
-	ids, err := scanStrings(tx.Query(`SELECT m.user_id FROM group_memberships m WHERE m.group_id=?
+	ids, err := scanStrings(tx.Query(`SELECT m.user_id FROM live_group_memberships m WHERE m.group_id=?
  AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=? AND e.user_id=m.user_id) ORDER BY m.user_id`, g.groupID, g.systemID))
 	if err != nil {
 		return "", err
@@ -489,7 +495,7 @@ func (s *Store) SCIMGroupMembers(systemID, groupID string) (name string, exists 
 	if err != nil {
 		return "", false, nil, err
 	}
-	remoteIDs, err = scanStrings(s.db.Query(`SELECT l.remote_id FROM group_memberships m
+	remoteIDs, err = scanStrings(s.db.Query(`SELECT l.remote_id FROM live_group_memberships m
  JOIN scim_user_links l ON l.system_id=? AND l.kind='user' AND l.local_id=m.user_id AND l.remote_id<>''
  WHERE m.group_id=? AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=? AND e.user_id=m.user_id)
  ORDER BY l.remote_id`, systemID, groupID, systemID))
@@ -530,7 +536,7 @@ func provisionedTx(tx *sql.Tx, ev AccountSyncEvent, now time.Time) error {
 	}
 	for _, g := range groups {
 		var member bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM group_memberships WHERE group_id=? AND user_id=?)`, g.groupID, ev.UserID).Scan(&member); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM live_group_memberships WHERE group_id=? AND user_id=?)`, g.groupID, ev.UserID).Scan(&member); err != nil {
 			return err
 		}
 		if !member {

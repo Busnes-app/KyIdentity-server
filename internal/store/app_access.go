@@ -38,14 +38,31 @@ func (s *Store) migrateAppAccess() error {
  app_id TEXT NOT NULL REFERENCES app_registry(id) ON DELETE CASCADE,
  group_id TEXT NOT NULL REFERENCES directory_groups(id) ON DELETE CASCADE, PRIMARY KEY(app_id,group_id));
  CREATE INDEX IF NOT EXISTS app_assignments_user ON app_user_assignments(user_id,app_id);
- CREATE INDEX IF NOT EXISTS app_assignments_group ON app_group_assignments(group_id,app_id);
- CREATE VIEW IF NOT EXISTS app_access_facts AS SELECT a.id app_id,u.id user_id,
- u.status='active' active,a.access_mode,a.enabled,
+ CREATE INDEX IF NOT EXISTS app_assignments_group ON app_group_assignments(group_id,app_id)`)
+	if err != nil {
+		return err
+	}
+	// Expiry instants (unix seconds, NULL = never) on direct assignments, memberships and
+	// accounts. The views read them on every decision, so they hold with no worker.
+	for _, col := range []struct{ table, column string }{{"app_user_assignments", "expires_at"}, {"group_memberships", "expires_at"}, {"users", "ends_at"}} {
+		if err = tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, col.table, col.column).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			if _, err = tx.Exec(`ALTER TABLE ` + col.table + ` ADD COLUMN ` + col.column + ` INTEGER`); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = tx.Exec(`DROP VIEW IF EXISTS effective_app_access; DROP VIEW IF EXISTS app_access_facts; DROP VIEW IF EXISTS live_group_memberships;
+ CREATE VIEW live_group_memberships AS SELECT group_id,user_id FROM group_memberships WHERE expires_at IS NULL OR expires_at>unixepoch();
+ CREATE VIEW app_access_facts AS SELECT a.id app_id,u.id user_id,
+ (u.status='active' AND (u.ends_at IS NULL OR u.ends_at>unixepoch())) active,a.access_mode,a.enabled,
  (a.client_id IS NULL OR EXISTS(SELECT 1 FROM oauth_clients c WHERE c.id=a.client_id AND c.enabled)) client_enabled,
- EXISTS(SELECT 1 FROM app_user_assignments d WHERE d.app_id=a.id AND d.user_id=u.id) direct,
- EXISTS(SELECT 1 FROM app_group_assignments g JOIN group_memberships m ON m.group_id=g.group_id WHERE g.app_id=a.id AND m.user_id=u.id) group_assigned
+ EXISTS(SELECT 1 FROM app_user_assignments d WHERE d.app_id=a.id AND d.user_id=u.id AND (d.expires_at IS NULL OR d.expires_at>unixepoch())) direct,
+ EXISTS(SELECT 1 FROM app_group_assignments g JOIN live_group_memberships m ON m.group_id=g.group_id WHERE g.app_id=a.id AND m.user_id=u.id) group_assigned
  FROM app_registry a CROSS JOIN users u;
- CREATE VIEW IF NOT EXISTS effective_app_access AS SELECT f.app_id,f.user_id FROM app_access_facts f WHERE ` + appAllowedSQL("f.access_mode", "f.enabled"))
+ CREATE VIEW effective_app_access AS SELECT f.app_id,f.user_id FROM app_access_facts f WHERE ` + appAllowedSQL("f.access_mode", "f.enabled"))
 	if err != nil {
 		return err
 	}
@@ -56,11 +73,21 @@ func (s *Store) migrateAppAccess() error {
 // in-flight exchange from reviving them if access is removed and then re-granted.
 // ponytail: scan live tokens/codes on access edits; scope to affected apps/users if this grows slow.
 func revokeLostAppAccessTx(tx *sql.Tx) error {
-	condition := `NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE e.user_id=t.user_id AND a.client_id=t.client_id)`
-	if _, err := tx.Exec(`UPDATE issued_tokens AS t SET revoked_at=? WHERE revoked_at IS NULL AND `+condition, time.Now().UTC()); err != nil {
+	now := time.Now().UTC()
+	lost := `NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE e.user_id=t.user_id AND a.client_id=t.client_id)`
+	if _, err := tx.Exec(`UPDATE issued_tokens AS t SET revoked_at=? WHERE revoked_at IS NULL AND `+lost, now); err != nil {
 		return err
 	}
-	_, err := tx.Exec(`DELETE FROM authorization_codes AS t WHERE ` + condition)
+	if _, err := tx.Exec(`DELETE FROM authorization_codes AS t WHERE ` + lost); err != nil {
+		return err
+	}
+	// A client that saw a login for access that no longer exists is told to log out,
+	// and the sid mapping goes with the access so the delivery happens once.
+	lostSession := `NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE e.user_id=cs.user_id AND a.client_id=cs.client_id)`
+	if err := enqueueLogoutTx(tx, now, lostSession); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM oidc_client_sessions AS cs WHERE ` + lostSession)
 	return err
 }
 func (s *Store) ClientAccessAllowed(userID, clientID string) (bool, error) {
@@ -120,6 +147,22 @@ func (s *Store) SetAppPolicy(id, mode string, enabled bool, revision int, audit 
 	return tx.Commit()
 }
 func (s *Store) SetAppAssignment(id, kind, principal string, assigned bool, audit *AuditEvent) error {
+	return s.setAppAssignment(id, kind, principal, assigned, nil, audit)
+}
+
+// SetAppAssignmentUntil grants until an instant (nil = no bound); repeating it moves the
+// instant. Only direct user grants carry one.
+func (s *Store) SetAppAssignmentUntil(id, kind, principal string, expiresAt *time.Time, audit *AuditEvent) error {
+	if kind != "users" && expiresAt != nil {
+		return ErrAppLinkConflict
+	}
+	if err := checkExpiry(expiresAt, time.Now().UTC()); err != nil {
+		return err
+	}
+	return s.setAppAssignment(id, kind, principal, true, expiresAt, audit)
+}
+
+func (s *Store) setAppAssignment(id, kind, principal string, assigned bool, expiresAt *time.Time, audit *AuditEvent) error {
 	table, column, source, name := "", "", "", ""
 	switch kind {
 	case "users":
@@ -152,7 +195,9 @@ func (s *Store) SetAppAssignment(id, kind, principal string, assigned bool, audi
 		}
 		return err
 	}
-	if assigned {
+	if assigned && kind == "users" {
+		_, err = tx.Exec(`INSERT INTO app_user_assignments(app_id,user_id,expires_at) VALUES(?,?,?) ON CONFLICT(app_id,user_id) DO UPDATE SET expires_at=excluded.expires_at`, id, principal, unixOrNil(expiresAt))
+	} else if assigned {
 		_, err = tx.Exec(`INSERT INTO `+table+`(app_id,`+column+`) VALUES(?,?) ON CONFLICT DO NOTHING`, id, principal)
 	} else {
 		_, err = tx.Exec(`DELETE FROM `+table+` WHERE app_id=? AND `+column+`=?`, id, principal)
@@ -189,6 +234,8 @@ type AppAccessUser struct {
 	Effective     bool   `json:"effective"`
 	Preview       bool   `json:"preview"`
 	Reason        string `json:"reason"`
+	// DirectExpiresAt bounds the direct grant; nil means it does not expire.
+	DirectExpiresAt *time.Time `json:"directExpiresAt,omitempty"`
 }
 type AppAccessUsers struct {
 	Users        []AppAccessUser `json:"users"`
@@ -235,16 +282,19 @@ func (s *Store) ListAppAccessUsers(id, query, previewMode string, previewEnabled
 	if err = tx.QueryRow(`SELECT COUNT(*)`+from, id, query, query).Scan(&p.Total); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.status,f.direct,f.group_assigned,(`+current+`),(`+proposed+`),CASE WHEN NOT f.active THEN 'user_disabled' WHEN NOT f.enabled THEN 'app_disabled' WHEN NOT f.client_enabled THEN 'client_disabled' WHEN f.access_mode='all_active_users' THEN 'all_active_users' WHEN f.direct THEN 'direct_assignment' WHEN f.group_assigned THEN 'group_assignment' ELSE 'not_assigned' END`+from+` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, enabled, mode, id, query, query, limit, offset)
+	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.status,f.direct,f.group_assigned,(`+current+`),(`+proposed+`),CASE WHEN NOT f.active THEN 'user_disabled' WHEN NOT f.enabled THEN 'app_disabled' WHEN NOT f.client_enabled THEN 'client_disabled' WHEN f.access_mode='all_active_users' THEN 'all_active_users' WHEN f.direct THEN 'direct_assignment' WHEN f.group_assigned THEN 'group_assignment' ELSE 'not_assigned' END,
+ (SELECT d.expires_at FROM app_user_assignments d WHERE d.app_id=f.app_id AND d.user_id=u.id)`+from+` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, enabled, mode, id, query, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var u AppAccessUser
-		if err = rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Status, &u.Direct, &u.GroupAssigned, &u.Effective, &u.Preview, &u.Reason); err != nil {
+		var expires sql.NullInt64
+		if err = rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Status, &u.Direct, &u.GroupAssigned, &u.Effective, &u.Preview, &u.Reason, &expires); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		u.DirectExpiresAt = timeFromUnix(expires)
 		p.Users = append(p.Users, u)
 	}
 	err = rows.Err()

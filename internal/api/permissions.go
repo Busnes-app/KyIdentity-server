@@ -47,11 +47,6 @@ type Access struct {
 	AppOwner []string `json:"appOwner"`
 }
 
-// Any reports whether the user can open the administration area at all.
-func (a Access) Any() bool {
-	return a.Admin || a.Helpdesk || a.Auditor || len(a.AppOwner) > 0
-}
-
 func (a Access) allows(p permission, r *http.Request) bool {
 	switch {
 	case a.Admin:

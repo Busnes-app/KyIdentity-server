@@ -568,12 +568,19 @@ func (e *Engine) StartWorker(ctx context.Context) {
 	reconcile := time.NewTicker(time.Minute)
 	defer reconcile.Stop()
 	go e.reconcileWorker(ctx)
+	// Overdue expiries are applied at start, so a restart drains them before anything else.
+	if _, err := e.store.RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
+		log.Printf("expiry follow-up failed: %v", err)
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-reconcile.C:
+			if _, err := e.store.RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
+				log.Printf("expiry follow-up failed: %v", err)
+			}
 			if err := e.store.ReconcileProvisioning(); err != nil && ctx.Err() == nil {
 				log.Printf("provisioning reconcile failed: %v", err)
 			}
