@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"regexp"
@@ -75,12 +76,17 @@ func scanAuditEvent(rows *sql.Rows) (AuditEvent, error) {
 
 // SearchAuditEvents pages the filtered trail with its total.
 func (s *Store) SearchAuditEvents(f AuditFilter) ([]AuditEvent, int, error) {
+	return s.SearchAuditEventsContext(context.Background(), f)
+}
+
+// SearchAuditEventsContext is SearchAuditEvents under the caller's deadline.
+func (s *Store) SearchAuditEventsContext(ctx context.Context, f AuditFilter) ([]AuditEvent, int, error) {
 	where, args := f.where()
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events`+where, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.Query(auditSelect+where+auditOrder+` LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
+	rows, err := s.db.QueryContext(ctx, auditSelect+where+auditOrder+` LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -101,10 +107,11 @@ func (s *Store) ListAuditEvents(limit, offset int) ([]AuditEvent, int, error) {
 }
 
 // StreamAuditEvents hands the filtered trail to fn in page order, at most maxRows of it,
-// and stops early when fn returns an error (a client gone or a deadline passed).
-func (s *Store) StreamAuditEvents(f AuditFilter, maxRows int, fn func(AuditEvent) error) (int, error) {
+// under the caller's deadline, and stops early when fn returns an error (a client gone
+// or a deadline passed).
+func (s *Store) StreamAuditEvents(ctx context.Context, f AuditFilter, maxRows int, fn func(AuditEvent) error) (int, error) {
 	where, args := f.where()
-	rows, err := s.db.Query(auditSelect+where+auditOrder+` LIMIT ?`, append(args, maxRows)...)
+	rows, err := s.db.QueryContext(ctx, auditSelect+where+auditOrder+` LIMIT ?`, append(args, maxRows)...)
 	if err != nil {
 		return 0, err
 	}

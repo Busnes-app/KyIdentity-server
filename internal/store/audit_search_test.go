@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -131,7 +132,7 @@ func TestAuditExportIsBoundedAndRedacted(t *testing.T) {
 	defer cleanup()
 	seedAudit(t, s, 30, time.Now().UTC().Truncate(time.Second), true)
 	var got []AuditEvent
-	n, err := s.StreamAuditEvents(AuditFilter{Action: "oauth."}, 5, func(e AuditEvent) error { got = append(got, e); return nil })
+	n, err := s.StreamAuditEvents(context.Background(), AuditFilter{Action: "oauth."}, 5, func(e AuditEvent) error { got = append(got, e); return nil })
 	if err != nil || n != 5 || len(got) != 5 {
 		t.Fatalf("bounded stream = %d %v", n, err)
 	}
@@ -141,8 +142,14 @@ func TestAuditExportIsBoundedAndRedacted(t *testing.T) {
 		}
 	}
 	stop := errors.New("client gone")
-	if n, err := s.StreamAuditEvents(AuditFilter{}, 100, func(AuditEvent) error { return stop }); !errors.Is(err, stop) || n != 0 {
+	if n, err := s.StreamAuditEvents(context.Background(), AuditFilter{}, 100, func(AuditEvent) error { return stop }); !errors.Is(err, stop) || n != 0 {
 		t.Fatalf("sink refusal not honoured: %d %v", n, err)
+	}
+	// A deadline that has already passed reaches the query itself.
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if n, err := s.StreamAuditEvents(expired, AuditFilter{}, 100, func(AuditEvent) error { return nil }); err == nil || n != 0 {
+		t.Fatalf("expired context ignored by the query: %d %v", n, err)
 	}
 	red := RedactAuditDetails(got[0].DetailsJSON)
 	if strings.Contains(red, "hunter2") || strings.Contains(red, `"apiToken":"x"`) || !strings.Contains(red, `"note":"n"`) || !strings.Contains(red, `"ok":1`) {
