@@ -271,6 +271,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"DELETE", "/api/admin/applications/{id}", permAdmin, false, http.HandlerFunc(adminH.DeleteApplication)},
 		{"POST", "/api/admin/icons", permAdmin, false, s.middleware.RateLimit("icon_upload", 20, 0.1)(http.HandlerFunc(adminH.UploadIcon))},
 		{"GET", "/api/admin/audit-events", permRead, false, http.HandlerFunc(adminH.ListAuditEvents)},
+		{"GET", "/api/admin/audit-events/export", permRead, false, s.middleware.RateLimit("audit_export", 5, 0.1)(http.HandlerFunc(adminH.ExportAuditEvents))},
 		{"POST", "/api/admin/backup/drill", permAdmin, false, http.HandlerFunc(backupH.RunDrill)},
 		{"GET", "/api/admin/backup/export-capsule", permAdmin, true, http.HandlerFunc(backupH.ExportCapsule)},
 		{"POST", "/api/admin/backup/pair-remote", permAdmin, true, http.HandlerFunc(backupH.PairRemote)},

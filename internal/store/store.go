@@ -392,6 +392,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateAccessRequests(); err != nil {
 		return err
 	}
+	if err := s.migrateAuditIndexes(); err != nil {
+		return err
+	}
 	if err := s.migrateLogoutDeliveries(); err != nil {
 		return err
 	}
@@ -2331,47 +2334,6 @@ func recordAuditTx(tx *sql.Tx, e *AuditEvent) error {
 func (s *Store) DeleteAuditEventsOlderThan(cutoff time.Time) error {
 	_, err := s.db.Exec(`DELETE FROM audit_events WHERE created_at < ?`, cutoff)
 	return err
-}
-
-func (s *Store) ListAuditEvents(limit, offset int) ([]AuditEvent, int, error) {
-	var total int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&total)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	query := `SELECT id, actor_id, actor_username, action, target_id, target_type, ip_address, user_agent, outcome, details_json, created_at FROM audit_events ORDER BY created_at DESC LIMIT ? OFFSET ?`
-	rows, err := s.db.Query(query, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	var events []AuditEvent
-	for rows.Next() {
-		var e AuditEvent
-		var actorID, actorUser, targetID, targetType, details sql.NullString
-		if err := rows.Scan(&e.ID, &actorID, &actorUser, &e.Action, &targetID, &targetType, &e.IPAddress, &e.UserAgent, &e.Outcome, &details, &e.CreatedAt); err != nil {
-			return nil, 0, err
-		}
-		if actorID.Valid {
-			e.ActorID = actorID.String
-		}
-		if actorUser.Valid {
-			e.ActorUsername = actorUser.String
-		}
-		if targetID.Valid {
-			e.TargetID = targetID.String
-		}
-		if targetType.Valid {
-			e.TargetType = targetType.String
-		}
-		if details.Valid {
-			e.DetailsJSON = details.String
-		}
-		events = append(events, e)
-	}
-	return events, total, nil
 }
 
 // GetSetting retrieves a configuration value from system_settings.

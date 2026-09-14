@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1063,40 +1062,6 @@ func (h *AdminHandler) DeleteApplication(w http.ResponseWriter, r *http.Request)
 }
 
 // ListAuditEvents returns audit trail for admin inspection.
-func (h *AdminHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
-	page := 1
-	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
-		page = p
-	}
-
-	limit := 25
-	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 500 {
-		limit = l
-	}
-
-	offset := (page - 1) * limit
-	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
-		offset = o
-		page = (offset / limit) + 1
-	}
-
-	events, total, err := h.store.ListAuditEvents(limit, offset)
-	if err != nil {
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
-	}
-	if events == nil {
-		events = []store.AuditEvent{}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"auditEvents": events,
-		"total":       total,
-		"page":        page,
-		"limit":       limit,
-	})
-}
 
 // ConfigureSystem reviews a legacy connector or replaces a generic SCIM token.
 func (h *AdminHandler) ConfigureSystem(w http.ResponseWriter, r *http.Request) {
