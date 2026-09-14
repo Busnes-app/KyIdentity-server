@@ -35,6 +35,10 @@ const (
 	// loginAlertCeiling bounds live login-failure alerts: past it, further sources
 	// fold into one alert rather than each minting an alert and its mail.
 	loginAlertCeiling = 10
+	// loginAlertCooldown bounds login-failure mail: once a login alert has been
+	// mailed, further login alerts within this long open without mail, so neither
+	// quiet-then-burst cycles nor rotating addresses can re-mail recipients.
+	loginAlertCooldown = 4 * time.Hour
 )
 
 type Alert struct {
@@ -405,6 +409,18 @@ func raiseAlertTx(tx *sql.Tx, now time.Time, spec alertSpec, recipients []string
 		if _, err := tx.Exec(`INSERT INTO alerts(id,rule,key,severity,title,summary,status,count,first_seen,last_seen) VALUES(?,?,?,?,?,?,'open',?,?,?)`,
 			id, spec.rule, spec.key, spec.severity, spec.title, spec.summary, spec.count, now, now); err != nil {
 			return err
+		}
+		// Login failures are the one rule an unauthenticated client drives, so their
+		// mail is capped per rule, not per key: one mailing per cooldown, the rest of
+		// the alerts open on the page only.
+		if spec.rule == "login_failures" {
+			var recent int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM alert_deliveries d JOIN alerts a ON a.id=d.alert_id WHERE a.rule=? AND d.created_at>?`, spec.rule, now.Add(-loginAlertCooldown)).Scan(&recent); err != nil {
+				return err
+			}
+			if recent > 0 {
+				return nil
+			}
 		}
 		return queueDeliveriesTx(tx, now, id, "opened", recipients)
 	case err != nil:

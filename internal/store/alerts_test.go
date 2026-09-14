@@ -213,8 +213,8 @@ func TestLoginFailureFloodIsBounded(t *testing.T) {
 	if alerts > loginAlertCeiling+2 {
 		t.Fatal("alerts grew with the number of sources:", alerts)
 	}
-	if n := countRows(t, s, `SELECT COUNT(*) FROM alert_deliveries`); n != alerts {
-		t.Fatal("mail grew past the alerts:", n, alerts)
+	if n := countRows(t, s, `SELECT COUNT(*) FROM alert_deliveries`); n != 1 {
+		t.Fatal("login mail is one mailing per cooldown, whatever the sources:", n)
 	}
 	many := openAlerts(t, s)["login_failures/many-sources"]
 	if many.ID == "" || many.Count < 2*loginAlertCeiling {
@@ -283,6 +283,50 @@ func TestLoginFailureAlertsResolveAndStayBounded(t *testing.T) {
 	}
 	if n := countRows(t, s, `SELECT COUNT(*) FROM alerts`); n != 0 {
 		t.Fatal("retention could not reclaim login alerts:", n)
+	}
+}
+
+// Resolving quiet login alerts must not turn quiet-then-burst cycles, or rotating
+// addresses, into a mail source: login mail is one mailing per cooldown.
+func TestLoginFailureReopenIsNotRemailed(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	window := 600 * time.Second
+	admin := alertAdmin(t, s, "root")
+	if err := s.SetAlertSettings(AlertSettings{LoginFailureThreshold: 3, LoginFailureWindowSeconds: 600, Recipients: []string{admin.ID}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Add(-40 * window)
+	for cycle := 0; cycle < 10; cycle++ {
+		for i := 0; i < 3*loginAlertCeiling; i++ {
+			for j := 0; j < 3; j++ {
+				auditedAt(t, s, at, fmt.Sprintf("203.0.113.%d", i), "auth.login", "x", "", "user", "failure", `{"reason":"user_not_found"}`)
+			}
+		}
+		if err := s.EvaluateAlerts(at); err != nil {
+			t.Fatal(err)
+		}
+		at = at.Add(2 * window)
+		if err := s.EvaluateAlerts(at); err != nil {
+			t.Fatal(err)
+		}
+		if n := countRows(t, s, `SELECT COUNT(*) FROM alerts WHERE rule='login_failures' AND status<>'resolved'`); n != 0 {
+			t.Fatal("cycle", cycle, "left live alerts:", n)
+		}
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM alert_deliveries`); n != 1 {
+		t.Fatal("mail grew with the cycles:", n)
+	}
+	// After a genuinely quiet cooldown a new burst is news again.
+	at = at.Add(loginAlertCooldown)
+	for j := 0; j < 3; j++ {
+		auditedAt(t, s, at, "203.0.113.1", "auth.login", "x", "", "user", "failure", `{"reason":"user_not_found"}`)
+	}
+	if err := s.EvaluateAlerts(at); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM alert_deliveries`); n != 2 {
+		t.Fatal("a burst after the cooldown should be mailed:", n)
 	}
 }
 

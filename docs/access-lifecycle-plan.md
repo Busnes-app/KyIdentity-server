@@ -775,8 +775,9 @@ is names only, never audit details. `DeliverAlerts` mails configured recipients
 (administrators or auditors, re-checked per message) through the existing relay with
 backoff and a visible failure after eight attempts, on its own goroutine under a pass
 budget. Login failures key by account id or source address, never by the submitted
-name, with a ceiling on live alerts past which sources share one alert, and resolve
-once their source is quiet for a window. Resolved alerts and finished
+name, with a ceiling on live alerts past which sources share one alert, resolve once
+their source is quiet for a window, and mail at most once per cooldown for the whole
+rule. Resolved alerts and finished
 deliveries follow audit retention. `admin.user_updated` gains
 `roleChanged` and `admin.system_configured` gains `credentialRotated` so the rules need
 no diffing. Inbox and settings under `read`/`admin` permissions, settings with step-up;

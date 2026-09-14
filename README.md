@@ -480,9 +480,10 @@ bearer token rotated, the mail relay changed), repeated login failures for one a
 or, when the name matches no account, from one address (threshold and window
 configurable, default ten in ten minutes; a submitted name never becomes an alert of
 its own, past ten live login alerts further sources share a single "many sources"
-alert, and a login alert whose source has been quiet for a whole window resolves
-itself without mail, so an attacker cycling names or addresses cannot flood the inbox,
-the mail or the table),
+alert, a login alert whose source has been quiet for a whole window resolves itself
+without mail, and login-failure mail is one mailing per four hours however many
+sources appear, so an attacker cycling names or addresses cannot flood the inbox, the
+mail or the table),
 failed or refused scheduled access removal, and outages (a connector whose deliveries are failing
 or given up, a client whose back-channel logouts were given up). Every audit insert
 queues its id through a trigger, the evaluator writes alerts and drains the queue in one
