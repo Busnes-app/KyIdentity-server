@@ -1,6 +1,6 @@
-# KySignOn Server
+# KyIdentity Server
 
-KySignOn is the self-hosted, single-organization identity service and central identity authority for the KySecurity suite, including KyPost, KyBookmarks, KyNotes, and KyPasswords.
+KyIdentity is the self-hosted, single-organization identity service and central identity authority for the KySecurity suite, including KyPost, KyBookmarks, KyNotes, and KyPasswords.
 
 ## Technical direction
 
@@ -15,10 +15,10 @@ KySignOn is the self-hosted, single-organization identity service and central id
 ## Identity, SSO, and Suite Replication
 
 - Implement OAuth 2.0 and OpenID Connect with PKCE.
-- Central User Directory: When administrators create or modify user accounts in KySignOn, changes automatically replicate to paired KySecurity products via signed sync webhooks.
-- UI System Pairing: Connect downstream KySecurity servers to KySignOn using short-lived (90s) pairing keys generated in the KySignOn Admin UI.
-- KyPost and all other KySecurity products integrate directly with KySignOn through OIDC.
-- KySignOn owns authentication, identity, browser sessions, and MFA state.
+- Central User Directory: When administrators create or modify user accounts in KyIdentity, changes automatically replicate to paired KySecurity products via signed sync webhooks.
+- UI System Pairing: Connect downstream KySecurity servers to KyIdentity using short-lived (90s) pairing keys generated in the KyIdentity Admin UI.
+- KyPost and all other KySecurity products integrate directly with KyIdentity through OIDC.
+- KyIdentity owns authentication, identity, browser sessions, and MFA state.
 - Support approved external OAuth/OIDC clients.
 - Use exact redirect-URI matching and standard OIDC discovery/JWKS endpoints.
 

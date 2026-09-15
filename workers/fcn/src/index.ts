@@ -3,7 +3,7 @@
  *
  * The published mobile app is bound at build time to a single Firebase project.
  * This Worker holds that project's service account (as secrets) and delivers
- * push notifications on behalf of KySignOn and KyPassword deployments, each
+ * push notifications on behalf of KyIdentity and KyPassword deployments, each
  * authenticated with its own API key. Self-hosters therefore never need a
  * Firebase account and never recompile the app.
  *

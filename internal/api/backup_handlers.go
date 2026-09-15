@@ -15,10 +15,10 @@ import (
 
 	"github.com/Busness-app/ky-primitives/capsule"
 	"github.com/Busness-app/ky-primitives/recoverykey"
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/backup"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/backup"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // appVersion is reported in capsule manifests and status responses.
@@ -280,7 +280,7 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, backup.ErrNotPaired):
 			writeError(w, http.StatusPreconditionFailed, "No recovery key: pair with KyRecovery or pin the suite recovery key first")
 		case errors.Is(err, backup.ErrNoDestination):
-			writeError(w, http.StatusPreconditionFailed, "Nowhere to put a capsule: pair with KyRecovery or set KYSIGNON_BACKUP_DIR")
+			writeError(w, http.StatusPreconditionFailed, "Nowhere to put a capsule: pair with KyRecovery or set KYIDENTITY_BACKUP_DIR")
 		case errors.Is(err, backup.ErrRecoveryKeyMismatch):
 			writeError(w, http.StatusConflict, "Recovery key file does not match the pinned key ID; refusing to seal")
 		case errors.Is(err, backup.ErrDepositInProgress):

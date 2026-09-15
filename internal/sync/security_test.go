@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/netguard"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/netguard"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
 func setupSync(t *testing.T) (*Engine, *store.Store, *store.User, func()) {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "kysignon-sync-sec-*")
+	dir, err := os.MkdirTemp("", "kyidentity-sync-sec-*")
 	if err != nil {
 		t.Fatal(err)
 	}

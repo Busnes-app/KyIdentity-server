@@ -15,18 +15,18 @@ import (
 
 	"github.com/Busness-app/ky-primitives/recoveryclient"
 
-	"github.com/Busness-app/kysignon-server/internal/api"
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/backup"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/mfa"
-	"github.com/Busness-app/kysignon-server/internal/netguard"
-	"github.com/Busness-app/kysignon-server/internal/oauth"
-	"github.com/Busness-app/kysignon-server/internal/store"
-	"github.com/Busness-app/kysignon-server/internal/sync"
-	"github.com/Busness-app/kysignon-server/web"
+	"github.com/Busness-app/kyidentity-server/internal/api"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/backup"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/mfa"
+	"github.com/Busness-app/kyidentity-server/internal/netguard"
+	"github.com/Busness-app/kyidentity-server/internal/oauth"
+	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/sync"
+	"github.com/Busness-app/kyidentity-server/web"
 	"github.com/google/uuid"
 )
 
@@ -85,10 +85,10 @@ func main() {
 	// deployment allowing them turns an attacker-chosen callback into an SSRF primitive.
 	netguard.AllowPrivate = cfg.AllowPrivateCallbacks
 	if cfg.BackupAllowPrivateRecovery {
-		log.Printf("[BACKUP] KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY is set: capsules may be deposited to a KyRecovery on a private address (HTTPS still required)")
+		log.Printf("[BACKUP] KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY is set: capsules may be deposited to a KyRecovery on a private address (HTTPS still required)")
 	}
 	if cfg.AllowPrivateCallbacks {
-		log.Println("WARNING: KYSIGNON_ALLOW_PRIVATE_CALLBACKS is on; paired systems may register internal callback URLs")
+		log.Println("WARNING: KYIDENTITY_ALLOW_PRIVATE_CALLBACKS is on; paired systems may register internal callback URLs")
 	}
 
 	auditLogger := audit.NewLogger(dbStore)
@@ -99,13 +99,13 @@ func main() {
 			URL:     cfg.PushRelayURL,
 			Key:     cfg.PushRelayKey,
 			KeyFile: filepath.Join(cfg.DataDir, "push-relay-fcm.key"),
-			Label:   "kysignon-" + cfg.IssuerURL,
+			Label:   "kyidentity-" + cfg.IssuerURL,
 		},
 		mfa.RelayConfig{
 			URL:     cfg.APNSRelayURL,
 			Key:     cfg.APNSRelayKey,
 			KeyFile: filepath.Join(cfg.DataDir, "push-relay-apns.key"),
-			Label:   "kysignon-" + cfg.IssuerURL,
+			Label:   "kyidentity-" + cfg.IssuerURL,
 		},
 	)
 	if err != nil {
@@ -198,7 +198,7 @@ func main() {
 	)
 
 	go func() {
-		log.Printf("KySignOn Server listening on :%s (Issuer: %s)", cfg.Port, cfg.IssuerURL)
+		log.Printf("KyIdentity Server listening on :%s (Issuer: %s)", cfg.Port, cfg.IssuerURL)
 		if err := server.Start(); err != nil && err.Error() != "http: Server closed" {
 			log.Fatalf("Server error: %v", err)
 		}
@@ -209,7 +209,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("Shutting down KySignOn Server gracefully...")
+	log.Println("Shutting down KyIdentity Server gracefully...")
 	cancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -218,7 +218,7 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
-	log.Println("KySignOn Server stopped.")
+	log.Println("KyIdentity Server stopped.")
 }
 
 func runBootstrap(username, password, email string) {
@@ -409,7 +409,7 @@ func runDeposit() {
 
 	res, err := backup.RunBackup(context.Background(), cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appVersion)
 	action, outcome, details := backup.Outcome(res, err)
-	_ = auditLogger.Record(action, "", "cli", res.Manifest.CapsuleID, "backup", "", "kysignon-cli", outcome, details)
+	_ = auditLogger.Record(action, "", "cli", res.Manifest.CapsuleID, "backup", "", "kyidentity-cli", outcome, details)
 	if err != nil {
 		log.Fatalf("Backup: %v", err)
 	}
@@ -428,7 +428,7 @@ func describe(res backup.Result) string {
 	return msg
 }
 
-// backupLoop runs the schedule the admin set (or the KYSIGNON_BACKUP_DEPOSIT_INTERVAL
+// backupLoop runs the schedule the admin set (or the KYIDENTITY_BACKUP_DEPOSIT_INTERVAL
 // default). It checks once a minute whether a run is due, so a schedule changed in the UI
 // takes effect without a restart and a restart never loses its place: the last attempt is in
 // the database. The wait honours shutdown; the run itself does not, so a SIGTERM mid-upload
@@ -456,7 +456,7 @@ func backupLoop(ctx context.Context, cfg *config.Config, dbStore *store.Store, a
 			continue
 		}
 		action, outcome, details := backup.Outcome(res, err)
-		_ = auditLogger.Record(action, "", "system", res.Manifest.CapsuleID, "backup", "", "kysignon-scheduler", outcome, details)
+		_ = auditLogger.Record(action, "", "system", res.Manifest.CapsuleID, "backup", "", "kyidentity-scheduler", outcome, details)
 		if err != nil {
 			log.Printf("[BACKUP] scheduled backup: %s", backup.AuditSafe(err.Error()))
 			continue
@@ -480,9 +480,9 @@ func runRestore(args []string) {
 	fs := flag.NewFlagSet("restore", flag.ExitOnError)
 	capsulePath := fs.String("capsule", "", "path to the .kycap file")
 	target := fs.String("to", "", "empty directory to restore into")
-	service := fs.String("service", "", "expected service name (default: $KYSIGNON_APP_NAME or KySignOn)")
+	service := fs.String("service", "", "expected service name (default: $KYIDENTITY_APP_NAME or KyIdentity)")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "Usage: kysignon restore -capsule <file.kycap> -to <dir> [-service <name>]\n\n"+
+		fmt.Fprint(os.Stderr, "Usage: kyidentity restore -capsule <file.kycap> -to <dir> [-service <name>]\n\n"+
 			"Custodian shares are read from stdin, one ky2-... share per line, and never from\n"+
 			"the command line: argv is world-readable and lands in shell history.\n\n")
 		fs.PrintDefaults()
@@ -493,7 +493,7 @@ func runRestore(args []string) {
 		os.Exit(2)
 	}
 	if *service == "" {
-		*service = os.Getenv("KYSIGNON_APP_NAME")
+		*service = os.Getenv("KYIDENTITY_APP_NAME")
 	}
 	if *service == "" {
 		*service = config.DefaultAppName

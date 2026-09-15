@@ -21,7 +21,7 @@ export const THEMES = {
 export type ThemeName = keyof typeof THEMES;
 export const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
 export const DEFAULT_THEME: ThemeName = 'Patina Ky';
-export const THEME_KEY = 'kysignon-theme';
+export const THEME_KEY = 'kyidentity-theme';
 
 export function isThemeName(value: unknown): value is ThemeName {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(THEMES, value);

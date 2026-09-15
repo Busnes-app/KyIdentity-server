@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // SessionHandler lists and revokes browser sessions and per-app token grants. Revocation
@@ -149,10 +149,10 @@ func writeSuccess(w http.ResponseWriter) {
 
 // clearSessionCookies expires both the session cookie and its CSRF pair.
 func clearSessionCookies(w http.ResponseWriter) {
-	for _, name := range []string{"kysignon_session", "kysignon_csrf"} {
+	for _, name := range []string{"kyidentity_session", "kyidentity_csrf"} {
 		http.SetCookie(w, &http.Cookie{
 			Name: name, Value: "", Path: "/", Expires: time.Unix(0, 0), MaxAge: -1,
-			SameSite: http.SameSiteLaxMode, HttpOnly: name == "kysignon_session",
+			SameSite: http.SameSiteLaxMode, HttpOnly: name == "kyidentity_session",
 		})
 	}
 }

@@ -1,4 +1,6 @@
 # Binaries
+/kyidentity
+/kyidentity.exe
 /kysignon
 /kysignon.exe
 *.exe

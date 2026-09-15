@@ -21,12 +21,12 @@ func TestWeakEncryptionKeyIsRejected(t *testing.T) {
 	for _, bad := range []string{"changeme", "a", "deadbeef", strings.Repeat("z", 64)} {
 		t.Run(bad[:min(len(bad), 12)], func(t *testing.T) {
 			withEnv(t, map[string]string{
-				"KYSIGNON_DATA_DIR":       t.TempDir(),
-				"KYSIGNON_ENCRYPTION_KEY": bad,
-				"BOOTSTRAP_ADMIN_PASS":    "",
+				"KYIDENTITY_DATA_DIR":       t.TempDir(),
+				"KYIDENTITY_ENCRYPTION_KEY": bad,
+				"BOOTSTRAP_ADMIN_PASS":      "",
 			})
 			if _, err := Load(); err == nil {
-				t.Errorf("KYSIGNON_ENCRYPTION_KEY=%q was accepted; it must be rejected", bad)
+				t.Errorf("KYIDENTITY_ENCRYPTION_KEY=%q was accepted; it must be rejected", bad)
 			}
 		})
 	}
@@ -34,20 +34,20 @@ func TestWeakEncryptionKeyIsRejected(t *testing.T) {
 
 func TestWeakSecretKeyIsRejected(t *testing.T) {
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR":   t.TempDir(),
-		"KYSIGNON_SECRET_KEY": "hunter2",
+		"KYIDENTITY_DATA_DIR":   t.TempDir(),
+		"KYIDENTITY_SECRET_KEY": "hunter2",
 	})
 	if _, err := Load(); err == nil {
-		t.Error("a 7-byte KYSIGNON_SECRET_KEY was accepted")
+		t.Error("a 7-byte KYIDENTITY_SECRET_KEY was accepted")
 	}
 }
 
 func TestValidHexKeysAreAccepted(t *testing.T) {
 	key := strings.Repeat("ab", 32) // 64 hex chars = 32 bytes
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR":       t.TempDir(),
-		"KYSIGNON_ENCRYPTION_KEY": key,
-		"KYSIGNON_SECRET_KEY":     key,
+		"KYIDENTITY_DATA_DIR":       t.TempDir(),
+		"KYIDENTITY_ENCRYPTION_KEY": key,
+		"KYIDENTITY_SECRET_KEY":     key,
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -66,7 +66,7 @@ func TestExistingShortKeyFileIsNotSilentlyReplaced(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte("truncated"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	withEnv(t, map[string]string{"KYSIGNON_DATA_DIR": dir})
+	withEnv(t, map[string]string{"KYIDENTITY_DATA_DIR": dir})
 
 	if _, err := Load(); err == nil {
 		t.Error("a truncated encryption.key was silently regenerated instead of reported")
@@ -83,7 +83,7 @@ func TestExistingShortKeyFileIsNotSilentlyReplaced(t *testing.T) {
 
 func TestGeneratedKeysPersistAcrossLoads(t *testing.T) {
 	dir := t.TempDir()
-	withEnv(t, map[string]string{"KYSIGNON_DATA_DIR": dir})
+	withEnv(t, map[string]string{"KYIDENTITY_DATA_DIR": dir})
 
 	first, err := Load()
 	if err != nil {
@@ -103,7 +103,7 @@ func TestGeneratedKeysPersistAcrossLoads(t *testing.T) {
 
 // The shipped default must not believe forwarding headers from the whole RFC1918 space.
 func TestNoProxiesAreTrustedByDefault(t *testing.T) {
-	withEnv(t, map[string]string{"KYSIGNON_DATA_DIR": t.TempDir()})
+	withEnv(t, map[string]string{"KYIDENTITY_DATA_DIR": t.TempDir()})
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -115,17 +115,17 @@ func TestNoProxiesAreTrustedByDefault(t *testing.T) {
 
 func TestPublicHTTPIssuerIsRejectedAndHTTPSForcesSecureCookies(t *testing.T) {
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR":   t.TempDir(),
-		"KYSIGNON_ISSUER_URL": "http://auth.example.test",
+		"KYIDENTITY_DATA_DIR":   t.TempDir(),
+		"KYIDENTITY_ISSUER_URL": "http://auth.example.test",
 	})
 	if _, err := Load(); err == nil {
 		t.Fatal("a public HTTP issuer was accepted")
 	}
 
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR":       t.TempDir(),
-		"KYSIGNON_ISSUER_URL":     "https://auth.example.test",
-		"KYSIGNON_SECURE_COOKIES": "false",
+		"KYIDENTITY_DATA_DIR":       t.TempDir(),
+		"KYIDENTITY_ISSUER_URL":     "https://auth.example.test",
+		"KYIDENTITY_SECURE_COOKIES": "false",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -138,17 +138,17 @@ func TestPublicHTTPIssuerIsRejectedAndHTTPSForcesSecureCookies(t *testing.T) {
 
 func TestRelayURLsRequireHTTPS(t *testing.T) {
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR": t.TempDir(),
-		"PUSH_RELAY_URL":    "http://relay.example.test",
+		"KYIDENTITY_DATA_DIR": t.TempDir(),
+		"PUSH_RELAY_URL":      "http://relay.example.test",
 	})
 	if _, err := Load(); err == nil {
 		t.Fatal("public HTTP PUSH_RELAY_URL was accepted")
 	}
 
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR": t.TempDir(),
-		"PUSH_RELAY_URL":    "https://fcm.example.test/",
-		"APNS_RELAY_URL":    "https://apns.example.test/",
+		"KYIDENTITY_DATA_DIR": t.TempDir(),
+		"PUSH_RELAY_URL":      "https://fcm.example.test/",
+		"APNS_RELAY_URL":      "https://apns.example.test/",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -163,7 +163,7 @@ func TestRelayURLsRequireHTTPS(t *testing.T) {
 // silently drops their proxy out of the trusted set.
 func TestMalformedTrustedProxyCIDRIsRejected(t *testing.T) {
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR":   t.TempDir(),
+		"KYIDENTITY_DATA_DIR": t.TempDir(),
 		"TRUSTED_PROXY_CIDRS": "10.89.0.1/32,not-a-cidr",
 	})
 	if _, err := Load(); err == nil {
@@ -173,9 +173,9 @@ func TestMalformedTrustedProxyCIDRIsRejected(t *testing.T) {
 
 func TestSessionTimeoutConfiguration(t *testing.T) {
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR":         t.TempDir(),
-		"KYSIGNON_SESSION_TTL":      "8h",
-		"KYSIGNON_SESSION_IDLE_TTL": "20m",
+		"KYIDENTITY_DATA_DIR":         t.TempDir(),
+		"KYIDENTITY_SESSION_TTL":      "8h",
+		"KYIDENTITY_SESSION_IDLE_TTL": "20m",
 	})
 	cfg, err := Load()
 	if err != nil {
@@ -186,9 +186,9 @@ func TestSessionTimeoutConfiguration(t *testing.T) {
 	}
 
 	withEnv(t, map[string]string{
-		"KYSIGNON_DATA_DIR":         t.TempDir(),
-		"KYSIGNON_SESSION_TTL":      "30m",
-		"KYSIGNON_SESSION_IDLE_TTL": "1h",
+		"KYIDENTITY_DATA_DIR":         t.TempDir(),
+		"KYIDENTITY_SESSION_TTL":      "30m",
+		"KYIDENTITY_SESSION_IDLE_TTL": "1h",
 	})
 	if _, err := Load(); err == nil {
 		t.Fatal("idle timeout longer than absolute timeout was accepted")
@@ -196,8 +196,8 @@ func TestSessionTimeoutConfiguration(t *testing.T) {
 }
 
 func TestLoadDerivesWebAuthnRelyingParty(t *testing.T) {
-	t.Setenv("KYSIGNON_ISSUER_URL", "https://auth.example.com/")
-	t.Setenv("KYSIGNON_DATA_DIR", t.TempDir())
+	t.Setenv("KYIDENTITY_ISSUER_URL", "https://auth.example.com/")
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
 
 	cfg, err := Load()
 	if err != nil {

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
-const PasswordACR = "urn:kysignon:acr:password"
-const MFAACR = "urn:kysignon:acr:mfa"
+const PasswordACR = "urn:kyidentity:acr:password"
+const MFAACR = "urn:kyidentity:acr:mfa"
 
 // AuthenticationRequest only strengthens the ordinary SSO login requirements.
 // A zero maximum age means one fresh interaction, not an unachievable zero-second

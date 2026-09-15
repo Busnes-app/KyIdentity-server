@@ -1,6 +1,6 @@
-# Contributing to KySignOn
+# Contributing to KyIdentity
 
-Thanks for wanting to work on this. KySignOn is the identity authority for the
+Thanks for wanting to work on this. KyIdentity is the identity authority for the
 KySecurity suite, so every contribution can affect authentication across several products.
 This document describes what a contribution has to clear before it merges, and why each
 gate exists.
@@ -52,7 +52,7 @@ re-litigation in a PR:
 
 ## Getting Set Up
 
-Docker is the only requirement to *run* KySignOn:
+Docker is the only requirement to *run* KyIdentity:
 
 ```bash
 cp .env.example .env

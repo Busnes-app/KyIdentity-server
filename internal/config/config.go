@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/webauthn"
+	"github.com/Busness-app/kyidentity-server/internal/webauthn"
 )
 
 // KeyLength is the required size, in bytes, of the secret and encryption keys.
@@ -25,7 +25,7 @@ const MinBackupDepositInterval = 15 * time.Minute
 
 // DefaultAppName is the service name this instance pairs and seals under. KyRecovery pins
 // the name sent at pairing and checks every capsule against it.
-const DefaultAppName = "KySignOn"
+const DefaultAppName = "KyIdentity"
 
 // DefaultBackupKeep is how many sealed capsules a local backup directory retains.
 const DefaultBackupKeep = 7
@@ -86,31 +86,31 @@ type Config struct {
 // Load loads configuration from environment variables. Anything malformed is an error:
 // a server that silently downgrades a misconfigured key is worse than one that will not start.
 func Load() (*Config, error) {
-	dataDir := getEnv("KYSIGNON_DATA_DIR", "./data")
+	dataDir := getEnv("KYIDENTITY_DATA_DIR", "./data")
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return nil, err
 	}
 
-	dbPath := getEnv("KYSIGNON_DB_PATH", filepath.Join(dataDir, "kysignon.db"))
-	rsaKeyPath := getEnv("KYSIGNON_RSA_KEY_PATH", filepath.Join(dataDir, "jwt_rs256.key"))
+	dbPath := getEnv("KYIDENTITY_DB_PATH", filepath.Join(dataDir, "kyidentity.db"))
+	rsaKeyPath := getEnv("KYIDENTITY_RSA_KEY_PATH", filepath.Join(dataDir, "jwt_rs256.key"))
 
-	port := getEnv("KYSIGNON_PORT", "5867")
-	issuerURL := strings.TrimRight(getEnv("KYSIGNON_ISSUER_URL", "http://localhost:"+port), "/")
+	port := getEnv("KYIDENTITY_PORT", "5867")
+	issuerURL := strings.TrimRight(getEnv("KYIDENTITY_ISSUER_URL", "http://localhost:"+port), "/")
 	issuer, err := url.Parse(issuerURL)
 	if err != nil || issuer.Hostname() == "" || (issuer.Scheme != "https" && !issuerIsLocal(issuer)) {
-		return nil, fmt.Errorf("KYSIGNON_ISSUER_URL must be an https URL (http is allowed only on loopback)")
+		return nil, fmt.Errorf("KYIDENTITY_ISSUER_URL must be an https URL (http is allowed only on loopback)")
 	}
 	rpID, rpOrigin, err := webauthn.RPIDFromIssuer(issuerURL)
 	if err != nil {
-		return nil, fmt.Errorf("KYSIGNON_ISSUER_URL cannot be used as a WebAuthn relying party: %w", err)
+		return nil, fmt.Errorf("KYIDENTITY_ISSUER_URL cannot be used as a WebAuthn relying party: %w", err)
 	}
 
-	secretKey, err := loadKey("KYSIGNON_SECRET_KEY", filepath.Join(dataDir, "secret.key"))
+	secretKey, err := loadKey("KYIDENTITY_SECRET_KEY", filepath.Join(dataDir, "secret.key"))
 	if err != nil {
 		return nil, err
 	}
 
-	encKey, err := loadKey("KYSIGNON_ENCRYPTION_KEY", filepath.Join(dataDir, "encryption.key"))
+	encKey, err := loadKey("KYIDENTITY_ENCRYPTION_KEY", filepath.Join(dataDir, "encryption.key"))
 	if err != nil {
 		return nil, err
 	}
@@ -123,16 +123,16 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	sessionTTL, err := loadPositiveDuration("KYSIGNON_SESSION_TTL", 24*time.Hour)
+	sessionTTL, err := loadPositiveDuration("KYIDENTITY_SESSION_TTL", 24*time.Hour)
 	if err != nil {
 		return nil, err
 	}
-	sessionIdleTTL, err := loadPositiveDuration("KYSIGNON_SESSION_IDLE_TTL", 30*time.Minute)
+	sessionIdleTTL, err := loadPositiveDuration("KYIDENTITY_SESSION_IDLE_TTL", 30*time.Minute)
 	if err != nil {
 		return nil, err
 	}
 	if sessionIdleTTL > sessionTTL {
-		return nil, fmt.Errorf("KYSIGNON_SESSION_IDLE_TTL must not exceed KYSIGNON_SESSION_TTL")
+		return nil, fmt.Errorf("KYIDENTITY_SESSION_IDLE_TTL must not exceed KYIDENTITY_SESSION_TTL")
 	}
 	pushRelayURL, err := loadRelayURL("PUSH_RELAY_URL")
 	if err != nil {
@@ -165,26 +165,26 @@ func Load() (*Config, error) {
 		ForwardedHeader:            forwardedHeader,
 		BootstrapUser:              getEnv("BOOTSTRAP_ADMIN_USER", "admin"),
 		BootstrapPass:              os.Getenv("BOOTSTRAP_ADMIN_PASS"),
-		SecureCookies:              issuer.Scheme == "https" || strings.EqualFold(os.Getenv("KYSIGNON_SECURE_COOKIES"), "true"),
+		SecureCookies:              issuer.Scheme == "https" || strings.EqualFold(os.Getenv("KYIDENTITY_SECURE_COOKIES"), "true"),
 		SessionTTL:                 sessionTTL,
 		SessionIdleTTL:             sessionIdleTTL,
-		AllowPrivateCallbacks:      strings.EqualFold(os.Getenv("KYSIGNON_ALLOW_PRIVATE_CALLBACKS"), "true"),
+		AllowPrivateCallbacks:      strings.EqualFold(os.Getenv("KYIDENTITY_ALLOW_PRIVATE_CALLBACKS"), "true"),
 		PushRelayURL:               pushRelayURL,
 		PushRelayKey:               strings.TrimSpace(os.Getenv("PUSH_RELAY_KEY")),
 		APNSRelayURL:               apnsRelayURL,
 		APNSRelayKey:               strings.TrimSpace(os.Getenv("APNS_RELAY_KEY")),
-		AppName:                    getEnv("KYSIGNON_APP_NAME", DefaultAppName),
+		AppName:                    getEnv("KYIDENTITY_APP_NAME", DefaultAppName),
 		BackupDepositInterval:      depositInterval,
 		BackupDir:                  backupDir,
 		BackupKeep:                 backupKeep,
-		BackupAllowPrivateRecovery: strings.EqualFold(os.Getenv("KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY"), "true"),
+		BackupAllowPrivateRecovery: strings.EqualFold(os.Getenv("KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY"), "true"),
 	}, nil
 }
 
-// loadDepositInterval reads KYSIGNON_BACKUP_DEPOSIT_INTERVAL: a Go duration, default 24h,
+// loadDepositInterval reads KYIDENTITY_BACKUP_DEPOSIT_INTERVAL: a Go duration, default 24h,
 // "0" disables, anything else below the minimum or negative fails startup.
 func loadDepositInterval() (time.Duration, error) {
-	const name = "KYSIGNON_BACKUP_DEPOSIT_INTERVAL"
+	const name = "KYIDENTITY_BACKUP_DEPOSIT_INTERVAL"
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
 		return 24 * time.Hour, nil
@@ -199,21 +199,21 @@ func loadDepositInterval() (time.Duration, error) {
 	return d, nil
 }
 
-// loadBackupDir reads KYSIGNON_BACKUP_DIR (absolute path, off when empty) and
-// KYSIGNON_BACKUP_KEEP (default 7, at least 1).
+// loadBackupDir reads KYIDENTITY_BACKUP_DIR (absolute path, off when empty) and
+// KYIDENTITY_BACKUP_KEEP (default 7, at least 1).
 func loadBackupDir() (string, int, error) {
-	dir := strings.TrimSpace(os.Getenv("KYSIGNON_BACKUP_DIR"))
+	dir := strings.TrimSpace(os.Getenv("KYIDENTITY_BACKUP_DIR"))
 	if dir != "" {
 		if !filepath.IsAbs(dir) {
-			return "", 0, fmt.Errorf("KYSIGNON_BACKUP_DIR must be an absolute path, got %q", dir)
+			return "", 0, fmt.Errorf("KYIDENTITY_BACKUP_DIR must be an absolute path, got %q", dir)
 		}
 		dir = filepath.Clean(dir)
 	}
 	keep := DefaultBackupKeep
-	if raw := strings.TrimSpace(os.Getenv("KYSIGNON_BACKUP_KEEP")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("KYIDENTITY_BACKUP_KEEP")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 {
-			return "", 0, fmt.Errorf("KYSIGNON_BACKUP_KEEP must be a positive integer, got %q", raw)
+			return "", 0, fmt.Errorf("KYIDENTITY_BACKUP_KEEP must be a positive integer, got %q", raw)
 		}
 		keep = n
 	}
@@ -304,17 +304,17 @@ func loadOrGenerateKeyFile(path string) ([]byte, error) {
 const DefaultForwardedHeader = "X-Forwarded-For"
 
 // loadForwardedHeader picks the one header a trusted proxy is believed on. Behind
-// Cloudflare set KYSIGNON_FORWARDED_HEADER=CF-Connecting-IP; behind most other proxies the
+// Cloudflare set KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP; behind most other proxies the
 // default is correct.
 func loadForwardedHeader() (string, error) {
-	raw := strings.TrimSpace(os.Getenv("KYSIGNON_FORWARDED_HEADER"))
+	raw := strings.TrimSpace(os.Getenv("KYIDENTITY_FORWARDED_HEADER"))
 	if raw == "" {
 		return DefaultForwardedHeader, nil
 	}
 	// A header name with spaces or separators is a typo, and a typo here silently attributes
 	// every request to the proxy instead of the client.
 	if strings.ContainsAny(raw, " \t:,;\r\n") {
-		return "", fmt.Errorf("KYSIGNON_FORWARDED_HEADER %q is not a valid header name", raw)
+		return "", fmt.Errorf("KYIDENTITY_FORWARDED_HEADER %q is not a valid header name", raw)
 	}
 	return http.CanonicalHeaderKey(raw), nil
 }

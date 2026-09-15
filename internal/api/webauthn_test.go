@@ -14,9 +14,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/mfa"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/mfa"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -103,7 +103,7 @@ func anonPost(t *testing.T, srv *Server, path string, body any) *httptest.Respon
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	csrf := "test-csrf-" + uuid.New().String()
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	req.Header.Set("X-CSRF-Token", csrf)
 	w := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(w, req)
@@ -301,7 +301,7 @@ func TestPasskeyLoginIssuesSession(t *testing.T) {
 	assertFactorEvidence(t, f.store, rec, "webauthn")
 	sessionIssued := false
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "kysignon_session" && c.Value != "" {
+		if c.Name == "kyidentity_session" && c.Value != "" {
 			sessionIssued = true
 		}
 	}

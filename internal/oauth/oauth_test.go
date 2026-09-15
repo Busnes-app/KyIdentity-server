@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
 func setupTestOAuthEngine(t *testing.T) (*Engine, *store.Store, func()) {
-	tmpDir, err := os.MkdirTemp("", "kysignon-oauth-test-*")
+	tmpDir, err := os.MkdirTemp("", "kyidentity-oauth-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}

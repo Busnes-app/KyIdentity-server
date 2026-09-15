@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func loginEvidence(t *testing.T, db *store.Store, rec *httptest.ResponseRecorder) *store.Session {
@@ -94,7 +94,7 @@ func TestPasswordLoginEvidenceReachesOIDCToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims["auth_time"] != float64(sess.PrimaryAuthenticatedAt.Unix()) || claims["acr"] != "urn:kysignon:acr:password" {
+	if claims["auth_time"] != float64(sess.PrimaryAuthenticatedAt.Unix()) || claims["acr"] != "urn:kyidentity:acr:password" {
 		t.Fatalf("incorrect HTTP token claims: %v", claims)
 	}
 }

@@ -83,7 +83,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
     try {
       await apiRequest(`/api/user/sessions/${id}`, { method: 'DELETE' });
       // The server cleared this browser's cookies; the app must stop treating it as signed in.
-      if (current) window.dispatchEvent(new CustomEvent('kysignon:unauthorized'));
+      if (current) window.dispatchEvent(new CustomEvent('kyidentity:unauthorized'));
       else loadSessions();
     } catch (err) {
       alert(errorMessage(err, 'Failed to sign out session'));

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -25,9 +25,9 @@ func TestAuthorizationPreservesAuthenticationEvidence(t *testing.T) {
 	}{
 		{"", []any{"pwd"}, "password"},
 		{"totp", []any{"pwd", "otp", "mfa"}, "mfa"},
-		{"push", []any{"pwd", "urn:kysignon:amr:push", "mfa"}, "mfa"},
-		{"webauthn", []any{"pwd", "urn:kysignon:amr:webauthn", "mfa"}, "mfa"},
-		{"recovery", []any{"pwd", "urn:kysignon:amr:recovery"}, "recovery"},
+		{"push", []any{"pwd", "urn:kyidentity:amr:push", "mfa"}, "mfa"},
+		{"webauthn", []any{"pwd", "urn:kyidentity:amr:webauthn", "mfa"}, "mfa"},
+		{"recovery", []any{"pwd", "urn:kyidentity:amr:recovery"}, "recovery"},
 		{"legacy", nil, ""},
 	} {
 		t.Run(tc.method, func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestAuthorizationPreservesAuthenticationEvidence(t *testing.T) {
 							t.Fatalf("invented legacy %s: %v", name, claims[name])
 						}
 					}
-				} else if claims["auth_time"] != float64(primary.Unix()) || !reflect.DeepEqual(claims["amr"], tc.amr) || claims["acr"] != "urn:kysignon:acr:"+tc.acr {
+				} else if claims["auth_time"] != float64(primary.Unix()) || !reflect.DeepEqual(claims["amr"], tc.amr) || claims["acr"] != "urn:kyidentity:acr:"+tc.acr {
 					t.Fatalf("incorrect claims: %v", claims)
 				}
 				if claims["nonce"] != "nonce" {

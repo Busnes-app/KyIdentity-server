@@ -8,7 +8,7 @@ If you discover a security vulnerability in KyPost, please report it responsibly
 
 ### How to Report
 
-1. Go to the [Security Advisories](https://github.com/Busness-app/kysignon-server/security/advisories) page
+1. Go to the [Security Advisories](https://github.com/Busness-app/kyidentity-server/security/advisories) page
 2. Click "Report a vulnerability"
 3. Provide a detailed description, affected versions, and reproduction steps if applicable
 4. Do not disclose the vulnerability publicly until a patch is available
@@ -141,9 +141,9 @@ When a reverse proxy sits in front of KyPost, the server sees the proxy's addres
 
 **If `TRUSTED_PROXY_CIDRS` is empty, forwarded headers are discarded entirely.** Every caller is keyed as the proxy, so all users share one lockout bucket and push notifications show the gateway address instead of the user signing in.
 
-**If `TRUSTED_PROXY_CIDRS` is set, KySignOn trusts `X-Forwarded-Proto` and exactly one client-address header from that CIDR.** This marks cookies `Secure` and keys lockouts off the real caller.
+**If `TRUSTED_PROXY_CIDRS` is set, KyIdentity trusts `X-Forwarded-Proto` and exactly one client-address header from that CIDR.** This marks cookies `Secure` and keys lockouts off the real caller.
 
-The address header is named by `KYSIGNON_FORWARDED_HEADER` and defaults to `X-Forwarded-For`. Behind Cloudflare, set `KYSIGNON_FORWARDED_HEADER=CF-Connecting-IP`.
+The address header is named by `KYIDENTITY_FORWARDED_HEADER` and defaults to `X-Forwarded-For`. Behind Cloudflare, set `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`.
 
 Only one header is consulted, on purpose. Trying several in turn (`CF-Connecting-IP`, then `X-Forwarded-For`, then `X-Real-IP`) means the one your edge does not overwrite is a free-form string the client controls, and that string becomes a rate-limit bucket key and an audit-log identity. Naming the contract removes the choice.
 
@@ -156,7 +156,7 @@ Two further rules apply to the value:
 
 - Proxy on same host: `TRUSTED_PROXY_CIDRS=127.0.0.1/32`
 - Proxy pinned on `kypost-net`: `TRUSTED_PROXY_CIDRS=10.89.0.10/32` (replace with your proxy's actual Docker network IP)
-- Cloudflare Tunnel: `TRUSTED_PROXY_CIDRS=0.0.0.0/0` is unavoidable; Tunnel is the proxy and only Cloudflare can reach it. Pair it with `KYSIGNON_FORWARDED_HEADER=CF-Connecting-IP`.
+- Cloudflare Tunnel: `TRUSTED_PROXY_CIDRS=0.0.0.0/0` is unavoidable; Tunnel is the proxy and only Cloudflare can reach it. Pair it with `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`.
 
 ### Rate limiting under pressure
 
@@ -338,7 +338,7 @@ Security-sensitive PRs should include:
 
 ## Security Contacts
 
-- **Vulnerability reports:** [GitHub Security Advisories](https://github.com/Busness-app/kysignon-server/security/advisories)
+- **Vulnerability reports:** [GitHub Security Advisories](https://github.com/Busness-app/kyidentity-server/security/advisories)
 - **Maintainer:** [Yoshiofthewire](https://github.com/Yoshiofthewire)
 
 ## Additional Resources

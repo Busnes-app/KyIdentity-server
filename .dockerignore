@@ -1,7 +1,7 @@
 .git
 data/
 web/node_modules/
-/kysignon
+/kyidentity
 *.key
 *.db
 *.db-wal

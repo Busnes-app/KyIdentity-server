@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Shared Cloudflare Worker logic for the KySecurity Mobile App push relays used by KySignOn and KyPassword. Provider-specific code lives in `workers/fcn/` and `workers/apns/`.
+Shared Cloudflare Worker logic for the KySecurity Mobile App push relays used by KyIdentity and KyPassword. Provider-specific code lives in `workers/fcn/` and `workers/apns/`.
 
 ## Local contracts
 

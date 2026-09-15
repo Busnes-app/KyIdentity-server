@@ -1,12 +1,12 @@
 # KySecurity Mobile App Push Relay (FCM)
 
 This Worker delivers data-only Firebase Cloud Messaging (FCM) pushes to the
-KySecurity Mobile App for KySignOn and KyPassword.
+KySecurity Mobile App for KyIdentity and KyPassword.
 
 The published mobile app is compiled against **one** Firebase project, so only a
 holder of that project's service account can deliver push to it. Instead of
 shipping that credential to every self-hosted server, the **maintainer** runs
-this one Worker. KySignOn and KyPassword deployments forward push requests to
+this one Worker. KyIdentity and KyPassword deployments forward push requests to
 it, each authenticated with its own API key. Deployments need **no Firebase
 account and never recompile the app**.
 

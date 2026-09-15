@@ -1,4 +1,4 @@
-# KySignOn: Split-Key Vault Unlock — Implementation Plan (v2)
+# KyIdentity: Split-Key Vault Unlock — Implementation Plan (v2)
 
 **Status:** Draft for review. Supersedes `e2ee_split_key_sso_plan.md` (v1), which is withdrawn.
 **Goal:** Remove the second key-entry step across the KySecurity suite without weakening the
@@ -8,13 +8,13 @@ end-to-end encryption that step currently protects.
 
 ## 0. What Changes For The User
 
-Today: sign in to KySignOn → land in KyNotes → **type a second vault password**.
+Today: sign in to KyIdentity → land in KyNotes → **type a second vault password**.
 
 After this work:
 
 | Path | User action | Result |
 |------|-------------|--------|
-| Password unlock (1+D) | Types master password **once**, at the KySignOn login screen | Every suite vault opens |
+| Password unlock (1+D) | Types master password **once**, at the KyIdentity login screen | Every suite vault opens |
 | Phone unlock (3+D) | Taps "Sign in with Authenticator", types 6 digits into the phone | Every suite vault opens, no password typed |
 | Recovery | Enters printed recovery code | Vault opens, prompted to re-enrol |
 
@@ -34,13 +34,13 @@ Written first, because v1 made four "Trust-No-One" claims with no stated adversa
 | Attacker with the master password only | No vault access without also passing MFA — the server refuses to release its share pre-MFA. |
 | Attacker with a stolen/unpaired phone | Nothing. The phone holds one 32-byte share of a 2-of-2 split; the other half is server-held and released only to an authenticated session. Revoking the device deletes the server half permanently. |
 | Attacker who is passively MITM on the push channel | Nothing. The shuttle is ECDH-encrypted end to end and integrity-bound to the challenge. |
-| **KySignOn server actively substituting keys** in the push shuttle | **Detected.** The 6-digit code the user types is derived from the ECDH transcript; a substituted browser key produces a code the phone rejects. |
+| **KyIdentity server actively substituting keys** in the push shuttle | **Detected.** The 6-digit code the user types is derived from the ECDH transcript; a substituted browser key produces a code the phone rejects. |
 | Malicious downstream app requesting another app's key | Rejected. Per-app keys are derived with the OAuth `client_id` in the HKDF info string and delivered only to the registered redirect origin. |
 | Push-fatigue / blind approval | Cannot leak key material. Key release requires the user to **type** a code they can only read from the real browser. Tap-to-approve grants a session only, never key material. |
 
 ### 1.2 NOT Defended — stated plainly, per project policy
 
-1. **A compromised KySignOn origin serving malicious JavaScript.** In Web Mode the server delivers
+1. **A compromised KyIdentity origin serving malicious JavaScript.** In Web Mode the server delivers
    the code that reconstructs the key. A malicious or supply-chained server can exfiltrate
    everything. This is inherent to browser-delivered E2EE and cannot be engineered away here.
    Mitigations that reduce (not eliminate) it: strict CSP with no `unsafe-inline`, subresource
@@ -69,7 +69,7 @@ data-destruction event. v2 generates the master key once and wraps it.
                                             ▲             re-wrapped on rotation,
                                    AES-256-GCM            never re-encrypts bulk data
                                             │
-                                        K_app  =  HKDF(K_user, info = "kysignon-app-v1|" || client_id)
+                                        K_app  =  HKDF(K_user, info = "kyidentity-app-v1|" || client_id)
                                             ▲
                                             │
                                         K_user           random 32 bytes, generated ONCE at
@@ -122,11 +122,11 @@ client-side combine routine instead of three. We keep it for that reason and we 
 | Purpose | Algorithm | Notes |
 |---------|-----------|-------|
 | Password KDF | Argon2id, **m = 65536 KiB, t = 4, p = 1** | `p=1` because WASM threading needs COOP/COEP headers we do not want to require. Parameters are **stored per user** and returned by the KDF endpoint so they can be raised later. Tuning target: 0.5–1.0 s on a low-end laptop; re-benchmark before launch. |
-| Key separation | HKDF-SHA256 | Every `info` string carries an explicit version: `"kysignon-<purpose>-v1"`. |
+| Key separation | HKDF-SHA256 | Every `info` string carries an explicit version: `"kyidentity-<purpose>-v1"`. |
 | Symmetric AEAD | AES-256-GCM, 96-bit random nonce | Nonce prepended, matching existing `crypto.EncryptAESGCM`. |
 | Key agreement | ECDH **P-256** via Go `crypto/ecdh` and WebCrypto | `crypto/ecdh`, **not** `crypto/elliptic` scalar mult — `ecdh.P256().NewPublicKey()` validates the point is on-curve and non-identity. Invalid input is a hard error, never a fallback. |
 | Device signatures | ECDSA P-256 over SHA-256 | Verified against `native_devices.public_key`, a column that exists today and has never once been used. |
-| Key check value | HMAC-SHA256 | `kcv = HMAC(K_user, "kysignon-kcv-v1")` |
+| Key check value | HMAC-SHA256 | `kcv = HMAC(K_user, "kyidentity-kcv-v1")` |
 | Recovery code | 32 random bytes, Crockford base32, 13 groups of 4 | KEK derived with HKDF (no Argon2 needed — the input is already 256 bits). |
 
 **Never** use a raw ECDH output as a key. v1 wrote `TunnelKey = ECDH(...)`. The rule is:
@@ -135,7 +135,7 @@ client-side combine routine instead of three. We keep it for that reason and we 
 Z         = ECDH(sk, pk)                       // pk validated on import; abort on error
 TunnelKey = HKDF-SHA256(ikm = Z,
                         salt = challengeId,
-                        info = "kysignon-shuttle-v1" || pk_browser || pk_phone)
+                        info = "kyidentity-shuttle-v1" || pk_browser || pk_phone)
 ```
 
 **Every** AES-GCM operation that crosses a trust boundary carries AAD binding it to its context.
@@ -156,13 +156,13 @@ sequenceDiagram
     autonumber
     actor User
     participant B as Browser (WebCrypto)
-    participant S as KySignOn Server
+    participant S as KyIdentity Server
 
     Note over User,S: User has already completed password + MFA login. Session cookie is set.
     B->>S: GET /api/user/vault/status
     S-->>B: { enrolled: false }
     User->>B: Confirms master password (re-typed once, this one time only)
-    Note over B: 1. K_user   = randomBytes(32)<br/>2. salt     = randomBytes(16)<br/>3. KEK_pw   = HKDF(Argon2id(P, salt, m,t,p), "kysignon-kek-v1")<br/>4. S_server = randomBytes(32)<br/>5. S_client = K_user XOR S_server<br/>6. wrapped  = AES-GCM(KEK_pw, S_client, AAD="password|"+userId)<br/>7. kcv      = HMAC(K_user, "kysignon-kcv-v1")
+    Note over B: 1. K_user   = randomBytes(32)<br/>2. salt     = randomBytes(16)<br/>3. KEK_pw   = HKDF(Argon2id(P, salt, m,t,p), "kyidentity-kek-v1")<br/>4. S_server = randomBytes(32)<br/>5. S_client = K_user XOR S_server<br/>6. wrapped  = AES-GCM(KEK_pw, S_client, AAD="password|"+userId)<br/>7. kcv      = HMAC(K_user, "kyidentity-kcv-v1")
     B->>S: POST /api/user/vault/enroll { serverShare, wrappedClientShare, kdf, kcv }
     Note over S: Store S_server ENCRYPTED at rest.<br/>Set vault_enrolled_at. key_version = 1.
     S-->>B: 201 { methodId }
@@ -180,20 +180,20 @@ sequenceDiagram
     autonumber
     actor User
     participant B as Browser
-    participant S as KySignOn Server
+    participant S as KyIdentity Server
 
     User->>B: Enters username + master password (P)
     B->>S: GET /api/auth/kdf?username=alice
     S-->>B: { salt, alg:"argon2id", m, t, p, keyVersion }   (200 even for unknown users)
-    Note over B: Derived = Argon2id(P, salt, m, t, p)<br/>K_auth = HKDF(Derived, "kysignon-auth-v1")<br/>KEK_pw = HKDF(Derived, "kysignon-kek-v1")
+    Note over B: Derived = Argon2id(P, salt, m, t, p)<br/>K_auth = HKDF(Derived, "kyidentity-auth-v1")<br/>KEK_pw = HKDF(Derived, "kyidentity-kek-v1")
     B->>S: POST /api/auth/login { username, authHash: K_auth }
     Note over S: Verify against stored Argon2id(K_auth).<br/>NO key material in this response. Ever.
     S-->>B: { mfaRequired: true, mfaToken, mfaMethods, challengeId }
     Note over B,S: — full existing MFA step completes here —
-    S-->>B: Set-Cookie: kysignon_session
+    S-->>B: Set-Cookie: kyidentity_session
     B->>S: GET /api/user/vault/unlock/password   (session cookie required)
     S-->>B: { serverShare, wrappedClientShare, kcv, keyVersion }
-    Note over B: S_client = AES-GCM-Dec(KEK_pw, wrapped)   → abort on tag failure<br/>K_user   = S_client XOR S_server<br/>VERIFY HMAC(K_user,"kysignon-kcv-v1") == kcv → abort on mismatch<br/>Import K_user as non-extractable HKDF CryptoKey
+    Note over B: S_client = AES-GCM-Dec(KEK_pw, wrapped)   → abort on tag failure<br/>K_user   = S_client XOR S_server<br/>VERIFY HMAC(K_user,"kyidentity-kcv-v1") == kcv → abort on mismatch<br/>Import K_user as non-extractable HKDF CryptoKey
 ```
 
 **The change that matters:** `serverShare` moved out of the login response and behind a
@@ -207,7 +207,7 @@ sequenceDiagram
     autonumber
     actor User
     participant B as Browser
-    participant S as KySignOn Server
+    participant S as KyIdentity Server
     participant P as KySecurity Authenticator
 
     User->>B: Clicks "Sign in with Authenticator"
@@ -215,11 +215,11 @@ sequenceDiagram
     B->>S: POST /api/auth/push/initiate { username, ephemeralPublicKey: pk_b, purpose: "vault" }
     Note over S: Create challenge (single-use, 2 min TTL).<br/>Store pk_b + device_id. Issue mfaToken bound to challenge.
     S-->>B: { challengeId, mfaToken, devicePublicKey: pk_p, expiresAt }
-    Note over B: transcript = challengeId || pk_b || pk_p || username<br/>SAS = HKDF(transcript,"kysignon-sas-v1") → 6 digits<br/>DISPLAY SAS
+    Note over B: transcript = challengeId || pk_b || pk_p || username<br/>SAS = HKDF(transcript,"kyidentity-sas-v1") → 6 digits<br/>DISPLAY SAS
     S->>P: Push { challengeId, pk_b, purpose: "vault" }
     Note over P: Recomputes SAS from (challengeId, pk_b received, own pk_p, username)
     User->>P: Types the 6 digits shown in the browser
-    Note over P: Constant-time compare. Mismatch → abort + lock after 3 tries.<br/>Biometric/PIN gate unlocks the keystore.<br/>Z = ECDH(sk_p, pk_b)  [pk_b validated on-curve]<br/>TunnelKey = HKDF(Z, salt=challengeId, info="kysignon-shuttle-v1"||pk_b||pk_p)<br/>C = AES-GCM(TunnelKey, S_client[device], AAD = challengeId||pk_b||pk_p)<br/>sig = ECDSA(deviceKey, SHA256(challengeId||"approve"||C))
+    Note over P: Constant-time compare. Mismatch → abort + lock after 3 tries.<br/>Biometric/PIN gate unlocks the keystore.<br/>Z = ECDH(sk_p, pk_b)  [pk_b validated on-curve]<br/>TunnelKey = HKDF(Z, salt=challengeId, info="kyidentity-shuttle-v1"||pk_b||pk_p)<br/>C = AES-GCM(TunnelKey, S_client[device], AAD = challengeId||pk_b||pk_p)<br/>sig = ECDSA(deviceKey, SHA256(challengeId||"approve"||C))
     P->>S: POST /api/mfa/push/respond { challengeId, approve, encryptedClientShare: C, signature }
     Note over S: Verify sig against native_devices.public_key.<br/>CAS status pending → approved. Reject if not exactly one row updated.
     B->>S: POST /api/auth/mfa/push/poll { challengeId, mfaToken }
@@ -227,7 +227,7 @@ sequenceDiagram
     Note over S: CAS approved → consumed. NULL encrypted_client_share.<br/>Payload is returned exactly once.
     Note over B: TunnelKey = HKDF(ECDH(sk_b, pk_p), …)<br/>S_client = AES-GCM-Dec(TunnelKey, C, AAD)  → abort on tag failure<br/>K_user   = S_client XOR S_server<br/>VERIFY kcv → abort on mismatch
     B->>S: POST /api/auth/mfa/push/finish { challengeId, mfaToken }
-    S-->>B: Set-Cookie: kysignon_session
+    S-->>B: Set-Cookie: kyidentity_session
 ```
 
 **Why the typed code, not tap-to-match.** Tap-to-match asks the user to pick one of four numbers.
@@ -248,7 +248,7 @@ sequenceDiagram
     autonumber
     actor User
     participant B as Browser (unlocked, K_user in memory)
-    participant S as KySignOn Server
+    participant S as KyIdentity Server
     participant P as KySecurity Authenticator
 
     User->>B: "Add Authenticator Device"
@@ -259,16 +259,16 @@ sequenceDiagram
     P->>S: POST /api/notifications/native/register { userId, pairingToken|pin, pk_phone, pushToken, deviceIdentifier }
     S-->>P: { deviceId }
     S-->>B: (browser polls) { deviceId, pk_phone }
-    Note over B: SAS = HKDF(pairingSecret || pk_browser || pk_phone, "kysignon-pair-v1") → 6 digits
+    Note over B: SAS = HKDF(pairingSecret || pk_browser || pk_phone, "kyidentity-pair-v1") → 6 digits
     User->>P: Types the 6 digits from the browser
-    Note over B: S_server[dev] = randomBytes(32)<br/>S_client[dev] = K_user XOR S_server[dev]<br/>Z = ECDH(sk_browser, pk_phone)<br/>MailKey = HKDF(Z, salt=pairingSecret, info="kysignon-pair-v1"||pk_browser||pk_phone)<br/>blob = AES-GCM(MailKey, S_client[dev], AAD = deviceId||userId)
+    Note over B: S_server[dev] = randomBytes(32)<br/>S_client[dev] = K_user XOR S_server[dev]<br/>Z = ECDH(sk_browser, pk_phone)<br/>MailKey = HKDF(Z, salt=pairingSecret, info="kyidentity-pair-v1"||pk_browser||pk_phone)<br/>blob = AES-GCM(MailKey, S_client[dev], AAD = deviceId||userId)
     B->>S: POST /api/user/vault/methods { type:"device", deviceId, serverShare: S_server[dev], mailbox: blob }
     P->>S: GET /api/user/vault/mailbox/{deviceId}   (device-signed)
     S-->>P: { blob, pk_browser }   — single read, row deleted immediately
     Note over P: MailKey = HKDF(ECDH(sk_phone, pk_browser), …)<br/>S_client[dev] = AES-GCM-Dec(MailKey, blob, AAD)<br/>Store in hardware keystore (see 4.4.1). Server share NEVER stored on phone.
 ```
 
-v1 specified this step as "Direct WebRTC / Local Relay or KySignOn Blind Mailbox" — three transports,
+v1 specified this step as "Direct WebRTC / Local Relay or KyIdentity Blind Mailbox" — three transports,
 no choice, no protocol. **Decision: Blind Mailbox only.** WebRTC in a homelab behind NAT is a support
 burden with no security gain, and the mailbox row is single-read and TTL-bounded.
 
@@ -285,7 +285,7 @@ subdomains (`notes.`, `passwords.`, `mail.`), so it cannot work — not "needs t
 
 **You asked whether there is a way without an iframe. Yes, and it is the better option anyway:**
 an iframe on the app's origin is a third-party context, so under storage partitioning and
-third-party-cookie blocking (Safari today, Chrome increasingly) the KySignOn iframe may not get its
+third-party-cookie blocking (Safari today, Chrome increasingly) the KyIdentity iframe may not get its
 own session cookie and the handoff breaks silently for a subset of users. The redirect + URL
 fragment pattern has none of that, because everything happens in a first-party top-level context.
 
@@ -297,15 +297,15 @@ It folds into the OIDC flow you already have, adding **zero** extra round trips:
 2.  KyNotes redirects to:
     /oauth/authorize?...&key_handoff=1&handoff_pk=<pk_app>
 
-3.  The KySignOn authorize page (which holds K_user as a non-extractable CryptoKey) does,
+3.  The KyIdentity authorize page (which holds K_user as a non-extractable CryptoKey) does,
     in the browser, after the user approves:
-        K_app     = HKDF(K_user, info = "kysignon-app-v1|" || client_id)
-        Z         = ECDH(sk_ephemeral_kysignon, pk_app)
-        WrapKey   = HKDF(Z, salt = code, info = "kysignon-handoff-v1" || client_id)
+        K_app     = HKDF(K_user, info = "kyidentity-app-v1|" || client_id)
+        Z         = ECDH(sk_ephemeral_kyidentity, pk_app)
+        WrapKey   = HKDF(Z, salt = code, info = "kyidentity-handoff-v1" || client_id)
         payload   = AES-GCM(WrapKey, K_app, AAD = client_id || code || redirect_uri)
 
 4.  Navigate to:
-    <redirect_uri>?code=<code>#kh=<payload>&kh_pk=<pk_kysignon>
+    <redirect_uri>?code=<code>#kh=<payload>&kh_pk=<pk_kyidentity>
 
 5.  KyNotes reads location.hash, immediately history.replaceState() to strip it,
     decrypts K_app, then exchanges `code` for tokens over the normal back channel.
@@ -321,7 +321,7 @@ Properties:
   allowlist to get wrong.
 - One-shot: the `code` is single-use already, and the AAD binds to it.
 
-**Storage of `K_user` on the KySignOn origin between navigations:** imported via
+**Storage of `K_user` on the KyIdentity origin between navigations:** imported via
 `crypto.subtle.importKey(..., extractable: false, ['deriveKey','deriveBits'])` and held in
 IndexedDB as a non-extractable `CryptoKey`. Script — including injected script — can *use* it to
 derive per-app keys but cannot read the bytes out. Cleared on logout and on tab close where the
@@ -337,7 +337,7 @@ and the client then happily encrypts new data under a key that cannot decrypt th
 
 ```
 reconstructed = S_client XOR S_server
-if !constantTimeEqual(HMAC(reconstructed, "kysignon-kcv-v1"), kcv) {
+if !constantTimeEqual(HMAC(reconstructed, "kyidentity-kcv-v1"), kcv) {
     abort; surface "vault key mismatch — do not proceed"; audit event; DO NOT WRITE
 }
 ```
@@ -351,7 +351,7 @@ difference between an error message and an unrecoverable vault.
 1. Client unlocks normally → holds K_user and S_client[password].
 2. Client derives KEK_pw' from the new password + a NEW salt.
 3. wrapped' = AES-GCM(KEK_pw', S_client[password], AAD = "password|" + userId)
-4. K_auth'  = HKDF(Derived', "kysignon-auth-v1")
+4. K_auth'  = HKDF(Derived', "kyidentity-auth-v1")
 5. POST /api/user/vault/password/rewrap { authHash: K_auth', wrappedClientShare: wrapped', kdf' }
    — server updates password_hash and the method row in ONE transaction.
 6. K_user unchanged. Device methods and the recovery method are untouched. Zero data re-encrypted.
@@ -465,7 +465,7 @@ empty string". Enrolment state is a column, not a sentinel.
 CREATE TABLE IF NOT EXISTS user_vaults (
     user_id      TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     key_version  INTEGER  NOT NULL DEFAULT 1,
-    kcv          TEXT     NOT NULL,              -- hex HMAC-SHA256(K_user,"kysignon-kcv-v1")
+    kcv          TEXT     NOT NULL,              -- hex HMAC-SHA256(K_user,"kyidentity-kcv-v1")
     enrolled_at  DATETIME NOT NULL,
     updated_at   DATETIME NOT NULL
 );
@@ -631,11 +631,11 @@ entire point. A server that could dictate the SAS could substitute keys undetect
 and every user's vault. The shipped M1 format is:
 
 ```
-message = "kysignon-push-v1" || "|" || challengeId || "|" || ("approve"|"deny") || "|" || selectedDigits
+message = "kyidentity-push-v1" || "|" || challengeId || "|" || ("approve"|"deny") || "|" || selectedDigits
 sig     = ECDSA-P256-SHA256(device_private_key, message)          // ASN.1 DER, base64
 ```
 
-M4 introduces `kysignon-push-v2`, appending `encryptedClientShare` and `purpose`. The version
+M4 introduces `kyidentity-push-v2`, appending `encryptedClientShare` and `purpose`. The version
 prefix domain-separates the two, so a v1 signature can never be replayed as a v2 approval that
 releases key material. See `mfa.PushResponseMessage`.
 
@@ -792,7 +792,7 @@ one.** A second-password fallback left in the codebase "just in case" is a bypas
 only (§11), not the IMAP mailbox — so the ceremony touches one key, once:
 
 ```
-1. User signs in via SSO. KyPost detects: KySignOn vault enrolled, encrypted-mail key not migrated.
+1. User signs in via SSO. KyPost detects: KyIdentity vault enrolled, encrypted-mail key not migrated.
 2. KyPost prompts for the old encrypted-mail password — the LAST time it is ever asked.
 3. KyPost unwraps its existing DEK the old way.
 4. KyPost obtains K_app via the OIDC fragment handoff (§4.5).
@@ -878,7 +878,7 @@ Plus the M0 hostile-server harness, run in CI on every commit that touches `inte
 
 | Location | Defect | Fix |
 |----------|--------|-----|
-| `crypto.go:179` | `sha256.New().Sum(pubDER)[:8]` does not hash — `Sum` **appends**, so `kid` is the first 8 bytes of the ASN.1 header. **Every KySignOn deployment has the same `kid`, and rotating the RSA key never changes it** — downstream JWKS caches keyed by `kid` will serve a stale key forever. | `sum := sha256.Sum256(pubDER); kid := hex.EncodeToString(sum[:8])` |
+| `crypto.go:179` | `sha256.New().Sum(pubDER)[:8]` does not hash — `Sum` **appends**, so `kid` is the first 8 bytes of the ASN.1 header. **Every KyIdentity deployment has the same `kid`, and rotating the RSA key never changes it** — downstream JWKS caches keyed by `kid` will serve a stale key forever. | `sum := sha256.Sum256(pubDER); kid := hex.EncodeToString(sum[:8])` |
 | `crypto.go:54-62` | `GenerateRandomPIN` has modulo bias — `b[i] % 10` over uniform bytes makes digits 0–5 measurably more likely | Rejection sampling, or `rand.Int(rand.Reader, big.NewInt(10))` |
 | `mfa.go:266-275` | Decoy loop indexes `b[idx%4]` while re-randomising `b` inside the body, with modulo bias and an unbounded `for` that can spin | Three rejection-sampled draws with an explicit attempt cap |
 | `mfa.go:320`, `store.go` | Unconditional status UPDATEs | Compare-and-swap with `RowsAffected` checks throughout |

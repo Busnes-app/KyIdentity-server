@@ -1,10 +1,10 @@
-# KySignOn Server
+# KyIdentity Server
 
-KySignOn Server is the single-organization SSO provider and central identity authority for the KySecurity Suite of software (KyPost, KyBookmarks, KyNotes, KyPasswords).
+KyIdentity Server is the single-organization SSO provider and central identity authority for the KySecurity Suite of software (KyPost, KyBookmarks, KyNotes, KyPasswords).
 
 ## Core Capabilities & Responsibilities
 
-1. **Central User Directory & Replication**: KySignOn is the source of truth for accounts. When an admin creates, updates, or disables an account, it automatically replicates to paired KySecurity products via bare SCIM 2.0 user bodies signed with `ky-primitives/syncauth`; event type and event ID are part of the signature, and the sync secret is never sent in `Authorization`.
+1. **Central User Directory & Replication**: KyIdentity is the source of truth for accounts. When an admin creates, updates, or disables an account, it automatically replicates to paired KySecurity products via bare SCIM 2.0 user bodies signed with `ky-primitives/syncauth`; event type and event ID are part of the signature, and the sync secret is never sent in `Authorization`.
 2. **Outbound SCIM 2.0**: Generic `scim` connectors use the target-issued Bearer token encrypted at rest and `ky-primitives/scim` resource writes; known suite types and explicit `suite_webhook` retain signed webhooks. Legacy custom/unknown types pause delivery until an administrator selects a protocol; paused/disabled connectors are excluded from event claims so they cannot starve active targets. Remote IDs and uncertain-create markers persist per connector/local user, surviving local user deletion. Strict bounded externalId lookup recovers lost create responses; unresolved outcomes never trigger another create. Generic deletion uses `active=false` PATCH, preserving downstream data. Writes through stored remote mappings recheck externalId ownership. Configuration review/token replacement requires step-up and atomic success audit; rejected changes record a separate failure audit. Connection tests only prove Users lookup, not write permissions. Setup and limitations: README.md, Outbound provisioning.
 3. **OpenID Connect & OAuth 2.0**: Standard authorization-code flow with PKCE, RS256 ID tokens, and JWKS discovery.
 4. **Native Device Pairing & Push MFA**: Natively hosts device pairing (`/api/notifications/native/register`) using 90s PIN/QR codes, push challenge dispatch through FCM/APNs relay Workers with 2-digit number matching, and TOTP/recovery code support.
@@ -46,8 +46,8 @@ KySignOn Server is the single-organization SSO provider and central identity aut
 public key and raw authenticator data the browser exports, because attestation is not
 verified and re-deriving those from the attestation object would buy nothing.
 
-KySignOn records whether a passkey is backup-eligible but never rejects one for it. The rule
-that a KySignOn login credential must live in KyAuth's device-local `totp_vault.kdbx` rather
+KyIdentity records whether a passkey is backup-eligible but never rejects one for it. The rule
+that a KyIdentity login credential must live in KyAuth's device-local `totp_vault.kdbx` rather
 than the KyPasswords-synced `passwords_vault.kdbx` is enforced in KyAuth, where the vault is
 chosen.
 
@@ -92,4 +92,4 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## Child DOX Index
 
-- [internal/backup/AGENTS.md](file:///home/yoshi/busness.app/kysignon-server/internal/backup/AGENTS.md): adapter over ky-primitives/recoveryclient: what KySignOn seals, its drill checks, store/key/config glue.
+- [internal/backup/AGENTS.md](file:///home/yoshi/busness.app/kyidentity-server/internal/backup/AGENTS.md): adapter over ky-primitives/recoveryclient: what KyIdentity seals, its drill checks, store/key/config glue.

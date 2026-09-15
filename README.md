@@ -1,8 +1,8 @@
-# KySignOn Server
+# KyIdentity Server
 
-KySignOn Server is the single-organization Single Sign-On (SSO) identity provider and central user directory for the **KySecurity Suite** (KyPost, KyPasswords, KyBookmarks, KyNotes).
+KyIdentity Server is the single-organization Single Sign-On (SSO) identity provider and central user directory for the **KySecurity Suite** (KyPost, KyPasswords, KyBookmarks, KyNotes).
 
-Built in Go with a focus on simplicity, minimal external dependencies, and native platform standards, KySignOn serves as the authoritative source of truth for accounts, OpenID Connect authentication, and mutual system replication.
+Built in Go with a focus on simplicity, minimal external dependencies, and native platform standards, KyIdentity serves as the authoritative source of truth for accounts, OpenID Connect authentication, and mutual system replication.
 
 ---
 
@@ -32,7 +32,7 @@ Following the **Ponytail** engineering philosophy (*use the smallest correct cha
                                            │
                                            ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                             KySignOn Server (Go)                                 │
+│                             KyIdentity Server (Go)                                 │
 ├──────────────────┬───────────────────┬─────────────────────┬─────────────────────┤
 │   HTTP Routing   │   OIDC / OAuth    │     MFA & TOTP      │    Sync Engine      │
 │  (net/http 1.22) │ (crypto/rsa, jwks)│ (crypto/hmac, sha1) │ (net/http, sha256)  │
@@ -56,7 +56,7 @@ Following the **Ponytail** engineering philosophy (*use the smallest correct cha
 
 ### Direct Dependencies
 
-KySignOn relies on only **3 direct external packages**:
+KyIdentity relies on only **3 direct external packages**:
 - **`modernc.org/sqlite`**: Pure-Go SQLite engine allowing zero-CGO static compilation (`CGO_ENABLED=0`) on Alpine Linux.
 - **`golang.org/x/crypto`**: Official Go extended crypto library for secure `bcrypt` password hashing.
 - **`github.com/google/uuid`**: RFC 4122 UUID generator.
@@ -74,13 +74,13 @@ cp .env.example .env
 Review and adjust variables in `.env`:
 ```ini
 # Interface binding (127.0.0.1 for local/proxy only, or 0.0.0.0 if not using proxy)
-KYSIGNON_BIND=127.0.0.1
+KYIDENTITY_BIND=127.0.0.1
 
 # Static container IP on shared kypost-net network
-KYSIGNON_IP=10.89.0.2
+KYIDENTITY_IP=10.89.0.2
 
 # Public URL used in issued tokens (use your public HTTPS domain in production)
-KYSIGNON_ISSUER_URL=https://auth.yourdomain.com
+KYIDENTITY_ISSUER_URL=https://auth.yourdomain.com
 
 # Optional: Pre-seed administrator credentials
 BOOTSTRAP_ADMIN_USER=admin
@@ -97,10 +97,10 @@ docker compose up -d --build
 ```
 
 ### 3. Retrieve Credentials & Log In
-If you did not define `BOOTSTRAP_ADMIN_PASS` in `.env`, KySignOn generates a one-time bootstrap password on first start:
+If you did not define `BOOTSTRAP_ADMIN_PASS` in `.env`, KyIdentity generates a one-time bootstrap password on first start:
 
 ```bash
-docker compose exec kysignon cat /data/first-run-password.txt
+docker compose exec kyidentity cat /data/first-run-password.txt
 ```
 
 Open your browser and navigate to:
@@ -144,13 +144,13 @@ You can verify the status of the server at any time:
 
 Create the first admin account directly within the running container:
 ```bash
-docker compose exec kysignon /usr/local/bin/kysignon bootstrap-admin --username admin --password "NewPassword123!"
+docker compose exec kyidentity /usr/local/bin/kyidentity bootstrap-admin --username admin --password "NewPassword123!"
 ```
 
 `bootstrap-admin` only creates a missing account. It will not overwrite the password of an
 account that already exists — change those from the admin UI, so the action is audited.
 
-Restoring from a `.kycap` backup is `kysignon restore`, with k custodian shares typed on
+Restoring from a `.kycap` backup is `kyidentity restore`, with k custodian shares typed on
 stdin. The full procedure, including putting the result back into service and proving it,
 is [docs/RESTORE.md](docs/RESTORE.md).
 
@@ -283,7 +283,7 @@ codes while the browser session survives). Revoking a session removes its author
 codes, tokens, step-up grants and pending authorization interactions in the same
 transaction as the audit event. These routes need CSRF but no step-up, like the emergency
 button. The app list is derived from issued tokens: it shows which apps can still call
-KySignOn, not whether the app's own login is alive, and downstream apps may keep their
+KyIdentity, not whether the app's own login is alive, and downstream apps may keep their
 session until standard logout ships.
 
 **Authorization re-authentication (PR05a).** Ordinary requests reuse SSO. Following
@@ -415,7 +415,7 @@ does not refresh the password's age. ID tokens expose these method/context value
 | Password + passkey | `pwd`, `urn:kysignon:amr:webauthn`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + recovery code | `pwd`, `urn:kysignon:amr:recovery` | `urn:kysignon:acr:recovery` |
 
-These are KySignOn context classes, not NIST assurance levels or assertions that keys
+These are KyIdentity context classes, not NIST assurance levels or assertions that keys
 are hardware-backed. Recovery does not claim ordinary MFA. The standard method names
 follow [RFC 8176](https://www.rfc-editor.org/rfc/rfc8176.html); the URNs are local contracts.
 Administrator per-app freshness policies are implemented as described above; further work
@@ -430,7 +430,7 @@ are listed to their owner and administrators for revocation but are not publishe
 `sid` claims; standard downstream logout remains future work.
 
 **System pairing requires the PIN** shown next to the token, and callback URLs must be
-`https` and resolve off-network unless `KYSIGNON_ALLOW_PRIVATE_CALLBACKS=true` (the
+`https` and resolve off-network unless `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` (the
 compose file sets this, since services on `kypost-net` address each other privately).
 Sync events are queued per paired system; a system only receives what was queued for it.
 
@@ -442,7 +442,7 @@ immediate peer is a CIDR you named. Set it to your proxy's address and nothing w
 host inside a listed range can choose its own rate-limit bucket and its own entry in your
 audit log.
 
-**`KYSIGNON_FORWARDED_HEADER` names the one header that is believed, defaulting to
+**`KYIDENTITY_FORWARDED_HEADER` names the one header that is believed, defaulting to
 `X-Forwarded-For`.** Behind Cloudflare, set it to `CF-Connecting-IP`. Exactly one header is
 honoured per deployment because trying several in turn means whichever one your edge does
 *not* overwrite is the one an attacker gets to choose. The value must parse as an IP
@@ -452,29 +452,29 @@ client-supplied entry prepended to the list is never attributed.
 **Backups are sealed to the suite recovery key and this server never holds what opens
 them.** The key arrives by pairing with KyRecovery, or is pasted from the ceremony page on
 the Disaster recovery screen for a server with no KyRecovery. Every capsule is sealed to it
-and goes to each configured destination: KyRecovery when paired, and `KYSIGNON_BACKUP_DIR`
-when set. Files there are named `<KYSIGNON_APP_NAME>-<capsule-id>.kycap`; the newest
-`KYSIGNON_BACKUP_KEEP` (default 7) with that prefix are kept and anything else in the
+and goes to each configured destination: KyRecovery when paired, and `KYIDENTITY_BACKUP_DIR`
+when set. Files there are named `<KYIDENTITY_APP_NAME>-<capsule-id>.kycap`; the newest
+`KYIDENTITY_BACKUP_KEEP` (default 7) with that prefix are kept and anything else in the
 directory is never listed or deleted. The schedule is set on
-the same screen; `KYSIGNON_BACKUP_DEPOSIT_INTERVAL` (default 24h, 15m floor, `0` disables)
+the same screen; `KYIDENTITY_BACKUP_DEPOSIT_INTERVAL` (default 24h, 15m floor, `0` disables)
 is only the default until an admin picks one. Custodian cards come from the KyRecovery
-ceremony, and a restore is `kysignon restore -capsule <file.kycap> -to <dir>` with k shares
+ceremony, and a restore is `kyidentity restore -capsule <file.kycap> -to <dir>` with k shares
 typed on stdin. A server with no key pinned can run drills but cannot make a capsule.
 
 **KyRecovery must be reached over HTTPS, and by default at a public address.** TLS is not
 for the capsule, which is sealed anyway; it protects the recovery public key that arrives at
 pairing (trust on first use), the deposit token, and the receipts. For a KyRecovery on your
-own network behind a TLS proxy, set `KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY=true`; HTTPS is
+own network behind a TLS proxy, set `KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY=true`; HTTPS is
 still required, the choice is recorded on every pairing, and loopback stays refused. Either
 way, pin the key by hand from the ceremony page before pairing, or compare the key ID the
 screen shows with the fingerprint in the KyRecovery dashboard; a swapped key then fails
 loudly. In Docker, a name that exists only on your LAN may not resolve inside the container when the
 host uses a loopback stub resolver; add the `docker-compose.lan-dns.yml` override with
-`KYSIGNON_DNS` set to your LAN's resolver. It replaces the host's resolvers for every lookup
+`KYIDENTITY_DNS` set to your LAN's resolver. It replaces the host's resolvers for every lookup
 the container makes, which is why it is an override and not the default.
 
 **Passkeys are bound to the issuer's origin.** The relying party ID is the hostname of
-`KYSIGNON_ISSUER_URL` and the accepted origin is its scheme, host and port. Changing the
+`KYIDENTITY_ISSUER_URL` and the accepted origin is its scheme, host and port. Changing the
 issuer URL invalidates every enrolled passkey, because the browser will not offer a
 credential registered under a different RP ID. Browsers permit WebAuthn over plain HTTP only
 on `localhost`, so a deployment reached by IP or by a name without TLS cannot enrol one.
@@ -505,7 +505,7 @@ cookie cannot produce one. Read-only views and the emergency "revoke sessions" b
 on the session alone, so locking an account down during an incident is not slowed by a
 second prompt.
 
-**`KYSIGNON_SECRET_KEY` and `KYSIGNON_ENCRYPTION_KEY` must be exactly 64 hex characters.**
+**`KYIDENTITY_SECRET_KEY` and `KYIDENTITY_ENCRYPTION_KEY` must be exactly 64 hex characters.**
 A malformed value is a startup error, never a silently weakened key. Generate with
 `openssl rand -hex 32`. Left unset, they are generated into the data directory and reused.
 
@@ -518,7 +518,7 @@ Refer to [SECURITY.md](SECURITY.md) for vulnerability disclosure procedures and 
 ## Outbound provisioning
 
 In **Suite sync**, choose **Generic SCIM 2.0** and enter the target's HTTPS SCIM
-base URL and its provisioning Bearer token. KySignOn encrypts the token at rest;
+base URL and its provisioning Bearer token. KyIdentity encrypts the token at rest;
 **Replace token** changes it without changing the connector or application identity.
 The token is never returned in listings or copied into delivery errors. **Test
 connection** performs a filtered Users read; success does not prove write permissions
@@ -528,7 +528,7 @@ The target must support `externalId eq "..."` filtering, standard ListResponse t
 User creation, PUT updates, and PATCH of `active`. Lookup requests ask for the first
 two matches: zero permits creation, one identifies the managed account, and more
 than one requires intervention. Partial or inconsistent pages fail closed. Responses
-are bounded to 1 MiB. KySignOn sends its stable user ID as `externalId` and stores
+are bounded to 1 MiB. KyIdentity sends its stable user ID as `externalId` and stores
 the remote ID returned by create or lookup. URLs ending in `/Users` from the old
 connection form are normalized to their base URL. Generic SCIM requires HTTPS even
 with private callbacks enabled; the existing outbound dial restrictions still apply.
@@ -551,7 +551,7 @@ nor resumes delivery. Signed suite webhooks have no read-back contract.
 
 To recover an expired attempt:
 
-1. Stop **all** KySignOn worker instances. Confirm at the receiving service that the
+1. Stop **all** KyIdentity worker instances. Confirm at the receiving service that the
    old request has finished and cannot commit later. A timeout or empty lookup is
    insufficient. If this cannot be established, keep the attempt blocked.
 2. Restart one instance, open **Deliveries**, and confirm these steps. **Resume delivery**

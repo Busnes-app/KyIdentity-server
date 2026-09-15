@@ -264,8 +264,8 @@ describe('parsePasskeys', () => {
 describe('parseBeginRegistration', () => {
   const begin = {
     challenge: 'c',
-    rpId: 'kysignon.test',
-    rpName: 'KySignOn',
+    rpId: 'kyidentity.test',
+    rpName: 'KyIdentity',
     userHandle: 'uh',
     username: 'ada',
     excludeCredentials: ['e1', 'e2'],
@@ -290,7 +290,7 @@ describe('parseBeginRegistration', () => {
 
 describe('parseBeginLogin', () => {
   it('reads a well-formed login ceremony', () => {
-    const begin = { challenge: 'c', rpId: 'kysignon.test', allowCredentials: ['a1'] };
+    const begin = { challenge: 'c', rpId: 'kyidentity.test', allowCredentials: ['a1'] };
     expect(parseBeginLogin(begin)).toEqual(begin);
   });
 

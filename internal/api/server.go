@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/mfa"
-	"github.com/Busness-app/kysignon-server/internal/oauth"
-	"github.com/Busness-app/kysignon-server/internal/store"
-	"github.com/Busness-app/kysignon-server/internal/sync"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/mfa"
+	"github.com/Busness-app/kyidentity-server/internal/oauth"
+	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/sync"
 )
 
 type Server struct {
@@ -357,7 +357,7 @@ const defaultIndexHTML = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KySignOn — Identity & SSO</title>
+    <title>KyIdentity — Identity & SSO</title>
     <link rel="stylesheet" href="/css/styles.css">
     <style>
         body { margin: 0; background: #0d0f14; color: #e2e8f0; font-family: 'Space Grotesk', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
@@ -370,7 +370,7 @@ const defaultIndexHTML = `<!DOCTYPE html>
 <body>
     <div id="root">
         <div class="card">
-            <h1>KySignOn Server</h1>
+            <h1>KyIdentity Server</h1>
             <p>Single-Organization Identity & Account Replication Service.</p>
             <p><span class="badge">API READY</span> • Check <code>/healthz</code> or <code>/.well-known/openid-configuration</code>.</p>
         </div>

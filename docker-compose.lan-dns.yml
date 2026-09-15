@@ -3,8 +3,8 @@
 # replaces the host's resolvers for every lookup this container makes, which is why it lives
 # in its own file instead of a default.
 #
-#   KYSIGNON_DNS=192.168.1.1 docker compose -f docker-compose.yml -f docker-compose.lan-dns.yml up -d
+#   KYIDENTITY_DNS=192.168.1.1 docker compose -f docker-compose.yml -f docker-compose.lan-dns.yml up -d
 services:
-  kysignon-server:
+  kyidentity-server:
     dns:
-      - ${KYSIGNON_DNS:?set KYSIGNON_DNS to your LAN DNS server}
+      - ${KYIDENTITY_DNS:?set KYIDENTITY_DNS to your LAN DNS server}

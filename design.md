@@ -1,12 +1,12 @@
-# KySignOn Server Design
+# KyIdentity Server Design
 
 ## 1. Purpose
 
-KySignOn is the single-organization identity service and central identity authority for the KySecurity suite. It provides single sign-on (SSO) for KyPost, KyBookmarks, KyNotes, and KyPasswords, as well as OAuth 2.0 and OpenID Connect (OIDC) for approved non-KySecurity services.
+KyIdentity is the single-organization identity service and central identity authority for the KySecurity suite. It provides single sign-on (SSO) for KyPost, KyBookmarks, KyNotes, and KyPasswords, as well as OAuth 2.0 and OpenID Connect (OIDC) for approved non-KySecurity services.
 
-KySignOn acts as the authoritative user directory for the suite: when an administrator creates or updates an account in KySignOn, the account automatically replicates across paired KySecurity products. Connecting downstream KySecurity systems to KySignOn is performed securely through a UI-generated, short-lived pairing key.
+KyIdentity acts as the authoritative user directory for the suite: when an administrator creates or updates an account in KyIdentity, the account automatically replicates across paired KySecurity products. Connecting downstream KySecurity systems to KyIdentity is performed securely through a UI-generated, short-lived pairing key.
 
-The first release prioritizes secure authentication, automated suite-wide account syncing, native push/TOTP MFA, and an application launcher. KySignOn MFA requires its own dedicated mobile authenticator app (or KyPost mobile during transition). It must not be folded into KyPassword or a single super app containing every KySecurity product.
+The first release prioritizes secure authentication, automated suite-wide account syncing, native push/TOTP MFA, and an application launcher. KyIdentity MFA requires its own dedicated mobile authenticator app (or KyPost mobile during transition). It must not be folded into KyPassword or a single super app containing every KySecurity product.
 
 ## 2. MVP Scope
 
@@ -14,10 +14,10 @@ The first release prioritizes secure authentication, automated suite-wide accoun
 
 - **Core & Runtime**: Go HTTP server packaged as a non-root Docker container with SQLite persistence (WAL mode, foreign keys enabled).
 - **Organization & Directory**: One organization with administrator-managed user accounts.
-- **Cross-System Account Syncing**: Automatic replication of user accounts (create, update, status change, MFA reset) from KySignOn to paired KySecurity products.
+- **Cross-System Account Syncing**: Automatic replication of user accounts (create, update, status change, MFA reset) from KyIdentity to paired KySecurity products.
 - **UI-Based System Pairing**: Administrator UI flow to generate short-lived (90s) pairing keys that securely register KySecurity services (KyPost, KyBookmarks, KyNotes, KyPasswords) and establish mutual HMAC sync credentials.
 - **OAuth 2.0 & OpenID Connect**: Authorization-code flow with PKCE, RS256 ID-token signing, JWKS discovery, and userinfo endpoints.
-- **Native Device Pairing & Push MFA**: Direct implementation in KySignOn of device registration (`/api/notifications/native/register`) using 90-second ephemeral PIN/QR codes, push challenge dispatch with 2-digit number matching and decoys, and device pull-mode queue.
+- **Native Device Pairing & Push MFA**: Direct implementation in KyIdentity of device registration (`/api/notifications/native/register`) using 90-second ephemeral PIN/QR codes, push challenge dispatch with 2-digit number matching and decoys, and device pull-mode queue.
 - **TOTP MFA & Recovery Codes**: Encrypted TOTP secret storage, time-step verification, and single-use hashed recovery backup codes.
 - **Passkeys (WebAuthn Level 2)**: ES256 credentials as a second factor, with single-use server-issued challenges, signature-counter clone detection, and backup-eligibility recorded per credential. Attestation is not verified; passwordless sign-in is deferred.
 - **Dedicated Authenticator Separation**: Support for KySecurity Authenticator mobile app as the long-term MFA client, maintaining strict separation from the password vault.
@@ -36,10 +36,10 @@ The first release prioritizes secure authentication, automated suite-wide accoun
 
 ## 3. Design Principles
 
-- **Identity authority on the server**: KySignOn is the source of truth for accounts and authentication across the KySecurity suite.
+- **Identity authority on the server**: KyIdentity is the source of truth for accounts and authentication across the KySecurity suite.
 - **Standard protocols for SSO**: Use standard OAuth 2.0 and OpenID Connect with PKCE rather than custom SSO protocols.
 - **Zero-knowledge separation**: Replicate user identity metadata (username, display name, email, role, status) to downstream systems, but never transmit or expose raw passwords or master vault keys.
-- **MFA independent of password vault**: KySignOn MFA must remain fully operational even if KyPassword is locked, compromised, or in recovery.
+- **MFA independent of password vault**: KyIdentity MFA must remain fully operational even if KyPassword is locked, compromised, or in recovery.
 - **Simple, robust deployment**: Single statically-compiled Go binary, SQLite database on a persistent Docker volume, minimal runtime dependencies.
 - **Secure system & device pairing**: All pairing actions (both admin system-pairing and user device-pairing) rely on short-lived (90s), cryptographically verified, single-use pairing keys generated in the UI.
 
@@ -47,7 +47,7 @@ The first release prioritizes secure authentication, automated suite-wide accoun
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           KySignOn Server                               │
+│                           KyIdentity Server                               │
 │                                                                         │
 │  ┌───────────────────────┐                 ┌─────────────────────────┐  │
 │  │   Admin Web UI        │                 │    User Web UI          │  │
@@ -93,12 +93,12 @@ The Go server is structured around cohesive, testable modules:
 
 ### 5.1 System Pairing & Account Replication (Cross-System Sync)
 
-KySignOn is the central identity authority. When an administrator creates, modifies, or disables a user, the change automatically propagates to all paired KySecurity products.
+KyIdentity is the central identity authority. When an administrator creates, modifies, or disables a user, the change automatically propagates to all paired KySecurity products.
 
 #### System Pairing Handshake
 
 ```text
-Admin (UI)                  KySignOn Server               KySecurity Product (e.g. KyPost)
+Admin (UI)                  KyIdentity Server               KySecurity Product (e.g. KyPost)
     │                              │                                     │
     │ 1. Request Pairing Key       │                                     │
     │─────────────────────────────>│                                     │
@@ -116,37 +116,37 @@ Admin (UI)                  KySignOn Server               KySecurity Product (e.
     │                              │ (System Paired & Active)            │
 ```
 
-1. **Token Generation**: In the KySignOn Admin UI, the admin generates a 90-second single-use pairing token for a target KySecurity product.
-2. **Registration**: The administrator copies/pastes the pairing token into the target product's configuration UI. The target product invokes `POST /api/systems/register` against KySignOn.
-3. **Mutual Trust**: KySignOn verifies the token, records the system in SQLite (`paired_systems`), and generates a unique HMAC-SHA256 secret key and OIDC client credentials for that system.
+1. **Token Generation**: In the KyIdentity Admin UI, the admin generates a 90-second single-use pairing token for a target KySecurity product.
+2. **Registration**: The administrator copies/pastes the pairing token into the target product's configuration UI. The target product invokes `POST /api/systems/register` against KyIdentity.
+3. **Mutual Trust**: KyIdentity verifies the token, records the system in SQLite (`paired_systems`), and generates a unique HMAC-SHA256 secret key and OIDC client credentials for that system.
 4. **Replication**: When user changes occur:
-   - KySignOn writes a record to `account_sync_events`.
+   - KyIdentity writes a record to `account_sync_events`.
    - The background sync dispatcher sends an authenticated HTTPS webhook (`user.created`, `user.updated`, `user.status_changed`, `user.mfa_reset`) signed with the system's HMAC secret.
    - Downstream products update their local user tables immediately.
    - If a target system is offline, the dispatcher retries with exponential backoff and flags failures in the Admin Dashboard.
 
 ### 5.2 Native Device Pairing & Push MFA Flow
 
-KySignOn natively manages mobile push devices and pairing tokens.
+KyIdentity natively manages mobile push devices and pairing tokens.
 
 #### Device Enrollment (90-second Ephemeral PIN/QR)
 
-1. The user logs into the KySignOn User Dashboard and navigates to **Security & Devices**.
-2. The user clicks **Add Authenticator Device**. KySignOn generates a 90-second single-use pairing token, displayed as both a scannable QR code and a 6-digit numeric PIN.
+1. The user logs into the KyIdentity User Dashboard and navigates to **Security & Devices**.
+2. The user clicks **Add Authenticator Device**. KyIdentity generates a 90-second single-use pairing token, displayed as both a scannable QR code and a 6-digit numeric PIN.
 3. In the KySecurity Authenticator app (or KyPost mobile app), the user scans the QR code or enters the PIN.
 4. The mobile app posts to `POST /api/notifications/native/register` with the pairing token, device ID, public key, and push push token.
-5. KySignOn validates the token, registers the device in `native_devices`, and activates it as an MFA approver.
-6. When FCM rotates the delivery token, the paired device sends `PUT /api/notifications/native/devices/{deviceId}/push-token` with `pushToken`, Unix-millisecond `issuedAt`, and an ASN.1 ECDSA P-256/SHA-256 signature. The signed UTF-8 message is `kysignon-push-token-v1|<issuer-origin>|<deviceId>|<issuedAt>|<lowercase-hex-SHA256-of-trimmed-token>`. Requests must be within five minutes of server time and newer than the device's last accepted refresh; success returns `204`, replay returns `409`, and the client must sign a current request after a stale-window failure.
+5. KyIdentity validates the token, registers the device in `native_devices`, and activates it as an MFA approver.
+6. When FCM rotates the delivery token, the paired device sends `PUT /api/notifications/native/devices/{deviceId}/push-token` with `pushToken`, Unix-millisecond `issuedAt`, and an ASN.1 ECDSA P-256/SHA-256 signature. The signed UTF-8 message is `kyidentity-push-token-v1|<issuer-origin>|<deviceId>|<issuedAt>|<lowercase-hex-SHA256-of-trimmed-token>`. Requests must be within five minutes of server time and newer than the device's last accepted refresh; success returns `204`, replay returns `409`, and the client must sign a current request after a stale-window failure.
 
 #### Push MFA Authentication
 
 1. User submits valid username and password during OIDC authorization or web login.
-2. KySignOn detects push MFA enrollment and generates a challenge containing:
+2. KyIdentity detects push MFA enrollment and generates a challenge containing:
    - `challengeId` (UUID)
    - `matchDigits` (random 2-digit number, e.g., `42`)
    - `decoyDigits` (array of alternative numbers)
    - Expiration (5 minutes)
-3. KySignOn dispatches the push challenge to the user's paired device via push relay (or places it in `GET /api/notifications/native/pull` for pull-mode clients).
+3. KyIdentity dispatches the push challenge to the user's paired device via push relay (or places it in `GET /api/notifications/native/pull` for pull-mode clients).
 4. The browser displays the prompt: *"Select 42 on your authenticator device"* and begins polling `POST /api/auth/mfa/push/poll`.
 5. The user opens the notification on their mobile device and taps the matching number `42`.
 6. The mobile app sends `POST /api/mfa/push/respond` with the signed response.
@@ -155,18 +155,18 @@ KySignOn natively manages mobile push devices and pairing tokens.
 ### 5.3 OIDC Login Flow for KySecurity Suite Applications
 
 1. KyPost (or another paired KySecurity app) redirects the browser to `GET /oauth/authorize` with `client_id`, `redirect_uri`, `response_type=code`, `scope=openid profile email`, `state`, and PKCE `code_challenge`.
-2. KySignOn validates the client and redirect URI against the `oauth_clients` table.
+2. KyIdentity validates the client and redirect URI against the `oauth_clients` table.
 3. User signs in with username/password and completes MFA (Push or TOTP).
-4. KySignOn redirects the browser back to the registered `redirect_uri` with a short-lived authorization code and the caller's `state`.
+4. KyIdentity redirects the browser back to the registered `redirect_uri` with a short-lived authorization code and the caller's `state`.
 5. KyPost exchanges the authorization code and `code_verifier` via `POST /oauth/token`.
-6. KySignOn verifies the PKCE verifier, invalidates the authorization code, and returns an RS256-signed ID Token and access token.
+6. KyIdentity verifies the PKCE verifier, invalidates the authorization code, and returns an RS256-signed ID Token and access token.
 7. KyPost validates the ID token signature against `/.well-known/jwks.json`.
 
 ### 5.4 Administrator MFA Reset
 
 1. An administrator opens the target user account in the Admin Dashboard and clicks **Reset MFA**.
-2. KySignOn prompts for explicit confirmation.
-3. Upon confirmation, KySignOn:
+2. KyIdentity prompts for explicit confirmation.
+3. Upon confirmation, KyIdentity:
    - Revokes all active sessions for the user;
    - Deletes enrolled TOTP secrets, push devices, and recovery codes;
    - Records an immutable audit log entry (actor, target user, timestamp, reason);
@@ -402,19 +402,19 @@ The frontend follows the existing KySecurity visual system and conventions:
 
 ## 11. Operational & Deployment Architecture
 
-- **Docker Container**: Multi-stage build producing a static Go binary running as a non-root user (`nobody` or `kysignon:kysignon`).
-- **Network**: Defaults to attaching to the shared `kypost-net` Docker network so that KySignOn and KyPost (and other KySecurity suite services) can communicate directly over internal Docker DNS (`http://kysignon-server:5867`).
+- **Docker Container**: Multi-stage build producing a static Go binary running as a non-root user (`nobody` or `kyidentity:kyidentity`).
+- **Network**: Defaults to attaching to the shared `kypost-net` Docker network so that KyIdentity and KyPost (and other KySecurity suite services) can communicate directly over internal Docker DNS (`http://kyidentity-server:5867`).
 - **Data Persistence**: SQLite database and cryptographic keys stored on a dedicated Docker volume mounted at `/data`.
 - **Configuration**: Fully configurable via environment variables:
-  - `KYSIGNON_BIND`: Interface address to bind container port publishing to (default `0.0.0.0` for network access, or `127.0.0.1` for loopback-only).
-  - `KYSIGNON_ISSUER_URL`: Public canonical base URL (e.g., `https://auth.example.com`).
-  - `KYSIGNON_DB_PATH`: Path to SQLite database file (default `/data/kysignon.db`).
-  - `KYSIGNON_SECRET_KEY`: Master secret for session and cookie signing.
-  - `KYSIGNON_ENCRYPTION_KEY`: Master key for AES-GCM secret encryption at rest.
-  - `KYSIGNON_RSA_KEY_PATH`: Path to private RSA signing key for OIDC JWTs.
-  - `KYSIGNON_SESSION_TTL` / `KYSIGNON_SESSION_IDLE_TTL`: Absolute and inactivity limits for browser sessions (defaults: `24h` / `30m`).
+  - `KYIDENTITY_BIND`: Interface address to bind container port publishing to (default `0.0.0.0` for network access, or `127.0.0.1` for loopback-only).
+  - `KYIDENTITY_ISSUER_URL`: Public canonical base URL (e.g., `https://auth.example.com`).
+  - `KYIDENTITY_DB_PATH`: Path to SQLite database file (default `/data/kyidentity.db`).
+  - `KYIDENTITY_SECRET_KEY`: Master secret for session and cookie signing.
+  - `KYIDENTITY_ENCRYPTION_KEY`: Master key for AES-GCM secret encryption at rest.
+  - `KYIDENTITY_RSA_KEY_PATH`: Path to private RSA signing key for OIDC JWTs.
+  - `KYIDENTITY_SESSION_TTL` / `KYIDENTITY_SESSION_IDLE_TTL`: Absolute and inactivity limits for browser sessions (defaults: `24h` / `30m`).
   - `TRUSTED_PROXY_CIDRS`: Trusted upstream reverse proxy CIDRs for real client IP extraction.
-- **Bootstrap CLI**: Initial administrator account created via CLI flag (e.g., `kysignon bootstrap-admin --username admin`) or environment variables on first start without logging credentials.
+- **Bootstrap CLI**: Initial administrator account created via CLI flag (e.g., `kyidentity bootstrap-admin --username admin`) or environment variables on first start without logging credentials.
 
 ## 12. Verification & Automated Testing
 

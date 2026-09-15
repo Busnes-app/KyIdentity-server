@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/Busness-app/ky-primitives/syncauth"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/netguard"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/netguard"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -56,7 +56,7 @@ func grantAllUsers(t *testing.T, s *store.Store, systemID string) {
 }
 
 func setupTestSyncEngine(t *testing.T) (*Engine, *store.Store, *store.User, func()) {
-	tmpDir, err := os.MkdirTemp("", "kysignon-sync-test-*")
+	tmpDir, err := os.MkdirTemp("", "kyidentity-sync-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}

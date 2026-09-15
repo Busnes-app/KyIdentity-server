@@ -10,18 +10,18 @@ import (
 	"time"
 
 	"github.com/Busness-app/ky-primitives/recoveryclient"
-	"github.com/Busness-app/kysignon-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/config"
 )
 
 // Relative paths inside a capsule. The restore drill and the restore command both have to
 // find the same files the collector wrote.
 const (
-	dbRelPath        = "data/kysignon.db"
+	dbRelPath        = "data/kyidentity.db"
 	keyRelPath       = "data/jwt_rs256.key"
 	encKeyRelPath    = "data/encryption.key"
 	secretKeyRelPath = "data/secret.key"
 	recoveryPubPath  = "data/recovery.pub"
-	configRelPath    = "config/kysignon.json"
+	configRelPath    = "config/kyidentity.json"
 )
 
 // Snapshotter produces a transactionally consistent copy of the live database. The store
@@ -61,7 +61,7 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 		return nil, fmt.Errorf("failed to create snapshot scratch directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
-	snapPath := filepath.Join(scratch, "kysignon.db")
+	snapPath := filepath.Join(scratch, "kyidentity.db")
 	if err := snap.SnapshotTo(snapPath); err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 		Files:       files,
 		Dependencies: map[string]any{
 			"ports": []int{portNum},
-			"env":   []string{"KYSIGNON_PORT", "KYSIGNON_ISSUER_URL"},
+			"env":   []string{"KYIDENTITY_PORT", "KYIDENTITY_ISSUER_URL"},
 		},
 		VerificationRecipe: map[string]any{
 			"check_sqlite_integrity": true,
@@ -160,7 +160,7 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 			"rsa_key_file":            keyRelPath,
 			"prove_secret_decryption": true,
 			"prove_token_signing":     true,
-			"expected_env":            []string{"KYSIGNON_PORT", "KYSIGNON_ISSUER_URL"},
+			"expected_env":            []string{"KYIDENTITY_PORT", "KYIDENTITY_ISSUER_URL"},
 			"expected_ports":          []int{portNum},
 		},
 	}, nil

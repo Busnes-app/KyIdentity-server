@@ -74,10 +74,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t kysignon-ci .
+      - run: docker build -t kyidentity-ci .
       - name: Smoke test production image
         run: |
-          container_id=$(docker run -d kysignon-ci)
+          container_id=$(docker run -d kyidentity-ci)
           trap 'docker rm -f "$container_id"' EXIT
           for _ in $(seq 1 30); do
             if docker exec "$container_id" wget -q --spider http://localhost:5867/readyz; then
@@ -89,7 +89,7 @@ jobs:
           exit 1
       - name: Reject public HTTP issuer
         run: |
-          if docker run --rm -e KYSIGNON_ISSUER_URL=http://auth.example.test kysignon-ci; then
+          if docker run --rm -e KYIDENTITY_ISSUER_URL=http://auth.example.test kyidentity-ci; then
             echo "server accepted a non-loopback HTTP issuer"
             exit 1
           fi

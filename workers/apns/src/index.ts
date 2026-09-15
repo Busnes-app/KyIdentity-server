@@ -3,7 +3,7 @@
  *
  * This Worker delivers native push notifications to iOS devices via Apple Push
  * Notification service (APNs), holding the APNs auth key (.p8) and issuing provider
- * tokens on behalf of KySignOn and KyPassword deployments, each authenticated with
+ * tokens on behalf of KyIdentity and KyPassword deployments, each authenticated with
  * its own API key. Self-hosters therefore never need an Apple Developer account at
  * the server level and never recompile the app (only update its APNs device token).
  *

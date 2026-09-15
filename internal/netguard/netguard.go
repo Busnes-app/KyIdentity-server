@@ -102,7 +102,7 @@ func ValidateURL(raw, field string) error {
 	// enforcement lives in the dialer.
 	if ip := net.ParseIP(host); ip != nil && isNonPublic(ip) {
 		return fmt.Errorf("%s points at the non-public address %s; "+
-			"set KYSIGNON_ALLOW_PRIVATE_CALLBACKS=true if that is intended", field, ip)
+			"set KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true if that is intended", field, ip)
 	}
 	return nil
 }

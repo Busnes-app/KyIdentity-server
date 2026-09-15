@@ -109,7 +109,7 @@ describe('unauthorized session handling', () => {
 
     await expect(apiRequest('/api/auth/me')).rejects.toBeInstanceOf(ApiError);
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect((dispatch.mock.calls[0][0] as CustomEvent).type).toBe('kysignon:unauthorized');
+    expect((dispatch.mock.calls[0][0] as CustomEvent).type).toBe('kyidentity:unauthorized');
   });
 
   it.each(['/api/auth/step-up', '/api/auth/step-up/finish'])('keeps the session on failed credentials at %s', async path => {

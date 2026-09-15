@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/kysignon-server.iml" filepath="$PROJECT_DIR$/.idea/kysignon-server.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/kyidentity-server.iml" filepath="$PROJECT_DIR$/.idea/kyidentity-server.iml" />
     </modules>
   </component>
 </project>

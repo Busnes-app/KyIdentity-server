@@ -137,7 +137,7 @@ export const AdminBackup: React.FC = () => {
       const grant = await requestGrant('The capsule holds your entire directory and its keys, sealed to the suite recovery key.', 'GET /api/admin/backup/export-capsule');
       const res = await fetch('/api/admin/backup/export-capsule', {
         credentials: 'same-origin',
-        headers: { 'X-KySignOn-StepUp': grant },
+        headers: { 'X-KyIdentity-StepUp': grant },
       });
       if (!res.ok) {
         const body: unknown = await res.json().catch(() => ({}));
@@ -151,7 +151,7 @@ export const AdminBackup: React.FC = () => {
       const url = URL.createObjectURL(await res.blob());
       const a = document.createElement('a');
       a.href = url;
-      a.download = match ? match[1] : 'kysignon.kycap';
+      a.download = match ? match[1] : 'kyidentity.kycap';
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -297,7 +297,7 @@ export const AdminBackup: React.FC = () => {
       )}
       {status && keyPinned && !paired && !hasLocal && (
         <div className="alert-box warn sm">
-          <AlertCircle size={16} /> A key is pinned but capsules have nowhere to go. Pair with KyRecovery, or set KYSIGNON_BACKUP_DIR to keep copies on this host.
+          <AlertCircle size={16} /> A key is pinned but capsules have nowhere to go. Pair with KyRecovery, or set KYIDENTITY_BACKUP_DIR to keep copies on this host.
         </div>
       )}
       {status && keyPinned && !scheduleOn && (
@@ -332,7 +332,7 @@ export const AdminBackup: React.FC = () => {
             <span>Local copies</span>
             <span className={`status-badge ${hasLocal ? 'active' : 'disabled'}`}>{hasLocal ? `${status?.localCopies.length ?? 0} of ${status?.localKeep}` : 'Off'}</span>
           </div>
-          <div className="dr-fact-value font-mono">{status?.localDir ?? 'KYSIGNON_BACKUP_DIR not set'}</div>
+          <div className="dr-fact-value font-mono">{status?.localDir ?? 'KYIDENTITY_BACKUP_DIR not set'}</div>
           <div className="dr-fact-note">{status?.localError ?? (newestLocal ? `Newest ${when(newestLocal.createdAt)}` : hasLocal ? 'Nothing written yet' : '')}</div>
         </div>
         <div className="dr-fact">

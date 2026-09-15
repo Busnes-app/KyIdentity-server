@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func (h *AdminHandler) ListProvisioningState(w http.ResponseWriter, r *http.Request) {

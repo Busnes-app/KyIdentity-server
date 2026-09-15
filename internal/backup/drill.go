@@ -10,14 +10,14 @@ import (
 
 	"github.com/Busness-app/ky-primitives/capsule"
 	"github.com/Busness-app/ky-primitives/recoveryclient"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
 	_ "modernc.org/sqlite"
 )
 
 // RunRestoreDrill proves the backup pipeline: recoveryclient.Drill seals the payload to a
 // throwaway key, opens it into a 0700 scratch directory under dataDir, and this function
-// adds KySignOn's own checks: required files present, SQLite integrity and application
+// adds KyIdentity's own checks: required files present, SQLite integrity and application
 // records, MFA secrets decrypt and the signing key issues a verifiable token. A separate
 // check reports whether the suite key is pinned; the drill itself never touches it.
 func RunRestoreDrill(ctx context.Context, dataDir, serviceName, appVersion string, files []File, deps, recipe map[string]any, pinned RecoveryKey) (*DrillResult, error) {
@@ -244,7 +244,7 @@ func proveRestoreIsUsable(ctx context.Context, scratchDir string, recipe map[str
 			return
 		}
 		token, err := km.SignJWT(map[string]any{
-			"iss": "kysignon-restore-drill",
+			"iss": "kyidentity-restore-drill",
 			"sub": "drill",
 			"exp": time.Now().Add(time.Minute).Unix(),
 		})

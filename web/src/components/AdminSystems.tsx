@@ -173,7 +173,7 @@ export const AdminSystems: React.FC = () => {
   };
 
   const handleDeleteSystem = async (s: PairedSystem) => {
-    if (!confirm(`Disconnect and remove '${s.name}' from KySignOn Suite sync?`)) return;
+    if (!confirm(`Disconnect and remove '${s.name}' from KyIdentity Suite sync?`)) return;
 
     try {
       const grant = await requestGrant(`Disconnecting '${s.name}' stops all account replication to it.`, `DELETE /api/admin/systems/${s.id}`);
@@ -373,7 +373,7 @@ export const AdminSystems: React.FC = () => {
                     </button>
                   </div>
                   <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.35rem', display: 'block' }}>
-                    Configure this secret in the downstream suite webhook verifier. KySignOn signs requests and never sends the secret in Authorization.
+                    Configure this secret in the downstream suite webhook verifier. KyIdentity signs requests and never sends the secret in Authorization.
                   </span>
                 </div>
                 <div className="modal-footer mt-4">
@@ -479,7 +479,7 @@ export const AdminSystems: React.FC = () => {
                 </div>}
                 <div className="alert-box info sm" style={{ marginBottom: '1.25rem' }}>
                   <Key size={14} />
-                  <span>{systemType === 'scim' ? 'Use an HTTPS SCIM base URL and the service’s provisioning token.' : editing ? 'The existing webhook signing secret will be retained.' : 'KySignOn generates a signing secret shown once after connection.'}</span>
+                  <span>{systemType === 'scim' ? 'Use an HTTPS SCIM base URL and the service’s provisioning token.' : editing ? 'The existing webhook signing secret will be retained.' : 'KyIdentity generates a signing secret shown once after connection.'}</span>
                 </div>
 
                 <div className="modal-footer">

@@ -18,11 +18,11 @@ import (
 
 	"github.com/Busness-app/ky-primitives/capsule"
 	"github.com/Busness-app/ky-primitives/recoverykey"
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/backup"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/backup"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -80,8 +80,8 @@ func TestAdminBackupEndpoints(t *testing.T) {
 		IPAddress: "127.0.0.1", UserAgent: "Go-Test", ExpiresAt: time.Now().Add(24 * time.Hour),
 	})
 	csrfToken := srv.middleware.IssueCSRFToken(adminSessionToken)
-	adminCookie := &http.Cookie{Name: "kysignon_session", Value: adminSessionToken}
-	csrfCookie := &http.Cookie{Name: "kysignon_csrf", Value: csrfToken}
+	adminCookie := &http.Cookie{Name: "kyidentity_session", Value: adminSessionToken}
+	csrfCookie := &http.Cookie{Name: "kyidentity_csrf", Value: csrfToken}
 	stepUp := func(method, path string) string { return mintStepUp(t, srv, adminSessionToken, method+" "+path) }
 
 	do := func(method, path string, body []byte, withStepUp bool) *httptest.ResponseRecorder {
@@ -119,7 +119,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 		}
 		var resp map[string]any
 		_ = json.NewDecoder(w.Body).Decode(&resp)
-		if resp["app_name"] != "KySignOn" || resp["paired"] != false {
+		if resp["app_name"] != "KyIdentity" || resp["paired"] != false {
 			t.Errorf("status %v", resp)
 		}
 	})

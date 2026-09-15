@@ -14,9 +14,9 @@ import (
 
 	"github.com/Busness-app/ky-primitives/scim"
 	"github.com/Busness-app/ky-primitives/syncauth"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/netguard"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/netguard"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -119,7 +119,7 @@ type SCIMUserResource struct {
 	Meta        *SCIMMeta   `json:"meta,omitempty"`
 }
 
-// UserToSCIMResource converts an internal KySignOn user into a standard SCIM 2.0 User resource.
+// UserToSCIMResource converts an internal KyIdentity user into a standard SCIM 2.0 User resource.
 func UserToSCIMResource(u *store.User) *SCIMUserResource {
 	if u == nil {
 		return nil
