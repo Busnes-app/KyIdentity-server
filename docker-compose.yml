@@ -1,4 +1,4 @@
-name: kyidentity-server
+name: kysignon-server
 
 services:
   kyidentity-server:
@@ -24,8 +24,8 @@ services:
 
     environment:
       KYIDENTITY_PORT: 5867
-      KYIDENTITY_ISSUER_URL: ${KYIDENTITY_ISSUER_URL:-http://localhost:5867}
-      KYIDENTITY_DB_PATH: /data/kyidentity.db
+      KYIDENTITY_ISSUER_URL: ${KYIDENTITY_ISSUER_URL:?set KYIDENTITY_ISSUER_URL}
+      KYIDENTITY_DB_PATH: /data/kysignon.db
       KYIDENTITY_DATA_DIR: /data
       # Empty by default: no peer may forge its client IP. Set to your proxy's address only.
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
@@ -58,7 +58,7 @@ services:
       BOOTSTRAP_ADMIN_PASS: ${BOOTSTRAP_ADMIN_PASS:-}
 
     volumes:
-      - kyidentity_data:/data
+      - kysignon_data:/data
 
     healthcheck:
       # /readyz, not /healthz: this must go unhealthy when the database or key material is
@@ -70,7 +70,7 @@ services:
       start_period: 5s
 
 volumes:
-  kyidentity_data:
+  kysignon_data:
 
 networks:
   kypost-net:

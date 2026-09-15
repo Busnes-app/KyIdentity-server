@@ -86,6 +86,9 @@ type Config struct {
 // Load loads configuration from environment variables. Anything malformed is an error:
 // a server that silently downgrades a misconfigured key is worse than one that will not start.
 func Load() (*Config, error) {
+	if err := rejectLegacyEnvironment(); err != nil {
+		return nil, err
+	}
 	dataDir := getEnv("KYIDENTITY_DATA_DIR", "./data")
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return nil, err
@@ -179,6 +182,16 @@ func Load() (*Config, error) {
 		BackupKeep:                 backupKeep,
 		BackupAllowPrivateRecovery: strings.EqualFold(os.Getenv("KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY"), "true"),
 	}, nil
+}
+
+func rejectLegacyEnvironment() error {
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(name, "KYSIGNON_") {
+			return fmt.Errorf("legacy environment variable %s is set; use %s instead", name, "KYIDENTITY_"+strings.TrimPrefix(name, "KYSIGNON_"))
+		}
+	}
+	return nil
 }
 
 // loadDepositInterval reads KYIDENTITY_BACKUP_DEPOSIT_INTERVAL: a Go duration, default 24h,

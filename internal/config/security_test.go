@@ -32,6 +32,15 @@ func TestWeakEncryptionKeyIsRejected(t *testing.T) {
 	}
 }
 
+func TestLegacyEnvironmentIsRejected(t *testing.T) {
+	t.Setenv("KYSIGNON_ISSUER_URL", "https://auth.example.test")
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "KYSIGNON_ISSUER_URL") || !strings.Contains(err.Error(), "KYIDENTITY_ISSUER_URL") {
+		t.Fatalf("Load did not reject the legacy environment: %v", err)
+	}
+}
+
 func TestWeakSecretKeyIsRejected(t *testing.T) {
 	withEnv(t, map[string]string{
 		"KYIDENTITY_DATA_DIR":   t.TempDir(),
