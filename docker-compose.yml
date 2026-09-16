@@ -52,6 +52,7 @@ services:
       # silently replaced by the defaults below.
       KYSIGNON_IP: ${KYSIGNON_IP:-}
       KYSIGNON_BIND: ${KYSIGNON_BIND:-}
+      KYSIGNON_IMAGE: ${KYSIGNON_IMAGE:-}
       KYSIGNON_PORT: ${KYSIGNON_PORT:-}
       KYSIGNON_ISSUER_URL: ${KYSIGNON_ISSUER_URL:-}
       KYSIGNON_DB_PATH: ${KYSIGNON_DB_PATH:-}
