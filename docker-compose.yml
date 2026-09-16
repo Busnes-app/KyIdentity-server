@@ -16,6 +16,7 @@ services:
     # in full, so a failed check, an unreadable .env or a short write never replaces your
     # secrets. Re-run with a newer sha to move; delete the KYIDENTITY_IMAGE line to follow :latest
     # again. A source install is unaffected: the build overlay's image wins over this pin.
+#   Images published before 2026-09-16 were attested under the previous owner, Busness-app; verify those with that owner in the two flags below, and keep the exact match.
     #   sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
     #   d=$(docker buildx imagetools inspect ghcr.io/busnes-app/kyidentity-server:$sha --format '{{.Manifest.Digest}}') \
     #     && gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/KyIdentity-server \
