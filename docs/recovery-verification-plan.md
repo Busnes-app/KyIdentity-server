@@ -16,8 +16,8 @@ real-card drill is pending the machine/capsule details and custodians.
 - Post 295 reports the adapter and hardening merged, v0.5.1 published, and prior CI
   and local backup/API race tests passing. These historical checks were not rerun
   while preparing this plan.
-- Yoshi reported a successful 109 KiB deposit of
-  `cap-KyIdentity-1788614029376181159` on September 5 at 09:13:49 AM. Its deployed
+- Yoshi reported a successful 109 KiB deposit of an unverified
+  `cap-KySignOn-…` capsule on September 5 at 09:13:49 AM. Its deployed
   revision, key continuity and re-pairing history remain unverified.
 - This session fetched origin and confirmed clean master matched origin/master at
   `a2d5dbc` before adding this document. Read `docs/RESTORE.md` and the root and
@@ -30,12 +30,12 @@ real-card drill is pending the machine/capsule details and custodians.
    recovery key IDs if available. Use existing operator evidence; do not request
    SSH just to repeat the deposit. If historical evidence is absent, mark continuity
    unknown. If local copies are configured, verify the exact legacy
-   `KyIdentity-cap-KyIdentity-<unix-nanos>.kycap` migration to the library prefix and
+  `KySignOn-cap-KySignOn-<unix-nanos>.kycap` migration to the library prefix and
    that unrelated files remain untouched. Otherwise mark this check not applicable.
 2. **Prepare the operator drill.** Choose a trusted scratch machine, a binary built
    from a recorded revision, and an empty task-specific directory at mode 0700.
    Arrange the ceremony's threshold number of custodians. An operator downloads
-   the chosen non-corrupt KyIdentity capsule through their KyRecovery session and
+   the chosen non-corrupt KySignOn capsule through their KyRecovery session and
    records its ID, creation time with timezone, digest and expected recovery key ID.
    Prefer the latest capsule per the runbook; if using the reported capsule to
    investigate that particular deposit, record that choice explicitly.

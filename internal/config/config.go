@@ -198,6 +198,8 @@ func databasePath(dataDir string) string {
 	if path := strings.TrimSpace(os.Getenv("KYIDENTITY_DB_PATH")); path != "" {
 		return path
 	}
+	// Prefer an existing legacy database during an in-place upgrade; fresh installs and
+	// restored capsules use the current filename.
 	current := filepath.Join(dataDir, "kyidentity.db")
 	legacy := filepath.Join(dataDir, "kysignon.db")
 	if _, err := os.Stat(current); os.IsNotExist(err) {

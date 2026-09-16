@@ -80,6 +80,23 @@ func TestLegacyDatabasePathIsReused(t *testing.T) {
 	}
 }
 
+func TestCurrentDatabasePathIsUsedWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "kyidentity.db")
+	if err := os.WriteFile(current, []byte("restored"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KYIDENTITY_DATA_DIR", dir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DBPath != current {
+		t.Fatalf("DBPath = %q, want restored database %q", cfg.DBPath, current)
+	}
+}
+
 func TestWeakSecretKeyIsRejected(t *testing.T) {
 	withEnv(t, map[string]string{
 		"KYIDENTITY_DATA_DIR":   t.TempDir(),

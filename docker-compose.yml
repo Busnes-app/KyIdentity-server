@@ -46,9 +46,6 @@ services:
       KYSIGNON_BACKUP_DIR: ${KYSIGNON_BACKUP_DIR:-}
       KYSIGNON_BACKUP_KEEP: ${KYSIGNON_BACKUP_KEEP:-}
       KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY: ${KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY:-}
-      # Keep this path stable across the product rename; changing it would make Compose
-      # bootstrap a second empty identity database beside the existing one.
-      KYIDENTITY_DB_PATH: /data/kysignon.db
       KYIDENTITY_DATA_DIR: /data
       # Empty by default: no peer may forge its client IP. Set to your proxy's address only.
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}

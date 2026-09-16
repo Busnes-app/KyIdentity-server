@@ -168,7 +168,7 @@ docker compose run --rm --no-deps --user root --entrypoint sh \
 docker compose up -d
 ```
 
-The one-off container mounts the same `kyidentity_data` volume the service uses, so the copy
+The one-off container mounts the same `kysignon_data` volume the service uses, so the copy
 lands where the server will read it, owned by the image's `kyidentity` user. Keep
 `KYIDENTITY_ISSUER_URL` identical to the old deployment, from `config/kyidentity.json`: the RSA
 key, every OIDC client and every passkey are bound to it.
