@@ -11,7 +11,7 @@ KyIdentity's adapter over `github.com/Busness-app/ky-primitives/recoveryclient`,
 ## Local Contracts
 - Do not reimplement anything the lib provides. If a behaviour is missing, add it to `recoveryclient` and bump the dependency.
 - The sealer label is fixed forever; changing it orphans every live pairing.
-- `ListLocalCopies` and `RunBackup` migrate only the exact legacy `KyIdentity-cap-KyIdentity-<unix-nanos>.kycap` shape to the library prefix before listing or retention; unrelated files are never renamed or pruned.
+- `ListLocalCopies` and `RunBackup` migrate only the exact legacy `KySignOn-cap-KySignOn-<unix-nanos>.kycap` shape to the library prefix before listing or retention; unrelated files are never renamed or pruned.
 - Settings keys are the lib's (`kyrecovery_*`, `backup_*`); the store just holds rows.
 - `TestNothingInTheServerDecrypts` runs `guardtest.NoDecryptOutside` on the repository with `cmd/kyidentity/main.go` `restore` as the only allowed caller. It was proven by planting `capsule.Open` in a handler and watching it fail.
 

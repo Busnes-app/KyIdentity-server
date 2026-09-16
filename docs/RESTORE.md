@@ -32,7 +32,7 @@ The restored directory is the live directory in the clear. Treat it like the run
 ## Before you start
 
 - **Pick the capsule.** In the KyRecovery dashboard, open Capsules, find the newest one for
-  service `KyIdentity` that is not flagged corrupt, and note its `capsule_id`, `created_at` and
+  service `KySignOn` that is not flagged corrupt, and note its `capsule_id`, `created_at` and
   `digest`. You will compare these after the restore. Download it with an operator session
   (`GET /api/capsules/{id}/download`). From a local backup directory, the file is
   `<APP_NAME>-<capsule-id>.kycap`; the newest is the one to use unless you have a reason.
@@ -63,7 +63,7 @@ subcommand goes straight after the service name; `--no-deps` keeps the real serv
 ```bash
 mkdir -m 700 restored
 docker compose run --rm --no-deps --user "$(id -u):$(id -g)" \
-  -v "$PWD/cap-KyIdentity-XXXXXXXX.kycap:/in.kycap:ro" \
+  -v "$PWD/cap-KySignOn-XXXXXXXX.kycap:/in.kycap:ro" \
   -v "$PWD/restored:/restored" \
   kyidentity-server restore -capsule /in.kycap -to /restored
 ```
@@ -84,14 +84,14 @@ Only for a rehearsal with synthetic test shares, never with real cards, stdin ca
 Delete it afterwards; a file holding k shares is the suite key in a file.
 
 ```bash
-kyidentity restore -capsule cap-KyIdentity-XXXXXXXX.kycap -to ./restored < test-shares.txt
+kyidentity restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored < test-shares.txt
 ```
 
 On success it prints the authenticated manifest:
 
 ```
-Restored 5 files from capsule cap-KyIdentity-1788564568139109864
-  service:      KyIdentity (v1.0.0)
+Restored 5 files from capsule cap-KySignOn-1788564568139109864
+  service:      KySignOn (v1.0.0)
   created:      2026-09-04T23:29:28Z
   recovery key: 886ff52c...
   payload hash: 8a053985...
