@@ -50,6 +50,10 @@ With the binary (from a release, or `go build ./cmd/kyidentity`):
 kyidentity restore -capsule cap-KyIdentity-XXXXXXXX.kycap -to ./restored
 ```
 
+For a capsule made before the KyIdentity rename, add `-service KySignOn` and use its
+`KySignOn` filename, for example `kyidentity restore -service KySignOn -capsule
+KySignOn-cap-KySignOn-XXXXXXXX.kycap -to ./restored`.
+
 With Docker Compose, from the repository directory, mount the capsule and an empty target
 directory into a one-off container. Create the target yourself at mode 700 and run the
 container as your own user, so the extraction can write into it and what comes out is owned
