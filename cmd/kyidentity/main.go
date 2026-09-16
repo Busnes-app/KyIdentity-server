@@ -480,7 +480,7 @@ func runRestore(args []string) {
 	fs := flag.NewFlagSet("restore", flag.ExitOnError)
 	capsulePath := fs.String("capsule", "", "path to the .kycap file")
 	target := fs.String("to", "", "empty directory to restore into")
-	service := fs.String("service", "", "expected service name (default: $KYIDENTITY_APP_NAME or KyIdentity)")
+	service := fs.String("service", "", restoreServiceHelp())
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage: kyidentity restore -capsule <file.kycap> -to <dir> [-service <name>]\n\n"+
 			"Custodian shares are read from stdin, one ky2-... share per line, and never from\n"+
@@ -511,4 +511,8 @@ func runRestore(args []string) {
 	if err := restore(*capsulePath, *target, *service, shares, os.Stdout); err != nil {
 		log.Fatalf("Restore: %v", err)
 	}
+}
+
+func restoreServiceHelp() string {
+	return "expected service name (default: $KYIDENTITY_APP_NAME or " + config.DefaultAppName + ")"
 }

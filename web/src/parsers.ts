@@ -419,7 +419,7 @@ export function parseBackupStatus(value: unknown): BackupStatus {
       : [],
     localError: optStr(o, 'local_error'),
     members: Array.isArray(o.members) ? strArray(o.members) : [],
-    app_name: optStr(o, 'app_name') ?? 'KyIdentity',
+    app_name: optStr(o, 'app_name') ?? 'KySignOn',
     app_version: optStr(o, 'app_version') ?? '',
   };
 }

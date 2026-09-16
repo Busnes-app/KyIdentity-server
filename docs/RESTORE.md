@@ -128,8 +128,8 @@ Choose one form and be consistent.
 **Docker Compose (the normal deployment).** The data volume must be empty before the copy,
 for the same reason Step 1 demands an empty directory. A capsule carries `kyidentity.db`; an
 in-place upgraded deployment may instead use `kysignon.db` according to the loader's
-compatibility rule, but a restored capsule always uses the current filename. The capsule never
-never its `-wal` and `-shm` sidecars; a write-ahead log left over from the old database
+compatibility rule, but a restored capsule always uses the current filename. A capsule never
+carries its `-wal` and `-shm` sidecars; a write-ahead log left over from the old database
 would be replayed into the restored one at first open, mixing two databases. Any other
 leftover file the capsule does not overwrite would survive too.
 
