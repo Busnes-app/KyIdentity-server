@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: image and attestation coordinates match this repository
+        run: |
+          grep -qF "ghcr.io/${GITHUB_REPOSITORY,,}:latest" docker-compose.yml
+          ! grep -ohE 'Busnes-app/[A-Za-z0-9._-]+' docker-compose.yml docs/RESTORE.md | grep -vxF "$GITHUB_REPOSITORY"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
