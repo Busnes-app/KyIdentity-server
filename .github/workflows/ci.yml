@@ -101,7 +101,7 @@ jobs:
       - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
           set -euo pipefail
-          docker save kysignon-ci | gzip > tested-image.tar.gz
+          docker save kyidentity-ci | gzip > tested-image.tar.gz
       - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -148,7 +148,7 @@ jobs:
         run: |
           set -euo pipefail
           name="ghcr.io/${GITHUB_REPOSITORY,,}"
-          docker tag kysignon-ci "$name:$GITHUB_SHA"
+          docker tag kyidentity-ci "$name:$GITHUB_SHA"
           docker push "$name:$GITHUB_SHA"
           digest="$(docker buildx imagetools inspect "$name:$GITHUB_SHA" --format '{{.Manifest.Digest}}')"
           echo "name=$name" >> "$GITHUB_OUTPUT"
