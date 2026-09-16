@@ -69,7 +69,7 @@ Tags are movable, `:<commit sha>` included, so the chain also checks that the at
 your commit as its source: the guarantee is the commit you named, not whatever the tag points at. The
 chain stops at the first failure and renames a same-directory staging file over `.env` only
 if the filtered copy was written in full, so your secrets are never truncated. The pin persists
-in `.env` after the drill: see the README's upgrade note for moving off it. Commits built before 2026-09-16 were attested under the previous organisation name, so verify those with the exact `--repo` and `--cert-identity` strings that were in effect when they were built (owner `Busness-app`); keep the exact match rather than switching to `--cert-identity-regex`.
+in `.env` after the drill: see the README's upgrade note for moving off it. Images built before 2026-09-16 can no longer be verified by name: the owner they were attested under is not held by this project, so do not point `--repo` or `--cert-identity` at it. Pin a commit built after that date, or build that commit from source with `docker-compose.build.yml`.
 
 ```bash
 sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
