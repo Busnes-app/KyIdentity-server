@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Busness-app/ky-primitives/scim"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -64,7 +64,7 @@ func TestReconcileJobListsAndRepairsGenericSCIM(t *testing.T) {
 		t.Fatal(err)
 	}
 	drain(t, e)
-	// Drift introduced behind KySignOn's back: one account deleted, one renamed, one
+	// Drift introduced behind KyIdentity's back: one account deleted, one renamed, one
 	// revoked user reactivated, and an account nobody here manages.
 	remote.mu.Lock()
 	for id, r := range remote.users {

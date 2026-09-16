@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func restoredDataDir(t *testing.T) (string, *store.Store) {

@@ -40,7 +40,7 @@ export function SyncDeliveries({ system, onClose }: { system: PairedSystem; onCl
     {stepUpPrompt}
     <h3>In-flight and blocked deliveries — {system.name}</h3>
     <p>Expired attempts stay blocked because the remote write may still finish. Read-back is an observation, not proof that a write stopped.</p>
-    <p>Before resuming: stop all KySignOn workers, verify with the receiving service that the old request has finished, then restart one instance. Do not resume while an old worker or remote request can still write.</p>
+    <p>Before resuming: stop all KyIdentity workers, verify with the receiving service that the old request has finished, then restart one instance. Do not resume while an old worker or remote request can still write.</p>
     <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} /> I completed these steps and confirmed the old request has finished.</label>
     {system.systemType === 'scim' && <p><label><input type="checkbox" checked={allowCreateRetry} onChange={e => setAllowCreateRetry(e.target.checked)} /> The receiver also confirmed no account was created. Allow a fresh create if externalId lookup is still empty.</label></p>}
     <p role="status">{message}</p>

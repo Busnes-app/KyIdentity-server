@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // Administration of inbound SCIM connectors: create, rename or disable, issue and revoke

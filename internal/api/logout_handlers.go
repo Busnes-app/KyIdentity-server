@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Busness-app/kysignon-server/internal/oauth"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/oauth"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // EndSession implements OpenID Connect RP-Initiated Logout at /oauth/logout.
@@ -84,7 +84,7 @@ func (h *OAuthHandler) EndSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.hintNamesSession(hint, user.ID, sess.ID) {
-		cookie, _ := r.Cookie("kysignon_session")
+		cookie, _ := r.Cookie("kyidentity_session")
 		confirm := q.Get("confirm")
 		if confirm == "" {
 			name := "An application"

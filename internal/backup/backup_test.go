@@ -15,14 +15,14 @@ import (
 
 	"github.com/Busness-app/ky-primitives/capsule"
 	"github.com/Busness-app/ky-primitives/recoverykey"
-	"github.com/Busness-app/kysignon-server/internal/backup"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/backup"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
-// instance is a live kysignon data directory: a store with one active admin, a signing key,
+// instance is a live kyidentity data directory: a store with one active admin, a signing key,
 // and 32-byte deployment keys, which is what the collector needs to produce a capsule.
 func instance(t *testing.T) (*config.Config, *store.Store) {
 	t.Helper()
@@ -30,7 +30,7 @@ func instance(t *testing.T) (*config.Config, *store.Store) {
 	cfg := &config.Config{
 		Port:          "5867",
 		IssuerURL:     "https://sso.example.test",
-		DBPath:        filepath.Join(dir, "kysignon.db"),
+		DBPath:        filepath.Join(dir, "kyidentity.db"),
 		DataDir:       dir,
 		RSAKeyPath:    filepath.Join(dir, "jwt_rs256.key"),
 		SecretKey:     make([]byte, config.KeyLength),
@@ -114,7 +114,7 @@ func TestCollectSealableCarriesEverythingARestoreNeeds(t *testing.T) {
 			t.Errorf("%s mode %o", f.Path, f.Mode)
 		}
 	}
-	for _, want := range []string{"data/kysignon.db", "data/jwt_rs256.key", "data/encryption.key", "data/secret.key", "config/kysignon.json"} {
+	for _, want := range []string{"data/kyidentity.db", "data/jwt_rs256.key", "data/encryption.key", "data/secret.key", "config/kyidentity.json"} {
 		if len(got[want]) == 0 {
 			t.Errorf("missing %s", want)
 		}
@@ -123,7 +123,7 @@ func TestCollectSealableCarriesEverythingARestoreNeeds(t *testing.T) {
 		t.Error("encryption key is not the loaded one byte for byte")
 	}
 	restored := filepath.Join(t.TempDir(), "restored.db")
-	if err := os.WriteFile(restored, got["data/kysignon.db"], 0600); err != nil {
+	if err := os.WriteFile(restored, got["data/kyidentity.db"], 0600); err != nil {
 		t.Fatal(err)
 	}
 	copyStore, err := store.New(restored)
@@ -389,7 +389,7 @@ func TestSettingsAdapterMapsNotFound(t *testing.T) {
 
 func TestPrivateDestinationRefusalNamesTheSwitch(t *testing.T) {
 	err := backup.ValidateRecoveryURL("https://192.168.1.91", false)
-	if err == nil || !strings.Contains(err.Error(), "KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY") {
+	if err == nil || !strings.Contains(err.Error(), "KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY") {
 		t.Fatalf("%v", err)
 	}
 	if err := backup.ValidateRecoveryURL("https://192.168.1.91", true); err != nil {

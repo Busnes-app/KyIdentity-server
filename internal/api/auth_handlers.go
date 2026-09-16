@@ -3,18 +3,18 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Busness-app/kysignon-server/internal/oauth"
+	"github.com/Busness-app/kyidentity-server/internal/oauth"
 	"log"
 	"net/http"
 	"net/url"
 	"slices"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/mfa"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/mfa"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -41,7 +41,7 @@ func NewAuthHandler(s *store.Store, mfaEngine *mfa.Engine, audit *audit.Logger, 
 // GetCSRFToken issues a random CSRF token cookie and returns it.
 func (h *AuthHandler) GetCSRFToken(w http.ResponseWriter, r *http.Request) {
 	var sessionToken string
-	if c, err := r.Cookie("kysignon_session"); err == nil {
+	if c, err := r.Cookie("kyidentity_session"); err == nil {
 		sessionToken = c.Value
 	}
 	csrfToken := h.middleware.IssueCSRFToken(sessionToken)
@@ -51,7 +51,7 @@ func (h *AuthHandler) GetCSRFToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "kysignon_csrf",
+		Name:     "kyidentity_csrf",
 		Value:    csrfToken,
 		Path:     "/",
 		SameSite: http.SameSiteLaxMode,
@@ -317,7 +317,7 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "kysignon_session",
+		Name:     "kyidentity_session",
 		Value:    rawToken,
 		Path:     "/",
 		Expires:  expiresAt,
@@ -328,7 +328,7 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 
 	// Rebind the CSRF token to the new session; one issued before login belongs to nobody.
 	http.SetCookie(w, &http.Cookie{
-		Name:     "kysignon_csrf",
+		Name:     "kyidentity_csrf",
 		Value:    h.middleware.IssueCSRFToken(rawToken),
 		Path:     "/",
 		Expires:  expiresAt,

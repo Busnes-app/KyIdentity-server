@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -16,7 +16,7 @@ import (
 func launcherCards(t *testing.T, srv *Server, cookie string) []store.Application {
 	t.Helper()
 	req := httptest.NewRequest("GET", "/api/user/applications", nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

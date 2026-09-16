@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // The completion view outlives the directory row: an administrator can watch a deleted

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func (h *AdminHandler) ListAppAccessUsers(w http.ResponseWriter, r *http.Request) {

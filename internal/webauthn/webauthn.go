@@ -1,10 +1,10 @@
-// Package webauthn implements the subset of WebAuthn Level 2 that KySignOn needs: verifying
+// Package webauthn implements the subset of WebAuthn Level 2 that KyIdentity needs: verifying
 // an ES256 assertion from a registered credential, and reading the authenticator data that
 // accompanies registration.
 //
 // It deliberately parses no CBOR. The browser exposes the credential public key in SPKI form
 // (AuthenticatorAttestationResponse.getPublicKey) and the raw authenticator data
-// (getAuthenticatorData), both of which the standard library reads. KySignOn does not verify
+// (getAuthenticatorData), both of which the standard library reads. KyIdentity does not verify
 // attestation, so re-deriving those two values from the attestation object ourselves would
 // buy no property we do not already have.
 package webauthn
@@ -111,7 +111,7 @@ type RegistrationInput struct {
 }
 
 // VerifyRegistration checks a credential creation response. Attestation is not verified:
-// KySignOn accepts any authenticator, so the statement would be recorded and never acted on.
+// KyIdentity accepts any authenticator, so the statement would be recorded and never acted on.
 func VerifyRegistration(in RegistrationInput) (AuthenticatorData, error) {
 	if err := VerifyClientData(in.ClientDataJSON, "webauthn.create", in.Challenge, in.Origin); err != nil {
 		return AuthenticatorData{}, err

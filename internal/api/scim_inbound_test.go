@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // scimCall is what an upstream directory sends: a Bearer token, no cookies, no CSRF.
@@ -262,7 +262,7 @@ func TestInboundSCIMCredentialsAreScopedAndSeparate(t *testing.T) {
 		t.Fatalf("scim token reached the admin API: %d", rec.Code)
 	}
 	req = httptest.NewRequest("GET", "/scim/v2/Users", nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: admin})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: admin})
 	rec = httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {

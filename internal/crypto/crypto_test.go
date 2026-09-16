@@ -50,7 +50,7 @@ func TestHMACSHA256(t *testing.T) {
 }
 
 func TestRSAKeyAndJWTSigning(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "kysignon-key-test-*")
+	tmpDir, err := os.MkdirTemp("", "kyidentity-key-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}

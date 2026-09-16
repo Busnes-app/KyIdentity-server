@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/mail"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/mail"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // Account links: activation for invited accounts, reset for forgotten passwords. A GET

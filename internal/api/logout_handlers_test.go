@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/oauth"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/oauth"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 const bye = "https://notes.urlxl.com/bye"
@@ -46,7 +46,7 @@ func endSession(t *testing.T, srv *Server, cookie string, params url.Values) *ht
 	t.Helper()
 	req := httptest.NewRequest("GET", "/oauth/logout?"+params.Encode(), nil)
 	if cookie != "" {
-		req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+		req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	}
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
@@ -75,7 +75,7 @@ func TestRPInitiatedLogoutWithValidHintEndsSessionAndRedirectsWithState(t *testi
 	}
 	cleared := false
 	for _, c := range rr.Result().Cookies() {
-		if c.Name == "kysignon_session" && c.MaxAge < 0 {
+		if c.Name == "kyidentity_session" && c.MaxAge < 0 {
 			cleared = true
 		}
 	}
@@ -159,7 +159,7 @@ func TestLogoutWithoutHintAsksForConfirmation(t *testing.T) {
 	// Cross-site POST without the confirmation token: no effect.
 	req := httptest.NewRequest("POST", "/oauth/logout", strings.NewReader(url.Values{"client_id": {"kynotes"}, "post_logout_redirect_uri": {bye}, "confirm": {"nope"}}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	w := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden || !sessionAlive(t, srv, cookie) {
@@ -170,7 +170,7 @@ func TestLogoutWithoutHintAsksForConfirmation(t *testing.T) {
 	confirm := extractInput(t, body, "confirm")
 	req = httptest.NewRequest("POST", "/oauth/logout", strings.NewReader(url.Values{"client_id": {"kynotes"}, "post_logout_redirect_uri": {bye}, "state": {"s1"}, "confirm": {confirm}}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	w = httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(w, req)
 	if w.Code != http.StatusFound || w.Header().Get("Location") != bye+"?state=s1" {

@@ -39,7 +39,7 @@ export const Brand: React.FC = () => (
       <Shield size={24} />
     </span>
     <div>
-      <b>KySignOn</b>
+      <b>KyIdentity</b>
       <small>ID Authority</small>
     </div>
   </div>

@@ -25,7 +25,7 @@ interface SessionListProps {
 
 /**
  * Browser sessions and app token grants for one account. App rows come from the token
- * registry only: they show which apps can still call KySignOn, not whether the app's own
+ * registry only: they show which apps can still call KyIdentity, not whether the app's own
  * login is alive, so the copy never promises a downstream sign-out.
  */
 export const SessionList: React.FC<SessionListProps> = ({ sessions, apps, logouts, onRevokeSession, onRevokeApp, onRetryLogout }) => (

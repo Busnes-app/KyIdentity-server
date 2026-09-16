@@ -4,17 +4,17 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"github.com/Busness-app/kysignon-server/internal/oauth"
+	"github.com/Busness-app/kyidentity-server/internal/oauth"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
-const authorizationBrowserCookie = "kysignon_authorization_browser"
+const authorizationBrowserCookie = "kyidentity_authorization_browser"
 
 func (m *MiddlewareManager) authorizationBrowserHash(r *http.Request) string {
 	c, err := r.Cookie(authorizationBrowserCookie)

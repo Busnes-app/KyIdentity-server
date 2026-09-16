@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // StepUpTTL is how long a step-up grant stays valid. Long enough to scan a QR code and read
@@ -14,7 +14,7 @@ import (
 const StepUpTTL = 5 * time.Minute
 
 // StepUpHeader carries the grant on the operation it authorizes.
-const StepUpHeader = "X-KySignOn-StepUp"
+const StepUpHeader = "X-KyIdentity-StepUp"
 
 var errStepUpRequired = errors.New("step-up authentication required")
 

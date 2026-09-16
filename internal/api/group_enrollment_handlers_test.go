@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func TestGroupEnrollmentAdminAndRestrictedAccess(t *testing.T) {
@@ -121,7 +121,7 @@ func TestGroupEnrollmentDeniedScope(t *testing.T) {
 	t.Fatal("missing denial audit")
 }
 func TestGroupEnrollmentJoinedError(t *testing.T) {
-	if os.Getenv("KYSIGNON_JOINED_ERROR_TEST") == "1" {
+	if os.Getenv("KYIDENTITY_JOINED_ERROR_TEST") == "1" {
 		debug.SetMaxStack(65536)
 		w := httptest.NewRecorder()
 		writeGroupError(w, errors.Join(store.ErrGroupTargetMissing, store.ErrEnrollmentPolicy))
@@ -131,7 +131,7 @@ func TestGroupEnrollmentJoinedError(t *testing.T) {
 		return
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupEnrollmentJoinedError$")
-	cmd.Env = append(os.Environ(), "KYSIGNON_JOINED_ERROR_TEST=1")
+	cmd.Env = append(os.Environ(), "KYIDENTITY_JOINED_ERROR_TEST=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("joined error crashed: %v\n%.1000s", err, out)
 	}

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -17,9 +17,9 @@ import (
 func call(t *testing.T, srv *Server, cookie, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	csrf := srv.middleware.IssueCSRFToken(cookie)
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	req.Header.Set("X-CSRF-Token", csrf)
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
@@ -145,7 +145,7 @@ func TestRevokingTheCurrentSessionClearsBothCookies(t *testing.T) {
 			cleared[c.Name] = true
 		}
 	}
-	if !cleared["kysignon_session"] || !cleared["kysignon_csrf"] {
+	if !cleared["kyidentity_session"] || !cleared["kyidentity_csrf"] {
 		t.Fatalf("cookies cleared: %v", cleared)
 	}
 	if got := call(t, srv, mine, "GET", "/api/auth/me"); got.Code != http.StatusUnauthorized {
@@ -268,7 +268,7 @@ func TestSessionRoutesRejectMissingCSRF(t *testing.T) {
 	mine, other := newSession(t, db, u, exp), newSession(t, db, u, exp)
 
 	req := httptest.NewRequest("DELETE", "/api/user/sessions/"+sessionIDFor(t, db, other), nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: mine})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: mine})
 	w := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {

@@ -3,11 +3,19 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
+
+func TestRestoreHelpUsesStableServiceIdentity(t *testing.T) {
+	if help := restoreServiceHelp(); !strings.Contains(help, config.DefaultAppName) {
+		t.Fatalf("restore help = %q, want %q", help, config.DefaultAppName)
+	}
+}
 
 func testStore(t *testing.T) *store.Store {
 	t.Helper()

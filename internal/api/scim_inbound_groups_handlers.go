@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/Busness-app/ky-primitives/scim"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // Inbound SCIM Groups over the flat directory groups. The upstream owns displayName and

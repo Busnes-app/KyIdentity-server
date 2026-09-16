@@ -14,19 +14,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/mfa"
-	"github.com/Busness-app/kysignon-server/internal/oauth"
-	"github.com/Busness-app/kysignon-server/internal/store"
-	"github.com/Busness-app/kysignon-server/internal/sync"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/mfa"
+	"github.com/Busness-app/kyidentity-server/internal/oauth"
+	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/sync"
 	"github.com/google/uuid"
 )
 
 func setupTestServer(t *testing.T) (*Server, *store.Store, *sync.Engine, *mfa.Engine, *oauth.Engine, func()) {
-	tmpDir, err := os.MkdirTemp("", "kysignon-api-test-*")
+	tmpDir, err := os.MkdirTemp("", "kyidentity-api-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestLoginAndCSRFAuthenticationFlow(t *testing.T) {
 	// 3. Verify session cookie issued
 	var sessionCookie *http.Cookie
 	for _, c := range loginRec.Result().Cookies() {
-		if c.Name == "kysignon_session" {
+		if c.Name == "kyidentity_session" {
 			sessionCookie = c
 			break
 		}
@@ -238,13 +238,13 @@ func TestAdminSystemPairingHandshakeViaAPI(t *testing.T) {
 		UserAgent:        "Go-Test",
 		ExpiresAt:        timeNowUTC().Add(24 * timeHour),
 	})
-	adminCookie := &http.Cookie{Name: "kysignon_session", Value: adminSessionToken}
+	adminCookie := &http.Cookie{Name: "kyidentity_session", Value: adminSessionToken}
 
 	// Fetch CSRF
 	// The CSRF token is bound to the session it was issued for, so it must come from the
 	// server rather than be invented here.
 	csrfToken := server.middleware.IssueCSRFToken(adminSessionToken)
-	csrfCookie := &http.Cookie{Name: "kysignon_csrf", Value: csrfToken}
+	csrfCookie := &http.Cookie{Name: "kyidentity_csrf", Value: csrfToken}
 
 	// 2. Admin calls POST /api/admin/systems to connect a SCIM target
 	scimReqBody, _ := json.Marshal(map[string]string{
@@ -320,7 +320,7 @@ func TestOIDCAuthorizeAndPKCETokenFlowViaHTTP(t *testing.T) {
 		UserAgent:        "Go-Test",
 		ExpiresAt:        timeNowUTC().Add(24 * timeHour),
 	})
-	userCookie := &http.Cookie{Name: "kysignon_session", Value: sessionToken}
+	userCookie := &http.Cookie{Name: "kyidentity_session", Value: sessionToken}
 
 	// 2. Create OIDC Client
 	client := &store.OAuthClient{
@@ -424,7 +424,7 @@ var (
 // behaviour that is captured at construction time rather than read per request.
 func setupTestServerWith(t *testing.T, opts ...func(*config.Config)) (*Server, *store.Store, *sync.Engine, *mfa.Engine, *oauth.Engine, func()) {
 	t.Helper()
-	tmpDir, err := os.MkdirTemp("", "kysignon-api-test-*")
+	tmpDir, err := os.MkdirTemp("", "kyidentity-api-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestAdminListAuditEventsPagination(t *testing.T) {
 		UserAgent:        "TestAdminBrowser",
 		ExpiresAt:        time.Now().UTC().Add(time.Hour),
 	})
-	adminCookie := &http.Cookie{Name: "kysignon_session", Value: adminSessionToken}
+	adminCookie := &http.Cookie{Name: "kyidentity_session", Value: adminSessionToken}
 
 	// 2. Insert test audit events
 	for i := 1; i <= 20; i++ {
@@ -589,7 +589,7 @@ func TestAdminCreatePairedSystemSCIM(t *testing.T) {
 		UserAgent:        "TestAdminBrowser",
 		ExpiresAt:        time.Now().UTC().Add(time.Hour),
 	})
-	adminCookie := &http.Cookie{Name: "kysignon_session", Value: adminSessionToken}
+	adminCookie := &http.Cookie{Name: "kyidentity_session", Value: adminSessionToken}
 
 	// 1. Create SCIM system directly via POST /api/admin/systems
 	csrfToken := server.middleware.IssueCSRFToken(adminSessionToken)
@@ -599,7 +599,7 @@ func TestAdminCreatePairedSystemSCIM(t *testing.T) {
 	req.Header.Set("X-CSRF-Token", csrfToken)
 	req.Header.Set(StepUpHeader, mintStepUp(t, server, adminSessionToken, "POST /api/admin/systems"))
 	req.AddCookie(adminCookie)
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrfToken})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrfToken})
 	rec := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(rec, req)
 

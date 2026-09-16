@@ -1,7 +1,7 @@
 name: kysignon-server
 
 services:
-  kysignon-server:
+  kyidentity-server:
     # The published, attested image. `pull` moves to the newest one; `up` uses what is
     # present, otherwise pulls. This file never builds: a source build would occupy this
     # name with unattested bytes, so it lives in docker-compose.build.yml under a local tag.
@@ -14,69 +14,90 @@ services:
     # AND record your commit as its source, or the chain stops. The new .env is staged in this
     # directory and renamed atomically over the old one only if the filtered copy was written
     # in full, so a failed check, an unreadable .env or a short write never replaces your
-    # secrets. Re-run with a newer sha to move; delete the KYSIGNON_IMAGE line to follow :latest
+    # secrets. Re-run with a newer sha to move; delete the KYIDENTITY_IMAGE line to follow :latest
     # again. A source install is unaffected: the build overlay's image wins over this pin.
     #   sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
-    #   d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:$sha --format '{{.Manifest.Digest}}') \
-    #     && gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
-    #          --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
-    #     && [ "$(gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
-    #          --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
+    #   d=$(docker buildx imagetools inspect ghcr.io/busness-app/kyidentity-server:$sha --format '{{.Manifest.Digest}}') \
+    #     && gh attestation verify "oci://ghcr.io/busness-app/kyidentity-server@$d" --repo Busness-app/kyidentity-server \
+    #          --cert-identity https://github.com/Busness-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
+    #     && [ "$(gh attestation verify "oci://ghcr.io/busness-app/kyidentity-server@$d" --repo Busness-app/kyidentity-server \
+    #          --cert-identity https://github.com/Busness-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
     #          --format json --jq '.[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit')" = "$sha" ] \
-    #     && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYSIGNON_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
-    #         && echo "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" >> "$t" && mv "$t" .env) \
-    #     && grep -qxF "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" .env
-    image: ${KYSIGNON_IMAGE:-ghcr.io/busness-app/kysignon-server:latest}
+    #     && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYIDENTITY_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
+    #         && echo "KYIDENTITY_IMAGE=ghcr.io/busness-app/kyidentity-server@$d" >> "$t" && mv "$t" .env) \
+    #     && grep -qxF "KYIDENTITY_IMAGE=ghcr.io/busness-app/kyidentity-server@$d" .env
+    image: ${KYIDENTITY_IMAGE:-ghcr.io/busness-app/kyidentity-server:latest}
     pull_policy: missing
-    container_name: KySignOn-Server
+    container_name: KyIdentity-Server
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
 
     networks:
       kypost-net:
-        ipv4_address: ${KYSIGNON_IP:-10.89.0.2}
+        ipv4_address: ${KYIDENTITY_IP:-10.89.0.2}
 
     ports:
-      - "${KYSIGNON_BIND:-127.0.0.1}:5867:5867"
+      - "${KYIDENTITY_BIND:-127.0.0.1}:5867:5867"
 
     # Names that exist only on your LAN (a KyRecovery behind your own proxy) may not resolve
     # in here when the host uses a loopback stub resolver. Add docker-compose.lan-dns.yml
-    # with KYSIGNON_DNS set; it is not in this file because a dns: entry replaces the host's
+    # with KYIDENTITY_DNS set; it is not in this file because a dns: entry replaces the host's
     # resolvers for every lookup, which must be a choice, not a default.
 
     environment:
-      KYSIGNON_PORT: 5867
-      KYSIGNON_ISSUER_URL: ${KYSIGNON_ISSUER_URL:-http://localhost:5867}
-      KYSIGNON_DB_PATH: /data/kysignon.db
-      KYSIGNON_DATA_DIR: /data
+      KYIDENTITY_PORT: 5867
+      KYIDENTITY_ISSUER_URL: ${KYIDENTITY_ISSUER_URL:?set KYIDENTITY_ISSUER_URL}
+      # Keep legacy names visible so a pre-rename .env fails closed instead of being
+      # silently replaced by the defaults below.
+      KYSIGNON_IP: ${KYSIGNON_IP:-}
+      KYSIGNON_BIND: ${KYSIGNON_BIND:-}
+      KYSIGNON_IMAGE: ${KYSIGNON_IMAGE:-}
+      KYSIGNON_PORT: ${KYSIGNON_PORT:-}
+      KYSIGNON_ISSUER_URL: ${KYSIGNON_ISSUER_URL:-}
+      KYSIGNON_DB_PATH: ${KYSIGNON_DB_PATH:-}
+      KYSIGNON_DATA_DIR: ${KYSIGNON_DATA_DIR:-}
+      KYSIGNON_FORWARDED_HEADER: ${KYSIGNON_FORWARDED_HEADER:-}
+      KYSIGNON_SECURE_COOKIES: ${KYSIGNON_SECURE_COOKIES:-}
+      KYSIGNON_SESSION_TTL: ${KYSIGNON_SESSION_TTL:-}
+      KYSIGNON_SESSION_IDLE_TTL: ${KYSIGNON_SESSION_IDLE_TTL:-}
+      KYSIGNON_SECRET_KEY: ${KYSIGNON_SECRET_KEY:-}
+      KYSIGNON_ENCRYPTION_KEY: ${KYSIGNON_ENCRYPTION_KEY:-}
+      KYSIGNON_RSA_KEY_PATH: ${KYSIGNON_RSA_KEY_PATH:-}
+      KYSIGNON_APP_NAME: ${KYSIGNON_APP_NAME:-}
+      KYSIGNON_ALLOW_PRIVATE_CALLBACKS: ${KYSIGNON_ALLOW_PRIVATE_CALLBACKS:-}
+      KYSIGNON_BACKUP_DEPOSIT_INTERVAL: ${KYSIGNON_BACKUP_DEPOSIT_INTERVAL:-}
+      KYSIGNON_BACKUP_DIR: ${KYSIGNON_BACKUP_DIR:-}
+      KYSIGNON_BACKUP_KEEP: ${KYSIGNON_BACKUP_KEEP:-}
+      KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY: ${KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY:-}
+      KYIDENTITY_DATA_DIR: /data
       # Empty by default: no peer may forge its client IP. Set to your proxy's address only.
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
       # The one header a trusted proxy is believed on. Set to CF-Connecting-IP behind
       # Cloudflare. Only one is honoured, so the header your edge does not overwrite can
       # never become an attacker-chosen client identity.
-      KYSIGNON_FORWARDED_HEADER: ${KYSIGNON_FORWARDED_HEADER:-X-Forwarded-For}
-      KYSIGNON_SECURE_COOKIES: ${KYSIGNON_SECURE_COOKIES:-}
-      KYSIGNON_SESSION_TTL: ${KYSIGNON_SESSION_TTL:-24h}
-      KYSIGNON_SESSION_IDLE_TTL: ${KYSIGNON_SESSION_IDLE_TTL:-30m}
-      KYSIGNON_SECRET_KEY: ${KYSIGNON_SECRET_KEY:-}
-      KYSIGNON_ENCRYPTION_KEY: ${KYSIGNON_ENCRYPTION_KEY:-}
+      KYIDENTITY_FORWARDED_HEADER: ${KYIDENTITY_FORWARDED_HEADER:-X-Forwarded-For}
+      KYIDENTITY_SECURE_COOKIES: ${KYIDENTITY_SECURE_COOKIES:-}
+      KYIDENTITY_SESSION_TTL: ${KYIDENTITY_SESSION_TTL:-24h}
+      KYIDENTITY_SESSION_IDLE_TTL: ${KYIDENTITY_SESSION_IDLE_TTL:-30m}
+      KYIDENTITY_SECRET_KEY: ${KYIDENTITY_SECRET_KEY:-}
+      KYIDENTITY_ENCRYPTION_KEY: ${KYIDENTITY_ENCRYPTION_KEY:-}
       PUSH_RELAY_URL: ${PUSH_RELAY_URL:-}
       PUSH_RELAY_KEY: ${PUSH_RELAY_KEY:-}
       APNS_RELAY_URL: ${APNS_RELAY_URL:-}
       APNS_RELAY_KEY: ${APNS_RELAY_KEY:-}
       # Services on kypost-net address each other privately, so pairing callbacks there
-      # are internal by design. Set to false if KySignOn is reachable from the internet
+      # are internal by design. Set to false if KyIdentity is reachable from the internet
       # and paired systems live on public hostnames.
-      KYSIGNON_ALLOW_PRIVATE_CALLBACKS: ${KYSIGNON_ALLOW_PRIVATE_CALLBACKS:-true}
+      KYIDENTITY_ALLOW_PRIVATE_CALLBACKS: ${KYIDENTITY_ALLOW_PRIVATE_CALLBACKS:-true}
       # Backups. The schedule is set in the admin UI; this is only its default. A local
       # capsule directory is a second destination (or the only one, with no KyRecovery);
       # mount a volume there. Allow a private KyRecovery only for one on your own network
       # behind TLS: HTTPS stays required, and the setting is recorded on every pairing.
-      KYSIGNON_BACKUP_DEPOSIT_INTERVAL: ${KYSIGNON_BACKUP_DEPOSIT_INTERVAL:-24h}
-      KYSIGNON_BACKUP_DIR: ${KYSIGNON_BACKUP_DIR:-}
-      KYSIGNON_BACKUP_KEEP: ${KYSIGNON_BACKUP_KEEP:-7}
-      KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY: ${KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY:-false}
+      KYIDENTITY_BACKUP_DEPOSIT_INTERVAL: ${KYIDENTITY_BACKUP_DEPOSIT_INTERVAL:-24h}
+      KYIDENTITY_BACKUP_DIR: ${KYIDENTITY_BACKUP_DIR:-}
+      KYIDENTITY_BACKUP_KEEP: ${KYIDENTITY_BACKUP_KEEP:-7}
+      KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY: ${KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY:-false}
       BOOTSTRAP_ADMIN_USER: ${BOOTSTRAP_ADMIN_USER:-admin}
       BOOTSTRAP_ADMIN_PASS: ${BOOTSTRAP_ADMIN_PASS:-}
 

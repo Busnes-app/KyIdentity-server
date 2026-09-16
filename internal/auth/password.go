@@ -76,7 +76,7 @@ func HashPassword(password string) (string, error) {
 var dummyHash string
 
 func init() {
-	h, err := HashPassword("kysignon-timing-equaliser-not-a-real-password")
+	h, err := HashPassword("kyidentity-timing-equaliser-not-a-real-password")
 	if err != nil {
 		panic("failed to build dummy password hash: " + err.Error())
 	}

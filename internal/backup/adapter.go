@@ -12,12 +12,12 @@ import (
 
 	"github.com/Busness-app/ky-primitives/capsule"
 	"github.com/Busness-app/ky-primitives/recoveryclient"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
-// This package is KySignOn's adapter over ky-primitives/recoveryclient: what to seal
+// This package is KyIdentity's adapter over ky-primitives/recoveryclient: what to seal
 // (payload.go), the drill's application checks (drill.go), and the glue below that maps the
 // store, the deployment key and the config onto the lib's interfaces. Behaviour lives in the
 // lib; nothing here decides anything about keys, destinations or schedules.
@@ -59,7 +59,7 @@ func RecoveryKeyPath(dataDir string) string { return recoveryclient.RecoveryKeyP
 // so the operator reads what to flip.
 func privateSwitch(err error) error {
 	if err != nil && strings.Contains(err.Error(), "private-destination option") {
-		return fmt.Errorf("%w (set KYSIGNON_BACKUP_ALLOW_PRIVATE_RECOVERY=true for a KyRecovery on your own network)", err)
+		return fmt.Errorf("%w (set KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY=true for a KyRecovery on your own network)", err)
 	}
 	return err
 }

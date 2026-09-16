@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -54,8 +54,8 @@ func newStepUpFixture(t *testing.T) (*stepUpFixture, func()) {
 
 	return &stepUpFixture{
 		srv: srv, store: dbStore, user: user, session: sess, pass: pass, csrf: csrf,
-		cookie: &http.Cookie{Name: "kysignon_session", Value: token},
-		csrfCk: &http.Cookie{Name: "kysignon_csrf", Value: csrf},
+		cookie: &http.Cookie{Name: "kyidentity_session", Value: token},
+		csrfCk: &http.Cookie{Name: "kyidentity_csrf", Value: csrf},
 	}, cleanup
 }
 
@@ -163,8 +163,8 @@ func TestStepUpGrantIsBoundToItsSession(t *testing.T) {
 	otherCSRF := f.srv.middleware.IssueCSRFToken(otherRaw)
 
 	req := httptest.NewRequest("POST", "/api/user/recovery-codes", nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: otherRaw})
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: otherCSRF})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: otherRaw})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: otherCSRF})
 	req.Header.Set("X-CSRF-Token", otherCSRF)
 	req.Header.Set(StepUpHeader, token)
 	w := httptest.NewRecorder()
@@ -242,7 +242,7 @@ func TestResetUserMFAIsAtomic(t *testing.T) {
 	f, cleanup := newStepUpFixture(t)
 	defer cleanup()
 
-	secret, _, err := f.srv.mfaEngine.GenerateTOTPSecret(f.user.Username, "KySignOn")
+	secret, _, err := f.srv.mfaEngine.GenerateTOTPSecret(f.user.Username, "KyIdentity")
 	if err != nil {
 		t.Fatal(err)
 	}

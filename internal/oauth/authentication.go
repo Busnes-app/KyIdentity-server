@@ -1,8 +1,8 @@
 package oauth
 
-import "github.com/Busness-app/kysignon-server/internal/store"
+import "github.com/Busness-app/kyidentity-server/internal/store"
 
-// These context classes describe KySignOn's verified login flow, not a NIST AAL
+// These context classes describe KyIdentity's verified login flow, not a NIST AAL
 // or a guarantee about hardware key storage. Recovery never claims ordinary MFA.
 func addAuthenticationClaims(claims map[string]any, evidence store.AuthenticationEvidence) {
 	if evidence.PrimaryAuthenticatedAt == nil {

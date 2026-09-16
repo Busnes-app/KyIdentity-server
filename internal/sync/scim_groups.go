@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Busness-app/ky-primitives/scim"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 const scimGroupSchema = "urn:ietf:params:scim:schemas:core:2.0:Group"

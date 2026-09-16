@@ -1,12 +1,12 @@
 # KySecurity Mobile App Push Relay (APNs)
 
 This Worker delivers native push notifications to the KySecurity Mobile App on
-iOS via Apple Push Notification service (APNs), for KySignOn and KyPassword.
+iOS via Apple Push Notification service (APNs), for KyIdentity and KyPassword.
 
 The published iOS app is compiled with one bundle ID, so only a holder of the
 corresponding Apple Developer Team ID can deliver push to it. Instead of
 shipping the APNs auth key (`.p8`) to every deployment, the **maintainer** runs
-this Worker. KySignOn and KyPassword deployments forward push requests to it,
+this Worker. KyIdentity and KyPassword deployments forward push requests to it,
 each authenticated with its own API key. Deployments need **no Apple Developer
 account and never recompile the app**.
 

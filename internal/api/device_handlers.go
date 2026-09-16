@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/mfa"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/mfa"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 type DeviceHandler struct {
@@ -56,7 +56,7 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 	}
 
 	qrPayload := map[string]any{
-		"type":      "kysignon_device_pairing",
+		"type":      "kyidentity_device_pairing",
 		"serverUrl": h.issuerURL,
 		// The token is the credential. userId is carried so a device pairing by PIN can
 		// scope its redemption to this account rather than matching any live PIN.
@@ -264,7 +264,7 @@ func (h *DeviceHandler) SetupTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secret, uri, err := h.mfaEngine.GenerateTOTPSecret(user.Username, "KySignOn")
+	secret, uri, err := h.mfaEngine.GenerateTOTPSecret(user.Username, "KyIdentity")
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

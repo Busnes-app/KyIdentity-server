@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func enrollmentAPIAdmin(t *testing.T, srv *Server, db *store.Store) string {
@@ -255,7 +255,7 @@ func TestEnrollmentInteractionCannotSkipExistingFactor(t *testing.T) {
 				t.Fatalf("existing TOTP bypassed: status=%d body=%s", r.Code, r.Body.String())
 			}
 			for _, c := range r.Result().Cookies() {
-				if c.Name == "kysignon_session" && c.Value != "" {
+				if c.Name == "kyidentity_session" && c.Value != "" {
 					t.Fatal("password-only session issued")
 				}
 			}

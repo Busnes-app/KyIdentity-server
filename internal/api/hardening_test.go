@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/Busness-app/ky-primitives/recoverykey"
-	"github.com/Busness-app/kysignon-server/internal/backup"
-	"github.com/Busness-app/kysignon-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/backup"
+	"github.com/Busness-app/kyidentity-server/internal/config"
 	_ "modernc.org/sqlite"
 )
 

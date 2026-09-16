@@ -19,8 +19,8 @@ func uploadIcon(t *testing.T, srv *Server, cookie, contentType string, data []by
 	req := httptest.NewRequest("POST", "/api/admin/icons", bytes.NewReader(data))
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("X-CSRF-Token", csrf)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 	return rr
@@ -85,7 +85,7 @@ func TestUploadedIconLifecycle(t *testing.T) {
 
 	get := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", "/api/icons/"+id, nil)
-		req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+		req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 		rr := httptest.NewRecorder()
 		srv.httpServer.Handler.ServeHTTP(rr, req)
 		return rr

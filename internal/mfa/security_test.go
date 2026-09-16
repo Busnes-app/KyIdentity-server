@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -221,7 +221,7 @@ func TestTOTPCodeCannotBeReplayed(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	secret, _, err := e.GenerateTOTPSecret(u.Username, "KySignOn")
+	secret, _, err := e.GenerateTOTPSecret(u.Username, "KyIdentity")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestMFATokenIsSpentAfterTooManyFailures(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	secret, _, _ := e.GenerateTOTPSecret(u.Username, "KySignOn")
+	secret, _, _ := e.GenerateTOTPSecret(u.Username, "KyIdentity")
 	if err := e.SaveUserTOTP(u.ID, secret, nil); err != nil {
 		t.Fatal(err)
 	}

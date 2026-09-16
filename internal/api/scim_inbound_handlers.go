@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	"github.com/Busness-app/ky-primitives/scim"
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // Inbound SCIM 2.0 Users. The supported profile is deliberately small and advertised

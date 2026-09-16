@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/sync"
+	"github.com/Busness-app/kyidentity-server/internal/sync"
 )
 
 func TestReconciliationAdministration(t *testing.T) {

@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
 func setupTestMFAEngine(t *testing.T) (*Engine, *store.Store, *store.User, func()) {
-	tmpDir, err := os.MkdirTemp("", "kysignon-mfa-test-*")
+	tmpDir, err := os.MkdirTemp("", "kyidentity-mfa-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestTOTPEnrollmentAndVerification(t *testing.T) {
 	engine, _, user, cleanup := setupTestMFAEngine(t)
 	defer cleanup()
 
-	secret, uri, err := engine.GenerateTOTPSecret(user.Username, "KySignOn")
+	secret, uri, err := engine.GenerateTOTPSecret(user.Username, "KyIdentity")
 	if err != nil {
 		t.Fatalf("GenerateTOTPSecret failed: %v", err)
 	}

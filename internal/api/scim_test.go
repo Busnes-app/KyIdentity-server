@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func TestSCIMConnectionAdministration(t *testing.T) {

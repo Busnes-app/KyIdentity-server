@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/auth"
-	"github.com/Busness-app/kysignon-server/internal/config"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
-	"github.com/Busness-app/kysignon-server/internal/sync"
+	"github.com/Busness-app/kyidentity-server/internal/auth"
+	"github.com/Busness-app/kyidentity-server/internal/config"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/sync"
 	"github.com/google/uuid"
 )
 
@@ -78,7 +78,7 @@ func TestExpiredSessionCannotMintAuthorizationCode(t *testing.T) {
 	req := httptest.NewRequest("GET",
 		"/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.urlxl.com%2Fcallback"+
 			"&response_type=code&scope=openid&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256", nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 
@@ -98,7 +98,7 @@ func TestLiveSessionStillMintsAuthorizationCode(t *testing.T) {
 	req := httptest.NewRequest("GET",
 		"/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.urlxl.com%2Fcallback"+
 			"&response_type=code&scope=openid&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256", nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 
@@ -385,7 +385,7 @@ func TestAdminApplicationsGetIsARead(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("GET", "/api/admin/applications", nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 
@@ -435,7 +435,7 @@ func postLogin(t *testing.T, srv *Server, username, password, ip string) (int, t
 	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrf)
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	req.RemoteAddr = ip + ":1"
 	rr := httptest.NewRecorder()
 	start := time.Now()
@@ -495,7 +495,7 @@ func TestSessionCookieIsSecureWhenConfigured(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrf)
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 
@@ -504,10 +504,10 @@ func TestSessionCookieIsSecureWhenConfigured(t *testing.T) {
 	}
 	found := false
 	for _, c := range rr.Result().Cookies() {
-		if c.Name == "kysignon_session" {
+		if c.Name == "kyidentity_session" {
 			found = true
 			if !c.Secure {
-				t.Error("session cookie was issued without the Secure flag despite KYSIGNON_SECURE_COOKIES")
+				t.Error("session cookie was issued without the Secure flag despite KYIDENTITY_SECURE_COOKIES")
 			}
 		}
 	}
@@ -596,8 +596,8 @@ func TestDisablingUserRevokesOutstandingTokens(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrf)
 	req.Header.Set(StepUpHeader, mintStepUp(t, srv, adminCookie, "PUT /api/admin/users/"+victim.ID))
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: adminCookie})
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: adminCookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -678,8 +678,8 @@ func TestForgedCSRFTokenIsRejected(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/admin/users", strings.NewReader(`{"username":"x"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", forged)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: forged})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: forged})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 
@@ -698,8 +698,8 @@ func TestIssuedCSRFTokenIsAccepted(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/api/admin/users/"+admin.ID+"/revoke-sessions", nil)
 	req.Header.Set("X-CSRF-Token", csrf)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 
@@ -754,8 +754,8 @@ func adminRequestWithStepUp(t *testing.T, srv *Server, method, path, cookie, bod
 	req := httptest.NewRequest(method, path, reader)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrf)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	if stepUp != "" {
 		req.Header.Set(StepUpHeader, stepUp)
 	}

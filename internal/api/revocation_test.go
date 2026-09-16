@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -234,7 +234,7 @@ func TestAuthResponsesCarryTheUnionFieldsTheUIValidates(t *testing.T) {
 	cookie := newSession(t, db, user, time.Now().UTC().Add(time.Hour))
 
 	req := httptest.NewRequest("GET", "/api/auth/me", nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	rr := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -247,7 +247,7 @@ func TestAuthResponsesCarryTheUnionFieldsTheUIValidates(t *testing.T) {
 	login.Header.Set("Content-Type", "application/json")
 	csrf := srv.middleware.IssueCSRFToken("")
 	login.Header.Set("X-CSRF-Token", csrf)
-	login.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	login.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	loginRR := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(loginRR, login)
 	if loginRR.Code != http.StatusOK {

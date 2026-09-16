@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // Keep a real browser's cookies across password/MFA completion and redirects.
@@ -26,8 +26,8 @@ func interactionBrowser(t *testing.T, srv *Server) func(string, string, any) *ht
 			t.Fatal(err)
 		}
 		req := httptest.NewRequest(method, path, strings.NewReader(string(data)))
-		csrf := srv.middleware.IssueCSRFToken(cookies["kysignon_session"])
-		cookies["kysignon_csrf"] = csrf
+		csrf := srv.middleware.IssueCSRFToken(cookies["kyidentity_session"])
+		cookies["kyidentity_csrf"] = csrf
 		for name, value := range cookies {
 			req.AddCookie(&http.Cookie{Name: name, Value: value})
 		}
@@ -158,7 +158,7 @@ func TestAuthorizationInteractionMFA(t *testing.T) {
 			defer cleanup()
 			u := newUser(t, db, "user")
 			newClient(t, db, "app", []string{"https://app.example/cb"}, []string{"openid"})
-			secret, _, err := srv.mfaEngine.GenerateTOTPSecret(u.Username, "KySignOn")
+			secret, _, err := srv.mfaEngine.GenerateTOTPSecret(u.Username, "KyIdentity")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -348,7 +348,7 @@ func TestAuthorizationRateLimitCookiesCannotExhaustSharedMap(t *testing.T) {
 	req.RemoteAddr = "198.51.100.42:12345"
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrf)
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	r := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(r, req)
 	if r.Code != 401 {

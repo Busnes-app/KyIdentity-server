@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 // The listing and the export share one filter, an auditor may use both, formula-shaped
@@ -163,7 +163,7 @@ func TestAuditExportMarksIncompleteOutput(t *testing.T) {
 	}
 	// A client that refuses the bytes: the completion row is a failure, not a success.
 	req := httptest.NewRequest("GET", "/api/admin/audit-events/export?format=csv&action=oauth.", nil)
-	req.AddCookie(&http.Cookie{Name: "kysignon_session", Value: admin})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: admin})
 	fw := &failingWriter{ResponseRecorder: *httptest.NewRecorder()}
 	srv.httpServer.Handler.ServeHTTP(fw, req)
 	events, _, _ := db.SearchAuditEvents(store.AuditFilter{Action: "admin.audit_exported", Limit: 5})

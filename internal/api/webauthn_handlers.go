@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/audit"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/mfa"
-	"github.com/Busness-app/kysignon-server/internal/store"
-	"github.com/Busness-app/kysignon-server/internal/webauthn"
+	"github.com/Busness-app/kyidentity-server/internal/audit"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/mfa"
+	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/webauthn"
 	"github.com/google/uuid"
 )
 
@@ -106,7 +106,7 @@ func (h *WebAuthnHandler) BeginRegistration(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(beginRegistrationResponse{
 		Challenge:  challenge,
 		RPID:       h.rpID,
-		RPName:     "KySignOn",
+		RPName:     "KyIdentity",
 		UserHandle: base64.RawURLEncoding.EncodeToString([]byte(user.ID)),
 		Username:   user.Username,
 		Exclude:    exclude,

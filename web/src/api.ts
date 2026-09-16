@@ -58,7 +58,7 @@ export async function apiRequest(path: string, options: ApiOptions = {}): Promis
       headers.set('X-CSRF-Token', await fetchCSRF(refreshCSRF));
     }
     if (stepUpToken) {
-      headers.set('X-KySignOn-StepUp', stepUpToken);
+      headers.set('X-KyIdentity-StepUp', stepUpToken);
     }
     return fetch(path, { ...init, headers, credentials: 'same-origin' });
   };
@@ -74,10 +74,10 @@ export async function apiRequest(path: string, options: ApiOptions = {}): Promis
 
   if (res.status === 401 && !path.startsWith('/api/auth/login') &&
       !(path.startsWith('/api/auth/step-up') && isRecord(data) && data.error === 'invalid_credentials')) {
-    window.dispatchEvent(new CustomEvent('kysignon:unauthorized'));
+    window.dispatchEvent(new CustomEvent('kyidentity:unauthorized'));
   }
 
-  if (res.status === 403 && isRecord(data) && data.error === 'enrollment_required') { window.dispatchEvent(new CustomEvent('kysignon:enrollment-required')); }
+  if (res.status === 403 && isRecord(data) && data.error === 'enrollment_required') { window.dispatchEvent(new CustomEvent('kyidentity:enrollment-required')); }
   if (!res.ok) {
     throw new ApiError(res.status, data);
   }

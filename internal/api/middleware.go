@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 type contextKey string
@@ -241,7 +241,7 @@ func (m *MiddlewareManager) allowRateLimit(key string, maxTokens, refillRate flo
 // nil. This is the single definition of "logged in"; RequireAuth and OptionalAuth both
 // use it so no endpoint can accidentally apply a weaker rule.
 func (m *MiddlewareManager) authenticate(r *http.Request) (*store.User, *store.Session) {
-	cookie, err := r.Cookie("kysignon_session")
+	cookie, err := r.Cookie("kyidentity_session")
 	if err != nil || cookie.Value == "" {
 		return nil, nil
 	}
@@ -321,7 +321,7 @@ func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 			return
 		}
 
-		csrfCookie, err := r.Cookie("kysignon_csrf")
+		csrfCookie, err := r.Cookie("kyidentity_csrf")
 		if err != nil || csrfCookie.Value == "" {
 			http.Error(w, `{"error":"invalid_csrf","error_description":"CSRF cookie missing"}`, http.StatusForbidden)
 			return
@@ -341,7 +341,7 @@ func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 		// which any sibling subdomain or network attacker able to write a cookie for this
 		// domain can do. For a request that carries a session, the token must also be one
 		// this server issued to that session.
-		if sessionCookie, err := r.Cookie("kysignon_session"); err == nil && sessionCookie.Value != "" {
+		if sessionCookie, err := r.Cookie("kyidentity_session"); err == nil && sessionCookie.Value != "" {
 			if !m.csrfTokenMatchesSession(sessionCookie.Value, csrfCookie.Value) {
 				http.Error(w, `{"error":"invalid_csrf","error_description":"CSRF token was not issued for this session"}`, http.StatusForbidden)
 				return

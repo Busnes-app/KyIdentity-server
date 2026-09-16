@@ -1,14 +1,14 @@
-# KySignOn WebAuthn Passkeys Implementation Plan
+# KyIdentity WebAuthn Passkeys Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add WebAuthn passkeys to KySignOn as a second authentication factor, so KyAuth (and any other passkey provider) can satisfy MFA without a merge between KySignOn and KyPassword.
+**Goal:** Add WebAuthn passkeys to KyIdentity as a second authentication factor, so KyAuth (and any other passkey provider) can satisfy MFA without a merge between KyIdentity and KyPassword.
 
 **Architecture:** A new `internal/webauthn` package verifies ES256 assertions using only stdlib. Credentials and single-use challenges live in two new SQLite tables. Enrollment reuses the existing step-up grant machinery; authentication plugs into the existing `mfaToken` flow exactly as TOTP and recovery codes do, so `Login` gains one method type and nothing else changes.
 
 **Tech Stack:** Go 1.26.5 stdlib (`crypto/ecdsa`, `crypto/x509`, `crypto/sha256`, `encoding/binary`, `encoding/base64`, `encoding/json`), SQLite via `modernc.org/sqlite`, React 19 + TypeScript + Vite, browser WebAuthn API.
 
-**Spec:** `design.md` (sections 2, 8, 9), plus the architecture decision recorded in "Design decisions" below. This plan implements the passkey half of the KySignOn/KyPassword separation analysis; the companion plans are listed at the end.
+**Spec:** `design.md` (sections 2, 8, 9), plus the architecture decision recorded in "Design decisions" below. This plan implements the passkey half of the KyIdentity/KyPassword separation analysis; the companion plans are listed at the end.
 
 ## Global Constraints
 
@@ -32,13 +32,13 @@ These are locked. Do not relitigate them mid-implementation; if one turns out to
 
 **2. No CBOR parser.** The browser exposes `AuthenticatorAttestationResponse.getPublicKey()` (SPKI DER, readable by `crypto/x509.ParsePKIXPublicKey`) and `.getAuthenticatorData()` (raw bytes). We send those two instead of `attestationObject`, so no CBOR decoder is needed anywhere.
 
-  Why this is safe: KySignOn does not verify attestation, so it never trusts the authenticator's identity claim regardless. A malicious client could submit a public key that did not come from the authenticator whose authData it also submitted — but it would be registering that credential against its own already-authenticated, step-up-gated session, and every later assertion is bound to the stored key by signature verification. The trust boundary is unchanged.
+  Why this is safe: KyIdentity does not verify attestation, so it never trusts the authenticator's identity claim regardless. A malicious client could submit a public key that did not come from the authenticator whose authData it also submitted — but it would be registering that credential against its own already-authenticated, step-up-gated session, and every later assertion is bound to the stored key by signature verification. The trust boundary is unchanged.
 
   `getPublicKey()` returns `null` for algorithms the browser cannot export. We request ES256 only, which every browser can export.
 
 **3. ES256 (`-7`) only.** `pubKeyCredParams` requests ES256 and nothing else. RSA passkeys are rare, and supporting them means a second verification path for no user we have.
 
-**4. Backup flags are recorded, not enforced.** The BE/BS bits in authenticator data tell us whether a credential is synced to a provider cloud. We store both, show "synced" vs "device-bound" in the UI, and put the flag in the enrollment audit event. We do **not** reject synced passkeys — that would break iCloud Keychain and Windows Hello for every user to solve a problem that belongs one layer down. The rule that KySignOn login credentials must live in KyAuth's device-local `totp_vault.kdbx` rather than the KyPassword-synced `passwords_vault.kdbx` is enforced in KyAuth (companion plan 2), where the vault choice actually happens.
+**4. Backup flags are recorded, not enforced.** The BE/BS bits in authenticator data tell us whether a credential is synced to a provider cloud. We store both, show "synced" vs "device-bound" in the UI, and put the flag in the enrollment audit event. We do **not** reject synced passkeys — that would break iCloud Keychain and Windows Hello for every user to solve a problem that belongs one layer down. The rule that KyIdentity login credentials must live in KyAuth's device-local `totp_vault.kdbx` rather than the KyPassword-synced `passwords_vault.kdbx` is enforced in KyAuth (companion plan 2), where the vault choice actually happens.
 
 **5. Enrolling a passkey does not revoke sibling sessions.** `EnableTOTP` revokes them because it *replaces* the account's single TOTP factor. Passkeys are additive and a user may enroll several, so revoking every other session on each enrollment is hostile. The enrollment is audited and requires a step-up grant, which is the control that matters.
 
@@ -61,7 +61,7 @@ These are locked. Do not relitigate them mid-implementation; if one turns out to
 - `internal/store/store.go` — two tables in `migrate()`, the CRUD methods, and the two MFA-wipe paths.
 - `internal/api/server.go` — routes.
 - `internal/api/auth_handlers.go:139-152` — `Login` advertises `webauthn` when the user has a credential.
-- `cmd/kysignon/main.go:148-160` — housekeeping deletes expired challenges.
+- `cmd/kyidentity/main.go:148-160` — housekeeping deletes expired challenges.
 - `web/src/types.ts` — `Passkey` interface.
 - `web/src/components/DeviceSettings.tsx` — enroll, list, delete.
 - `web/src/components/LoginView.tsx` — `webauthn` MFA mode.
@@ -357,13 +357,13 @@ Expected: FAIL — the package does not exist (`no Go files in .../internal/weba
 Create `internal/webauthn/webauthn.go`:
 
 ```go
-// Package webauthn implements the subset of WebAuthn Level 2 that KySignOn needs: verifying
+// Package webauthn implements the subset of WebAuthn Level 2 that KyIdentity needs: verifying
 // an ES256 assertion from a registered credential, and reading the authenticator data that
 // accompanies registration.
 //
 // It deliberately parses no CBOR. The browser exposes the credential public key in SPKI form
 // (AuthenticatorAttestationResponse.getPublicKey) and the raw authenticator data
-// (getAuthenticatorData), both of which the standard library reads. KySignOn does not verify
+// (getAuthenticatorData), both of which the standard library reads. KyIdentity does not verify
 // attestation, so re-deriving those two values from the attestation object ourselves would
 // buy no property we do not already have.
 package webauthn
@@ -469,7 +469,7 @@ type RegistrationInput struct {
 }
 
 // VerifyRegistration checks a credential creation response. Attestation is not verified:
-// KySignOn accepts any authenticator, so the statement would be recorded and never acted on.
+// KyIdentity accepts any authenticator, so the statement would be recorded and never acted on.
 func VerifyRegistration(in RegistrationInput) (AuthenticatorData, error) {
 	if err := VerifyClientData(in.ClientDataJSON, "webauthn.create", in.Challenge, in.Origin); err != nil {
 		return AuthenticatorData{}, err
@@ -1027,16 +1027,16 @@ Then run the whole package to prove nothing regressed: `go test -race ./internal
 
 - [ ] **Step 8: Wire housekeeping and commit**
 
-In `cmd/kysignon/main.go`, inside the `housekeep` closure (line 148), after `_ = dbStore.DeleteExpiredMFAChallenges()`:
+In `cmd/kyidentity/main.go`, inside the `housekeep` closure (line 148), after `_ = dbStore.DeleteExpiredMFAChallenges()`:
 
 ```go
 			_ = dbStore.DeleteExpiredWebAuthnChallenges()
 ```
 
 ```bash
-gofmt -w internal/store cmd/kysignon
+gofmt -w internal/store cmd/kyidentity
 go vet ./...
-git add internal/store cmd/kysignon
+git add internal/store cmd/kyidentity
 git commit -m "feat(store): add webauthn credential and challenge tables"
 ```
 
@@ -1053,7 +1053,7 @@ git commit -m "feat(store): add webauthn credential and challenge tables"
 - Consumes: everything from Tasks 1 and 2.
 - Produces: `config.Config` gains `RPID` and `Origin`; `NewWebAuthnHandler(s *store.Store, audit *audit.Logger, mfaEngine *mfa.Engine, mm *MiddlewareManager, rpID, origin string) *WebAuthnHandler` with methods `BeginRegistration`, `FinishRegistration`, `ListPasskeys`, `DeletePasskey`, `BeginLogin`, `FinishLogin` (the last two are implemented in Task 4). Routes: `POST /api/user/passkeys/register/begin`, `POST /api/user/passkeys/register/finish`.
 
-**Existing test fixtures to reuse — read these before writing anything.** `internal/api/stepup_test.go:28` defines `newStepUpFixture(t)`, which creates a server, a user with password `f.pass`, a live session, and a matching CSRF pair. `f.post(t, path, body, stepUpToken)` issues an authenticated POST with all of that attached; `f.grant(t)` mints a step-up token. Requests are dispatched with `f.srv.httpServer.Handler.ServeHTTP(w, req)` — there is no `Server.Handler()` method. The session cookie is `kysignon_session` and the CSRF cookie is `kysignon_csrf`. **Every non-GET request must carry both the `kysignon_csrf` cookie and a matching `X-CSRF-Token` header** (`internal/api/middleware.go:316`); for a request that also carries a session, the token must be `srv.middleware.IssueCSRFToken(sessionToken)`. None of the passkey routes are on the CSRF bypass list, and none should be added to it.
+**Existing test fixtures to reuse — read these before writing anything.** `internal/api/stepup_test.go:28` defines `newStepUpFixture(t)`, which creates a server, a user with password `f.pass`, a live session, and a matching CSRF pair. `f.post(t, path, body, stepUpToken)` issues an authenticated POST with all of that attached; `f.grant(t)` mints a step-up token. Requests are dispatched with `f.srv.httpServer.Handler.ServeHTTP(w, req)` — there is no `Server.Handler()` method. The session cookie is `kyidentity_session` and the CSRF cookie is `kyidentity_csrf`. **Every non-GET request must carry both the `kyidentity_csrf` cookie and a matching `X-CSRF-Token` header** (`internal/api/middleware.go:316`); for a request that also carries a session, the token must be `srv.middleware.IssueCSRFToken(sessionToken)`. None of the passkey routes are on the CSRF bypass list, and none should be added to it.
 
 - [ ] **Step 1: Derive the RP ID at startup**
 
@@ -1073,7 +1073,7 @@ and populate them immediately after the existing issuer validation block (line 6
 ```go
 	rpID, rpOrigin, err := webauthn.RPIDFromIssuer(issuerURL)
 	if err != nil {
-		return nil, fmt.Errorf("KYSIGNON_ISSUER_URL cannot be used as a WebAuthn relying party: %w", err)
+		return nil, fmt.Errorf("KYIDENTITY_ISSUER_URL cannot be used as a WebAuthn relying party: %w", err)
 	}
 ```
 
@@ -1083,8 +1083,8 @@ Add to `internal/config/security_test.go`:
 
 ```go
 func TestLoadDerivesWebAuthnRelyingParty(t *testing.T) {
-	t.Setenv("KYSIGNON_ISSUER_URL", "https://auth.example.com/")
-	t.Setenv("KYSIGNON_DATA_DIR", t.TempDir())
+	t.Setenv("KYIDENTITY_ISSUER_URL", "https://auth.example.com/")
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
 
 	cfg, err := Load()
 	if err != nil {
@@ -1128,8 +1128,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Yoshiofthewire/kysignon-server/internal/auth"
-	"github.com/Yoshiofthewire/kysignon-server/internal/store"
+	"github.com/Yoshiofthewire/kyidentity-server/internal/auth"
+	"github.com/Yoshiofthewire/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -1216,7 +1216,7 @@ func anonPost(t *testing.T, srv *Server, path string, body any) *httptest.Respon
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	csrf := "test-csrf-" + uuid.New().String()
-	req.AddCookie(&http.Cookie{Name: "kysignon_csrf", Value: csrf})
+	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	req.Header.Set("X-CSRF-Token", csrf)
 	w := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(w, req)
@@ -1326,11 +1326,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Yoshiofthewire/kysignon-server/internal/audit"
-	"github.com/Yoshiofthewire/kysignon-server/internal/crypto"
-	"github.com/Yoshiofthewire/kysignon-server/internal/mfa"
-	"github.com/Yoshiofthewire/kysignon-server/internal/store"
-	"github.com/Yoshiofthewire/kysignon-server/internal/webauthn"
+	"github.com/Yoshiofthewire/kyidentity-server/internal/audit"
+	"github.com/Yoshiofthewire/kyidentity-server/internal/crypto"
+	"github.com/Yoshiofthewire/kyidentity-server/internal/mfa"
+	"github.com/Yoshiofthewire/kyidentity-server/internal/store"
+	"github.com/Yoshiofthewire/kyidentity-server/internal/webauthn"
 	"github.com/google/uuid"
 )
 
@@ -1425,7 +1425,7 @@ func (h *WebAuthnHandler) BeginRegistration(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(beginRegistrationResponse{
 		Challenge:  challenge,
 		RPID:       h.rpID,
-		RPName:     "KySignOn",
+		RPName:     "KyIdentity",
 		UserHandle: base64.RawURLEncoding.EncodeToString([]byte(user.ID)),
 		Username:   user.Username,
 		Exclude:    exclude,
@@ -1691,7 +1691,7 @@ func TestPasskeyLoginIssuesSession(t *testing.T) {
 
 	sessionIssued := false
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "kysignon_session" && c.Value != "" {
+		if c.Name == "kyidentity_session" && c.Value != "" {
 			sessionIssued = true
 		}
 	}
@@ -2113,7 +2113,7 @@ func (h *WebAuthnHandler) DeletePasskey(w http.ResponseWriter, r *http.Request) 
 }
 ```
 
-Add `"github.com/Yoshiofthewire/kysignon-server/internal/store"` to the imports if the file does not already have it.
+Add `"github.com/Yoshiofthewire/kyidentity-server/internal/store"` to the imports if the file does not already have it.
 
 - [ ] **Step 4: Wire the routes**
 
@@ -2440,7 +2440,7 @@ Expected: PASS and a clean build.
 Then run the app and confirm the ceremony end to end against a real authenticator:
 
 ```bash
-go build -o kysignon . && KYSIGNON_ISSUER_URL=http://localhost:5867 ./kysignon
+go build -o kyidentity . && KYIDENTITY_ISSUER_URL=http://localhost:5867 ./kyidentity
 ```
 
 Enrol a passkey from Settings, sign out, sign in with it. Note that browsers permit WebAuthn on `http://localhost` but nowhere else without TLS; testing against a LAN IP will fail in the browser, not in this code.
@@ -2473,7 +2473,7 @@ In "Integration Requirements", add:
 
 ```markdown
 **Passkeys are bound to the issuer's origin.** The relying party ID is the hostname of
-`KYSIGNON_ISSUER_URL` and the accepted origin is its scheme, host and port. Changing the
+`KYIDENTITY_ISSUER_URL` and the accepted origin is its scheme, host and port. Changing the
 issuer URL invalidates every enrolled passkey, because the browser will not offer a
 credential registered under a different RP ID. Browsers permit WebAuthn over plain HTTP only
 on `localhost`, so a deployment reached by IP or by a name without TLS cannot enrol one.
@@ -2520,8 +2520,8 @@ Add to the root `AGENTS.md`, in whichever section holds the equivalent notes for
 public key and raw authenticator data the browser exports, because attestation is not
 verified and re-deriving those from the attestation object would buy nothing.
 
-KySignOn records whether a passkey is backup-eligible but never rejects one for it. The rule
-that a KySignOn login credential must live in KyAuth's device-local `totp_vault.kdbx` rather
+KyIdentity records whether a passkey is backup-eligible but never rejects one for it. The rule
+that a KyIdentity login credential must live in KyAuth's device-local `totp_vault.kdbx` rather
 than the KyPasswords-synced `passwords_vault.kdbx` is enforced in KyAuth, where the vault is
 chosen.
 ```
@@ -2558,10 +2558,10 @@ git commit -m "docs: record passkey support and the vault boundary"
 
 These come from the same analysis and are deliberately separate — each produces working software on its own, and each lives in a different repository.
 
-**Plan 1b — Passwordless passkey login (KySignOn).** Discoverable credentials, a `userHandle` → user lookup, and a challenge issued before any user is known. Depends on this plan. Only worth doing if you want to drop the password step entirely.
+**Plan 1b — Passwordless passkey login (KyIdentity).** Discoverable credentials, a `userHandle` → user lookup, and a challenge issued before any user is known. Depends on this plan. Only worth doing if you want to drop the password step entirely.
 
-**Plan 2 — KyAuth vault placement (`kyauth-android`).** Route KySignOn login passkeys into the device-local `totp_vault.kdbx` instead of the KyPasswords-synced `passwords_vault.kdbx`, or tag them non-syncable. This is what actually enforces `design.md:41` ("MFA independent of password vault"); the server records the flag but cannot enforce it. **Do this immediately after this plan** — until it lands, a user enrolling from KyAuth may put their KySignOn factor in the synced vault.
+**Plan 2 — KyAuth vault placement (`kyauth-android`).** Route KyIdentity login passkeys into the device-local `totp_vault.kdbx` instead of the KyPasswords-synced `passwords_vault.kdbx`, or tag them non-syncable. This is what actually enforces `design.md:41` ("MFA independent of password vault"); the server records the flag but cannot enforce it. **Do this immediately after this plan** — until it lands, a user enrolling from KyAuth may put their KyIdentity factor in the synced vault.
 
-**Plan 3 — KyPassword becomes OIDC-only (`kypassword-server`).** Delete `internal/users`' local directory role, keeping only the vault-unlock verifier that cryptographically cannot move to KySignOn. Removes the duplicate account store and makes KySignOn the single directory.
+**Plan 3 — KyPassword becomes OIDC-only (`kypassword-server`).** Delete `internal/users`' local directory role, keeping only the vault-unlock verifier that cryptographically cannot move to KyIdentity. Removes the duplicate account store and makes KyIdentity the single directory.
 
-**Plan 4 — Shared pairing and audit code (`ky_server_base`).** `zero_code_pairing_handoff_spec.md` is byte-identical across `kysignon-server` and `kypassword-server` (md5 `24899bae8d11ac740c58dcc5c3581e32`), and both implement 90-second PIN/QR pairing and a hash-chained audit trail separately. Consolidate into `ky_server_base`. Lowest urgency, highest blast radius — do it last, behind full test coverage on both callers.
+**Plan 4 — Shared pairing and audit code (`ky_server_base`).** `zero_code_pairing_handoff_spec.md` is byte-identical across `kyidentity-server` and `kypassword-server` (md5 `24899bae8d11ac740c58dcc5c3581e32`), and both implement 90-second PIN/QR pairing and a hash-chained audit trail separately. Consolidate into `ky_server_base`. Lowest urgency, highest blast radius — do it last, behind full test coverage on both callers.

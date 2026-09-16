@@ -1,6 +1,6 @@
-# Restoring KySignOn from a capsule
+# Restoring KyIdentity from a capsule
 
-This is the procedure for bringing a KySignOn back from a `.kycap` backup after the original
+This is the procedure for bringing a KyIdentity back from a `.kycap` backup after the original
 is gone. It needs three things, held by three different parties by design:
 
 | Thing | Who has it |
@@ -24,19 +24,22 @@ command pins and verifies a digest.
 
 ## What a capsule holds
 
-Everything a fresh KySignOn needs to be the old one:
+Everything a fresh KyIdentity needs to be the old one:
 
 | Path in the capsule | What it is |
 |---|---|
-| `data/kysignon.db` | The whole directory: users, sessions, OAuth clients, MFA state, audit log, settings |
+| `data/kyidentity.db` | The whole directory: users, sessions, OAuth clients, MFA state, audit log, settings |
 | `data/jwt_rs256.key` | The RSA signing key. Without it every issued token and every OIDC client breaks |
 | `data/encryption.key` | 32 bytes. Every TOTP secret and paired-system token in the database is encrypted under it |
 | `data/secret.key` | 32 bytes. Signs sessions and CSRF tokens |
 | `data/recovery.pub` | The suite recovery public key, so the restored server comes back pinned (present when the backup was paired) |
-| `config/kysignon.json` | Issuer URL, port, TTLs, app name. For your reference when re-deploying; nothing reads it |
+| `config/kyidentity.json` | Issuer URL, port, TTLs, app name. For your reference when re-deploying; nothing reads it |
 
 The restored directory is the live directory in the clear. Treat it like the running server's
 `/data`.
+
+Capsules created before this release contain `data/kysignon.db` and `config/kysignon.json`; the
+server still picks up those legacy filenames through the fallback in `internal/config/config.go`.
 
 ## Before you start
 
@@ -53,10 +56,10 @@ The restored directory is the live directory in the clear. Treat it like the run
 
 ## Step 1: open the capsule
 
-With the binary (from a release, or `go build ./cmd/kysignon`):
+With the binary (from a release, or `go build ./cmd/kyidentity`):
 
 ```bash
-kysignon restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored
+kyidentity restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored
 ```
 
 For a published-image install, and always on a fresh recovery machine, pin the commit you
@@ -70,25 +73,25 @@ in `.env` after the drill: see the README's upgrade note for moving off it.
 
 ```bash
 sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
-d=$(docker buildx imagetools inspect ghcr.io/busness-app/kysignon-server:$sha --format '{{.Manifest.Digest}}') \
-  && gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
-       --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
-  && [ "$(gh attestation verify "oci://ghcr.io/busness-app/kysignon-server@$d" --repo Busness-app/kysignon-server \
-       --cert-identity https://github.com/Busness-app/kysignon-server/.github/workflows/ci.yml@refs/heads/master \
+d=$(docker buildx imagetools inspect ghcr.io/busness-app/kyidentity-server:$sha --format '{{.Manifest.Digest}}') \
+  && gh attestation verify "oci://ghcr.io/busness-app/kyidentity-server@$d" --repo Busness-app/kyidentity-server \
+       --cert-identity https://github.com/Busness-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
+  && [ "$(gh attestation verify "oci://ghcr.io/busness-app/kyidentity-server@$d" --repo Busness-app/kyidentity-server \
+       --cert-identity https://github.com/Busness-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
        --format json --jq '.[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit')" = "$sha" ] \
-  && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYSIGNON_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
-      && echo "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" >> "$t" && mv "$t" .env) \
-  && grep -qxF "KYSIGNON_IMAGE=ghcr.io/busness-app/kysignon-server@$d" .env
+  && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYIDENTITY_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
+      && echo "KYIDENTITY_IMAGE=ghcr.io/busness-app/kyidentity-server@$d" >> "$t" && mv "$t" .env) \
+  && grep -qxF "KYIDENTITY_IMAGE=ghcr.io/busness-app/kyidentity-server@$d" .env
 ```
 
 Then, in the same shell (the check compares against `$d`), refuse to go on unless the image in
-effect is exactly that digest. A source install passes on its `kysignon-server:local` build instead,
+effect is exactly that digest. A source install passes on its `kyidentity-server:local` build instead,
 since `docker-compose.build.yml` wins over the pin, which is what a source install wants. The
 two refusal messages are distinct on purpose: a broken invocation is not an unpinned image.
 
 ```bash
 imgs=$(docker compose config --images) || { echo 'refusing: compose could not resolve the image'; false; }
-printf '%s\n' "$imgs" | grep -qxF "ghcr.io/busness-app/kysignon-server@$d" || printf '%s\n' "$imgs" | grep -qxF 'kysignon-server:local' \
+printf '%s\n' "$imgs" | grep -qxF "ghcr.io/busness-app/kyidentity-server@$d" || printf '%s\n' "$imgs" | grep -qxF 'kyidentity-server:local' \
   || { echo "refusing: image in effect is '$imgs', not the digest verified above"; false; }
 ```
 
@@ -103,7 +106,7 @@ mkdir -m 700 restored
 docker compose run --rm --no-deps --user "$(id -u):$(id -g)" \
   -v "$PWD/cap-KySignOn-XXXXXXXX.kycap:/in.kycap:ro" \
   -v "$PWD/restored:/restored" \
-  kysignon-server restore -capsule /in.kycap -to /restored
+  kyidentity-server restore -capsule /in.kycap -to /restored
 ```
 
 The bare binary needs none of this: it creates a missing target itself at mode 700.
@@ -122,7 +125,7 @@ Only for a rehearsal with synthetic test shares, never with real cards, stdin ca
 Delete it afterwards; a file holding k shares is the suite key in a file.
 
 ```bash
-kysignon restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored < test-shares.txt
+kyidentity restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored < test-shares.txt
 ```
 
 On success it prints the authenticated manifest:
@@ -144,7 +147,7 @@ Failures you may see, and what they mean:
 
 | Message | Meaning |
 |---|---|
-| `capsule is for service "KySignOn", this instance is "X"` | You passed `-service` or set `KYSIGNON_APP_NAME` to something else. Only override `-service` if the backup was made under a different app name |
+| `capsule is for service "KySignOn", this instance is "X"` | You passed `-service` or set `KYIDENTITY_APP_NAME` to something else. Only override `-service` if the backup was made under a different app name |
 | `shamir: fewer shares than the threshold requires` | Fewer than k valid lines were read. Check for a missed line or a truncated paste |
 | `restore target directory is not empty` | Use an empty directory. The restore never overwrites |
 | a decrypt or integrity error | Wrong shares (from a different ceremony), a share mistyped, or a damaged file. Re-download and retry with the custodians |
@@ -156,7 +159,7 @@ find restored -type f -printf '%m %p\n'
 ```
 
 Expect five or six files, all mode `600`, under `restored/data` and `restored/config`.
-`cat restored/config/kysignon.json` shows the issuer URL and port the old server ran with.
+`cat restored/config/kyidentity.json` shows the issuer URL and port the old server ran with.
 
 ## Step 3: put it in service
 
@@ -164,14 +167,14 @@ The server reads keys from `/data` files unless the same keys are given by envir
 Choose one form and be consistent.
 
 **Docker Compose (the normal deployment).** The data volume must be empty before the copy,
-for the same reason Step 1 demands an empty directory. A capsule carries `kysignon.db` but
+for the same reason Step 1 demands an empty directory. A capsule carries `kyidentity.db` but
 never its `-wal` and `-shm` sidecars; a write-ahead log left over from the old database
 would be replayed into the restored one at first open, mixing two databases. Any other
 leftover file the capsule does not overwrite would survive too.
 
 ```bash
 docker compose down
-docker compose run --rm --no-deps --entrypoint sh kysignon-server -c 'ls -A /data | wc -l'
+docker compose run --rm --no-deps --entrypoint sh kyidentity-server -c 'ls -A /data | wc -l'
 ```
 
 That must print `0`. If it does not, the old volume still holds data, and you keep a copy
@@ -182,7 +185,7 @@ the image's user cannot write a directory it does not own:
 
 ```bash
 mkdir -m 700 old-data
-docker compose run --rm --no-deps --user root -v "$PWD/old-data:/out" --entrypoint sh kysignon-server \
+docker compose run --rm --no-deps --user root -v "$PWD/old-data:/out" --entrypoint sh kyidentity-server \
   -c 'cp -a /data/. /out/ && ls -A /out | wc -l'
 ```
 
@@ -194,32 +197,32 @@ Only with the copy confirmed, remove the volume. This is irreversible:
 
 ```bash
 docker compose down -v
-docker compose run --rm --no-deps --entrypoint sh kysignon-server -c 'ls -A /data | wc -l'
+docker compose run --rm --no-deps --entrypoint sh kyidentity-server -c 'ls -A /data | wc -l'
 ```
 
 With `0` confirmed, copy the restored files in and start:
 
 ```bash
 docker compose run --rm --no-deps --user root --entrypoint sh \
-  -v "$PWD/restored/data:/from:ro" kysignon-server \
-  -c 'cp -a /from/. /data/ && chown -R kysignon:kysignon /data && chmod 600 /data/*'
+  -v "$PWD/restored/data:/from:ro" kyidentity-server \
+  -c 'cp -a /from/. /data/ && chown -R kyidentity:kyidentity /data && chmod 600 /data/*'
 docker compose up -d
 ```
 
 The one-off container mounts the same `kysignon_data` volume the service uses, so the copy
-lands where the server will read it, owned by the image's `kysignon` user. Keep
-`KYSIGNON_ISSUER_URL` identical to the old deployment, from `config/kysignon.json`: the RSA
+lands where the server will read it, owned by the image's `kyidentity` user. Keep
+`KYIDENTITY_ISSUER_URL` identical to the old deployment, from `config/kyidentity.json`: the RSA
 key, every OIDC client and every passkey are bound to it.
 
 The restored `encryption.key` and `secret.key` files are the keys; the file form is the one
-to use. If the old deployment supplied `KYSIGNON_SECRET_KEY` or `KYSIGNON_ENCRYPTION_KEY` by
+to use. If the old deployment supplied `KYIDENTITY_SECRET_KEY` or `KYIDENTITY_ENCRYPTION_KEY` by
 environment instead, the environment wins when both are present, so either remove those
 variables so the files are read, or keep supplying the same values from wherever the old
 deployment kept them. Never print a key to a terminal or type one on a command line: it lands
 in scrollback, session recordings and shell history. If you must produce the hex form, write
 it straight into the compose project's `.env` with `umask 077` and nothing else on stdout.
 
-**Bare binary.** Point `KYSIGNON_DATA_DIR` at `restored/data`, set `KYSIGNON_ISSUER_URL` as
+**Bare binary.** Point `KYIDENTITY_DATA_DIR` at `restored/data`, set `KYIDENTITY_ISSUER_URL` as
 before, and start.
 
 ## Step 4: prove it
@@ -232,7 +235,7 @@ before, and start.
    deposit again without re-pairing; click Back up now to prove it. If the screen says the
    key is missing, `data/recovery.pub` did not come across; re-pair, which is refused unless
    KyRecovery hands back the same key.
-3. Have one downstream application sign in through KySignOn. That proves the RSA key.
+3. Have one downstream application sign in through KyIdentity. That proves the RSA key.
 4. Check the audit log: the last events before the restore are there, followed by your
    sign-in.
 
@@ -248,7 +251,7 @@ against the restored server.
    Users, repeated for every user in the list. After hardware loss that is enough. After a
    suspected compromise it is not; rotating `secret.key` (step 3) is what invalidates every
    session and CSRF token at once, including any the list does not show you.
-2. Walk the old audit log in `old-data/kysignon.db` from `created_at` to the moment the old
+2. Walk the old audit log in `old-data/kyidentity.db` from `created_at` to the moment the old
    server was lost (the restored server's log stops at `created_at`), and re-apply
    what happened after the capsule: disabled accounts, rotated passwords, deleted or rotated
    OAuth clients, removed paired systems, reset MFA.
@@ -266,14 +269,14 @@ against the restored server.
 
    ```bash
    docker compose down
-   docker compose run --rm --no-deps --user root --entrypoint sh kysignon-server \
+   docker compose run --rm --no-deps --user root --entrypoint sh kyidentity-server \
      -c 'rm /data/jwt_rs256.key /data/secret.key && ls -A /data'
    docker compose up -d
-   docker compose logs kysignon-server | head -20
+   docker compose logs kyidentity-server | head -20
    ```
 
-   The listing must still show `encryption.key` and `kysignon.db`. Environment form: if
-   `KYSIGNON_SECRET_KEY` is set, replace its value with `openssl rand -hex 32` written
+   The listing must still show `encryption.key` and `kyidentity.db`. Environment form: if
+   `KYIDENTITY_SECRET_KEY` is set, replace its value with `openssl rand -hex 32` written
    straight into `.env`, not echoed, then `docker compose up -d`; the RSA key is always a file.
 
    What this does: every session and CSRF token is invalid, so everyone signs in again;

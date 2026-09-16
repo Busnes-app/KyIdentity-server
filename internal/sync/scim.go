@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/Busness-app/ky-primitives/scim"
-	"github.com/Busness-app/kysignon-server/internal/crypto"
-	"github.com/Busness-app/kysignon-server/internal/store"
+	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func supportedSystemType(kind string) bool {
@@ -323,7 +323,7 @@ func (e *Engine) TestSystem(ctx context.Context, sys *store.PairedSystem) error 
 	}
 	// A filtered Users read checks authenticated directory access; discovery may
 	// be public. An empty result is a valid authenticated collection response.
-	_, err = e.findSCIMUser(ctx, e.scimClient(sys, secret), "kysignon-connection-test")
+	_, err = e.findSCIMUser(ctx, e.scimClient(sys, secret), "kyidentity-connection-test")
 	if errors.Is(err, scim.ErrNotFound) {
 		return nil
 	}

@@ -1,7 +1,7 @@
-**Repo:** kysignon-server
-**Worktree:** /home/yoshi/busness.app/kysignon-server/.claude/worktrees/pr11-oidc-logout (on merged master; no server PR outstanding)
+**Repo:** kyidentity-server
+**Worktree:** /home/yoshi/busness.app/kyidentity-server/.claude/worktrees/pr11-oidc-logout (on merged master; no server PR outstanding)
 
-# KySignOn access and identity lifecycle implementation plan
+# KyIdentity access and identity lifecycle implementation plan
 
 Date: 2026-09-05. Status: implementation started. PR 01 merged as GitHub PR #24;
 PR 02 merged as GitHub PR #25; PR 03 merged as GitHub PR #26. PR 04 is split into
@@ -68,13 +68,13 @@ delegated administration, temporary access, and access explanations and alerts.
 Include access requests and approvals, which were proposed as the follow-on to
 temporary access. Ship in independently reviewable PRs with functional UI increments.
 
-KySignOn remains a single-organization authority for downstream access. An upstream
-directory may own selected users and attributes; KySignOn still decides suite access.
+KyIdentity remains a single-organization authority for downstream access. An upstream
+directory may own selected users and attributes; KyIdentity still decides suite access.
 Inbound SCIM is provisioning, not upstream login federation. SAML, external OIDC login,
 LDAP, refresh tokens, passwordless primary login, device posture, nested/dynamic groups,
 and a general policy scripting language are outside this feature set.
 
-The program comprises 23 KySignOn PRs and four required downstream adoption PRs.
+The program comprises 23 KyIdentity PRs and four required downstream adoption PRs.
 A shared-library change is conditional on an actual gap in the released primitives.
 The labels permit splitting an oversized PR further without changing acceptance gates.
 
@@ -473,7 +473,7 @@ final role behavior. Each product may stage its adoption but must pass the same 
 - Apply versioned suite directory events idempotently and atomically with local access
   disablement. Reject stale reactivation. Provide authenticated observed-state checks
   needed for reconciliation; document exactly what acknowledgment guarantees.
-- Map configured app roles without granting every KySignOn admin product administration.
+- Map configured app roles without granting every KyIdentity admin product administration.
   Sensitive app actions initiate fresh authorization and bind its result to that action.
 - Preserve E2EE data. Specifically for KyPasswords, distinguish identity password reset
   from vault decryption/recovery: resetting SSO must not promise to unlock a vault.
@@ -890,7 +890,7 @@ does not prematurely change those current-behavior statements. The existing sepa
 
 - Authentication request parameters and authentication claims follow [OpenID Connect
   Core](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest). The combination
-  of app/group policies and reason codes above is KySignOn's proposed product behavior.
+  of app/group policies and reason codes above is KyIdentity's proposed product behavior.
 - Inbound/outbound resources and supported operations follow [SCIM schema RFC
   7643](https://www.rfc-editor.org/rfc/rfc7643.html) and [SCIM protocol RFC
   7644](https://www.rfc-editor.org/rfc/rfc7644.html). Publish an honest supported profile;

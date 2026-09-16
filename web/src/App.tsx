@@ -48,9 +48,9 @@ export const App: React.FC = () => {
       setCurrentUser(null);
     };
 
-    window.addEventListener('kysignon:unauthorized', handleUnauthorized);
-    window.addEventListener('kysignon:enrollment-required',checkSession);
-    return () => {window.removeEventListener('kysignon:unauthorized', handleUnauthorized);window.removeEventListener('kysignon:enrollment-required',checkSession);};
+    window.addEventListener('kyidentity:unauthorized', handleUnauthorized);
+    window.addEventListener('kyidentity:enrollment-required',checkSession);
+    return () => {window.removeEventListener('kyidentity:unauthorized', handleUnauthorized);window.removeEventListener('kyidentity:enrollment-required',checkSession);};
   }, []);
 
   const handleLogout = async () => {

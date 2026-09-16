@@ -469,7 +469,7 @@ export const AdminClients: React.FC = () => {
                     onChange={(e) => setLaunchUrl(e.target.value)}
                   />
                   <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
-                    If provided, clicking the app tile in the KySignOn launcher will open this exact auto-login URL.
+                    If provided, clicking the app tile in the KyIdentity launcher will open this exact auto-login URL.
                   </span>
                 </div>
 
