@@ -18,20 +18,24 @@ jobs:
           set -euo pipefail
           img="ghcr.io/${GITHUB_REPOSITORY,,}"
           ident="https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/master"
-          # every compose file and every non-historical doc an operator might copy from
-          mapfile -t files < <(git ls-files 'docker-compose*.yml' '*.md' | grep -v '^docs/superpowers/')
+          # the retired owner is claimable by anyone. It may appear only in the README's two warning
+          # lines, or in a file that opens with the "Retired owner:" annotation (a dated record), and
+          # never as a fetchable coordinate or a fetch instruction, annotated or not
+          mapfile -t all < <(git ls-files 'docker-compose*.yml' '*.md')
+          bad=$(grep -in 'busness-app' README.md | grep -vE '^[0-9]+:## Upgrading from ghcr\.io/busness-app$' | grep -vE '^[0-9]+:The GitHub organisation was renamed on 2026-09-16 and the image now lives at ' || true); [ -z "$bad" ] || { echo "retired owner outside the README warning lines:"; echo "$bad"; exit 1; }
+          bad=$(grep -il 'busness-app' "${all[@]}" | grep -vx README.md | xargs -r grep -L 'Retired owner:' || true); [ -z "$bad" ] || { echo "retired owner named without the retirement annotation in:"; echo "$bad"; exit 1; }
+          bad=$(grep -nE 'github\.com/busness-app|(go get|go mod edit -replace|^module )[^\n]*busness-app' -i "${all[@]}" || true); [ -z "$bad" ] || { echo "fetchable coordinate under the retired owner:"; echo "$bad"; exit 1; }
+          # operator-facing files: every compose file and every non-historical doc
+          mapfile -t files < <(printf '%s\n' "${all[@]}" | grep -v '^docs/superpowers/')
           [ "${#files[@]}" -ge 2 ] || { echo "no compose/doc files found"; exit 1; }
           for f in "${files[@]}"; do [ -r "$f" ] || { echo "$f is not readable"; exit 1; }; done
-          # the retired owner is claimable by anyone: it may be named only by the README's warning
-          # and by the superseded findings note that records what was believed before the move
-          if bad=$(grep -il 'busness-app' "${files[@]}" | grep -vx -e README.md -e docs/shamir-interop-findings.md); then echo "retired owner named in:"; echo "$bad"; exit 1; fi
           # the image key itself, not just some occurrence in a comment
           grep -E '^\s*image:' docker-compose.yml | grep -qF "$img" || { echo "image: does not default to $img"; exit 1; }
-          # every image coordinate, in either spelling of any org; the retired namespace only as
-          # the bare name in the README's warning, never as an image
+          # every image coordinate, in either spelling of any org; the retired namespace only as the
+          # bare name on the README warning lines checked above, never as an image
           seen=$(grep -ohE 'ghcr\.io/[A-Za-z0-9._/-]+' "${files[@]}" | sort -u || true)
           [ -n "$seen" ] || { echo "no image coordinate found"; exit 1; }
-          if bad=$(printf '%s\n' "$seen" | grep -vxF -e "$img" -e "ghcr.io/busness-app"); then echo "image coordinate outside $img:"; echo "$bad"; exit 1; fi
+          bad=$(printf '%s\n' "$seen" | grep -vxF -e "$img" -e "ghcr.io/busness-app" || true); [ -z "$bad" ] || { echo "image coordinate outside $img:"; echo "$bad"; exit 1; }
           # the pin block itself must carry both flags; a value elsewhere does not excuse it
           for f in docker-compose.yml $( [ -f docs/RESTORE.md ] && echo docs/RESTORE.md ); do
             if [ "$f" = docker-compose.yml ] || grep -qE -- '--(repo|cert-identity) ' "$f"; then
@@ -42,10 +46,10 @@ jobs:
           # collected by option name so a malformed value cannot slip past the check
           repos=$(grep -ohE -- '--repo [^ ]+' "${files[@]}" | sed 's/^--repo //' | sort -u || true)
           [ -n "$repos" ] || { echo "no --repo found"; exit 1; }
-          if bad=$(printf '%s\n' "$repos" | grep -vxF "$GITHUB_REPOSITORY"); then echo "--repo outside $GITHUB_REPOSITORY:"; echo "$bad"; exit 1; fi
+          bad=$(printf '%s\n' "$repos" | grep -vxF "$GITHUB_REPOSITORY" || true); [ -z "$bad" ] || { echo "--repo outside $GITHUB_REPOSITORY:"; echo "$bad"; exit 1; }
           certs=$(grep -ohE -- '--cert-identity [^ ]+' "${files[@]}" | sed 's/^--cert-identity //' | sort -u || true)
           [ -n "$certs" ] || { echo "no --cert-identity found"; exit 1; }
-          if bad=$(printf '%s\n' "$certs" | grep -vxF "$ident"); then echo "--cert-identity outside $ident:"; echo "$bad"; exit 1; fi
+          bad=$(printf '%s\n' "$certs" | grep -vxF "$ident" || true); [ -z "$bad" ] || { echo "--cert-identity outside $ident:"; echo "$bad"; exit 1; }
           # README may only point at docs that exist
           (grep -ohE 'docs/[A-Za-z0-9._/-]+\.md' README.md || true) | sort -u | xargs -r -I{} test -f {}
       - uses: actions/setup-go@v5
