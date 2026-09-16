@@ -40,20 +40,23 @@ func NewEngine(s *store.Store, km *crypto.JWTKeyManager, issuerURL string) *Engi
 
 // OIDCConfiguration returns RFC 8414 / OpenID Connect Discovery metadata.
 type OIDCConfiguration struct {
-	ACRValuesSupported               []string `json:"acr_values_supported"`
-	Issuer                           string   `json:"issuer"`
-	AuthorizationEndpoint            string   `json:"authorization_endpoint"`
-	TokenEndpoint                    string   `json:"token_endpoint"`
-	UserinfoEndpoint                 string   `json:"userinfo_endpoint"`
-	JwksURI                          string   `json:"jwks_uri"`
-	RevocationEndpoint               string   `json:"revocation_endpoint,omitempty"`
-	ResponseTypesSupported           []string `json:"response_types_supported"`
-	SubjectTypesSupported            []string `json:"subject_types_supported"`
-	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
-	ScopesSupported                  []string `json:"scopes_supported"`
-	TokenEndpointAuthMethods         []string `json:"token_endpoint_auth_methods_supported"`
-	CodeChallengeMethodsSupported    []string `json:"code_challenge_methods_supported"`
-	ClaimsSupported                  []string `json:"claims_supported"`
+	ACRValuesSupported                []string `json:"acr_values_supported"`
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	UserinfoEndpoint                  string   `json:"userinfo_endpoint"`
+	JwksURI                           string   `json:"jwks_uri"`
+	RevocationEndpoint                string   `json:"revocation_endpoint,omitempty"`
+	EndSessionEndpoint                string   `json:"end_session_endpoint"`
+	BackchannelLogoutSupported        bool     `json:"backchannel_logout_supported"`
+	BackchannelLogoutSessionSupported bool     `json:"backchannel_logout_session_supported"`
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	SubjectTypesSupported             []string `json:"subject_types_supported"`
+	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`
+	ScopesSupported                   []string `json:"scopes_supported"`
+	TokenEndpointAuthMethods          []string `json:"token_endpoint_auth_methods_supported"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	ClaimsSupported                   []string `json:"claims_supported"`
 }
 
 // SupportsRevocation reports whether /oauth/revoke actually invalidates a token. Discovery
@@ -62,20 +65,23 @@ func (e *Engine) SupportsRevocation() bool { return true }
 
 func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 	cfg := OIDCConfiguration{
-		ACRValuesSupported:               []string{PasswordACR, MFAACR},
-		Issuer:                           e.issuerURL,
-		AuthorizationEndpoint:            e.issuerURL + "/oauth/authorize",
-		TokenEndpoint:                    e.issuerURL + "/oauth/token",
-		UserinfoEndpoint:                 e.issuerURL + "/oauth/userinfo",
-		JwksURI:                          e.issuerURL + "/.well-known/jwks.json",
-		ResponseTypesSupported:           []string{"code"},
-		SubjectTypesSupported:            []string{"public"},
-		IDTokenSigningAlgValuesSupported: []string{"RS256"},
-		ScopesSupported:                  []string{"openid", "profile", "email"},
-		TokenEndpointAuthMethods:         []string{"client_secret_post", "client_secret_basic", "none"},
-		CodeChallengeMethodsSupported:    []string{"S256"},
-		ClaimsSupported: []string{"sub", "iss", "aud", "exp", "iat", "jti", "nonce", "auth_time", "amr", "acr",
-			"preferred_username", "name", "email", "role"},
+		ACRValuesSupported:                []string{PasswordACR, MFAACR},
+		Issuer:                            e.issuerURL,
+		AuthorizationEndpoint:             e.issuerURL + "/oauth/authorize",
+		TokenEndpoint:                     e.issuerURL + "/oauth/token",
+		UserinfoEndpoint:                  e.issuerURL + "/oauth/userinfo",
+		JwksURI:                           e.issuerURL + "/.well-known/jwks.json",
+		ResponseTypesSupported:            []string{"code"},
+		SubjectTypesSupported:             []string{"public"},
+		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
+		ScopesSupported:                   []string{"openid", "profile", "email"},
+		TokenEndpointAuthMethods:          []string{"client_secret_post", "client_secret_basic", "none"},
+		CodeChallengeMethodsSupported:     []string{"S256"},
+		EndSessionEndpoint:                e.issuerURL + "/oauth/logout",
+		BackchannelLogoutSupported:        true,
+		BackchannelLogoutSessionSupported: true,
+		ClaimsSupported: []string{"sub", "iss", "aud", "exp", "iat", "jti", "nonce", "auth_time", "amr", "acr", "sid",
+			"preferred_username", "name", "email", "email_verified", "roles", "groups", "role"},
 	}
 	if e.SupportsRevocation() {
 		cfg.RevocationEndpoint = e.issuerURL + "/oauth/revoke"
@@ -107,11 +113,27 @@ func ValidatePKCE(verifier, challenge, method string) bool {
 // and a redirect URI is the only thing deciding who receives an authorization code. A
 // deployment that needs three ports registers three URIs.
 func (e *Engine) ValidateRedirectURI(client *store.OAuthClient, uri string) bool {
-	if uri == "" || client == nil {
+	if client == nil {
+		return false
+	}
+	return registeredExactly(client.RedirectURIsJSON, uri)
+}
+
+// ValidatePostLogoutRedirectURI applies the same exact-match rule to the URIs a client
+// registered for RP-initiated logout.
+func (e *Engine) ValidatePostLogoutRedirectURI(client *store.OAuthClient, uri string) bool {
+	if client == nil {
+		return false
+	}
+	return registeredExactly(client.PostLogoutRedirectURIsJSON, uri)
+}
+
+func registeredExactly(registeredJSON, uri string) bool {
+	if uri == "" {
 		return false
 	}
 	var registered []string
-	if err := json.Unmarshal([]byte(client.RedirectURIsJSON), &registered); err != nil {
+	if err := json.Unmarshal([]byte(registeredJSON), &registered); err != nil {
 		return false
 	}
 	for _, candidate := range registered {
@@ -327,6 +349,12 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 
 	now := time.Now().UTC()
 	exp := now.Add(AccessTokenTTL)
+	// A token never outlives the access it carries: the union's end or the account's.
+	if end, err := e.store.AccessEndsAt(user.ID, clientID); err != nil {
+		return nil, err
+	} else if end != nil && end.Before(exp) {
+		exp = *end
+	}
 	accessJTI := uuid.New().String()
 
 	// Register the token before handing it out, so revocation has something to revoke.
@@ -352,20 +380,21 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 
 	var idToken string
 	if hasScope(authCode.Scope, "openid") {
-		claims := map[string]any{
-			"iss":                e.issuerURL,
-			"sub":                user.ID,
-			"aud":                clientID,
-			"exp":                exp.Unix(),
-			"iat":                now.Unix(),
-			"jti":                uuid.New().String(),
-			"token_use":          "id_token",
-			"username":           user.Username,
-			"preferred_username": user.Username,
-			"name":               user.DisplayName,
-			"email":              user.Email,
-			"role":               user.Role,
+		sid, err := e.store.EnsureClientSession(clientID, authCode.SessionID, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to bind session to client: %w", err)
 		}
+		claims, err := e.identityClaims(user, clientID, authCode.Scope)
+		if err != nil {
+			return nil, err
+		}
+		claims["sid"] = sid
+		claims["iss"] = e.issuerURL
+		claims["aud"] = clientID
+		claims["exp"] = exp.Unix()
+		claims["iat"] = now.Unix()
+		claims["jti"] = uuid.New().String()
+		claims["token_use"] = "id_token"
 		addAuthenticationClaims(claims, authCode.AuthenticationEvidence)
 		if authCode.Nonce != "" {
 			claims["nonce"] = authCode.Nonce
@@ -379,7 +408,7 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 	return &TokenResponse{
 		AccessToken: accessToken,
 		TokenType:   "Bearer",
-		ExpiresIn:   int(AccessTokenTTL.Seconds()),
+		ExpiresIn:   int(exp.Sub(now).Seconds()),
 		IDToken:     idToken,
 		Scope:       authCode.Scope,
 	}, nil
@@ -444,15 +473,56 @@ func (e *Engine) GetUserinfo(tokenString string) (map[string]any, error) {
 		return nil, errors.New("user not found or inactive")
 	}
 
-	return map[string]any{
-		"sub":                user.ID,
-		"username":           user.Username,
-		"preferred_username": user.Username,
-		"name":               user.DisplayName,
-		"email":              user.Email,
-		"email_verified":     true,
-		"role":               user.Role,
-	}, nil
+	aud, _ := claims["aud"].(string)
+	scope, _ := claims["scope"].(string)
+	return e.identityClaims(user, aud, scope)
+}
+
+// ErrClaimsTooLarge means the roles and groups mapped for this user and app do not fit
+// in a token. It is a configuration problem for the administrator to fix, so it is
+// reported rather than silently truncated.
+var ErrClaimsTooLarge = errors.New("identity claims exceed the token size limit; reduce the roles or groups mapped for this user")
+
+// identityClaims are the claims about the user an ID token and UserInfo share, gated by
+// the granted scope: profile for names, email for the address, and always the app's own
+// roles (plus its assigned groups when it asks) and the legacy global role only while
+// the app keeps it on. Nothing about another app ever appears.
+func (e *Engine) identityClaims(user *store.User, clientID, scope string) (map[string]any, error) {
+	claims := map[string]any{"sub": user.ID}
+	if hasScope(scope, "profile") {
+		claims["username"] = user.Username
+		claims["preferred_username"] = user.Username
+		claims["name"] = user.DisplayName
+	}
+	if hasScope(scope, "email") {
+		claims["email"] = user.Email
+		claims["email_verified"] = user.EmailVerifiedAt != nil
+	}
+	app, err := e.store.UserAppClaims(user.ID, clientID)
+	if err != nil {
+		return nil, err
+	}
+	if app.Roles == nil {
+		app.Roles = []string{}
+	}
+	claims["roles"] = app.Roles
+	if app.GroupsClaim {
+		if app.Groups == nil {
+			app.Groups = []string{}
+		}
+		claims["groups"] = app.Groups
+	}
+	if app.LegacyRole {
+		claims["role"] = user.Role
+	}
+	encoded, err := json.Marshal(claims)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > store.MaxIdentityClaimBytes {
+		return nil, fmt.Errorf("%w (%d roles, %d groups)", ErrClaimsTooLarge, len(app.Roles), len(app.Groups))
+	}
+	return claims, nil
 }
 
 // RevokeToken implements RFC 7009. The caller must authenticate as the client the token

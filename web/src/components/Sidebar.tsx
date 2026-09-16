@@ -1,6 +1,6 @@
 import React from 'react';
-import { User } from '../types';
-import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut } from 'lucide-react';
+import { Access, User } from '../types';
+import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox, Bell } from 'lucide-react';
 
 interface SidebarProps {
   user: User;
@@ -23,10 +23,14 @@ const ADMIN: Item[] = [
   ['admin-enrollment', 'MFA policies', Shield],
   ['admin-groups', 'Groups', Users],
   ['admin-app-registry', 'App connections', LayoutGrid],
+  ['admin-requests', 'Access requests', Inbox],
   ['admin-systems', 'Suite sync', RefreshCw],
+  ['admin-scim', 'Inbound SCIM', Database],
   ['admin-clients', 'OAuth clients', Key],
   ['admin-audit', 'Audit log', FileText],
+  ['admin-alerts', 'Alerts', Bell],
   ['admin-backup', 'Disaster recovery', Archive],
+  ['admin-mail', 'Mail delivery', Mail],
 ];
 
 export const Brand: React.FC = () => (
@@ -41,7 +45,20 @@ export const Brand: React.FC = () => (
   </div>
 );
 
+/** Navigation is a convenience; the server enforces every route. */
+function adminItems(a: Access | undefined): Item[] {
+  if (!a) return [];
+  if (a.admin || a.auditor) return ADMIN;
+  return ADMIN.filter(([tab]) => (tab === 'admin-users' && a.helpdesk) || ((tab === 'admin-app-registry' || tab === 'admin-requests') && a.appOwner.length > 0));
+}
+
+function roleLabel(user: User): string {
+  if (user.role === 'admin') return 'Administrator';
+  return adminItems(user.access).length > 0 ? 'Delegated administrator' : 'User';
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onLogout }) => {
+  const admin = adminItems(user.access);
   const group = (title: string, items: Item[]) => (
     <nav className="side-nav" aria-label={title}>
       <h4>{title}</h4>
@@ -62,11 +79,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
     <aside className="side">
       <Brand />
       {group('Your account', ACCOUNT)}
-      {user.role === 'admin' && group('Administration', ADMIN)}
+      {admin.length > 0 && group('Administration', admin)}
       <div className="side-me">
         <div className="side-who">
           <b>{user.username}</b>
-          <span>{user.role === 'admin' ? 'Administrator' : 'User'}</span>
+          <span>{roleLabel(user)}</span>
         </div>
         <button className="icon-btn" onClick={onLogout} title="Sign out" aria-label="Sign out">
           <LogOut size={16} />

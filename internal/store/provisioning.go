@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Busness-app/ky-primitives/scim"
@@ -30,8 +31,7 @@ func (s *Store) migrateProvisioning() error {
 		{`SELECT COUNT(*) FROM pragma_table_info('paired_systems') WHERE name='groups_enabled'`, `ALTER TABLE paired_systems ADD COLUMN groups_enabled BOOLEAN NOT NULL DEFAULT 0`},
 		{`SELECT COUNT(*) FROM pragma_table_info('account_sync_events') WHERE name='revision'`, `ALTER TABLE account_sync_events ADD COLUMN revision INTEGER NOT NULL DEFAULT 0`},
 		{`SELECT COUNT(*) FROM pragma_table_info('scim_user_links') WHERE name='kind'`, `ALTER TABLE scim_user_links ADD COLUMN kind TEXT NOT NULL DEFAULT 'user';
- DROP INDEX IF EXISTS scim_remote_user;
- CREATE UNIQUE INDEX scim_remote_resource ON scim_user_links(system_id,kind,remote_id) WHERE remote_id<>''`},
+ CREATE UNIQUE INDEX IF NOT EXISTS scim_remote_resource ON scim_user_links(system_id,kind,remote_id) WHERE remote_id<>''`},
 		{`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sync_resource_state'`, `CREATE TABLE sync_resource_state (
  system_id TEXT NOT NULL REFERENCES paired_systems(id) ON DELETE CASCADE,
  resource_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'user',
@@ -40,6 +40,9 @@ func (s *Store) migrateProvisioning() error {
  PRIMARY KEY(system_id,resource_id));
  INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision)
  SELECT a.system_id,e.user_id,1,1,1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id IS NOT NULL`},
+		// offboarded_at is the durable acknowledgement of a deactivation or deletion; the
+		// outbox row that carried it is pruned, this is not.
+		{`SELECT COUNT(*) FROM pragma_table_info('sync_resource_state') WHERE name='offboarded_at'`, `ALTER TABLE sync_resource_state ADD COLUMN offboarded_at DATETIME`},
 	} {
 		var n int
 		if err = tx.QueryRow(c.probe).Scan(&n); err != nil {
@@ -51,10 +54,26 @@ func (s *Store) migrateProvisioning() error {
 			}
 		}
 	}
+	// scim_remote_user predates group links and its uniqueness rule refuses a group and
+	// a user that share a remote id. Dropping it unconditionally repairs a database
+	// where an earlier start recreated it after the column probe had gone quiet.
+	if _, err = tx.Exec(`DROP INDEX IF EXISTS scim_remote_user`); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
 func scimUserPayload(u *User, active bool) ([]byte, error) {
+	var roles []scim.MultiValue
+	if u.Role != "" {
+		roles = []scim.MultiValue{{Value: u.Role, Primary: true}}
+	}
+	return scimUserPayloadWithRoles(u, active, roles)
+}
+
+// scimUserPayloadWithRoles always states the role list, empty included: a receiver that
+// merges attributes must see "no roles" as an assertion, not as a missing field.
+func scimUserPayloadWithRoles(u *User, active bool, roles []scim.MultiValue) ([]byte, error) {
 	res := scim.User{
 		Schemas: []string{scim.UserSchema}, ID: u.ID, ExternalID: u.ID, UserName: u.Username,
 		DisplayName: u.DisplayName, Name: &scim.Name{Formatted: u.DisplayName}, Active: active,
@@ -63,10 +82,13 @@ func scimUserPayload(u *User, active bool) ([]byte, error) {
 	if u.Email != "" {
 		res.Emails = []scim.MultiValue{{Value: u.Email, Type: "work", Primary: true}}
 	}
-	if u.Role != "" {
-		res.Roles = []scim.MultiValue{{Value: u.Role, Primary: true}}
+	if roles == nil {
+		roles = []scim.MultiValue{}
 	}
-	return json.Marshal(res)
+	return json.Marshal(struct {
+		scim.User
+		Roles []scim.MultiValue `json:"roles"`
+	}{res, roles})
 }
 
 // A deleted or unknown user still needs a body the receiver can act on.
@@ -80,13 +102,26 @@ func scimGroupPayload(groupID string) []byte {
 	return b
 }
 
-const userColumns = `id, username, display_name, email, password_hash, role, status, created_at, updated_at`
+const userColumns = `id, username, display_name, email, password_hash, role, status, pending, email_verified_at, source_connector_id, external_id, source_active, locally_disabled, ends_at, created_at, updated_at`
 
+// scanUser reads a user row. An account past its end date reads as disabled, so every
+// decision that checks status honours the end date without a worker.
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
-	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	var verified sql.NullTime
+	var source, external sql.NullString
+	var endsAt sql.NullInt64
+	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.Pending, &verified, &source, &external, &u.SourceActive, &u.LocallyDisabled, &endsAt, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
+	}
+	if verified.Valid {
+		at := verified.Time
+		u.EmailVerifiedAt = &at
+	}
+	u.SourceConnectorID, u.ExternalID = source.String, external.String
+	if u.EndsAt = timeFromUnix(endsAt); u.EndsAt != nil && !u.EndsAt.After(time.Now()) {
+		u.Status = "disabled"
 	}
 	return u, err
 }
@@ -99,6 +134,8 @@ type desiredState struct {
 	// force sends even when the receiver already holds this state (resync); for users
 	// it sends user.created so a missing suite account is recreated.
 	force bool
+	// deleted announces removal from the directory instead of an inactive profile.
+	deleted bool
 }
 
 // queueDesiredStateTx records the new desired state and the outbox work that delivers it.
@@ -122,12 +159,14 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	}
 	var revision int
 	if err := tx.QueryRow(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,revision,members) VALUES(?,?,?,?,1,?)
- ON CONFLICT(system_id,resource_id) DO UPDATE SET active=excluded.active,revision=revision+1,members=excluded.members RETURNING revision`,
+ ON CONFLICT(system_id,resource_id) DO UPDATE SET active=excluded.active,revision=revision+1,members=excluded.members,offboarded_at=NULL RETURNING revision`,
 		d.systemID, d.resourceID, d.kind, d.active, d.members).Scan(&revision); err != nil {
 		return err
 	}
 	eventType := "user.updated"
 	switch {
+	case d.deleted:
+		eventType = "user.deleted"
 	case d.kind == "group" && d.active:
 		eventType = "group.updated"
 	case d.kind == "group":
@@ -147,10 +186,6 @@ func insertResourceEventTx(tx *sql.Tx, systemID, resourceID, eventType string, p
 // queueUserNotificationTx sends an event that carries no desired state (MFA reset) to
 // every connector that currently holds the account. It neither supersedes nor is superseded.
 func queueUserNotificationTx(tx *sql.Tx, u *User, eventType string, now time.Time) error {
-	payload, err := scimUserPayload(u, u.Status == "active")
-	if err != nil {
-		return err
-	}
 	rows, err := tx.Query(`SELECT st.system_id,st.revision FROM sync_resource_state st JOIN paired_systems s ON s.id=st.system_id
  WHERE st.resource_id=? AND st.kind='user' AND st.active AND s.status<>'disabled'`, u.ID)
 	if err != nil {
@@ -173,6 +208,10 @@ func queueUserNotificationTx(tx *sql.Tx, u *User, eventType string, now time.Tim
 		return err
 	}
 	for _, t := range targets {
+		payload, err := scimUserPayloadTx(tx, u, u.Status == "active", t.id)
+		if err != nil {
+			return err
+		}
 		if err := insertResourceEventTx(tx, t.id, u.ID, eventType, payload, t.rev, now); err != nil {
 			return err
 		}
@@ -189,11 +228,11 @@ func queueUserUpdateTx(tx *sql.Tx, u *User, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	payload, err := scimUserPayload(u, true)
-	if err != nil {
-		return err
-	}
 	for _, sys := range systems {
+		payload, err := scimUserPayloadTx(tx, u, true, sys)
+		if err != nil {
+			return err
+		}
 		if err := queueDesiredStateTx(tx, desiredState{systemID: sys, resourceID: u.ID, kind: "user", active: true, payload: payload}, now); err != nil {
 			return err
 		}
@@ -239,7 +278,12 @@ func scanPairs(rows *sql.Rows, err error) ([]resourcePair, error) {
 // desired state to the state effective access now implies. It runs inside each access
 // mutation and periodically from the worker, so cascades that bypass a mutation path
 // (client deletion, foreign-key cascades) still converge.
+// reconcileRuns counts whole-directory reconciliations; tests use it to prove a batch
+// write reconciles once rather than once per row.
+var reconcileRuns atomic.Int64
+
 func reconcileProvisioningTx(tx *sql.Tx, now time.Time) error {
+	reconcileRuns.Add(1)
 	gains, err := scanPairs(tx.Query(`SELECT s.id,u.id FROM paired_systems s JOIN app_registry a ON a.system_id=s.id
  JOIN effective_app_access e ON e.app_id=a.id JOIN users u ON u.id=e.user_id
  LEFT JOIN sync_resource_state st ON st.system_id=s.id AND st.resource_id=u.id
@@ -259,7 +303,7 @@ func reconcileProvisioningTx(tx *sql.Tx, now time.Time) error {
 		if err != nil || u == nil {
 			return err
 		}
-		payload, err := scimUserPayload(u, true)
+		payload, err := scimUserPayloadTx(tx, u, true, p.systemID)
 		if err != nil {
 			return err
 		}
@@ -324,7 +368,7 @@ func desiredGroupsTx(tx *sql.Tx, systemID string) ([]desiredGroup, error) {
 // The hash covers the name and the in-scope member set, so any change re-queues the
 // group once. Delivery reads the live membership again, so a stale snapshot is harmless.
 func groupMembersHashTx(tx *sql.Tx, g desiredGroup) (string, error) {
-	ids, err := scanStrings(tx.Query(`SELECT m.user_id FROM group_memberships m WHERE m.group_id=?
+	ids, err := scanStrings(tx.Query(`SELECT m.user_id FROM live_group_memberships m WHERE m.group_id=?
  AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=? AND e.user_id=m.user_id) ORDER BY m.user_id`, g.groupID, g.systemID))
 	if err != nil {
 		return "", err
@@ -421,7 +465,7 @@ func (s *Store) ResyncSystem(systemID string) error {
 		return err
 	}
 	for _, u := range users {
-		payload, err := scimUserPayload(u, true)
+		payload, err := scimUserPayloadTx(tx, u, true, systemID)
 		if err != nil {
 			return err
 		}
@@ -456,7 +500,7 @@ func (s *Store) SCIMGroupMembers(systemID, groupID string) (name string, exists 
 	if err != nil {
 		return "", false, nil, err
 	}
-	remoteIDs, err = scanStrings(s.db.Query(`SELECT l.remote_id FROM group_memberships m
+	remoteIDs, err = scanStrings(s.db.Query(`SELECT l.remote_id FROM live_group_memberships m
  JOIN scim_user_links l ON l.system_id=? AND l.kind='user' AND l.local_id=m.user_id AND l.remote_id<>''
  WHERE m.group_id=? AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=? AND e.user_id=m.user_id)
  ORDER BY l.remote_id`, systemID, groupID, systemID))
@@ -469,6 +513,13 @@ func (s *Store) SCIMGroupMembers(systemID, groupID string) (name string, exists 
 // A confirmed first delivery establishes the remote link, so groups holding this user
 // are re-queued to pick the member up.
 func provisionedTx(tx *sql.Tx, ev AccountSyncEvent, now time.Time) error {
+	if ev.EventType == "user.deleted" || ev.EventType == "user.updated" {
+		// A delivered inactive state for the current revision is the acknowledgement the
+		// offboarding view reads; a newer desired state clears it.
+		if _, err := tx.Exec(`UPDATE sync_resource_state SET offboarded_at=? WHERE system_id=? AND resource_id=? AND kind='user' AND NOT active AND revision=?`, now, ev.SystemID, ev.UserID, ev.Revision); err != nil {
+			return err
+		}
+	}
 	switch ev.EventType {
 	case "user.created", "user.updated", "group.updated":
 	case "group.deleted":
@@ -490,7 +541,7 @@ func provisionedTx(tx *sql.Tx, ev AccountSyncEvent, now time.Time) error {
 	}
 	for _, g := range groups {
 		var member bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM group_memberships WHERE group_id=? AND user_id=?)`, g.groupID, ev.UserID).Scan(&member); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM live_group_memberships WHERE group_id=? AND user_id=?)`, g.groupID, ev.UserID).Scan(&member); err != nil {
 			return err
 		}
 		if !member {

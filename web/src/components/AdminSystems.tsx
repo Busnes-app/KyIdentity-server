@@ -296,6 +296,7 @@ export const AdminSystems: React.FC = () => {
                   <td>
                     {s.groupsEnabled && <span className="status-badge active">Groups</span>}
                     {needsReview(s) && <span className="status-badge warn">Protocol review required — delivery paused</span>}
+                    {s.provisioningHold && <span className="status-badge warn">Held after a restore — reconcile to resume delivery</span>}
                     {!needsReview(s) && s.status === 'active' && (
                       <span className="status-badge active">
                         <CheckCircle size={12} /> Active

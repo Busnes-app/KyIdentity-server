@@ -323,8 +323,14 @@ func (m *JWTKeyManager) GetJWKS() JWKS {
 
 // SignJWT creates an RS256 signed JWT string with the given claims.
 func (m *JWTKeyManager) SignJWT(claims map[string]any) (string, error) {
+	return m.SignJWTWithType("JWT", claims)
+}
+
+// SignJWTWithType signs claims under an explicit `typ` header, so tokens with a different
+// purpose (logout tokens are `logout+jwt`) are distinguishable before their claims are read.
+func (m *JWTKeyManager) SignJWTWithType(typ string, claims map[string]any) (string, error) {
 	header := map[string]any{
-		"typ": "JWT",
+		"typ": typ,
 		"alg": "RS256",
 		"kid": m.KeyID,
 	}
@@ -355,6 +361,17 @@ func (m *JWTKeyManager) SignJWT(claims map[string]any) (string, error) {
 
 // VerifyJWT validates the signature and expiration of an RS256 signed JWT.
 func (m *JWTKeyManager) VerifyJWT(tokenString string) (map[string]any, error) {
+	return m.verifyJWT(tokenString, false)
+}
+
+// VerifyExpiredJWT validates the signature of an RS256 signed JWT but tolerates a past
+// exp. It exists for RP-initiated logout, where an ID token hint identifies a login
+// after the token itself has expired; it must never gate access.
+func (m *JWTKeyManager) VerifyExpiredJWT(tokenString string) (map[string]any, error) {
+	return m.verifyJWT(tokenString, true)
+}
+
+func (m *JWTKeyManager) verifyJWT(tokenString string, allowExpired bool) (map[string]any, error) {
 	parts := strings.Split(tokenString, ".")
 	if len(parts) != 3 {
 		return nil, errors.New("invalid token format")
@@ -386,7 +403,7 @@ func (m *JWTKeyManager) VerifyJWT(tokenString string) (map[string]any, error) {
 	if !ok {
 		return nil, errors.New("token has no exp claim")
 	}
-	if time.Now().Unix() > int64(exp) {
+	if !allowExpired && time.Now().Unix() > int64(exp) {
 		return nil, errors.New("token expired")
 	}
 

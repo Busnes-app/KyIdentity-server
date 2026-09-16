@@ -26,7 +26,7 @@ func (s *Store) migrateEnrollmentPolicy() error {
 	}
 	// Views and their dependent triggers are replaced in the same transaction as the schema.
 	if _, err = tx.Exec(`DROP VIEW IF EXISTS mfa_session_access; DROP VIEW IF EXISTS enrollment_requirements; DROP VIEW IF EXISTS applicable_enrollment_policies;
- DROP TRIGGER IF EXISTS enrollment_new_user; DROP TRIGGER IF EXISTS enrollment_user_role; DROP TRIGGER IF EXISTS enrollment_new_group; DROP TRIGGER IF EXISTS enrollment_new_member; DROP TRIGGER IF EXISTS enrollment_role_compatibility;`); err != nil {
+ DROP TRIGGER IF EXISTS enrollment_new_user; DROP TRIGGER IF EXISTS enrollment_user_role; DROP TRIGGER IF EXISTS enrollment_new_group; DROP TRIGGER IF EXISTS enrollment_new_member; DROP TRIGGER IF EXISTS enrollment_role_compatibility; DROP TRIGGER IF EXISTS enrollment_new_delegation;`); err != nil {
 		return err
 	}
 	if err = tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('enrollment_policies')`).Scan(&exists); err != nil {
@@ -67,13 +67,13 @@ func (s *Store) migrateEnrollmentPolicy() error {
  INSERT OR IGNORE INTO enrollment_policies(scope,group_id) SELECT 'group:'||id,id FROM directory_groups;
  CREATE VIEW applicable_enrollment_policies AS
  SELECT u.id user_id,p.scope,p.allowed_mask,p.grace_seconds FROM users u JOIN enrollment_policies p ON p.required AND p.scope='organization'
- UNION ALL SELECT u.id,p.scope,p.allowed_mask,p.grace_seconds FROM users u JOIN enrollment_policies p ON p.required AND p.scope='administrators' WHERE u.role='admin'
+ UNION ALL SELECT u.id,p.scope,p.allowed_mask,p.grace_seconds FROM users u JOIN enrollment_policies p ON p.required AND p.scope='administrators' WHERE (u.role='admin' OR EXISTS(SELECT 1 FROM admin_delegations d WHERE d.user_id=u.id))
  UNION ALL SELECT m.user_id,p.scope,p.allowed_mask,p.grace_seconds FROM group_memberships m JOIN enrollment_policies p ON p.group_id=m.group_id AND p.required;
  CREATE VIEW enrollment_requirements AS
  SELECT u.id user_id,
- EXISTS(SELECT 1 FROM enrollment_policies p WHERE p.required AND p.scope IN (SELECT 'organization' UNION ALL SELECT 'administrators' WHERE u.role='admin' UNION ALL SELECT 'group:'||m.group_id FROM group_memberships m WHERE m.user_id=u.id)) required,
- COALESCE((SELECT MIN(p.allowed_mask&1)+MIN(p.allowed_mask&2)+MIN(p.allowed_mask&4) FROM enrollment_policies p WHERE p.required AND p.scope IN (SELECT 'organization' UNION ALL SELECT 'administrators' WHERE u.role='admin' UNION ALL SELECT 'group:'||m.group_id FROM group_memberships m WHERE m.user_id=u.id)),7) allowed_mask,
- COALESCE((SELECT MIN(COALESCE(d.due_at,0)) FROM enrollment_policies p LEFT JOIN enrollment_deadlines d ON d.user_id=u.id AND d.scope=p.scope WHERE p.required AND p.scope IN (SELECT 'organization' UNION ALL SELECT 'administrators' WHERE u.role='admin' UNION ALL SELECT 'group:'||m.group_id FROM group_memberships m WHERE m.user_id=u.id)),0) due_at
+ EXISTS(SELECT 1 FROM enrollment_policies p WHERE p.required AND p.scope IN (SELECT 'organization' UNION ALL SELECT 'administrators' WHERE (u.role='admin' OR EXISTS(SELECT 1 FROM admin_delegations d WHERE d.user_id=u.id)) UNION ALL SELECT 'group:'||m.group_id FROM group_memberships m WHERE m.user_id=u.id)) required,
+ COALESCE((SELECT MIN(p.allowed_mask&1)+MIN(p.allowed_mask&2)+MIN(p.allowed_mask&4) FROM enrollment_policies p WHERE p.required AND p.scope IN (SELECT 'organization' UNION ALL SELECT 'administrators' WHERE (u.role='admin' OR EXISTS(SELECT 1 FROM admin_delegations d WHERE d.user_id=u.id)) UNION ALL SELECT 'group:'||m.group_id FROM group_memberships m WHERE m.user_id=u.id)),7) allowed_mask,
+ COALESCE((SELECT MIN(COALESCE(d.due_at,0)) FROM enrollment_policies p LEFT JOIN enrollment_deadlines d ON d.user_id=u.id AND d.scope=p.scope WHERE p.required AND p.scope IN (SELECT 'organization' UNION ALL SELECT 'administrators' WHERE (u.role='admin' OR EXISTS(SELECT 1 FROM admin_delegations d WHERE d.user_id=u.id)) UNION ALL SELECT 'group:'||m.group_id FROM group_memberships m WHERE m.user_id=u.id)),0) due_at
  FROM users u;
  CREATE VIEW IF NOT EXISTS enrolled_factors AS
  SELECT user_id,1 bit FROM mfa_methods WHERE method_type='totp'
@@ -88,7 +88,10 @@ func (s *Store) migrateEnrollmentPolicy() error {
  CREATE TRIGGER enrollment_new_member AFTER INSERT ON group_memberships BEGIN
  INSERT OR IGNORE INTO enrollment_deadlines SELECT p.user_id,p.scope,unixepoch()+p.grace_seconds FROM applicable_enrollment_policies p WHERE p.user_id=NEW.user_id AND p.scope='group:'||NEW.group_id; END;
  CREATE TRIGGER enrollment_role_compatibility AFTER UPDATE OF role ON users BEGIN
- SELECT CASE WHEN EXISTS(SELECT 1 FROM enrollment_requirements WHERE user_id=NEW.id AND allowed_mask=0) THEN RAISE(ABORT,'conflicting enrollment policies') END; END;`); err != nil {
+ SELECT CASE WHEN EXISTS(SELECT 1 FROM enrollment_requirements WHERE user_id=NEW.id AND allowed_mask=0) THEN RAISE(ABORT,'conflicting enrollment policies') END; END;
+ CREATE TRIGGER enrollment_new_delegation AFTER INSERT ON admin_delegations BEGIN
+ SELECT CASE WHEN EXISTS(SELECT 1 FROM enrollment_requirements WHERE user_id=NEW.user_id AND allowed_mask=0) THEN RAISE(ABORT,'conflicting enrollment policies') END;
+ INSERT OR IGNORE INTO enrollment_deadlines SELECT p.user_id,p.scope,unixepoch()+p.grace_seconds FROM applicable_enrollment_policies p WHERE p.user_id=NEW.user_id AND p.scope='administrators'; END;`); err != nil {
 		return err
 	}
 	return tx.Commit()

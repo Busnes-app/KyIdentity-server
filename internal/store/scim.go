@@ -13,7 +13,7 @@ func (s *Store) migrateSCIM() error {
  remote_id TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(system_id, local_id),
  CHECK(local_id <> '')
- ); CREATE UNIQUE INDEX IF NOT EXISTS scim_remote_user ON scim_user_links(system_id,remote_id) WHERE remote_id <> '';`)
+ );`)
 	return err
 }
 

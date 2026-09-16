@@ -25,7 +25,9 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - uses: golang/govulncheck-action@v1
-      - run: go test -race -count=1 ./...
+      # Go's default is 10 minutes per package, which the api suite under -race now
+      # exceeds on a runner. This is a hang detector, not a performance budget.
+      - run: go test -race -count=1 -timeout 20m ./...
 
   web:
     runs-on: ubuntu-latest
@@ -93,3 +95,121 @@ jobs:
             echo "server accepted a non-loopback HTTP issuer"
             exit 1
           fi
+
+      # Hand the exact image the checks above ran against to the publish job,
+      # so what gets pushed is what was tested, never a second build.
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          set -euo pipefail
+          docker save kysignon-ci | gzip > tested-image.tar.gz
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tested-image
+          path: tested-image.tar.gz
+          retention-days: 1
+
+  # Publishes the image CI tested: only for pushes to master, only
+  # after every job passed, and with no checkout and no build of its own, so
+  # the pushed bytes are the tested bytes. A pull request from a fork must
+  # never reach this job or write a package.
+  publish:
+    needs: [go, web, relay, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    # No concurrency group here on purpose: GitHub cancels a *pending* job when a
+    # newer one queues into the same group, which would leave that commit with no
+    # :<sha> image and no attestation. Every commit whose run reaches this job
+    # gets both; a run superseded before it starts publishes nothing.
+    outputs:
+      name: ${{ steps.push.outputs.name }}
+      digest: ${{ steps.push.outputs.digest }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: tested-image
+      - run: docker load < tested-image.tar.gz
+
+      - env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      # Name derived, not spelled out: GITHUB_TOKEN can only write the owning
+      # account's namespace, and registries reject a mixed-case name. Only the
+      # commit tag is pushed here; it is what lets an operator pin a known-good
+      # image and roll back to it. :latest moves in the promote job, after the
+      # attestation verifies.
+      - id: push
+        run: |
+          set -euo pipefail
+          name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker tag kysignon-ci "$name:$GITHUB_SHA"
+          docker push "$name:$GITHUB_SHA"
+          digest="$(docker buildx imagetools inspect "$name:$GITHUB_SHA" --format '{{.Manifest.Digest}}')"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      # Binds the pushed manifest to this run and commit. Verifying it here, the
+      # way an operator would, proves the attestation is usable and not just present.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME: ${{ steps.push.outputs.name }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://$NAME@$DIGEST" --repo "$GITHUB_REPOSITORY" \
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/master"
+
+
+  # :latest advances only to an image whose provenance verified above, and only
+  # to the current tip of master. Serialised here, not in publish: a pending
+  # promote cancelled by a newer one queuing is harmless, since a newer run
+  # existing is exactly what makes this commit no longer the tip. Promotion is
+  # by digest and the result is asserted, so :latest is the attested manifest.
+  promote:
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: promote-master
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME: ${{ needs.publish.outputs.name }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          tip="$(gh api "repos/$GITHUB_REPOSITORY/branches/master" --jq .commit.sha)"
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            echo "Published \`$NAME@$DIGEST\` as \`:$GITHUB_SHA\` only: master has moved on to $tip" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # --prefer-index=false: with the default, buildx wraps a single manifest in a
+          # new index whose digest the attestation does not cover. Then prove it, the
+          # way an operator would, on the tag they actually deploy.
+          docker buildx imagetools create --prefer-index=false --tag "$NAME:latest" "$NAME@$DIGEST"
+          latest="$(docker buildx imagetools inspect "$NAME:latest" --format '{{.Manifest.Digest}}')"
+          if [ "$latest" != "$DIGEST" ]; then
+            echo "::error:::latest resolves to $latest, attested digest is $DIGEST" >&2
+            exit 1
+          fi
+          gh attestation verify "oci://$NAME:latest" --repo "$GITHUB_REPOSITORY" \
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/master"
+          echo "Published \`$NAME@$DIGEST\` as \`:latest\` and \`:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"

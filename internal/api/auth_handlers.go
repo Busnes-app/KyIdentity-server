@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/Busness-app/kyidentity-server/internal/oauth"
+	"log"
 	"net/http"
 	"net/url"
 	"slices"
@@ -108,7 +109,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	if user.Status != "active" {
 		auth.DummyVerify(req.Password)
-		h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": "user_disabled"})
+		reason := "user_disabled"
+		if user.Pending {
+			reason = "user_pending"
+		}
+		h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": reason})
 		http.Error(w, `{"error":"invalid_credentials","error_description":"Invalid username or password"}`, http.StatusUnauthorized)
 		return
 	}
@@ -578,15 +583,18 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	sess := GetSessionFromContext(r.Context())
 	user := GetUserFromContext(r.Context())
 
-	if sess != nil {
-		_ = h.store.DeleteSession(sess.ID)
+	if sess != nil && user != nil {
+		pending := h.audit.Prepare("auth.logout", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+		if err := h.store.RevokeSession(user.ID, sess.ID, pending.Row); err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("logout for user %s failed: %v", user.ID, err)
+			stepUpInternalError(w)
+			return
+		} else if err == nil {
+			pending.Committed()
+		}
 	}
 
 	clearSessionCookies(w)
-
-	if user != nil {
-		h.audit.Record("auth.logout", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -610,9 +618,15 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	for _, m := range mfaMethods {
 		methodTypes = append(methodTypes, m.MethodType)
 	}
+	access, err := accessFor(h.store, user)
+	if err != nil {
+		stepUpInternalError(w)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
+		"access":      access,
 		"enrollment":  enrollment,
 		"id":          user.ID,
 		"username":    user.Username,

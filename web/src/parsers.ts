@@ -7,6 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, OwnAccessRequests, AccessExplanation } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -16,6 +17,7 @@ import type {
   AuditEvent,
   AppGrant,
   BrowserSession,
+  LogoutDelivery,
   SessionInventory,
   BackupDrillResult,
   BackupRunResult,
@@ -101,9 +103,22 @@ function list<T>(value: unknown, parse: (item: unknown) => T): T[] {
   return arr(value, 'an array').map(parse);
 }
 
+export function parseAccess(value: unknown): Access {
+  const o = obj(value, 'an access object');
+  return { admin: requiredBool(o, 'admin'), helpdesk: requiredBool(o, 'helpdesk'), auditor: requiredBool(o, 'auditor'), appOwner: strArray(o.appOwner) };
+}
+
+export function parseDelegations(value: unknown): Delegations {
+  const o = obj(value, 'a delegations response');
+  const d = obj(o.delegations, 'a delegations object');
+  return { helpdesk: requiredBool(d, 'helpdesk'), auditor: requiredBool(d, 'auditor'), appOwner: strArray(d.appOwner) };
+}
+
 export function parseUser(value: unknown): User {
   const o = obj(value, 'a user object');
   return {
+    access: o.access === undefined ? undefined : parseAccess(o.access),
+    endsAt: optStr(o, 'endsAt'),
     enrollment: o.enrollment === undefined ? undefined : parseEnrollmentStatus(o.enrollment),
     id: str(o, 'id'),
     username: str(o, 'username'),
@@ -111,6 +126,11 @@ export function parseUser(value: unknown): User {
     email: optStr(o, 'email') ?? '',
     role: oneOf(o, 'role', ['admin', 'user'] as const),
     status: oneOf(o, 'status', ['active', 'disabled'] as const),
+    pending: o.pending === true,
+    emailVerifiedAt: optStr(o, 'emailVerifiedAt'),
+    sourceConnectorId: optStr(o, 'sourceConnectorId'),
+    externalId: optStr(o, 'externalId'),
+    locallyDisabled: o.locallyDisabled === true,
     mfaMethods: strArray(o.mfaMethods),
     createdAt: optStr(o, 'createdAt'),
   };
@@ -172,9 +192,27 @@ function parseAppGrant(value: unknown): AppGrant {
   };
 }
 
+function parseLogoutDelivery(value: unknown): LogoutDelivery {
+  const o = obj(value, 'a logout delivery');
+  return {
+    id: str(o, 'id'),
+    clientId: str(o, 'clientId'),
+    clientName: optStr(o, 'clientName') ?? str(o, 'clientId'),
+    status: oneOf(o, 'status', ['queued', 'delivered', 'failed'] as const),
+    attempts: typeof o.attempts === 'number' ? o.attempts : 0,
+    lastError: optStr(o, 'lastError') ?? '',
+    nextAttemptAt: optStr(o, 'nextAttemptAt') ?? '',
+    updatedAt: optStr(o, 'updatedAt') ?? '',
+  };
+}
+
 export function parseSessionInventory(value: unknown): SessionInventory {
   const o = obj(value, 'a session inventory');
-  return { sessions: list(o.sessions, parseBrowserSession), apps: list(o.apps, parseAppGrant) };
+  return {
+    sessions: list(o.sessions, parseBrowserSession),
+    apps: list(o.apps, parseAppGrant),
+    logouts: list(o.logouts, parseLogoutDelivery),
+  };
 }
 
 export interface PairingToken {
@@ -299,6 +337,7 @@ export function parsePairedSystems(value: unknown): PairedSystem[] {
       lastSyncedAt: optStr(s, 'lastSyncedAt'),
       createdAt: optStr(s, 'createdAt') ?? '',
       groupsEnabled: bool(s, 'groupsEnabled'),
+      provisioningHold: bool(s, 'provisioningHold'),
       reconcileHours: s.reconcileHours === undefined ? 0 : directoryCount(s, 'reconcileHours'),
     };
   });
@@ -327,6 +366,8 @@ export function parseOAuthClients(value: unknown): OAuthClient[] {
       clientType: oneOf(c, 'clientType', ['confidential', 'public'] as const),
       redirectUris: jsonStringArray(c, 'redirectUrisJson'),
       allowedScopes: jsonStringArray(c, 'allowedScopesJson'),
+      postLogoutRedirectUris: typeof c.postLogoutRedirectUrisJson === 'string' ? jsonStringArray(c, 'postLogoutRedirectUrisJson') : [],
+      backchannelLogoutUri: optStr(c, 'backchannelLogoutUri') || undefined,
       launchUrl: optStr(c, 'launchUrl'),
       enabled: c.enabled !== false,
       createdAt: optStr(c, 'createdAt') ?? '',
@@ -495,6 +536,7 @@ export function parseGroupPage(value: unknown): DirectoryPage<DirectoryGroup> {
   return directoryPage(value, 'groups', item => {
     const o = obj(item, 'a group');
     return { id: str(o, 'id'), name: str(o, 'name'), description: str(o, 'description'),
+      sourceConnectorId: optStr(o, 'sourceConnectorId'), externalId: optStr(o, 'externalId'),
       memberCount: directoryCount(o, 'memberCount'), member: directoryMember(o),
       createdAt: str(o, 'createdAt'), updatedAt: str(o, 'updatedAt') };
   });
@@ -503,7 +545,7 @@ export function parseGroupUserPage(value: unknown): DirectoryPage<GroupUser> {
   return directoryPage(value, 'users', item => {
     const o = obj(item, 'a group user');
     return { id: str(o, 'id'), username: str(o, 'username'), displayName: str(o, 'displayName'),
-      email: str(o, 'email'), status: oneOf(o, 'status', ['active', 'disabled']), member: directoryMember(o) };
+      email: str(o, 'email'), status: oneOf(o, 'status', ['active', 'disabled']), member: directoryMember(o), expiresAt: optStr(o, 'expiresAt') };
   });
 }
 
@@ -529,14 +571,74 @@ export function parseAppRecord(value: unknown): AppRecord {
     id: str(a, 'id'), revision,
     authentication: parseAppAuthenticationPolicy(a.authentication),
     authenticationRevision: directoryCount(a, 'authenticationRevision'),
+    roleRevision: directoryCount(a, 'roleRevision'),
+    legacyRoleClaim: requiredBool(a, 'legacyRoleClaim'),
+    groupsClaim: requiredBool(a, 'groupsClaim'),
     accessMode: oneOf(a, 'accessMode', ['all_active_users', 'assigned_only']),
     enabled: requiredBool(a, 'enabled'),
+    requestable: requiredBool(a, 'requestable'),
     clientId: str(a, 'clientId'), clientName: str(a, 'clientName'),
     launcherId: str(a, 'launcherId'), launcherName: str(a, 'launcherName'),
     systemId: str(a, 'systemId'), systemName: str(a, 'systemName'),
   };
   if (!record.id || (!record.clientId && !record.launcherId && !record.systemId)) return fail('an app with a connection');
   return record;
+}
+export function parseAccessRequest(value: unknown): AccessRequest {
+  const r = obj(value, 'an access request');
+  return {
+    id: str(r, 'id'), appId: str(r, 'appId'), appName: str(r, 'appName'), userId: str(r, 'userId'), username: str(r, 'username'),
+    reason: str(r, 'reason'), durationSeconds: directoryCount(r, 'durationSeconds'),
+    status: oneOf(r, 'status', ['pending', 'approved', 'denied', 'cancelled', 'expired'] as const),
+    createdAt: str(r, 'createdAt'), expiresAt: str(r, 'expiresAt'),
+    decidedAt: optStr(r, 'decidedAt'), decidedBy: optStr(r, 'decidedBy'), decisionNote: optStr(r, 'decisionNote'),
+  };
+}
+export function parseOwnAccessRequests(value: unknown): OwnAccessRequests {
+  const o = obj(value, 'an access requests response');
+  return {
+    requestable: list(o.requestable, item => { const a = obj(item, 'a requestable app'); return { appId: str(a, 'appId'), name: str(a, 'name'), pending: requiredBool(a, 'pending') }; }),
+    requests: list(o.requests, parseAccessRequest),
+  };
+}
+export function parseAccessRequestPage(value: unknown): DirectoryPage<AccessRequest> {
+  return directoryPage(value, 'requests', parseAccessRequest);
+}
+export function parseAlert(value: unknown): Alert {
+  const a = obj(value, 'an alert');
+  const d = obj(a.delivery, 'an alert delivery summary');
+  return {
+    id: str(a, 'id'), rule: str(a, 'rule'), key: str(a, 'key'), severity: oneOf(a, 'severity', ['critical', 'warning'] as const),
+    title: str(a, 'title'), summary: str(a, 'summary'), status: oneOf(a, 'status', ['open', 'acknowledged', 'resolved'] as const),
+    count: directoryCount(a, 'count'), firstSeen: str(a, 'firstSeen'), lastSeen: str(a, 'lastSeen'),
+    acknowledgedAt: optStr(a, 'acknowledgedAt'), acknowledgedBy: optStr(a, 'acknowledgedBy'), resolvedAt: optStr(a, 'resolvedAt'),
+    delivery: { pending: directoryCount(d, 'pending'), delivered: directoryCount(d, 'delivered'), failed: directoryCount(d, 'failed'), skipped: directoryCount(d, 'skipped'), lastError: optStr(d, 'lastError') ?? '' },
+  };
+}
+export function parseAlertPage(value: unknown): DirectoryPage<Alert> {
+  return directoryPage(value, 'alerts', parseAlert);
+}
+export function parseAlertSettings(value: unknown): AlertSettings {
+  const o = obj(value, 'alert settings');
+  return {
+    loginFailureThreshold: directoryCount(o, 'loginFailureThreshold'), loginFailureWindowSeconds: directoryCount(o, 'loginFailureWindowSeconds'),
+    recipients: list(o.recipients, item => { const r = obj(item, 'an alert recipient'); return { id: str(r, 'id'), username: str(r, 'username') }; }),
+  };
+}
+export function parseAccessExplanation(value: unknown): AccessExplanation {
+  const o = obj(value, 'an access explanation response');
+  const e = obj(o.explanation, 'an access explanation');
+  return {
+    appId: str(e, 'appId'), appName: str(e, 'appName'), userId: str(e, 'userId'), username: str(e, 'username'),
+    allowed: requiredBool(e, 'allowed'), reason: str(e, 'reason'),
+    accessMode: oneOf(e, 'accessMode', ['all_active_users', 'assigned_only'] as const),
+    appEnabled: requiredBool(e, 'appEnabled'), clientEnabled: requiredBool(e, 'clientEnabled'), userStatus: str(e, 'userStatus'), userEndsAt: optStr(e, 'userEndsAt'),
+    grants: list(e.grants, item => { const g = obj(item, 'a grant'); return { kind: oneOf(g, 'kind', ['direct', 'group'] as const), groupId: optStr(g, 'groupId'), groupName: optStr(g, 'groupName'), sourceConnectorId: optStr(g, 'sourceConnectorId'), expiresAt: optStr(g, 'expiresAt'), live: requiredBool(g, 'live') }; }),
+    roles: list(e.roles, item => { const r = obj(item, 'a role grant'); return { role: str(r, 'role'), via: oneOf(r, 'via', ['direct', 'group'] as const), groupName: optStr(r, 'groupName') }; }),
+    accessEndsAt: optStr(e, 'accessEndsAt'), authentication: parseAppAuthenticationPolicy(e.authentication),
+    revision: directoryCount(e, 'revision'), authenticationRevision: directoryCount(e, 'authenticationRevision'), roleRevision: directoryCount(e, 'roleRevision'),
+    requestable: requiredBool(e, 'requestable'),
+  };
 }
 export function parseAppRecordPage(value: unknown): DirectoryPage<AppRecord> {
  return directoryPage(value, 'records', parseAppRecord);
@@ -550,7 +652,7 @@ export function parseAppAccessPage(value: unknown): AppAccessPage {
   const u = obj(item, 'an app access user');
   return { id: str(u,'id'), username: str(u,'username'), displayName: str(u,'displayName'), status: oneOf(u,'status',['active','disabled']),
    direct: requiredBool(u,'direct'), groupAssigned: requiredBool(u,'groupAssigned'), effective: requiredBool(u,'effective'), preview: requiredBool(u,'preview'),
-   reason: oneOf(u,'reason',['user_disabled','app_disabled','client_disabled','all_active_users','direct_assignment','group_assignment','not_assigned']) };
+   reason: oneOf(u,'reason',['user_disabled','app_disabled','client_disabled','all_active_users','direct_assignment','group_assignment','not_assigned']), directExpiresAt: optStr(u,'directExpiresAt') };
  }), app: parseAppRecord(o.app), losingAccess: directoryCount(o,'losingAccess'), gainingAccess: directoryCount(o,'gainingAccess') };
 }
 export function parseAppAccessGroups(value: unknown): DirectoryPage<AppAccessGroup> {
@@ -636,4 +738,68 @@ export function parseReconcileJob(value: unknown): ReconcileJob {
 }
 export function parseReconcileJobs(value: unknown): ReconcileJob[] {
   return list(obj(value, 'a reconcile jobs response').jobs, job => parseReconcileJob({ job }));
+}
+
+export function parseOffboarding(value: unknown): Offboarding {
+  const o = obj(value, 'an offboarding view');
+  return {
+    userId: str(o, 'userId'), active: requiredBool(o, 'active'), deleted: requiredBool(o, 'deleted'), acknowledged: requiredBool(o, 'acknowledged'), verified: requiredBool(o, 'verified'),
+    logouts: list(o.logouts, parseLogoutDelivery),
+    targets: list(o.targets, item => {
+      const t = obj(item, 'an offboarding target');
+      return { systemId: str(t, 'systemId'), systemName: optStr(t, 'systemName') ?? str(t, 'systemId'), systemType: optStr(t, 'systemType') ?? '', systemStatus: optStr(t, 'systemStatus') ?? '',
+        revision: directoryCount(t, 'revision'), recorded: requiredBool(t, 'recorded'), acknowledged: requiredBool(t, 'acknowledged'), verified: requiredBool(t, 'verified'), contradicted: requiredBool(t, 'contradicted'), blocked: requiredBool(t, 'blocked'),
+        observed: oneOf(t, 'observed', ['', 'present_active', 'present_inactive', 'absent', 'unsupported']), observedAt: optStr(t, 'observedAt'),
+        lastEvent: t.lastEvent == null ? undefined : parseProvisioningEvent(t.lastEvent) };
+    }),
+  };
+}
+
+export function parseAccountLink(value: unknown): AccountLink {
+  const o = obj(value, 'an account link');
+  return { kind: oneOf(o, 'kind', ['activation', 'reset'] as const), delivery: oneOf(o, 'delivery', ['manual', 'email'] as const), link: optStr(o, 'link'), expiresAt: str(o, 'expiresAt') };
+}
+
+export function parseMailSettings(value: unknown): MailSettings {
+  const o = obj(value, 'mail settings');
+  return { host: optStr(o, 'host') ?? '', port: typeof o.port === 'number' ? o.port : 587, username: optStr(o, 'username') ?? '', from: optStr(o, 'from') ?? '',
+    security: oneOf(o, 'security', ['tls', 'starttls'] as const), hasPassword: requiredBool(o, 'hasPassword'), configured: requiredBool(o, 'configured') };
+}
+
+function parseSCIMTokenRow(value: unknown): SCIMToken {
+  const t = obj(value, 'a connector token');
+  return { id: str(t, 'id'), scope: oneOf(t, 'scope', ['read', 'write'] as const), createdAt: str(t, 'createdAt'), lastUsedAt: optStr(t, 'lastUsedAt'), revokedAt: optStr(t, 'revokedAt') };
+}
+
+/** A freshly issued token: the raw value appears here exactly once. */
+export function parseSCIMToken(value: unknown): SCIMToken & { token: string } {
+  const t = obj(value, 'an issued connector token');
+  return { ...parseSCIMTokenRow(t), token: str(t, 'token') };
+}
+
+export function parseSCIMConnector(value: unknown): SCIMConnector {
+  const c = obj(value, 'a SCIM connector');
+  return { id: str(c, 'id'), name: str(c, 'name'), status: oneOf(c, 'status', ['active', 'disabled'] as const), createdAt: str(c, 'createdAt'),
+    tokens: list(c.tokens, parseSCIMTokenRow), users: directoryCount(c, 'users'), groups: directoryCount(c, 'groups') };
+}
+
+export function parseSCIMConnectors(value: unknown): { connectors: SCIMConnector[]; endpoint: string } {
+  const o = obj(value, 'a connector listing');
+  return { connectors: list(o.connectors, parseSCIMConnector), endpoint: optStr(o, 'endpoint') ?? '' };
+}
+
+function parseAppRolePrincipal(value: unknown): AppRolePrincipal {
+  const p = obj(value, 'a role principal');
+  return { id: str(p, 'id'), name: str(p, 'name') };
+}
+
+export function parseAppRole(value: unknown): AppRole {
+  const r = obj(value, 'an app role');
+  return { id: str(r, 'id'), appId: str(r, 'appId'), name: str(r, 'name'), description: optStr(r, 'description') ?? '', createdAt: str(r, 'createdAt'),
+    users: list(r.users, parseAppRolePrincipal), groups: list(r.groups, parseAppRolePrincipal) };
+}
+
+export function parseAppRolesPage(value: unknown): { app: AppRecord; roles: AppRole[] } {
+  const o = obj(value, 'an app roles page');
+  return { app: parseAppRecord(o.app), roles: list(o.roles, parseAppRole) };
 }

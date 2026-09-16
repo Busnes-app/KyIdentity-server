@@ -58,7 +58,7 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 	// A stored mapping may outlive a target restore or ID reuse; IDs established by this
 	// call's externalId lookup have already been checked.
 	if verifyMapping {
-		status, raw, err := e.scimRequest(ctx, c, http.MethodGet, base.JoinPath("Groups", remoteID).String(), nil)
+		status, raw, err := e.scimRequest(ctx, c, http.MethodGet, base.JoinPath("Groups", url.PathEscape(remoteID)).String(), nil)
 		if errors.Is(err, scim.ErrNotFound) && eventType == "group.deleted" {
 			return e.store.DeleteSCIMLink(sys.ID, "group", groupID)
 		}
@@ -75,7 +75,7 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 		if remoteID == "" {
 			return nil
 		}
-		status, _, err := e.scimRequest(ctx, c, http.MethodDelete, base.JoinPath("Groups", remoteID).String(), nil)
+		status, _, err := e.scimRequest(ctx, c, http.MethodDelete, base.JoinPath("Groups", url.PathEscape(remoteID)).String(), nil)
 		if err != nil && !errors.Is(err, scim.ErrNotFound) {
 			return err
 		}
@@ -128,7 +128,7 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 		return e.store.SaveSCIMLink(sys.ID, "group", groupID, created.ID)
 	}
 	// Only a completion status proves the member list was applied; 202 stays blocked.
-	status, _, err := e.scimRequest(ctx, c, http.MethodPut, base.JoinPath("Groups", remoteID).String(), body)
+	status, _, err := e.scimRequest(ctx, c, http.MethodPut, base.JoinPath("Groups", url.PathEscape(remoteID)).String(), body)
 	if err == nil && status != http.StatusOK && status != http.StatusNoContent {
 		return scim.ErrMalformedResponse
 	}

@@ -299,18 +299,6 @@ func (m *MiddlewareManager) OptionalAuth(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAdmin ensures authenticated user has admin role.
-func (m *MiddlewareManager) RequireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(userContextKey).(*store.User)
-		if !ok || user == nil || user.Role != "admin" {
-			http.Error(w, `{"error":"forbidden","error_description":"Administrator access required"}`, http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // CSRFValidate enforces double-submit CSRF protection for non-GET/HEAD/OPTIONS methods.
 func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -321,12 +309,14 @@ func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 
 		// Bypass CSRF for public native push response, system registration, and OAuth token endpoints
 		path := r.URL.Path
-		if path == "/api/systems/register" ||
+		if strings.HasPrefix(path, "/scim/v2/") || // Bearer-only machine boundary; cookies are never read there.
+			path == "/api/systems/register" ||
 			path == "/api/notifications/native/register" ||
 			(strings.HasPrefix(path, "/api/notifications/native/devices/") && strings.HasSuffix(path, "/push-token")) ||
 			path == "/api/mfa/push/respond" ||
 			path == "/oauth/token" ||
-			path == "/oauth/revoke" {
+			path == "/oauth/revoke" ||
+			path == "/oauth/logout" { // Its same-site confirmation form carries the session-bound token in a `confirm` field, checked by EndSession; a cross-site POST has no session cookie and is bounced to a GET.
 			next.ServeHTTP(w, r)
 			return
 		}

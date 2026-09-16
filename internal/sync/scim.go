@@ -180,9 +180,12 @@ func (e *Engine) deliverSCIM(ctx context.Context, sys *store.PairedSystem, secre
 	if err != nil {
 		return err
 	}
-	var desired scim.User
+	var desired scimUserBody
 	if err = json.Unmarshal(payload, &desired); err != nil {
 		return scim.ErrMalformedResponse
+	}
+	if desired.Roles == nil {
+		desired.Roles = []scim.MultiValue{}
 	}
 	// Scope loss and local disablement both arrive as an inactive update. Neither may
 	// create an account, so they follow the deletion path: deactivate when present.
@@ -218,7 +221,7 @@ func (e *Engine) deliverSCIM(ctx context.Context, sys *store.PairedSystem, secre
 			if !won {
 				return errCreateUncertain
 			}
-			created, err := c.CreateUser(ctx, desired)
+			created, err := e.createSCIMUser(ctx, c, desired)
 			if err != nil {
 				var rejection *scim.Error
 				if errors.As(err, &rejection) && rejection.Status >= 400 && rejection.Status < 500 && rejection.Status != http.StatusRequestTimeout {
@@ -269,8 +272,45 @@ func (e *Engine) deliverSCIM(ctx context.Context, sys *store.PairedSystem, secre
 		}
 		return err
 	}
-	_, err = c.ReplaceUser(ctx, remoteID, desired)
+	body, err := json.Marshal(desired)
+	if err != nil {
+		return err
+	}
+	// Only a completion status proves the profile was applied; 202 stays pending.
+	base, _ := url.Parse(c.BaseURL)
+	status, _, err := e.scimRequest(ctx, c, http.MethodPut, base.JoinPath("Users", url.PathEscape(remoteID)).String(), body)
+	if err == nil && status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
+		return scim.ErrMalformedResponse
+	}
 	return err
+}
+
+// scimUserBody is a scim.User whose roles are always written, empty included. The
+// client's User type omits an empty list, so both create and replace send this body
+// through the bounded raw request: a receiver that merges attributes or applies a
+// default role on create must see "no roles" stated.
+type scimUserBody struct {
+	scim.User
+	Roles []scim.MultiValue `json:"roles"`
+}
+
+// createSCIMUser posts the user and returns what the target created. Non-2xx answers
+// come back as *scim.Error, so the caller's rejection and conflict handling still apply.
+func (e *Engine) createSCIMUser(ctx context.Context, c *scim.Client, desired scimUserBody) (scim.User, error) {
+	body, err := json.Marshal(desired)
+	if err != nil {
+		return scim.User{}, err
+	}
+	base, _ := url.Parse(c.BaseURL)
+	status, raw, err := e.scimRequest(ctx, c, http.MethodPost, base.JoinPath("Users").String(), body)
+	if err != nil {
+		return scim.User{}, err
+	}
+	var created scim.User
+	if status != http.StatusCreated && status != http.StatusOK || json.Unmarshal(raw, &created) != nil || created.ID == "" || created.ID == "." || created.ID == ".." {
+		return scim.User{}, scim.ErrMalformedResponse
+	}
+	return created, nil
 }
 
 func (e *Engine) TestSystem(ctx context.Context, sys *store.PairedSystem) error {

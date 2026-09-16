@@ -68,7 +68,7 @@ KyIdentity relies on only **3 direct external packages**:
 ### 1. Configure Environment
 Clone the repository and copy the sample configuration:
 ```bash
-cp .env.example .env
+[ -e .env ] || (umask 077; cp .env.example .env); chmod 600 .env   # an existing .env is kept; it holds secrets
 ```
 
 Review and adjust variables in `.env`:
@@ -92,15 +92,39 @@ APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 ```
 
 ### 2. Start the Server
+Published image:
+
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
+
+Source install (never paste this into a published-image install: the build overlay wins over a
+`KYIDENTITY_IMAGE` digest pin, and a source install must set this line before its first `up -d` on a
+new checkout):
+
+```bash
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+  && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+  && case ":$cf:" in *:docker-compose.build.yml:*) ;; *) cf="$cf:docker-compose.build.yml";; esac \
+  && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" \
+  && printf 'COMPOSE_FILE=%s\n' "$cf" >> "$t" && mv "$t" .env)
+docker compose up -d
+```
+
+Update a published-image install on the rolling tag:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+A digest-pinned install (`KYIDENTITY_IMAGE` in `.env`) gets nothing from `pull`: re-run the pin recipe in
+`docker-compose.yml` with the commit sha you want first, or delete that line to follow `:latest` again.
 
 ### 3. Retrieve Credentials & Log In
 If you did not define `BOOTSTRAP_ADMIN_PASS` in `.env`, KyIdentity generates a one-time bootstrap password on first start:
 
 ```bash
-docker compose exec kyidentity cat /data/first-run-password.txt
+docker compose exec kyidentity-server cat /data/first-run-password.txt
 ```
 
 Open your browser and navigate to:
@@ -144,7 +168,7 @@ You can verify the status of the server at any time:
 
 Create the first admin account directly within the running container:
 ```bash
-docker compose exec kyidentity /usr/local/bin/kyidentity bootstrap-admin --username admin --password "NewPassword123!"
+docker compose exec kyidentity-server /usr/local/bin/kyidentity bootstrap-admin --username admin --password "NewPassword123!"
 ```
 
 `bootstrap-admin` only creates a missing account. It will not overwrite the password of an
@@ -155,6 +179,46 @@ stdin. The full procedure, including putting the result back into service and pr
 is [docs/RESTORE.md](docs/RESTORE.md).
 
 ---
+
+## Onboarding and passwords
+
+**Inviting.** Creating a user without a password invites them: the account is pending
+and disabled, holds no credential at all, and cannot sign in, be provisioned or hold app
+access until an activation link sets a password. Users → the link button issues the
+link (step-up required); it is shown once for hand-over, or mailed when mail delivery is
+configured. Activation links last 24 hours, reset links 30 minutes, and a new link of
+the same kind retires the previous one. Only the token's hash is stored, and the raw
+link never appears in the audit log. A link is only redeemable while the account is
+still in the state it was issued for, and every link dies when access is revoked: to
+cancel an invitation, use the account's Revoke Sessions action (or delete it); setting a
+password on a pending account also retires its activation link. Opening a link only shows the form; submitting it
+spends the token and sets the password in one transaction, so a mail scanner that
+follows the link changes nothing. Activation makes the account active and, when the link
+was mailed, records the address as verified; the first sign-in then goes through any
+required factor enrollment before app access. An administrator setting a password on a
+pending account is the manual activation; flipping its status alone is refused.
+
+**Passwords.** Security and devices → Password changes your own password after a
+step-up; every other session, token and app grant ends, this browser stays signed in.
+"Forgot your password?" on the sign-in page always answers the same way whether or not
+the account exists or mail is configured, is limited per address and per account, and
+mails a 30-minute reset link when it can. Redeeming a reset link signs the account out
+everywhere and clears the lockout counter; it never removes a second factor. Losing a
+factor is a recovery-code sign-in or an administrator MFA reset, not a password reset.
+
+**Email verification.** `email_verified` in ID tokens and userinfo is true only after a
+link mailed to the address was redeemed; existing addresses start unverified. Changing
+an address clears verification and retires every outstanding link.
+
+**Mail delivery.** Administration → Mail delivery holds one SMTP relay (host, port,
+STARTTLS or implicit TLS, sender, optional credentials). The password is stored
+encrypted with the deployment key and is never returned; a blank password keeps the
+stored one only while host, port, username and transport are unchanged, so the stored
+credential can never be pointed at a different relay, and a blank host turns delivery
+off. "Send test to me" mails the signed-in
+administrator and audits the outcome. Cleartext SMTP is not offered: a relay without
+STARTTLS is refused before any credential is sent. Without mail delivery every link is
+handed over by an administrator and self-service reset is unavailable.
 
 ## Directory groups
 
@@ -221,7 +285,8 @@ access revokes online tokens and invalidates authorization codes in the same tra
 Token registration rechecks access and the originating code atomically, including during
 membership-removal races. Re-granting access cannot revive invalidated codes or tokens.
 Offline JWT consumers may accept old access tokens for up to 15 minutes, and an app's own
-session may last longer until downstream logout integration ships.
+session lasts until it asks KyIdentity to sign out or receives the back-channel logout
+described below; an app with no back-channel receiver is never told.
 
 Admin API: `GET /api/admin/app-registry` accepts the same pagination bounds as group lists
 and searches connection names and IDs. `POST /api/admin/app-registry/{id}/link` accepts
@@ -239,6 +304,258 @@ Both accept the same pagination bounds as group lists. `PUT .../{id}/access-poli
 requires `mode`, `enabled`, and `revision`. `PUT`/`DELETE
 /api/admin/app-registry/{id}/assignments/{kind}/{principal}` adds/removes an individual
 assignment (`kind` is `users` or `groups`). Duplicate assignments are idempotent.
+
+## App roles and token claims
+
+**Roles.** App connections → Roles defines the fixed role names an app understands
+(letters, digits, `_`, `.`, `:`, `-`) and maps groups or users to them. A token for the
+app carries exactly the roles the user holds there, sorted, under the `roles` claim,
+and nothing about any other app; an app with no roles gets an empty list. Unassigned
+apps issue no token at all, so they receive no claims. Any role, mapping or claim
+setting change revokes the affected users' live tokens and pending codes for that app,
+bumps the app's role revision so a code issued before the change cannot be exchanged
+after it, and re-sends the users' profiles to the app's provisioning connection with
+the new roles (a connection whose app defines roles receives those instead of the
+global directory role).
+
+**Claims by scope.** `profile` grants `preferred_username`, `username` and `name`;
+`email` grants `email` and `email_verified`; `openid` always grants `sub`, `sid`, the
+authentication claims and `roles`. The ID token and UserInfo apply the same rules to the
+same granted scope, so neither can widen the other. Allowed scopes on a client are drawn
+from `openid`, `profile` and `email`; an unknown scope is refused at registration, not
+silently accepted. If the roles and groups mapped for a user do not fit in a token
+(4 KiB of identity claims), the token request fails with `invalid_request` naming the
+counts rather than truncating a permission set.
+
+**Upgrade note.** Before this release every ID token and UserInfo answer carried the
+name and email claims regardless of scope. A relying party that requests only `openid`
+must now also request `profile` and `email` to keep receiving them; there is no switch
+for this, because emitting claims a client did not ask for is the defect being fixed.
+Group membership changes, including deletion of a mapped group and changes arriving
+over inbound SCIM, count as role changes for every app that maps the group, and a
+provisioned account whose roles are revoked receives an explicit empty `roles` list. An
+app's first role, and its last one going, re-send every account provisioned through its
+connection, since the whole role set changes shape at that point.
+
+**Per-app switches.** *Legacy global role claim* keeps the directory-wide `role`
+(`user` or `admin`) in the app's tokens; apps that existed before app roles keep it on,
+new apps start with it off, and it should be turned off for each app once that app reads
+`roles`. *Groups claim* adds a `groups` claim listing the app's assigned or role-mapped
+groups the user belongs to, never the user's other groups. Both are per app; flipping
+either revokes every live grant for the app so the token shape changes cleanly.
+
+## Delegated administration
+
+Global administrators (`role: admin`) hold every permission and are the only ones who
+can delegate. Users → the delegation button on a user sets fixed, narrow permissions
+for an ordinary account; each is read on every request, so removing one takes effect
+on that user's next call without waiting for their session to end.
+
+| Delegation | May | May not |
+|---|---|---|
+| Helpdesk | List users and groups; view a user's sessions and offboarding status; reset MFA, revoke sessions and app grants, retry logouts, issue activation and reset links, for ordinary users | Touch an administrator's or another delegate's account in any of those ways; create, edit or delete users; assign privileges |
+| Auditor | Read every administration page: users, groups, app connections, provisioning, connectors, clients, policies, mail settings, backup status, audit log | Change anything, including step-up protected writes and the recovery capsule export |
+| App owner (per app) | List users and groups to pick principals; see the owned app's access, roles and access explanations; assign users and groups to the app; create and delete its roles and map principals to them; decide access requests for the app | See or touch any other app; change the app's access mode, authentication policy, claim switches, links, OAuth credentials or provisioning connection |
+
+Everyone holding a delegation falls under the *administrators* MFA enrollment policy
+from the moment it is granted: a required policy restricts their session until they
+enrol, and a user who cannot satisfy it cannot be delegated to. Nobody but a global
+administrator can change delegations, global MFA policy, connector secrets, mail
+settings, recovery material or OAuth credentials. Writes keep their step-up
+requirement and audit row (`admin.delegations_updated` records each change). Ownership
+names an app record; unlinking a connection into a new record ends ownership of it, so
+re-delegate after an unlink. The `GET /api/auth/me` answer carries an `access` block
+the SPA uses to show the pages a delegate can use; the server enforces every route.
+
+## Expiring access and account end dates
+
+A direct user assignment on an app connection and a membership in a group can each
+carry an expiry instant; an account can carry an end date. The operator enters a
+wall-clock time in their own zone and the page shows the exact UTC instant beside it,
+so a DST edge or a wrong zone is visible before it bites. Instants must lie in the
+future; repeating the grant moves or clears its instant.
+
+Expiry is decided where access is decided: the access views exclude an expired grant
+and an ended account on every authorize, token exchange, UserInfo and provisioning
+decision, so it holds even with no background work running. Access is a union, so an
+expired grant changes nothing while another live grant remains, and a token issued on
+bounded access ends with that access (`expires_in` and the ID token `exp` stop at the
+latest live grant, capped by the account end date).
+
+The expiry follow-up runs at start and once a minute: it removes expired assignments and
+memberships (roles mapped through the group end, MFA policy requirements lift), revokes
+the tokens and codes that depended on them, sends back-channel logout to the apps that
+saw those logins, deactivates the downstream accounts, and ends accounts past their end
+date (disabled, not deleted; sessions and grants revoked; profile deprovisioned). Every
+removal writes an audit row with actor `expiry`. Each item commits on its own: one row
+the follow-up cannot process is audited as a `*_failed` row with outcome `failure`,
+returned to the log, and retried next minute, while everything else due still lands.
+The rows themselves are the persisted due work, so a restart drains overdue expiries
+first and an instant extended before the follow-up runs is simply not due. The last
+active administrator, counted as an administrator whose end date has not passed, can
+neither be scheduled to end nor ended by the follow-up: the schedule is refused with
+`cannot_remove_last_admin`, and an end date that would remove the last administrator is
+cleared and audited as `account.end_refused`. Over the API, omitting `endsAt` keeps the
+current schedule; an empty string clears it.
+
+## Access requests and approvals
+
+An administrator opens an assigned-only app to requests with *Users may request access*
+on its access page. A user who lacks access then sees the app under *Request access* on
+their dashboard, states a reason and picks a duration (none, 1, 7, 30 or 90 days);
+apps that are not open to requests are never named, whether by listing or by guessed
+ID. One pending request per app, at most five pending per user, ten filings per
+minute, and a request nobody answers expires after fourteen days.
+
+Owners of the app and global administrators see the request in *Access requests*; a
+delegate's inbox holds only their apps. Approving or denying spends a step-up grant and
+writes an audit row. An approval is an ordinary direct assignment with the requested
+expiry, written through the same path a manual grant takes, so there is no second way
+to hold access and everything in "Expiring access" applies to it. The decision re-reads
+the approver's current authority, the app's policy and the request's state under the
+write lock: a requester cannot approve their own request, a request is decided once,
+an owner whose delegation was withdrawn cannot approve from a stale form, an app closed
+to requests in the meantime cannot be approved, and a request withdrawn or expired
+before the click grants nothing. The requester is told by mail when delivery is
+configured.
+
+## Explaining access decisions
+
+*Explain* on a user's row of an app's access page shows why that user can or cannot
+open the app, read from the same rows that decide it: the verdict and reason, every
+direct and group grant with its expiry and whether it is still live (an upstream-managed
+membership is marked), the app roles held and through which group, when access ends,
+the account's status and end date, the app's authentication policy, and the access,
+authentication and role revisions. The reason words are the ones the listing uses
+(`user_disabled`, `account_ended`, `app_disabled`, `client_disabled`,
+`all_active_users`, `direct_assignment`, `group_assignment`, `not_assigned`,
+`grants_expired`), so the two never disagree. The access page's policy preview still
+shows who would lose or gain access under a proposed policy without changing it.
+
+Explanations follow viewer permissions: administrators and auditors may explain any app,
+an app owner only their apps, and the answer names only groups assigned to that app,
+which the same viewers already see. A user can ask `GET
+/api/user/access-explanation?clientId=…` about themselves, ten times a minute, and gets
+the verdict and whether the app is requestable; every denial reads the same
+(`no_access`) whatever its cause, a client that does not exist reads like a denial,
+and the app is named only when they have access or may request it, so the answer
+discloses nothing an authorize attempt would not. A denied
+authorization is audited with the reason and the access, authentication and role
+revisions of that moment, so an old denial is never explained with today's policy, and
+the redirect tells a user of a requestable app to ask from their dashboard.
+
+## Audit search and export
+
+The audit log page filters by actor (id or username), target id, action prefix (for
+example `oauth.` covers every OAuth event), outcome and a time range entered in the
+operator's zone. Filters are bounded, indexed, and paged in a total order (time, then
+id), so paging never repeats or skips a row under tied timestamps. *Export CSV* and
+*Export JSONL* carry the same filter as the page, over `GET
+/api/admin/audit-events/export?format=csv|jsonl&…`, at most 50,000 rows and 30 seconds
+per export (response headers `X-KyIdentity-Export-Total`, `-Limit` and `-Truncated` say
+when a filter exceeded the bound), with a burst of five exports refilling at about six a
+minute per address and sixty listing calls a minute. An export that stopped short of the
+filtered set, whether by the row bound, the deadline or a failed write, ends with an
+in-band marker (`_export: incomplete` with the reason and row counts) so a downloaded
+file is never mistaken for a complete one. Each export is recorded before the first
+byte leaves (`admin.audit_export_started`; if that row cannot be written the export is
+refused) and again when it ends (`admin.audit_exported` with the outcome and row count). Details whose keys look like
+credential material (`secret`, `token`, `password`, `hash`, `credential`, `private`) are
+redacted at any depth, CSV cells that start with `=`, `+`, `-`, `@`, tab or carriage
+return are prefixed with a quote so no spreadsheet treats them as formulas, and the
+recorded rows carry the filter and row count. Administrators
+and auditors may search and export; nobody else. Retention is unchanged: rows older
+than the configured cutoff are trimmed by the existing housekeeping, and any change to
+that period is a separate decision, not part of search or export. For external log
+collection use the structured process log; there is no second audit delivery path.
+
+## Alerts
+
+The alerts page turns the audit trail and connector state into a short list an
+administrator or auditor can act on: privilege changes (an account made or unmade an
+administrator, delegations changed), recovery use (a recovery code consumed, a second
+factor reset by an administrator, a password reset link redeemed), connector credential
+changes (inbound SCIM tokens issued or revoked, an outbound connector created or its
+bearer token rotated, the mail relay changed), repeated login failures for one account
+or, when the name matches no account, from one address (threshold and window
+configurable, default ten in ten minutes; a submitted name never becomes an alert of
+its own, past ten live login alerts further sources share a single "many sources"
+alert, a login alert whose source has been quiet for a whole window resolves itself
+without mail, and login-failure mail is one mailing per four hours however many
+sources appear, so an attacker cycling names or addresses cannot flood the inbox, the
+mail or the table),
+failed or refused scheduled access removal, and outages (a connector whose deliveries are failing
+or given up, a client whose back-channel logouts were given up). Every audit insert
+queues its id through a trigger, the evaluator writes alerts and drains the queue in one
+transaction, and a worker goroutine of its own runs it every few seconds with a bounded
+pass, so a crash can repeat work but never skip a trigger, a stuck relay never delays
+provisioning or expiry follow-up, and history recorded before this version is not
+re-alerted.
+Repeats fold into one open alert per rule and subject with a count; an acknowledged
+alert reopens on the next occurrence rather than hiding it; an outage stays one alert
+for its whole duration, resolves itself when deliveries succeed again, and a later
+failure opens a fresh one. Alert text names the account, connector or app and nothing
+else: the audit details behind it, and any recovery code or credential, never reach the
+alert, the mail or the page. Recipients (`PUT /api/admin/alerts/settings`, administrators
+with step-up, usernames on the wire) must be administrators or auditors when configured
+and are checked again before each message; anyone who has since lost that access is
+skipped and the skip is shown. Mail goes through the existing relay when one is
+configured, with growing retry delays and a visible failure after eight attempts, so a
+broken relay or a missing configuration shows on the alert rather than silently
+dropping it. Administrators and auditors read the inbox (`GET /api/admin/alerts`), only
+administrators acknowledge (`POST /api/admin/alerts/{id}/acknowledge`), and both
+settings changes and acknowledgements are audited. Resolved alerts and finished
+deliveries are trimmed with the audit retention period; live alerts are kept whatever
+their age. There is no second alert transport and no per-rule switch; the process log
+remains the place for external collection.
+
+## Upgrades and restores
+
+Upgrading is starting the new image on the existing data directory: migrations run at
+startup, identifiers are stable, and an app that existed before per-app access modes is
+marked `all_active_users` rather than quietly locked down, because that is what the old
+server did. Running the migrations again changes nothing, which is checked by comparing
+the schema of a twice-upgraded database with a fresh one.
+
+Restoring is two commands and one deliberate consequence. `kyidentity restore -capsule
+<file> -to <dir>` unpacks a capsule (custodian shares on stdin, never argv) and marks
+the directory as restored. The next start reads that marker once and invalidates what
+the capsule carried: sessions, issued tokens, authorization codes and interactions,
+MFA and step-up challenges and grants, invitation and reset links, device pairing
+tokens and in-flight delivery fences. Back-channel logouts go the other way: a restore
+ends every login here, so before the sessions go it queues a logout for each one to the
+relying parties that saw it, and keeps the logouts it already owed rather than deleting
+them. Nothing else would re-derive that work, and a receiver told nothing keeps its own
+session until its own timeout. Queued outbound
+deliveries are closed out with a reason rather than sent, and outbound provisioning is
+held on every connector that is not disabled. A `system.restored` audit row records the
+counts, and the marker is removed only after that has committed, so an interrupted
+start repeats the work rather than skipping it.
+
+A held connector delivers nothing until a repair reconciliation has compared this
+directory with what is really on the far side and written the difference through; the
+Suite sync page shows the hold. Nothing else releases it: not a preview, not a failed
+run, not a listing that was refused or truncated, and not a connector whose kind cannot
+be listed at all. This is what stops a restored outbox from recreating accounts that
+have since left. A connector that cannot be listed — a suite webhook has no directory to
+read back — would otherwise stay held forever, so `POST
+/api/admin/systems/{id}/provisioning/resume` (administrators, step-up) lifts the hold on
+the operator's word instead, recorded as `admin.provisioning_resumed`. Connectors that
+were disabled at snapshot time are held too, so re-enabling one later does not deliver
+what was queued before it was disabled.
+
+The capsule's own outbox never delivers, on any of those paths. Closing a row out is not
+enough by itself: the worker re-pends exhausted work that still matches a connector's
+desired state, and a restore leaves every row eligible for that. So the closed-out rows
+are marked with a revision no connector can carry, which the re-pending cannot match and
+the next pass deletes. Deletions and MFA resets carry no desired state and do still
+retry, which only ever removes access. What reaches a resumed connector is what this
+directory wants now, not what the capsule was in the middle of. Passwords, enrolled
+factors and recovery codes are in the capsule and keep working, so the restore runbook
+asks for connector credentials to be reviewed for rotation before delivery resumes.
+Procedures are in [docs/RUNBOOKS.md](docs/RUNBOOKS.md) and
+[docs/RESTORE.md](docs/RESTORE.md); what has and has not been verified for a release is
+in [docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md).
 
 ## Integration Requirements
 
@@ -283,8 +600,62 @@ codes while the browser session survives). Revoking a session removes its author
 codes, tokens, step-up grants and pending authorization interactions in the same
 transaction as the audit event. These routes need CSRF but no step-up, like the emergency
 button. The app list is derived from issued tokens: it shows which apps can still call
-KyIdentity, not whether the app's own login is alive, and downstream apps may keep their
-session until standard logout ships.
+KyIdentity, not whether the app's own login is alive. The "Sign-out notifications" list
+below it shows, per app, whether the back-channel logout for an ended login is pending,
+acknowledged or failed; apps without a receiver never appear there.
+
+**RP-initiated logout.** Discovery advertises `end_session_endpoint` at `/oauth/logout`
+([OpenID Connect RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html)).
+Every ID token carries a `sid`: an opaque value minted per client and login, so two apps
+cannot correlate a user's sessions through it and no app learns the internal session ID.
+An app sends the browser to `/oauth/logout` with `id_token_hint`, optionally `client_id`,
+`post_logout_redirect_uri` and `state` (GET or POST). A hint this server signed for that
+client whose `sid` names the session held in this browser ends it at once. Without such a
+hint, or with a hint for another user or another login of the same user, KyIdentity shows a
+confirmation page whose form carries a session-bound token; a cross-site POST cannot
+confirm on the user's behalf. A cross-site POST carries no session cookie (`SameSite=Lax`),
+so it is answered with a 303 to the same request as a top-level GET on this origin rather
+than reported as a sign-out.
+`post_logout_redirect_uri` must match one of the client's registered post-logout URIs
+exactly (register them on the client, https or loopback http only); anything else is a 400
+page and nothing is changed, never a redirect. `state` is echoed on the redirect. Expired
+hints are accepted, forged or foreign-issuer hints are not. Ending the session revokes its
+codes, tokens, step-up grants and pending interactions in the same audited transaction as
+the browser logout button.
+
+**Back-channel logout.** Discovery advertises `backchannel_logout_supported` and
+`backchannel_logout_session_supported`
+([OpenID Connect Back-Channel Logout](https://openid.net/specs/openid-connect-backchannel-1_0.html)).
+A client may register one back-channel logout URI (public HTTPS, same guard as
+provisioning callbacks). Whenever a login ends, whether by the logout button, RP-initiated
+logout, "sign out other sessions", an administrator revoking a session or an app's tokens,
+or an account being disabled, KyIdentity queues one delivery per client that saw that login
+and has a receiver, in the same transaction as the revocation. A worker POSTs
+`logout_token=<JWT>` as a form body with no redirects followed, a ten-second timeout and a
+fresh token per attempt; 200 or 204 acknowledges, anything else retries with exponential
+backoff (30 s doubling, 30 min cap) up to five attempts, then the delivery is marked failed.
+Administrators see each delivery in the user's Sessions modal and can retry a stuck one,
+which restores the attempt budget; the retry is audited as `admin.logout_retry`. Only
+administrators see the transport error text, since it can name the receiver's host.
+Deliveries run on four workers with at most one in flight per client, so a receiver that
+never answers delays only its own queue. Delivered rows are pruned after seven days; a failed delivery stays until it succeeds
+or an administrator retries it, because its absence would read as success.
+A session that reaches its idle or absolute limit is dropped without a logout token:
+expiry is not a sign-out action, and apps rely on their own session lifetimes for it.
+
+The logout token is an RS256 JWT with header `typ: logout+jwt` and claims `iss`, `aud`
+(the client ID), `sub`, `sid` (the client-scoped session ID from the ID token), `iat`,
+`exp` (two minutes), `jti` and `events` containing
+`http://schemas.openid.net/event/backchannel-logout`. It never carries `nonce` or
+`token_use`, and this server rejects it as an ID token hint and as an access token. A
+receiver must verify the signature against the JWKS, the issuer, that `aud` is its client
+ID, that `typ` is `logout+jwt`, that the events claim is present and `nonce` absent, and
+reject a `jti` it has already seen; it should then end every local session tied to that
+`sid` (or to `sub` when it keys sessions by subject) and answer 200 with `Cache-Control:
+no-store`. An acknowledgement means the receiver accepted the token, not that it proved it
+ended a session; "Acknowledged" in the UI carries exactly that meaning. Subject-wide logout
+(a token with `sub` and no `sid`) is not sent by this server today: every delivery names one
+login.
 
 **Authorization re-authentication (PR05a).** Ordinary requests reuse SSO. Following
 [OpenID Connect authentication requests](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest),
@@ -426,8 +797,8 @@ login supplies evidence. Pending legacy authorization codes and MFA flows are in
 users in those flows restart login. New codes and access tokens bind internally to the
 originating session: removing it blocks exchange and online UserInfo access. Already-issued
 legacy access tokens retain their previous expiry/revocation behavior. Internal session IDs
-are listed to their owner and administrators for revocation but are not published as logout
-`sid` claims; standard downstream logout remains future work.
+are listed to their owner and administrators for revocation; ID tokens publish a separate
+per-client `sid` for RP-initiated and back-channel logout.
 
 **System pairing requires the PIN** shown next to the token, and callback URLs must be
 `https` and resolve off-network unless `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` (the
@@ -469,8 +840,8 @@ still required, the choice is recorded on every pairing, and loopback stays refu
 way, pin the key by hand from the ceremony page before pairing, or compare the key ID the
 screen shows with the fingerprint in the KyRecovery dashboard; a swapped key then fails
 loudly. In Docker, a name that exists only on your LAN may not resolve inside the container when the
-host uses a loopback stub resolver; add the `docker-compose.lan-dns.yml` override with
-`KYIDENTITY_DNS` set to your LAN's resolver. It replaces the host's resolvers for every lookup
+host uses a loopback stub resolver; append `docker-compose.lan-dns.yml` to `COMPOSE_FILE` in
+`.env` (see the file's header) and recreate with `KYIDENTITY_DNS` set to your LAN's resolver. It replaces the host's resolvers for every lookup
 the container makes, which is why it is an override and not the default.
 
 **Passkeys are bound to the issuer's origin.** The relying party ID is the hostname of
@@ -650,6 +1021,34 @@ Signed suite webhooks have no read contract. Their jobs record every held accoun
 **Scheduled repair every N hours** in Connection settings queues a repair job at that
 interval (0 disables it). The last twenty jobs per connector are kept.
 
+### Offboarding
+
+Disabling an account, deleting it, and (when it ships) an account end date all run the
+same transaction: every browser session ends and its back-channel logout is queued,
+every token, code and step-up grant is revoked, and an inactive desired state is
+recorded for every connector that holds the account, including a connector that only
+knows the user through a remote ID mapping and never had a tracked grant. Deletion sends
+`user.deleted` instead of an inactive profile and then removes the directory row; the
+completion state, the remote ID mappings and the audit trail outlive it so retries and
+reconciliation still work. A connector with no recorded account still receives a bare
+deletion, in case it holds one from whole-directory delivery that predates tracking, and
+it appears in the completion view like any other target. Disabling does not send to such
+a connector: nothing shows it holds the account, and nothing is hidden from the view. Products are told to deactivate; nothing erases mail, notes
+or vaults. Re-enabling records a new desired-state revision, so a deactivation still in
+flight cannot land after the reactivation, and the user must sign in again.
+
+**Users → Offboarding status** (also opened automatically after a delete) shows, per
+connector, what was queued, whether the connector acknowledged it, and what the last
+listing observed, with attempts, next retry and a retry button; below it are the
+sign-out notifications. The summary reads *Pending* while any target is outstanding,
+*Acknowledged* once every connector and app accepted its delivery (decided over every
+delivery, not just the ones listed, and recorded on the connector's state row so it
+survives outbox pruning), and *Complete* only when a later listing verified
+the account inactive or absent at every connector. A
+connector whose listing is unsupported can be acknowledged but never verified, and a
+connector whose later listing still shows the account active is marked *Still active at
+target* and counts as neither; the view says so rather than rounding up.
+
 ### SCIM Groups
 
 Generic SCIM connectors may enable **Deliver SCIM Groups** under Connection settings.
@@ -662,3 +1061,74 @@ before every write, and only 200/204 completes a write. Unassigning or deleting 
 group deletes the remote group (404 is accepted). Disabling the flag leaves remote groups untouched. Group attempts
 appear in Deliveries with the group ID as the resource; read-back and lost-create
 recovery use the Groups collection. Suite receivers never receive group events.
+
+## Inbound SCIM
+
+An upstream directory can own accounts here over SCIM 2.0. **Administration → Inbound
+SCIM** creates a connector and issues its Bearer tokens (shown once, stored as hashes,
+`read` or `write` scope, last use recorded, revocable at any time; issue a new one and
+revoke the old to rotate). The base URL is `<issuer>/scim/v2`. Connector tokens work
+only there: they never authorize the browser API, and a browser session never
+authorizes SCIM. Every request is rate limited per connector, and failed
+authentications per address.
+
+**Supported profile.** `GET /ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`
+describe exactly this: Users only; create, get, list with one exact-match filter
+(`userName`, `externalId`, `emails.value` or `id` with `eq`), `startIndex`/`count`
+paging up to 200, replace, PATCH with `add`/`replace` of `active`, `userName`,
+`displayName`, `name` and `emails` (single or path-less operations, 50 at most, applied
+atomically), and DELETE. Weak ETags are returned and honoured on `If-Match`; a stale
+version is refused with 412. Bulk, sorting, other filters and other attributes are
+refused with a SCIM error rather than ignored. Password provisioning is unsupported and
+a `password` attribute is rejected outright; `roles` are ignored.
+
+**Ownership.** An account the upstream creates is keyed by connector plus its immutable
+`externalId`; a changed `externalId` is refused. It starts pending with no credential,
+like any invited account: an administrator issues its activation link (or mail delivery
+does), and only then can it sign in, be provisioned or hold app access. No activation
+link is issued while the upstream marks the account inactive or a local override holds,
+and activation never outranks either: the password is set, the status follows the
+source state. `userName`,
+`displayName`, `name`, the primary email and the `active` flag belong to the upstream
+and are read-only for local administrators; role is a local decision the upstream
+cannot make. A clash with an existing username or email, local or from another
+connector, is a 409, and so is a `userName` equal to some account's email or the
+reverse: an upstream never takes over or shadows an account. A connector sees and
+touches only its own accounts. DELETE deactivates; nothing is erased.
+
+**Overrides.** A local administrator disabling an upstream account sets an override the
+upstream's `active: true` cannot lift; enabling it locally lifts the override and takes
+effect only if the upstream also wants the account active. Upstream deactivation runs
+the full offboarding transaction. Local accounts, including emergency administrators,
+are outside every connector's reach by construction.
+
+**Groups.** `/scim/v2/Groups` maps onto the flat directory groups: create, get, list
+with one exact-match filter (`displayName`, `externalId` or `id`), replace, PATCH and
+delete. A group's `displayName` and member set belong to the upstream; every member must
+be a User of the same connector (a local account, another connector's account or a
+group is refused with a clear SCIM error and nothing is applied), and nested groups are
+refused. A PATCH is validated in full and applied as one replace, so an invalid
+operation anywhere means nothing changes. Weak ETags apply as for Users. Deleting a
+group removes what its memberships granted and never deletes a user. A group with a
+required MFA policy is refused to the upstream for any change, its name included, since
+only a local administrator with a compliant sign-in may change such a group. One request
+carries at most 1000 members; a conditional write (`If-Match`) is re-checked inside the
+write transaction, so two writes that read the same version cannot both land. Locally, an upstream group's name is
+read-only (`source_owned`); its description stays local. Group membership drives app
+assignment and downstream provisioning exactly as local membership does.
+
+**Setup.** Create the connector, issue a write token, and add a SCIM provisioning target
+in the upstream directory with tenant URL `<issuer>/scim/v2` and the token as the Bearer
+secret. Map `userName`, `externalId`, `displayName`/`name`, the primary email and
+`active` for users, and `displayName`, `externalId` and `members` for groups; do not map
+passwords or roles. Provisioned accounts appear pending on the Users page and take an
+activation link; groups appear on the Groups page marked SCIM. Every SCIM write is in
+the audit log under `scim.*` with the connector as actor. The supported profile is
+proven by the protocol test suite and a local curl run only; it has not yet been
+validated against a real upstream tenant, so do not claim compatibility with a
+particular directory product until that run is recorded.
+
+**Disconnecting** a connector requires a choice for the accounts it owned: keep them as
+ordinary local accounts as they are, or disable them first. Disabling is refused when it
+would leave no active administrator. Its groups become ordinary local groups, its
+tokens die with it, and the choice is audited.

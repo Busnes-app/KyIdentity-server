@@ -302,6 +302,13 @@ func proveSecretDecryption(ctx context.Context, scratchDir string, recipe map[st
 			`SELECT hmac_secret_encrypted FROM paired_systems WHERE hmac_secret_encrypted IS NOT NULL AND hmac_secret_encrypted != ''`,
 			"No paired systems are configured, so none could be checked",
 		},
+		{
+			// Mail settings are the one encrypted blob in system_settings; a restore
+			// that cannot read them cannot send an activation or reset link.
+			"Mail Settings Decryption",
+			`SELECT value FROM system_settings WHERE key = 'mail_settings_enc' AND value != ''`,
+			"Mail delivery is not configured, so nothing could be checked",
+		},
 	} {
 		rows, err := db.QueryContext(ctx, target.query)
 		if err != nil {

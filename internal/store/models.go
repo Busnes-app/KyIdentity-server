@@ -5,15 +5,32 @@ import (
 )
 
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	DisplayName  string    `json:"displayName"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"`   // "user", "admin"
-	Status       string    `json:"status"` // "active", "disabled"
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	DisplayName  string `json:"displayName"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"-"`
+	Role         string `json:"role"`   // "user", "admin"
+	Status       string `json:"status"` // "active", "disabled"
+	// Pending accounts were invited but have no password yet; they stay disabled until
+	// an activation link sets one.
+	Pending bool `json:"pending"`
+	// EmailVerifiedAt is set only when a link mailed to the address was redeemed.
+	EmailVerifiedAt *time.Time `json:"emailVerifiedAt,omitempty"`
+	// SourceConnectorID names the inbound SCIM connector that owns the profile; empty
+	// for local accounts. ExternalID is the upstream's immutable key for the account.
+	SourceConnectorID string `json:"sourceConnectorId,omitempty"`
+	ExternalID        string `json:"externalId,omitempty"`
+	// SourceActive is the upstream's active flag; LocallyDisabled is a local
+	// administrator's override that the upstream cannot lift. ApplySourceState derives
+	// Status from them.
+	SourceActive    bool `json:"sourceActive"`
+	LocallyDisabled bool `json:"locallyDisabled"`
+	// EndsAt is the account end date; once passed the account reads as disabled
+	// everywhere and the expiry follow-up ends it for real.
+	EndsAt    *time.Time `json:"endsAt,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 // AuthenticationEvidence records server-verified login facts. Nil timestamps mean
@@ -52,6 +69,9 @@ type PairedSystem struct {
 	GroupsEnabled bool `json:"groupsEnabled"`
 	// ReconcileHours schedules a repair reconciliation at this interval; 0 disables it.
 	ReconcileHours int `json:"reconcileHours"`
+	// ProvisioningHold stops outbound delivery until a repair reconciliation has
+	// compared this connector with what is really there. A restore sets it.
+	ProvisioningHold bool `json:"provisioningHold"`
 }
 
 type AccountSyncEvent struct {
@@ -140,22 +160,27 @@ type RecoveryCode struct {
 }
 
 type OAuthClient struct {
-	ID                string    `json:"id"`
-	ClientName        string    `json:"clientName"`
-	ClientType        string    `json:"clientType"` // "public", "confidential"
-	ClientSecretHash  string    `json:"-"`
-	RedirectURIsJSON  string    `json:"redirectUrisJson"`
-	AllowedScopesJSON string    `json:"allowedScopesJson"`
-	LaunchURL         string    `json:"launchUrl,omitempty"`
-	Description       string    `json:"description,omitempty"`
-	IconName          string    `json:"iconName,omitempty"`
-	Enabled           bool      `json:"enabled"`
-	CreatedAt         time.Time `json:"createdAt"`
+	ID                string `json:"id"`
+	ClientName        string `json:"clientName"`
+	ClientType        string `json:"clientType"` // "public", "confidential"
+	ClientSecretHash  string `json:"-"`
+	RedirectURIsJSON  string `json:"redirectUrisJson"`
+	AllowedScopesJSON string `json:"allowedScopesJson"`
+	// PostLogoutRedirectURIsJSON lists where RP-initiated logout may send the browser.
+	PostLogoutRedirectURIsJSON string `json:"postLogoutRedirectUrisJson"`
+	// BackchannelLogoutURI receives signed logout tokens when a login ends; empty means unsupported.
+	BackchannelLogoutURI string    `json:"backchannelLogoutUri"`
+	LaunchURL            string    `json:"launchUrl,omitempty"`
+	Description          string    `json:"description,omitempty"`
+	IconName             string    `json:"iconName,omitempty"`
+	Enabled              bool      `json:"enabled"`
+	CreatedAt            time.Time `json:"createdAt"`
 }
 
 type AuthorizationCode struct {
 	AuthenticationAppID          string     `json:"-"`
 	AuthenticationPolicyRevision int        `json:"-"`
+	RoleRevision                 int        `json:"-"`
 	InteractionHash              string     `json:"-"`
 	AuthenticationExpiresAt      *time.Time `json:"-"`
 	AuthenticationEvidence

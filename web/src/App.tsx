@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { User } from './types';
+import { User, canAdminister } from './types';
 import { apiJson, apiRequest } from './api';
 import { parseMe } from './parsers';
 import { Sidebar } from './components/Sidebar';
@@ -15,6 +15,11 @@ import { AdminSystems } from './components/AdminSystems';
 import { AdminClients } from './components/AdminClients';
 import { AdminAudit } from './components/AdminAudit';
 import { AdminBackup } from './components/AdminBackup';
+import { AdminMail } from './components/AdminMail';
+import { AdminSCIM } from './components/AdminSCIM';
+import { AdminAccessRequests } from './components/AdminAccessRequests';
+import { AdminAlerts } from './components/AdminAlerts';
+import { AccountLinkView } from './components/AccountLinkView';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -22,6 +27,9 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [groupUser, setGroupUser] = useState<User | null>(null);
+
+  // Link pages need no session and must not wait for one.
+  const linkKind = window.location.pathname === '/activate' ? 'activation' : window.location.pathname === '/reset' ? 'reset' : null;
 
   const checkSession = async () => {
     try {
@@ -65,6 +73,8 @@ export const App: React.FC = () => {
     );
   }
 
+  if (linkKind) return <AccountLinkView kind={linkKind} />;
+
   if (!currentUser || (window.location.pathname === '/login' && new URLSearchParams(window.location.search).has('interaction'))) {
     return <LoginView onLoginSuccess={(u) => { setCurrentUser(u); checkSession(); }} />;
   }
@@ -98,10 +108,10 @@ export const App: React.FC = () => {
 
         {activeTab === 'appearance' && <Appearance />}
 
-        {currentUser.role === 'admin' && (
+        {canAdminister(currentUser.access) && (
           <>
             {activeTab === 'admin-enrollment' && <AdminEnrollmentPolicies />}
-            {activeTab === 'admin-users' && <AdminUsers onManageGroups={user => { setGroupUser(user); setActiveTab('admin-groups'); }} />}
+            {activeTab === 'admin-users' && <AdminUsers access={currentUser.access} onManageGroups={user => { setGroupUser(user); setActiveTab('admin-groups'); }} />}
             {activeTab === 'admin-groups' && <AdminGroups key={groupUser?.id ?? 'all'} user={groupUser} onClearUser={() => setGroupUser(null)} />}
             {activeTab === 'admin-app-registry' && <AdminAppRegistry onManageLaunchers={() => setActiveTab('admin-launchers')} />}
             {activeTab === 'admin-launchers' && <UserDashboard key="manage-launchers" manage user={currentUser} onNavigateToDevices={() => setActiveTab('devices')} />}
@@ -109,6 +119,10 @@ export const App: React.FC = () => {
             {activeTab === 'admin-clients' && <AdminClients />}
             {activeTab === 'admin-audit' && <AdminAudit />}
             {activeTab === 'admin-backup' && <AdminBackup />}
+            {activeTab === 'admin-mail' && <AdminMail />}
+            {activeTab === 'admin-scim' && <AdminSCIM />}
+            {activeTab === 'admin-requests' && <AdminAccessRequests />}
+            {activeTab === 'admin-alerts' && <AdminAlerts access={currentUser.access} />}
           </>
         )}
       </main>

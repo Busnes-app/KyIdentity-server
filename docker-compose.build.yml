@@ -1,0 +1,20 @@
+# Source build. Set it once and every `docker compose` command, the recovery procedure
+# included, keeps using the local build instead of the published image. The overlay is appended
+# to whatever COMPOSE_FILE chain .env already holds (a LAN-DNS override survives), re-running is a
+# no-op, and .env, which also holds secrets, is written at 0600.
+#   (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+#     && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+#     && case ":$cf:" in *:docker-compose.build.yml:*) ;; *) cf="$cf:docker-compose.build.yml";; esac \
+#     && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" \
+#     && printf 'COMPOSE_FILE=%s\n' "$cf" >> "$t" && mv "$t" .env)
+# Further overlays chain onto the same value, e.g. `:docker-compose.lan-dns.yml`;
+# an explicit `-f` list replaces COMPOSE_FILE entirely, so avoid mixing the two.
+# The result is tagged kyidentity-server:local so it never occupies the published name. This
+# image also wins over a KYIDENTITY_IMAGE digest pin in .env: a source install always runs its build.
+services:
+  kyidentity-server:
+    image: kyidentity-server:local
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile

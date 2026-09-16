@@ -43,6 +43,26 @@ func (h *AdminHandler) RetryProvisioning(w http.ResponseWriter, r *http.Request)
 	writeGroupJSON(w, map[string]bool{"success": true})
 }
 
+// ResumeProvisioning lifts a restore hold on the operator's word rather than on a
+// reconciliation's evidence. It is for connectors that cannot be listed, so no
+// reconciliation could ever clear them.
+func (h *AdminHandler) ResumeProvisioning(w http.ResponseWriter, r *http.Request) {
+	admin := GetUserFromContext(r.Context())
+	event := h.audit.Prepare("admin.provisioning_resumed", admin.ID, admin.Username, r.PathValue("id"), "system", h.middleware.ClientIP(r), r.UserAgent(), "success",
+		map[string]any{"reason": "resumed without a reconciliation"})
+	err := h.store.ResumeProvisioning(r.PathValue("id"), event.Row)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, 500)
+		return
+	}
+	event.Committed()
+	writeGroupJSON(w, map[string]bool{"success": true})
+}
+
 func (h *AdminHandler) ListReconcileJobs(w http.ResponseWriter, r *http.Request) {
 	sys, err := h.store.GetPairedSystemByID(r.PathValue("id"))
 	if err != nil {

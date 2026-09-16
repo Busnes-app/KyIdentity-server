@@ -1,5 +1,5 @@
 **Repo:** kyidentity-server
-**Worktree:** /home/yoshi/busness.app/kyidentity-server (branch master after PR #37)
+**Worktree:** /home/yoshi/busness.app/kyidentity-server/.claude/worktrees/pr11-oidc-logout (on merged master; no server PR outstanding)
 
 # KyIdentity access and identity lifecycle implementation plan
 
@@ -15,7 +15,40 @@ PR07 merged as GitHub PR #33 with CI passed and both findings resolved.
 PR08 is split into 08a (resource ordering and uncertain-write recovery, merged as
 GitHub PR #34) and 08b (assignment-aware desired state, revisions and group delivery,
 merged as GitHub PR #35). PR09 merged as GitHub PR #36. PR10 merged as GitHub PR #37 with CI
-passed and the security review cleared. PRs 11–23 and D1–D4 remain planned.
+passed and the security review cleared. PR11 is split into 11a (per-client `sid`,
+RP-initiated logout, post-logout redirect registration; merged as GitHub PR #39)
+and 11b (back-channel logout tokens and durable delivery; merged as GitHub PR #41 with
+the security review's four findings fixed). PR12 merged as GitHub PR #44 after five review rounds (durable
+acknowledgement, contradicting listings, wire shape, pruning, untracked holders). PR13
+(invitations, activation and password self-service) merged as GitHub PR #45. PR14
+(inbound SCIM connector security and Users) merged as GitHub PR #46 after four review
+rounds (atomic upstream writes, identifier shadowing, last-admin on disconnect, stale
+local copies, activation following source state). PR15 (inbound SCIM Groups and
+operational setup) merged as GitHub PR #47 after one review round. PR16 (app roles and
+bounded claim mappings) merged as GitHub PR #48 after four review rounds (membership
+changes as role changes, explicit empty roles end to end, first/last role re-push,
+completion status on the SCIM replace). PR17 (delegated administration) merged as GitHub PR #49 after one review
+round (delegates under the administrators MFA scope, helpdesk kept off administrators
+and other delegates). PR18 (expiring access and account end dates) merged as GitHub PR #50 after two
+review rounds (one active-administrator definition, per-item expiry follow-up, unchanged
+end dates not treated as schedules). PR19 (access requests and approvals) merged as GitHub PR #51,
+cleared by the security review on its first pass. PR20 (explain effective access and
+authentication decisions) merged as GitHub PR #52 after one review round (uniform
+user-facing denial with a rate limit, roles named only via assigned groups). PR21 (audit
+search and export) merged as GitHub PR #53 after two review rounds (in-band incomplete
+marker, deadline-aware queries, intent row before the first byte, row bound detected
+from the stream). PR22 (actionable security and provisioning alerts) merged as GitHub
+PR #54 after three review rounds (login alerts keyed by account or source rather than
+the submitted name, alerts on their own goroutine under a pass budget, retention for
+alerts and deliveries, login mail capped per rule per cooldown). PR23 (upgrade, restore
+and end-to-end release verification) merged as GitHub PR #55 after three review rounds
+(the provisioning hold released only by a repair that compared the far side, every
+connector held including disabled ones, the capsule's outbox marked so the worker cannot
+re-pend it, and the logins a restore ends announced to the relying parties rather than
+their queued logouts deleted). Every server PR in the plan is now merged; D1–D4 remain
+planned, and the external release gates stay open in docs/RELEASE-EVIDENCE.md. Note for D1–D4: released
+ky-primitives v0.6.0 `oidcverify` has no logout-token path and does not check `typ`, so
+receivers need a dedicated verification primitive before consuming logout tokens.
 PR37 review limitation: review input was truncated and omitted changes were not
 reviewed; the reviewer ran no browser session. Local browser verification covered the
 own-account list, revoke-others and the admin modal only.
@@ -372,6 +405,20 @@ tokens only. README.md "Sessions".
 
 ### PR 11 — Standard OIDC logout and durable downstream delivery
 
+Split for independent review:
+- **11a — RP-initiated logout and `sid`:** per-client opaque `sid` in ID tokens backed by
+  `oidc_client_sessions`, `/oauth/logout` with exact post-logout redirect matching, state
+  echo, expired-hint tolerance, a session-bound confirmation page for unproven requests,
+  admin registration of post-logout URIs, discovery `end_session_endpoint`. The browser
+  logout button and RP-initiated logout share the PR10 transactional session revocation.
+- **11b — Back-channel delivery:** logout-token signing, per-client receiver registration,
+  durable retry jobs enqueued from session revocation, delivery status display and the
+  discovery flags. The acceptance criteria below span both increments. Implementation:
+  `logout_deliveries` with leases, claim tokens, backoff and a five-attempt budget; enqueue
+  happens in `revokeSessionsTx` and per-client revocation before session rows cascade;
+  `Engine.StartLogoutWorker` delivers; README.md "Back-channel logout" documents receiver
+  checks, replay handling and that only session-specific tokens are sent.
+
 Depends on: 01, 10. Touch: OAuth discovery/handlers, client metadata, logout outbox.
 
 - Add RP-initiated logout, exact registered post-logout redirect matching, appropriate
@@ -404,6 +451,14 @@ Depends on: 08, 09, 10, 11. Touch: shared account lifecycle operations and admin
 Acceptance: disable while one app is offline, verify local denial immediately and remote
 convergence on return; prove no later stale work restores access; re-enable requires new
 login. Never show globally complete while a required target is pending or unsupported.
+
+Implementation: `offboardUserTx` (disable and delete; end dates can reuse it) revokes
+local access and queues inactive desired state or `user.deleted` for every connector
+with a state row or a remote mapping; deletion keeps `sync_resource_state` and
+`scim_user_links`. `GET /api/admin/users/{id}/offboarding` and the Users → Offboarding
+status modal show per-connector queued/acknowledged/observed with retries; `verified`
+needs a listing at or after the last delivery and is never true for unsupported
+verification. README.md "Offboarding". Account end dates remain PR 18.
 
 ### PRs D1–D4 — Downstream suite adoption, one PR per product
 
@@ -457,6 +512,17 @@ Acceptance: expired/replayed/cross-account links fail; a link cannot bypass MFA 
 activation state; password change revokes other access; delivery failure is visible;
 reset cannot enumerate users; no-email deployments can activate users manually.
 
+Implementation: `users.pending` + `email_verified_at`, `account_tokens` (hashes only,
+kind activation/reset, delivery manual/email); `internal/mail` SMTP sender with
+TLS-only transports and encrypted settings in `system_settings`; routes
+`POST /api/auth/activate`, `/api/auth/password/forgot|reset`, `POST /api/user/password`
+(step-up), `POST /api/admin/users/{id}/activation-link|reset-link` (step-up),
+`GET/PUT /api/admin/mail`, `POST /api/admin/mail/test`; SPA pages `/activate` and
+`/reset`, "Forgot your password?", Security → Password, Users link button and
+Mail delivery page. README.md "Onboarding and passwords". Enrollment grace still starts
+at account creation (trigger `enrollment_new_user`), so a late activation may land
+straight in restricted enrollment; deliberate. Lost-factor recovery is unchanged.
+
 ### PR 14 — Inbound SCIM connector security and Users
 
 Depends on: 07, 12, 13. Touch: new SCIM HTTP boundary, shared lifecycle/store, connector UI.
@@ -481,6 +547,14 @@ Acceptance: realistic SCIM client fixture completes lifecycle with stable IDs; c
 email does not take over an account; repeated creates resolve safely; stale conditional
 writes fail; credential rotation rejects the old token; local disable overrides survive.
 
+Implementation: `scim_connectors`/`scim_connector_tokens`, `users.source_connector_id`,
+`external_id`, `source_active`, `locally_disabled`; `/scim/v2` Users + discovery with
+one-clause `eq` filters, weak ETags, PATCH add/replace, delete-to-deactivate; admin
+routes under `/api/admin/scim-connectors`; Administration → Inbound SCIM page; Users
+page marks managed accounts and refuses edits of source-owned fields. README.md
+"Inbound SCIM". Emergency administrators are protected by construction (local accounts
+are outside every connector). Groups are PR 15.
+
 ### PR 15 — Inbound SCIM Groups and operational setup
 
 Depends on: 03, 08, 14. Touch: SCIM Groups, group/source metadata, connector admin UI.
@@ -499,6 +573,14 @@ Depends on: 03, 08, 14. Touch: SCIM Groups, group/source metadata, connector adm
 Acceptance: upstream join/move/leave drives assignment and downstream convergence;
 invalid PATCH rolls back fully; cross-connector membership is rejected; deleting an
 external group cannot delete users or mutate local admin ownership.
+
+Implementation: `directory_groups.source_connector_id`/`external_id`; `/scim/v2/Groups`
+with one-clause filters, weak ETags, PATCH computed then applied as one replace, members
+restricted to the connector's users, nested groups refused, delete never touches users;
+admin refuses local rename of upstream groups; Inbound SCIM page shows setup steps and
+counts; README.md "Inbound SCIM" (Groups, Setup). Not done: validation against a real
+upstream tenant; README says so and withholds product compatibility claims. Redacted
+request logs are the `scim.*` audit rows; a per-request log was not added.
 
 Release C gate: upstream create → activation → MFA → group grant → app login → group
 removal → downstream access removal, with a manual-only onboarding path also verified.
@@ -522,6 +604,16 @@ Acceptance: Finance maps to one app's billing role without privilege in another;
 unassigned apps receive no claims; role removal blocks stale code exchange; unknown
 scopes and large memberships cannot leak or silently broaden permissions.
 
+Implementation: `app_roles` with group/user mappings, `roles` and optional `groups`
+claims per app, `role_revision` stamped on codes and checked at exchange, affected
+grants revoked and SCIM profiles re-sent on every change, claims gated by granted scope
+in ID token and UserInfo alike, 4 KiB identity-claim cap with an actionable
+`invalid_request`, client scopes restricted to the known set, per-app legacy `role`
+claim switch (on for pre-existing apps, off for new ones; each remaining exception is
+visible on the app's Roles page). README.md "App roles and token claims".
+Compatibility exceptions to remove after D1–D4 verify `roles`: every app created before
+this PR has the legacy switch on.
+
 ### PR 17 — Delegated administration
 
 Depends on: 02, 04, 12, 16. Touch: API permissions, store role bindings, admin navigation.
@@ -539,6 +631,18 @@ Depends on: 02, 04, 12, 16. Touch: API permissions, store role bindings, admin n
 Acceptance: a permission matrix covers every admin route; guessed IDs and direct calls
 cannot cross scope; helpdesk cannot reset a global admin; demotion takes effect without
 requiring the old session to expire; the final admin invariant still holds.
+
+Implementation: `admin_delegations` (helpdesk, auditor, app owner per app record) set
+only by global administrators with step-up and an atomic audit row; the global
+`users.role` is untouched, so the last-administrator invariant is unchanged. Every admin
+route is a table row naming one of seven fixed permissions; `require` computes access
+from the users row and delegation rows on each request, so a demotion or removed
+delegation is refused on the next call. Helpdesk recovery routes refuse administrator
+targets; app-owner routes are scoped to the path's app and the app list is narrowed to
+owned apps. `TestPermissionMatrixCoversEveryAdminRoute` exercises all 82 routes with
+six actor kinds, cross-app ownership and immediate revocation. Users → delegation
+editor in the SPA; navigation follows the `access` block from `/api/auth/me`.
+README.md "Delegated administration".
 
 ### PR 18 — Expiring access and account end dates
 
@@ -559,6 +663,16 @@ Acceptance: expiry works with the worker stopped, alternate grants preserve acce
 restart drains overdue removals, stale jobs cannot undo extensions, and timezone/DST
 input resolves to the intended UTC instant.
 
+Implementation: expiry instants on direct assignments, memberships and accounts, read
+by the access views with `unixepoch()` on every decision (worker-independent); tokens
+bounded to `AccessEndsAt` (latest live grant, capped by the account end date);
+`RunDueExpiries` as the follow-up at start and each minute (rows are the persisted due
+work; only removes, so a prior extension is untouched), with role, enrollment, logout,
+token and provisioning follow-ups and `expiry` audit rows; last administrator neither
+schedulable nor endable. Lost app access now also queues back-channel logout. SPA takes
+a datetime-local value and shows the exact UTC instant beside it. README.md "Expiring
+access and account end dates".
+
 ### PR 19 — Access requests and approvals
 
 Depends on: 17, 18. Touch: request store, user request view, app-owner/admin inbox.
@@ -574,6 +688,18 @@ Depends on: 17, 18. Touch: request store, user request view, app-owner/admin inb
 Acceptance: approval grants exactly the requested app/duration once; revoked approver
 authority blocks stale forms; cancellation/expiry cannot race into a grant; private apps
 are not disclosed through search or IDs.
+
+Implementation: `app_registry.requestable` set by global administrators; `access_requests`
+with one pending row per app and user, a cap of five pending per user, a rate limit on
+filing and a fourteen-day expiry closed by the expiry follow-up; `RequestableApps` names
+only requestable assigned-only apps the user lacks, and a closed app answers like a
+missing one; `DecideAccessRequest` re-reads authority, requester, state and app policy
+under the write lock and grants through `applyAppAssignmentTx`, the manual-grant path,
+with the requested duration as the assignment expiry; inbox and decisions under the
+`requests` permission (administrators and app owners, scoped server-side), step-up and
+audit on every decision, mail to the requester when configured. Dashboard "Request
+access" panel and an administration "Access requests" inbox. README.md "Access requests
+and approvals".
 
 Release D gate: a delegated app owner approves temporary access, mapped roles reach
 only the correct app, and expiry removes access without intervention.
@@ -596,6 +722,15 @@ Acceptance: displayed decisions equal actual authorization for direct/group/expi
 disabled cases; historical reasons survive edits; unauthorized viewers cannot enumerate
 groups, users or private apps via explanations.
 
+Implementation: `ExplainAccess` reads the verdict from the access view and the reason
+from the expression the listing uses, lists grants with expiry and liveness, roles with
+their source, the authentication policy, the access end and the three revisions; an
+Explain modal on the app access page (administrators, auditors, owners of that app) and
+a user-facing endpoint that returns only verdict, reason and requestability; denied
+authorizations are audited with the reason and revisions of that moment and point users
+of requestable apps at the request path. The existing policy preview covers proposed
+access-policy changes. README.md "Explaining access decisions".
+
 ### PR 21 — Audit search and export
 
 Depends on: 17, 20. Touch: audit queries/indexes, admin audit UI/export endpoint.
@@ -611,6 +746,15 @@ Depends on: 17, 20. Touch: audit queries/indexes, admin audit UI/export endpoint
 Acceptance: pagination has no duplicates under tied timestamps, scopes apply equally to
 UI and export, malicious CSV values cannot execute formulas, and large exports remain
 bounded without blocking authentication.
+
+Implementation: `AuditFilter` shared by listing and export (actor, target, target type,
+action prefix, outcome, time range), total order by time then id with matching indexes
+checked by `EXPLAIN QUERY PLAN` at 6,000 rows, streamed CSV/JSONL export bounded to
+50,000 rows and 30 seconds with truncation headers, credential-shaped detail keys
+redacted, formula-leading CSV cells quoted, one `admin.audit_exported` row per export,
+both under the `read` permission (administrators and auditors) with a per-IP limiter.
+Retention untouched (`DeleteAuditEventsOlderThan`). Audit page gains a filter bar and
+export links. README.md "Audit search and export".
 
 ### PR 22 — Actionable security and provisioning alerts
 
@@ -628,6 +772,26 @@ Depends on: 09, 12, 13, 19, 21. Touch: persisted alert delivery, admin inbox/con
 Acceptance: one prolonged outage produces a useful incident rather than mail floods;
 restart cannot lose a critical alert; failed SMTP remains visible; privileged details do
 not reach ordinary app owners; recovery use creates an alert without exposing the code.
+
+Implementation: a trigger queues every audit insert into `alert_queue`; `EvaluateAlerts`
+classifies the queue with fixed rules (privilege change, recovery use, connector
+credentials, login failures over a configurable threshold, failed access removal),
+writes `alerts` and drains the queue in one transaction, then derives outage alerts
+from connector and logout delivery state and resolves them when clear. One live alert
+per rule and key; repeats count, acknowledged alerts reopen, outages neither. Alert text
+is names only, never audit details. `DeliverAlerts` mails configured recipients
+(administrators or auditors, re-checked per message) through the existing relay with
+backoff and a visible failure after eight attempts, on its own goroutine under a pass
+budget. Login failures key by account id or source address, never by the submitted
+name, with a ceiling on live alerts past which sources share one alert, resolve once
+their source is quiet for a window, and mail at most once per cooldown for the whole
+rule. Resolved alerts and finished
+deliveries follow audit retention. `admin.user_updated` gains
+`roleChanged` and `admin.system_configured` gains `credentialRotated` so the rules need
+no diffing. Inbox and settings under `read`/`admin` permissions, settings with step-up;
+worker evaluates and delivers on its 3-second tick. Alerts page in the SPA. README.md
+"Alerts". Not done: per-app alert scoping for owners (owners see no alerts), a second
+transport, per-rule switches.
 
 ### PR 23 — Upgrade, restore and end-to-end release verification
 
@@ -651,6 +815,27 @@ Depends on: 01–22 and D1–D4. Touch: migrations/tests, existing backup drill 
 Acceptance: restored policy and ownership are intact; stale secrets/grants cannot log in;
 restored queues cannot re-enable a departed user; all release scenarios pass through
 real HTTP routes and all four adopted products.
+
+Implementation: `TestUpgradeFromPreFeatureDatabase` migrates a pre-feature database
+(sessions, clients, launcher apps, queued deliveries, outbox still foreign-keyed to
+users) twice, and compares schema fingerprints with a fresh install; it found and fixed
+a real defect, a second migration resurrecting the pre-group `scim_remote_user` index
+and with it a uniqueness rule that refuses a group and a user sharing a remote id.
+`kysignon restore` writes a restore marker; the next start invalidates the capsule's
+sessions, tokens, links and challenges, queues a back-channel logout for every login it
+ends and keeps the ones already owed, closes out the queued outbound deliveries, holds provisioning per connector and audits `system.restored` in the same
+transaction. A held connector delivers nothing until a repair reconciliation that listed the far
+side completely and wrote through releases it; a preview, a failed run, a refused or
+truncated listing and an unlistable connector kind do not, and the last of those is
+resumed deliberately through an audited administrator route instead. The capsule's
+outbox is marked with a sentinel revision so the worker's safety net cannot re-pend it
+behind any of those paths. The drill now checks policy, groups, app
+linkage, remote mappings, job state and the encrypted relay configuration.
+`docs/RUNBOOKS.md` covers app policy migration, SCIM setup, emergency administrator
+recovery, offboarding failure, restore reconciliation and downstream limitations;
+`docs/RELEASE-EVIDENCE.md` records suite versions, the automated evidence and the gates
+that stay open. Not done: the external gates (relying parties, upstream tenant,
+D1–D4, custodian ceremony) are named as open rather than claimed from fixtures.
 
 ## Dependency and delivery strategy
 
@@ -722,4 +907,4 @@ is the independent provisioning prerequisite. Recheck worktree changes and live 
 package/product status before editing. The most sensitive invariants are true auth time,
 authorization/revocation races, source ownership, stale provisioning replay, and preserving
 user data during deactivation. Mirror this entire document to the
-`kyidentity-access-lifecycle-plan` myslop folder; the local copy is durable.
+`kysignon-access-lifecycle-plan` myslop folder; the local copy is durable.

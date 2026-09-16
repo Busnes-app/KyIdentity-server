@@ -3,6 +3,9 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
+
+	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 func (h *AdminHandler) ListAppAccessUsers(w http.ResponseWriter, r *http.Request) {
@@ -75,12 +78,63 @@ func (h *AdminHandler) SetAppAssignment(w http.ResponseWriter, r *http.Request) 
 	if assigned {
 		action = "admin.app_assignment_added"
 	}
+	expiresAt, err := readExpiry(w, r)
+	if err != nil {
+		return
+	}
+	if expiresAt != nil && kind != "users" {
+		http.Error(w, `{"error":"invalid_request","error_description":"Only direct user assignments expire"}`, http.StatusBadRequest)
+		return
+	}
 	actor := GetUserFromContext(r.Context())
-	event := h.audit.Prepare(action, actor.ID, actor.Username, r.PathValue("id"), "application", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	if err := h.store.SetAppAssignment(r.PathValue("id"), kind, r.PathValue("principal"), assigned, event.Row); err != nil {
+	details := map[string]any{"kind": kind, "principal": r.PathValue("principal")}
+	if expiresAt != nil {
+		details["expiresAt"] = expiresAt
+	}
+	event := h.audit.Prepare(action, actor.ID, actor.Username, r.PathValue("id"), "application", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
+	if assigned {
+		err = h.store.SetAppAssignmentUntil(r.PathValue("id"), kind, r.PathValue("principal"), expiresAt, event.Row)
+	} else {
+		err = h.store.SetAppAssignment(r.PathValue("id"), kind, r.PathValue("principal"), false, event.Row)
+	}
+	if err != nil {
 		writeAppRegistryError(w, err)
 		return
 	}
 	event.Committed()
 	writeGroupJSON(w, map[string]bool{"success": true})
+}
+
+// readExpiry reads an optional {"expiresAt": RFC3339} body. An instant in the past is
+// refused: an operator who wanted "now" removes the grant instead.
+func readExpiry(w http.ResponseWriter, r *http.Request) (*time.Time, error) {
+	var req struct {
+		ExpiresAt string `json:"expiresAt"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+			return nil, err
+		}
+	}
+	at, err := parseInstant(req.ExpiresAt)
+	if err != nil {
+		http.Error(w, `{"error":"expiry_in_past","error_description":"The expiry must be a future RFC 3339 instant"}`, http.StatusBadRequest)
+	}
+	return at, err
+}
+
+func parseInstant(raw string) (*time.Time, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, store.ErrExpiryInPast
+	}
+	at = at.UTC().Truncate(time.Second)
+	if !at.After(time.Now()) {
+		return nil, store.ErrExpiryInPast
+	}
+	return &at, nil
 }

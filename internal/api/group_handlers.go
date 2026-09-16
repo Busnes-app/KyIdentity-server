@@ -39,6 +39,8 @@ func writeGroupError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrEnrollmentPolicy), errors.Is(err, store.ErrEmergencyAdministrator):
 		enrollmentError(w, err)
+	case errors.Is(err, store.ErrGroupSourceOwned):
+		http.Error(w, `{"error":"source_owned","error_description":"This group's name is managed by its SCIM connector"}`, 400)
 	case errors.Is(err, store.ErrGroupNameExists):
 		http.Error(w, `{"error":"group_name_exists","error_description":"A group with that name already exists"}`, 409)
 	case errors.Is(err, store.ErrGroupTargetMissing):
@@ -157,8 +159,22 @@ func (h *AdminHandler) SetGroupMembership(w http.ResponseWriter, r *http.Request
 	if member {
 		action = "admin.group_member_added"
 	}
-	event := h.audit.Prepare(action, actor.ID, actor.Username, groupID, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"userId": userID})
-	if err := h.store.SetGroupMembershipForSession(groupID, userID, member, GetSessionFromContext(r.Context()).ID, event.Row); err != nil {
+	expiresAt, err := readExpiry(w, r)
+	if err != nil {
+		return
+	}
+	details := map[string]any{"userId": userID}
+	if expiresAt != nil {
+		details["expiresAt"] = expiresAt
+	}
+	event := h.audit.Prepare(action, actor.ID, actor.Username, groupID, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
+	sessionID := GetSessionFromContext(r.Context()).ID
+	if member {
+		err = h.store.SetGroupMembershipUntil(groupID, userID, expiresAt, sessionID, event.Row)
+	} else {
+		err = h.store.SetGroupMembershipForSession(groupID, userID, false, sessionID, event.Row)
+	}
+	if err != nil {
 		if errors.Is(err, store.ErrEnrollmentPolicy) || errors.Is(err, store.ErrEmergencyAdministrator) {
 			reason := "conflicting_mfa_policies"
 			if errors.Is(err, store.ErrEmergencyAdministrator) {

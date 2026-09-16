@@ -62,6 +62,12 @@ func TestAppRegistryMigrationAndLinkLifecycle(t *testing.T) {
 	if err := s.migrateAppAuthentication(); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.migrateAppRoles(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrateAccessRequests(); err != nil {
+		t.Fatal(err)
+	}
 	rows, total, err := s.ListAppRecords("Same", 25, 0)
 	if err != nil || total != 3 {
 		t.Fatal("migration inferred a link", err)

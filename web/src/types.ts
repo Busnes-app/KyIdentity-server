@@ -2,7 +2,18 @@ export interface EnrollmentStatus { required: boolean; allowedMethods: string[];
 export interface EnrollmentPolicy { scope: 'organization' | 'administrators' | `group:${string}`; required: boolean; allowedMethods: string[]; graceSeconds: number; revision: number }
 export interface EnrollmentPreview { affected: number; missingFactor: number; restrictedSessions: number; canActivate: boolean }
 
+/** What the signed-in user may administer, computed by the server on every request. */
+export interface Access { admin: boolean; helpdesk: boolean; auditor: boolean; appOwner: string[] }
+export interface Delegations { helpdesk: boolean; auditor: boolean; appOwner: string[] }
+
+export function canAdminister(a: Access | undefined): boolean {
+  return Boolean(a && (a.admin || a.helpdesk || a.auditor || a.appOwner.length > 0));
+}
+
 export interface User {
+  access?: Access;
+  /** UTC instant after which the account is ended; absent means never. */
+  endsAt?: string;
   enrollment?: EnrollmentStatus;
   id: string;
   username: string;
@@ -10,6 +21,13 @@ export interface User {
   email: string;
   role: 'user' | 'admin';
   status?: 'active' | 'disabled';
+  /** Invited but no password yet; stays disabled until an activation link sets one. */
+  pending?: boolean;
+  emailVerifiedAt?: string;
+  /** Set when an inbound SCIM connector owns the profile; name and email are then read-only here. */
+  sourceConnectorId?: string;
+  externalId?: string;
+  locallyDisabled?: boolean;
   mfaMethods?: string[];
   createdAt?: string;
 }
@@ -27,6 +45,8 @@ export interface PairedSystem {
   groupsEnabled: boolean;
   /** Scheduled repair interval; 0 = off. Only meaningful for SCIM. */
   reconcileHours: number;
+  /** Set by a restore: nothing is delivered until a repair reconciliation has run. */
+  provisioningHold: boolean;
 }
 
 export interface NativeDevice {
@@ -60,9 +80,21 @@ export interface AppGrant {
   expiresAt: string;
 }
 
+export interface LogoutDelivery {
+  id: string;
+  clientId: string;
+  clientName: string;
+  status: 'queued' | 'delivered' | 'failed';
+  attempts: number;
+  lastError: string;
+  nextAttemptAt: string;
+  updatedAt: string;
+}
+
 export interface SessionInventory {
   sessions: BrowserSession[];
   apps: AppGrant[];
+  logouts: LogoutDelivery[];
 }
 
 export interface Passkey {
@@ -92,6 +124,8 @@ export interface OAuthClient {
   clientType: 'public' | 'confidential';
   redirectUris: string[];
   allowedScopes: string[];
+  postLogoutRedirectUris: string[];
+  backchannelLogoutUri?: string;
   launchUrl?: string;
   enabled: boolean;
   createdAt: string;
@@ -170,6 +204,9 @@ export interface DirectoryGroup {
   id: string;
   name: string;
   description: string;
+  /** Set when an inbound SCIM connector owns the group's name and members. */
+  sourceConnectorId?: string;
+  externalId?: string;
   memberCount: number;
   member: boolean;
   createdAt: string;
@@ -183,6 +220,8 @@ export interface GroupUser {
   email: string;
   status: 'active' | 'disabled';
   member: boolean;
+  /** UTC instant the membership ends; absent means it does not expire. */
+  expiresAt?: string;
 }
 
 export interface DirectoryPage<T> {
@@ -199,9 +238,40 @@ export interface AppAuthenticationPolicy {
  factorMaxAge: number;
 }
 
+export interface RequestableApp { appId: string; name: string; pending: boolean }
+export interface AccessRequest {
+  id: string; appId: string; appName: string; userId: string; username: string; reason: string;
+  durationSeconds: number; status: 'pending' | 'approved' | 'denied' | 'cancelled' | 'expired';
+  createdAt: string; expiresAt: string; decidedAt?: string; decidedBy?: string; decisionNote?: string;
+}
+export interface OwnAccessRequests { requestable: RequestableApp[]; requests: AccessRequest[] }
+
+export interface AlertDelivery { pending: number; delivered: number; failed: number; skipped: number; lastError: string }
+export interface Alert {
+  id: string; rule: string; key: string; severity: 'critical' | 'warning'; title: string; summary: string;
+  status: 'open' | 'acknowledged' | 'resolved'; count: number; firstSeen: string; lastSeen: string;
+  acknowledgedAt?: string; acknowledgedBy?: string; resolvedAt?: string; delivery: AlertDelivery;
+}
+export interface AlertRecipient { id: string; username: string }
+export interface AlertSettings { loginFailureThreshold: number; loginFailureWindowSeconds: number; recipients: AlertRecipient[] }
+
+export interface AccessGrant { kind: 'direct' | 'group'; groupId?: string; groupName?: string; sourceConnectorId?: string; expiresAt?: string; live: boolean }
+export interface RoleGrant { role: string; via: 'direct' | 'group'; groupName?: string }
+export interface AccessExplanation {
+  appId: string; appName: string; userId: string; username: string; allowed: boolean; reason: string;
+  accessMode: 'all_active_users' | 'assigned_only'; appEnabled: boolean; clientEnabled: boolean; userStatus: string; userEndsAt?: string;
+  grants: AccessGrant[]; roles: RoleGrant[]; accessEndsAt?: string; authentication: AppAuthenticationPolicy;
+  revision: number; authenticationRevision: number; roleRevision: number; requestable: boolean;
+}
+
 export interface AppRecord {
+ /** Users who lack access may ask for this app. */
+ requestable: boolean;
  authentication: AppAuthenticationPolicy;
  authenticationRevision: number;
+ roleRevision: number;
+ legacyRoleClaim: boolean;
+ groupsClaim: boolean;
   accessMode: 'all_active_users' | 'assigned_only';
   enabled: boolean;
   id: string;
@@ -216,6 +286,8 @@ export interface AppRecord {
 
 export interface AppAccessUser {
  id: string; username: string; displayName: string; status: 'active' | 'disabled';
+ /** UTC instant the direct grant ends; absent means it does not expire. */
+ directExpiresAt?: string;
  direct: boolean; groupAssigned: boolean; effective: boolean; preview: boolean;
  reason: 'user_disabled' | 'app_disabled' | 'client_disabled' | 'all_active_users' | 'direct_assignment' | 'group_assignment' | 'not_assigned';
 }
@@ -242,3 +314,21 @@ export interface ReconcileJob {
   id: string; systemId: string; kind: 'preview' | 'repair'; status: 'queued' | 'running' | 'done' | 'failed';
   requestedBy: string; attempts: number; createdAt: string; startedAt?: string; finishedAt?: string; error?: string; result?: DriftReport;
 }
+
+export interface OffboardingTarget {
+  systemId: string; systemName: string; systemType: string; systemStatus: string; revision: number;
+  recorded: boolean; acknowledged: boolean; observed: ObservedState; observedAt?: string; verified: boolean; contradicted: boolean; blocked: boolean;
+  lastEvent?: ProvisioningEvent;
+}
+export interface Offboarding {
+  userId: string; active: boolean; deleted: boolean; targets: OffboardingTarget[]; logouts: LogoutDelivery[]; acknowledged: boolean; verified: boolean;
+}
+
+export interface AccountLink { kind: 'activation' | 'reset'; delivery: 'manual' | 'email'; link?: string; expiresAt: string }
+export interface MailSettings { host: string; port: number; username: string; from: string; security: 'tls' | 'starttls'; hasPassword: boolean; configured: boolean }
+
+export interface SCIMToken { id: string; scope: 'read' | 'write'; createdAt: string; lastUsedAt?: string; revokedAt?: string }
+export interface SCIMConnector { id: string; name: string; status: 'active' | 'disabled'; createdAt: string; tokens: SCIMToken[]; users: number; groups: number }
+
+export interface AppRolePrincipal { id: string; name: string }
+export interface AppRole { id: string; appId: string; name: string; description: string; createdAt: string; users: AppRolePrincipal[]; groups: AppRolePrincipal[] }

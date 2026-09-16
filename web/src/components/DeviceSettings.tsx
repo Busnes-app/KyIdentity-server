@@ -69,7 +69,30 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
 
   const { requestGrant, stepUpPrompt } = useStepUp();
 
-  const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [] });
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNew, setPwNew] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwDone, setPwDone] = useState(false);
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null); setPwDone(false);
+    if (pwNew !== pwConfirm) { setPwError('The two new passwords do not match.'); return; }
+    setPwBusy(true);
+    try {
+      const stepUpToken = await requestGrant('Changing your password signs out every other session and app.', 'POST /api/user/password');
+      await apiRequest('/api/user/password', { method: 'POST', stepUpToken, body: JSON.stringify({ currentPassword: pwCurrent, newPassword: pwNew }) });
+      setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwDone(true);
+      loadSessions();
+    } catch (err) {
+      if (!isCancelled(err)) setPwError(errorMessage(err, 'Password not changed'));
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
+  const [inventory, setInventory] = useState<SessionInventory>({ sessions: [], apps: [], logouts: [] });
   const loadSessions = async () => {
     try {
       setInventory(await apiJson('/api/user/sessions', parseSessionInventory));
@@ -527,13 +550,31 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
       <div className="settings-section">
         <div className="section-header">
           <div className="section-title-wrap">
+            <h2>Password</h2>
+          </div>
+        </div>
+        <form onSubmit={handleChangePassword} className="login-form">
+          {pwError && <div className="alert-box error" role="alert">{pwError}</div>}
+          {pwDone && <div className="alert-box" role="status">Password changed. Every other session and app was signed out.</div>}
+          <div className="form-row">
+            <div className="form-group flex-1"><label className="form-label" htmlFor="pw-current">Current password</label><input id="pw-current" type="password" className="form-input" autoComplete="current-password" value={pwCurrent} onChange={(e) => setPwCurrent(e.target.value)} disabled={pwBusy} required /></div>
+            <div className="form-group flex-1"><label className="form-label" htmlFor="pw-new">New password</label><input id="pw-new" type="password" className="form-input" autoComplete="new-password" minLength={12} value={pwNew} onChange={(e) => setPwNew(e.target.value)} disabled={pwBusy} required /></div>
+            <div className="form-group flex-1"><label className="form-label" htmlFor="pw-confirm">Repeat new password</label><input id="pw-confirm" type="password" className="form-input" autoComplete="new-password" minLength={12} value={pwConfirm} onChange={(e) => setPwConfirm(e.target.value)} disabled={pwBusy} required /></div>
+          </div>
+          <button type="submit" className="secondary-btn sm" disabled={pwBusy || restricted}><span>Change password</span></button>
+        </form>
+      </div>
+
+      <div className="settings-section">
+        <div className="section-header">
+          <div className="section-title-wrap">
             <h2>Where you are signed in</h2>
           </div>
           <button className="secondary-btn sm" disabled={inventory.sessions.length < 2} onClick={handleRevokeOthers}>
             <span>Sign out other sessions</span>
           </button>
         </div>
-        <SessionList sessions={inventory.sessions} apps={inventory.apps} onRevokeSession={(sess) => handleRevokeSession(sess.id, sess.current)} />
+        <SessionList sessions={inventory.sessions} apps={inventory.apps} logouts={inventory.logouts} onRevokeSession={(sess) => handleRevokeSession(sess.id, sess.current)} />
       </div>
 
       {/* Device Pairing Modal (90s Ephemeral Key / QR) */}

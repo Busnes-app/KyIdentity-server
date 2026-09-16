@@ -54,9 +54,25 @@ re-litigation in a PR:
 
 Docker is the only requirement to *run* KyIdentity:
 
+Published image:
+
 ```bash
-cp .env.example .env
-docker compose up --build -d
+[ -e .env ] || (umask 077; cp .env.example .env); chmod 600 .env   # an existing .env is kept
+docker compose up -d
+```
+
+Source install (never paste this into a published-image install: the build overlay wins over a
+`KYSIGNON_IMAGE` digest pin, and a source install must set this line before its first `up -d` on a
+new checkout):
+
+```bash
+[ -e .env ] || (umask 077; cp .env.example .env); chmod 600 .env   # an existing .env is kept
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+  && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+  && case ":$cf:" in *:docker-compose.build.yml:*) ;; *) cf="$cf:docker-compose.build.yml";; esac \
+  && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" \
+  && printf 'COMPOSE_FILE=%s\n' "$cf" >> "$t" && mv "$t" .env)
+docker compose up -d
 ```
 
 To work on the code outside the container you need Go 1.26.5+ and Node 22.

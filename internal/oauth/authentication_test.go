@@ -77,8 +77,8 @@ func TestAuthorizationPreservesAuthenticationEvidence(t *testing.T) {
 				if claims["nonce"] != "nonce" {
 					t.Fatal("nonce lost")
 				}
-				if _, ok := claims["sid"]; ok {
-					t.Fatal("internal session ID must not be published as a logout sid")
+				if sid, _ := claims["sid"].(string); sid == "" || sid == sess.ID {
+					t.Fatalf("sid must be present and opaque, got %q for session %s", sid, sess.ID)
 				}
 			}
 		})

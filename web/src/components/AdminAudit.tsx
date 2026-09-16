@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { AuditEvent } from '../types';
 import { apiJson } from '../api';
 import { parseAuditPage } from '../parsers';
+import { instantFromLocal, localZone } from '../instant';
 import {
   RefreshCw,
   CheckCircle,
@@ -27,6 +28,17 @@ export const AdminAudit: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(10); // seconds
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState({ actor: '', target: '', action: '', outcome: '', from: '', to: '' });
+  const filterQuery = () => {
+    const q = new URLSearchParams();
+    if (filter.actor.trim()) q.set('actor', filter.actor.trim());
+    if (filter.target.trim()) q.set('target', filter.target.trim());
+    if (filter.action.trim()) q.set('action', filter.action.trim());
+    if (filter.outcome) q.set('outcome', filter.outcome);
+    const from = instantFromLocal(filter.from); if (from) q.set('from', from);
+    const to = instantFromLocal(filter.to); if (to) q.set('to', to);
+    return q.toString();
+  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<number | null>(null);
@@ -41,7 +53,7 @@ export const AdminAudit: React.FC = () => {
 
       try {
         const page = await apiJson(
-          `/api/admin/audit-events?page=${targetPage}&limit=${targetLimit}`,
+          `/api/admin/audit-events?page=${targetPage}&limit=${targetLimit}&${filterQuery()}`,
           parseAuditPage
         );
         setEvents(page.events);
@@ -53,7 +65,8 @@ export const AdminAudit: React.FC = () => {
         setIsRefreshing(false);
       }
     },
-    [page, pageSize]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [page, pageSize, filter]
   );
 
   // Initial load or page/size change
@@ -180,6 +193,25 @@ export const AdminAudit: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <section className="settings-section">
+        <div className="section-header"><div className="section-title-wrap"><h2>Filter</h2></div>
+          <div className="action-buttons-wrap">
+            <a className="secondary-btn sm" href={`/api/admin/audit-events/export?format=csv&${filterQuery()}`} download>Export CSV</a>
+            <a className="secondary-btn sm" href={`/api/admin/audit-events/export?format=jsonl&${filterQuery()}`} download>Export JSONL</a>
+          </div></div>
+        <p className="text-muted text-sm">Exports carry the same filter as this page, at most 50,000 rows, with credential-shaped details redacted; each export is itself audited.</p>
+        <div className="form-row">
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-actor">Actor (id or username)</label><input id="audit-actor" className="form-input" maxLength={200} value={filter.actor} onChange={e => { setFilter({ ...filter, actor: e.target.value }); setPage(1); }} /></div>
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-target">Target id</label><input id="audit-target" className="form-input" maxLength={200} value={filter.target} onChange={e => { setFilter({ ...filter, target: e.target.value }); setPage(1); }} /></div>
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-action">Action (prefix, e.g. oauth.)</label><input id="audit-action" className="form-input font-mono" maxLength={200} value={filter.action} onChange={e => { setFilter({ ...filter, action: e.target.value }); setPage(1); }} /></div>
+          <div className="form-group"><label className="form-label" htmlFor="audit-outcome">Outcome</label><select id="audit-outcome" className="form-select" value={filter.outcome} onChange={e => { setFilter({ ...filter, outcome: e.target.value }); setPage(1); }}><option value="">Any</option><option value="success">Success</option><option value="failure">Failure</option><option value="denied">Denied</option></select></div>
+        </div>
+        <div className="form-row">
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-from">From ({localZone()})</label><input id="audit-from" type="datetime-local" className="form-input" value={filter.from} onChange={e => { setFilter({ ...filter, from: e.target.value }); setPage(1); }} /></div>
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-to">To ({localZone()})</label><input id="audit-to" type="datetime-local" className="form-input" value={filter.to} onChange={e => { setFilter({ ...filter, to: e.target.value }); setPage(1); }} /></div>
+        </div>
+      </section>
 
       <div className="audit-container">
         {/* Controls header bar */}

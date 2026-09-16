@@ -193,8 +193,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
-		h.audit.Record("oauth.authorize", user.ID, user.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "app_access_denied"})
-		redirectError(w, r, redirectURI, state, "access_denied", "You do not have access to this application")
+		h.denyAccess(w, r, user, clientID, redirectURI, state)
 		return
 	}
 	if !requirements.Satisfied(session.AuthenticationEvidence, time.Now().UTC()) {
@@ -213,8 +212,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, store.ErrAppAccessDenied) {
-			h.audit.Record("oauth.authorize", user.ID, user.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "app_access_denied"})
-			redirectError(w, r, redirectURI, state, "access_denied", "You do not have access to this application")
+			h.denyAccess(w, r, user, clientID, redirectURI, state)
 			return
 		}
 		redirectError(w, r, redirectURI, state, "server_error", "Could not issue an authorization code")
@@ -267,6 +265,16 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tokenResp, err := h.oauthEngine.ExchangeAuthorizationCode(code, clientID, clientSecret, redirectURI, codeVerifier)
+	if errors.Is(err, oauth.ErrClaimsTooLarge) {
+		// A configuration problem, not a guess about credentials: name it so the app's
+		// administrator can fix the mappings.
+		h.audit.Record("oauth.token_exchange", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"error": err.Error()})
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request", "error_description": err.Error()})
+		return
+	}
 	if err != nil {
 		// The precise reason goes to the audit log, not to the caller: distinguishing
 		// "client mismatch" from "invalid PKCE verifier" tells an attacker which half of
@@ -349,4 +357,20 @@ func (h *OAuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	// not an oracle for token validity.
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
+}
+
+// denyAccess audits an access denial with the reason and policy revisions of this
+// moment, so an old denial is never explained with today's policy, and tells a user of
+// a requestable app where to ask.
+func (h *OAuthHandler) denyAccess(w http.ResponseWriter, r *http.Request, user *store.User, clientID, redirectURI, state string) {
+	details := map[string]any{"reason": "app_access_denied"}
+	description := "You do not have access to this application"
+	if e, err := h.store.ExplainClientAccess(user.ID, clientID); err == nil {
+		details = map[string]any{"reason": e.Reason, "revision": e.Revision, "authenticationRevision": e.AuthRevision, "roleRevision": e.RoleRevision}
+		if e.Requestable {
+			description += ". You can request it from your KySignOn dashboard"
+		}
+	}
+	h.audit.Record("oauth.authorize", user.ID, user.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "denied", details)
+	redirectError(w, r, redirectURI, state, "access_denied", description)
 }

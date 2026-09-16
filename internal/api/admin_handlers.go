@@ -8,12 +8,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Busness-app/kyidentity-server/internal/audit"
 	"github.com/Busness-app/kyidentity-server/internal/auth"
 	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busness-app/kyidentity-server/internal/netguard"
 	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/Busness-app/kyidentity-server/internal/sync"
 	"github.com/google/uuid"
@@ -74,8 +75,8 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	req.Email = strings.TrimSpace(req.Email)
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 
-	if req.Username == "" || req.Email == "" || req.Password == "" {
-		http.Error(w, `{"error":"missing_fields","error_description":"Username, email, and password are required"}`, http.StatusBadRequest)
+	if req.Username == "" || req.Email == "" {
+		http.Error(w, `{"error":"missing_fields","error_description":"Username and email are required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -86,25 +87,31 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		req.Status = "active"
 	}
 
-	passHash, err := auth.HashPassword(req.Password)
-	if err != nil {
-		http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
-		return
-	}
-
+	// No password invites the account: it stays pending and disabled until an activation
+	// link sets one, so no usable default credential ever exists.
 	user := &store.User{
-		ID:           uuid.New().String(),
-		Username:     req.Username,
-		DisplayName:  req.DisplayName,
-		Email:        req.Email,
-		PasswordHash: passHash,
-		Role:         req.Role,
-		Status:       req.Status,
+		ID:          uuid.New().String(),
+		Username:    req.Username,
+		DisplayName: req.DisplayName,
+		Email:       req.Email,
+		Role:        req.Role,
+		Status:      req.Status,
+	}
+	if req.Password == "" {
+		user.Pending, user.Status = true, "disabled"
+	} else {
+		passHash, err := auth.HashPassword(req.Password)
+		if err != nil {
+			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			return
+		}
+		user.PasswordHash = passHash
 	}
 
 	created := h.audit.Prepare("admin.user_created", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
 		"username": user.Username,
 		"role":     user.Role,
+		"pending":  user.Pending,
 	})
 	if err := h.syncEngine.CreateUserAndQueueSyncEvents(user, created.Row); err != nil {
 		http.Error(w, `{"error":"user_exists","error_description":"Username or email already exists"}`, http.StatusConflict)
@@ -130,6 +137,9 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		Role        string `json:"role"`
 		Status      string `json:"status"`
 		Password    string `json:"password,omitempty"`
+		// EndsAt schedules the account's end: absent keeps the current schedule, an
+		// empty string clears it, an instant sets it.
+		EndsAt *string `json:"endsAt"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -143,19 +153,40 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.DisplayName = strings.TrimSpace(req.DisplayName); req.DisplayName != "" {
+	req.DisplayName, req.Email = strings.TrimSpace(req.DisplayName), strings.TrimSpace(req.Email)
+	if user.SourceConnectorID != "" && ((req.DisplayName != "" && req.DisplayName != user.DisplayName) || (req.Email != "" && !strings.EqualFold(req.Email, user.Email))) {
+		http.Error(w, `{"error":"source_owned","error_description":"Name and email of this account are managed by its SCIM connector"}`, http.StatusBadRequest)
+		return
+	}
+	if req.DisplayName != "" {
 		user.DisplayName = req.DisplayName
 	}
-	if req.Email = strings.TrimSpace(req.Email); req.Email != "" {
+	if req.Email != "" {
 		user.Email = req.Email
 	}
-	wasAdmin := user.Role == "admin"
+	wasAdmin, wasRole := user.Role == "admin", user.Role
 	if req.Role == "user" || req.Role == "admin" {
 		user.Role = req.Role
+	}
+	endsAtBefore := user.EndsAt
+	if req.EndsAt != nil && !sameInstant(*req.EndsAt, user.EndsAt) {
+		// The store is the rule; this is the early answer for a changed value.
+		endsAt, err := parseInstant(*req.EndsAt)
+		if err != nil {
+			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
+			return
+		}
+		user.EndsAt = endsAt
 	}
 	wasActive := user.Status == "active"
 	if req.Status == "active" || req.Status == "disabled" {
 		user.Status = req.Status
+		if user.SourceConnectorID != "" {
+			// A local disable is an override the upstream cannot lift; enabling lifts it
+			// but only takes effect if the upstream also wants the account active.
+			user.LocallyDisabled = req.Status == "disabled"
+			user.ApplySourceState()
+		}
 	}
 
 	passwordChanged := req.Password != ""
@@ -166,6 +197,12 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		user.PasswordHash = passHash
+		// An administrator setting the password is the manual activation path.
+		user.Pending = false
+	}
+	if user.Pending && user.Status == "active" {
+		http.Error(w, `{"error":"account_pending","error_description":"A pending account activates through its link or by setting a password"}`, http.StatusBadRequest)
+		return
 	}
 
 	// Demotion is a revocation. An issued ID token carries "role":"admin" as a signed claim,
@@ -178,7 +215,10 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		"username":      user.Username,
 		"role":          user.Role,
 		"status":        user.Status,
+		"endsAt":        user.EndsAt,
+		"endsAtBefore":  endsAtBefore,
 		"demoted":       demoted,
+		"roleChanged":   user.Role != wasRole,
 		"accessRevoked": revokeAccess,
 	})
 	if err := h.syncEngine.UpdateUserAndQueueSyncEvents(user, revokeAccess, updated.Row); err != nil {
@@ -186,6 +226,8 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			enrollmentError(w, err)
 		} else if errors.Is(err, store.ErrLastActiveAdmin) {
 			http.Error(w, `{"error":"cannot_remove_last_admin"}`, http.StatusBadRequest)
+		} else if errors.Is(err, store.ErrExpiryInPast) {
+			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
 		} else {
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		}
@@ -394,6 +436,11 @@ type CreateClientRequest struct {
 	RedirectURIs  []string `json:"redirectUris"`
 	AllowedScopes []string `json:"allowedScopes"`
 	LaunchURL     string   `json:"launchUrl"`
+	// PostLogoutRedirectURIs are the only places RP-initiated logout may send the browser.
+	PostLogoutRedirectURIs []string `json:"postLogoutRedirectUris"`
+	// BackchannelLogoutURI receives signed logout tokens; it is an outbound target, so it
+	// must pass the same public-HTTPS guard as provisioning callbacks.
+	BackchannelLogoutURI string `json:"backchannelLogoutUri"`
 }
 
 // suiteClientIDs are the KySecurity services, every one of which is a server-side backend
@@ -454,6 +501,10 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 	if len(req.AllowedScopes) == 0 {
 		req.AllowedScopes = []string{"openid", "profile", "email"}
 	}
+	if !knownScopes(req.AllowedScopes) {
+		http.Error(w, `{"error":"unknown_scope","error_description":"Allowed scopes must be drawn from openid, profile and email"}`, http.StatusBadRequest)
+		return
+	}
 	if len(req.RedirectURIs) == 0 {
 		http.Error(w, `{"error":"invalid_request","error_description":"At least one redirect URI is required"}`, http.StatusBadRequest)
 		return
@@ -473,6 +524,18 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
 		return
 	}
+	postLogoutJSON, err := encodePostLogoutURIs(req.PostLogoutRedirectURIs)
+	if err != nil {
+		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+	req.BackchannelLogoutURI = strings.TrimSpace(req.BackchannelLogoutURI)
+	if req.BackchannelLogoutURI != "" {
+		if err := netguard.ValidateURL(req.BackchannelLogoutURI, "backchannelLogoutUri"); err != nil {
+			http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			return
+		}
+	}
 	redirectURIsJSON, _ := json.Marshal(req.RedirectURIs)
 	scopesJSON, _ := json.Marshal(req.AllowedScopes)
 
@@ -490,6 +553,9 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		AllowedScopesJSON: string(scopesJSON),
 		LaunchURL:         strings.TrimSpace(req.LaunchURL),
 		Enabled:           true,
+
+		PostLogoutRedirectURIsJSON: postLogoutJSON,
+		BackchannelLogoutURI:       req.BackchannelLogoutURI,
 	}
 
 	if err := h.store.CreateOAuthClient(client); err != nil {
@@ -519,6 +585,9 @@ type UpdateClientRequest struct {
 	LaunchURL     *string   `json:"launchUrl,omitempty"`
 	Enabled       *bool     `json:"enabled,omitempty"`
 	RotateSecret  bool      `json:"rotateSecret,omitempty"`
+
+	PostLogoutRedirectURIs *[]string `json:"postLogoutRedirectUris,omitempty"`
+	BackchannelLogoutURI   *string   `json:"backchannelLogoutUri,omitempty"`
 }
 
 // UpdateOAuthClient edits a registered client in place.
@@ -577,7 +646,29 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 		}
 		client.RedirectURIsJSON = string(encoded)
 	}
+	if req.BackchannelLogoutURI != nil {
+		uri := strings.TrimSpace(*req.BackchannelLogoutURI)
+		if uri != "" {
+			if err := netguard.ValidateURL(uri, "backchannelLogoutUri"); err != nil {
+				http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+				return
+			}
+		}
+		client.BackchannelLogoutURI = uri
+	}
+	if req.PostLogoutRedirectURIs != nil {
+		encoded, err := encodePostLogoutURIs(*req.PostLogoutRedirectURIs)
+		if err != nil {
+			http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			return
+		}
+		client.PostLogoutRedirectURIsJSON = encoded
+	}
 	if req.AllowedScopes != nil {
+		if !knownScopes(*req.AllowedScopes) {
+			http.Error(w, `{"error":"unknown_scope","error_description":"Allowed scopes must be drawn from openid, profile and email"}`, http.StatusBadRequest)
+			return
+		}
 		encoded, err := json.Marshal(*req.AllowedScopes)
 		if err != nil {
 			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
@@ -771,6 +862,24 @@ func (h *AdminHandler) CreateApplication(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "application": app})
 }
 
+// encodePostLogoutURIs validates post-logout redirect URIs like redirect URIs (https, or
+// http on loopback) and returns the stored JSON; an empty list disables redirects.
+func encodePostLogoutURIs(uris []string) (string, error) {
+	cleaned := make([]string, 0, len(uris))
+	for _, raw := range uris {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if err := validateExternalURL(raw); err != nil {
+			return "", fmt.Errorf("invalid post-logout redirect URI: %w", err)
+		}
+		cleaned = append(cleaned, raw)
+	}
+	encoded, err := json.Marshal(cleaned)
+	return string(encoded), err
+}
+
 func validateRegisteredURLs(redirectURIs []string, launchURL string) error {
 	for _, raw := range redirectURIs {
 		if err := validateExternalURL(raw); err != nil {
@@ -954,40 +1063,6 @@ func (h *AdminHandler) DeleteApplication(w http.ResponseWriter, r *http.Request)
 }
 
 // ListAuditEvents returns audit trail for admin inspection.
-func (h *AdminHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
-	page := 1
-	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
-		page = p
-	}
-
-	limit := 25
-	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 500 {
-		limit = l
-	}
-
-	offset := (page - 1) * limit
-	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
-		offset = o
-		page = (offset / limit) + 1
-	}
-
-	events, total, err := h.store.ListAuditEvents(limit, offset)
-	if err != nil {
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
-	}
-	if events == nil {
-		events = []store.AuditEvent{}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"auditEvents": events,
-		"total":       total,
-		"page":        page,
-		"limit":       limit,
-	})
-}
 
 // ConfigureSystem reviews a legacy connector or replaces a generic SCIM token.
 func (h *AdminHandler) ConfigureSystem(w http.ResponseWriter, r *http.Request) {
@@ -1021,7 +1096,7 @@ func (h *AdminHandler) ConfigureSystem(w http.ResponseWriter, r *http.Request) {
 		hours = *req.ReconcileHours
 	}
 	admin := GetUserFromContext(r.Context())
-	event := h.audit.Prepare("admin.system_configured", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"systemName": sys.Name, "systemType": req.SystemType, "groups": groups, "reconcileHours": hours})
+	event := h.audit.Prepare("admin.system_configured", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"systemName": sys.Name, "systemType": req.SystemType, "groups": groups, "reconcileHours": hours, "credentialRotated": req.BearerToken != ""})
 	if err = h.syncEngine.ReviewSystem(sys, req.SystemType, req.BearerToken, groups, hours, event.Row); err != nil {
 		protocol := req.SystemType
 		if protocol != "scim" && protocol != "suite_webhook" {
@@ -1061,4 +1136,27 @@ func (h *AdminHandler) TestSystem(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// knownScopes admits only the scopes this server defines claims for; an unknown scope
+// can neither be granted nor quietly widen what a token says.
+func knownScopes(scopes []string) bool {
+	for _, sc := range scopes {
+		switch sc {
+		case "openid", "profile", "email":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// sameInstant reports whether raw names the instant the row already carries, so an
+// edit that re-submits a stored (possibly past) end date is not a new schedule.
+func sameInstant(raw string, current *time.Time) bool {
+	if raw == "" || current == nil {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	return err == nil && at.Equal(*current)
 }

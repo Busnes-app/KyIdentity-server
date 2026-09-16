@@ -371,13 +371,46 @@ func (s *Store) migrate() error {
 	if err := s.migrateAuthorizationInteractions(); err != nil {
 		return err
 	}
+	if err := s.migrateClientSessions(); err != nil {
+		return err
+	}
+	if err := s.migrateOnboarding(); err != nil {
+		return err
+	}
+	if err := s.migrateInboundSCIM(); err != nil {
+		return err
+	}
+	if err := s.migrateInboundSCIMGroups(); err != nil {
+		return err
+	}
+	if err := s.migrateAppRoles(); err != nil {
+		return err
+	}
+	if err := s.migrateDelegations(); err != nil {
+		return err
+	}
+	if err := s.migrateAccessRequests(); err != nil {
+		return err
+	}
+	if err := s.migrateAuditIndexes(); err != nil {
+		return err
+	}
+	if err := s.migrateLogoutDeliveries(); err != nil {
+		return err
+	}
 	if err := s.migrateEnrollmentPolicy(); err != nil {
 		return err
 	}
 	if err := s.migrateProvisioning(); err != nil {
 		return err
 	}
-	return s.migrateReconcile()
+	if err := s.migrateReconcile(); err != nil {
+		return err
+	}
+	if err := s.migrateAlerts(); err != nil {
+		return err
+	}
+	return s.migrateRestoreHold()
 }
 
 // migrateSyncEventLease adds the delivery lease column to pre-existing databases.
@@ -411,8 +444,9 @@ func (s *Store) migrateSyncEventLease() error {
 // shows no description rather than an invented one.
 func (s *Store) migrateOAuthClientLauncherMetadata() error {
 	for column, ddl := range map[string]string{
-		"description": `ALTER TABLE oauth_clients ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
-		"icon_name":   `ALTER TABLE oauth_clients ADD COLUMN icon_name TEXT NOT NULL DEFAULT ''`,
+		"description":                    `ALTER TABLE oauth_clients ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
+		"icon_name":                      `ALTER TABLE oauth_clients ADD COLUMN icon_name TEXT NOT NULL DEFAULT ''`,
+		"post_logout_redirect_uris_json": `ALTER TABLE oauth_clients ADD COLUMN post_logout_redirect_uris_json TEXT NOT NULL DEFAULT '[]'`,
 	} {
 		var count int
 		if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('oauth_clients') WHERE name = ?`, column).Scan(&count); err != nil {
@@ -594,12 +628,12 @@ func (s *Store) migrateSyncEventsUserReference() error {
 // User CRUD
 func (s *Store) CreateUser(u *User) error {
 	query := `
-	INSERT INTO users (id, username, display_name, email, password_hash, role, status, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	now := time.Now().UTC()
 	u.CreatedAt = now
 	u.UpdatedAt = now
-	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.CreatedAt, u.UpdatedAt)
+	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
@@ -612,7 +646,7 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 	defer tx.Rollback()
 	now := time.Now().UTC()
 	u.CreatedAt, u.UpdatedAt = now, now
-	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.CreatedAt, u.UpdatedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt); err != nil {
 		return err
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
@@ -625,38 +659,19 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 }
 
 func (s *Store) GetUserByID(id string) (*User, error) {
-	query := `SELECT id, username, display_name, email, password_hash, role, status, created_at, updated_at FROM users WHERE id = ?`
-	u := &User{}
-	err := s.db.QueryRow(query, id).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return u, err
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 }
 
 func (s *Store) GetUserByUsername(username string) (*User, error) {
-	query := `SELECT id, username, display_name, email, password_hash, role, status, created_at, updated_at FROM users WHERE username = ? COLLATE NOCASE`
-	u := &User{}
-	err := s.db.QueryRow(query, username).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return u, err
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE username = ? COLLATE NOCASE`, username))
 }
 
 func (s *Store) GetUserByEmail(email string) (*User, error) {
-	query := `SELECT id, username, display_name, email, password_hash, role, status, created_at, updated_at FROM users WHERE email = ? COLLATE NOCASE`
-	u := &User{}
-	err := s.db.QueryRow(query, email).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return u, err
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE email = ? COLLATE NOCASE`, email))
 }
 
 func (s *Store) ListUsers() ([]User, error) {
-	query := `SELECT id, username, display_name, email, password_hash, role, status, created_at, updated_at FROM users ORDER BY username ASC`
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(`SELECT ` + userColumns + ` FROM users ORDER BY username ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -664,11 +679,11 @@ func (s *Store) ListUsers() ([]User, error) {
 
 	var users []User
 	for rows.Next() {
-		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		users = append(users, u)
+		users = append(users, *u)
 	}
 	return users, nil
 }
@@ -683,18 +698,52 @@ func (s *Store) UpdateUser(u *User) error {
 // UpdateUserWithSyncEvents preserves the active-admin invariant and writes its outbox event
 // in the same transaction as the account change.
 func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *AuditEvent) error {
+	return s.updateUser(u, revokeAccess, audit, nil)
+}
+
+// updateUser is the one account-update transaction. prepare, when given, runs after the
+// current row is read under the write lock and before anything is written, so a caller
+// can refuse the change or fold local state into u without a lost update.
+func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepare func(tx *sql.Tx, current *User) error) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var oldRole, oldStatus string
-	if err := tx.QueryRow(`SELECT role, status FROM users WHERE id = ?`, u.ID).Scan(&oldRole, &oldStatus); err != nil {
+	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, u.ID))
+	if err != nil {
 		return err
 	}
-	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active") {
+	if current == nil {
+		return sql.ErrNoRows
+	}
+	if prepare != nil {
+		if err := prepare(tx, current); err != nil {
+			return err
+		}
+		u.EndsAt = current.EndsAt
+	} else {
+		// A local caller never owns the upstream's fields: take them from the row as it is
+		// now, so an upstream write landing since the caller's read is not undone.
+		u.SourceConnectorID, u.ExternalID, u.SourceActive = current.SourceConnectorID, current.ExternalID, current.SourceActive
+		if current.SourceConnectorID != "" {
+			u.Username, u.DisplayName, u.Email = current.Username, current.DisplayName, current.Email
+		}
+		u.ApplySourceState()
+	}
+	oldRole, oldStatus, oldEmail := current.Role, current.Status, current.Email
+	// A newly set end date is a schedule: it must lie ahead, and scheduling the last
+	// administrator's end is refused like removing them would be. An end date the row
+	// already carries is left alone so the account stays editable.
+	schedulingEnd := u.EndsAt != nil && (current.EndsAt == nil || !u.EndsAt.Equal(*current.EndsAt))
+	if schedulingEnd {
+		if err := checkExpiry(u.EndsAt, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active" || schedulingEnd) {
 		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'`).Scan(&admins); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
 			return err
 		}
 		if admins <= 1 {
@@ -703,17 +752,31 @@ func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *Audi
 	}
 	now := time.Now().UTC()
 	u.UpdatedAt = now
-	if _, err := tx.Exec(`UPDATE users SET display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, updated_at = ? WHERE id = ?`, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, now, u.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
 		return enrollmentMutationError(err)
 	}
-	if revokeAccess {
-		if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
+	if !strings.EqualFold(oldEmail, u.Email) {
+		// A new address is unproven, and a link mailed to the old one must not act on it.
+		if _, err := tx.Exec(`UPDATE users SET email_verified_at = NULL WHERE id = ?`, u.ID); err != nil {
+			return err
+		}
+		if err := expireAccountTokensTx(tx, now, `user_id=?`, u.ID); err != nil {
 			return err
 		}
 	}
 	stored, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, u.ID))
 	if err != nil || stored == nil {
 		return err
+	}
+	switch {
+	case oldStatus == "active" && stored.Status == "disabled":
+		if err := offboardUserTx(tx, stored, false, now); err != nil {
+			return err
+		}
+	case revokeAccess:
+		if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
+			return err
+		}
 	}
 	if err := queueUserUpdateTx(tx, stored, now); err != nil {
 		return err
@@ -741,7 +804,7 @@ func (s *Store) UpdateUserStatus(userID, status string) error {
 
 func (s *Store) CountAdmins() (int, error) {
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'`).Scan(&count)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&count)
 	return count, err
 }
 
@@ -750,9 +813,10 @@ func (s *Store) DeleteUser(userID string) error {
 	return err
 }
 
-// DeleteUserWithSyncEvents atomically removes a user and queues its deletion for every
-// connector that holds the account. Older queued user events are discarded so a
-// downstream system cannot receive stale updates after the deletion.
+// DeleteUserWithSyncEvents atomically offboards a user and removes the directory row.
+// Every connector that holds the account gets a deletion through its desired state, so
+// completion stays visible afterwards; connectors with no recorded account get a bare
+// deletion in case they hold one from whole-directory delivery that predates tracking.
 func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -768,63 +832,34 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 	}
 	if u.Role == "admin" && u.Status == "active" {
 		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'`).Scan(&admins); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
 			return err
 		}
 		if admins <= 1 {
 			return ErrLastActiveAdmin
 		}
 	}
-
-	// Every connector may hold the account from whole-directory delivery that predates
-	// desired-state tracking; receivers tolerate a deletion for an unknown account. Only
-	// a connector known to hold the account receives the profile; the rest get the ID.
-	rows, err := tx.Query(`SELECT s.id,COALESCE(st.revision,0)+1,
- st.resource_id IS NOT NULL OR EXISTS(SELECT 1 FROM scim_user_links l WHERE l.system_id=s.id AND l.local_id=? AND l.kind='user')
- FROM paired_systems s LEFT JOIN sync_resource_state st ON st.system_id=s.id AND st.resource_id=? AND st.kind='user'
- WHERE s.status<>'disabled' ORDER BY s.id`, userID, userID)
+	now := time.Now().UTC()
+	if err := offboardUserTx(tx, u, true, now); err != nil {
+		return err
+	}
+	strangers, err := scanStrings(tx.Query(`SELECT s.id FROM paired_systems s WHERE s.status<>'disabled'
+ AND NOT EXISTS(SELECT 1 FROM sync_resource_state st WHERE st.system_id=s.id AND st.resource_id=? AND st.kind='user') ORDER BY s.id`, userID))
 	if err != nil {
 		return err
 	}
-	type target struct {
-		revision int
-		held     bool
-	}
-	targets := map[string]target{}
-	for rows.Next() {
-		var sys string
-		var t target
-		if err := rows.Scan(&sys, &t.revision, &t.held); err != nil {
-			rows.Close()
+	// The bare deletion is recorded as a target too, so the completion view cannot claim
+	// every connector is done while it is still queued.
+	for _, sys := range strangers {
+		if _, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',0,0,0)`, sys, userID); err != nil {
 			return err
 		}
-		targets[sys] = t
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM sync_resource_state WHERE resource_id = ? AND kind='user'`, userID); err != nil {
-		return err
+		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", scimInactivePayload(userID), 0, now); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`DELETE FROM users WHERE id = ?`, userID); err != nil {
 		return err
-	}
-	now := time.Now().UTC()
-	payload, err := scimUserPayload(u, false)
-	if err != nil {
-		return err
-	}
-	for sys, t := range targets {
-		body := scimInactivePayload(userID)
-		if t.held {
-			body = payload
-		}
-		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", body, t.revision, now); err != nil {
-			return err
-		}
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
 		return err
@@ -905,11 +940,6 @@ func (s *Store) DeleteSession(sessionID string) error {
 	return err
 }
 
-func (s *Store) DeleteUserSessions(userID string) error {
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
-	return err
-}
-
 // HasAnySession reports whether anyone has ever established a session, used to decide when
 // the first-run credentials file has served its purpose.
 func (s *Store) HasAnySession() (bool, error) {
@@ -987,9 +1017,9 @@ func (s *Store) CreatePairedSystem(ps *PairedSystem) error {
 }
 
 func (s *Store) GetPairedSystemByID(id string) (*PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems WHERE id = ?`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours, provisioning_hold FROM paired_systems WHERE id = ?`
 	ps := &PairedSystem{}
-	err := s.db.QueryRow(query, id).Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours)
+	err := s.db.QueryRow(query, id).Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours, &ps.ProvisioningHold)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -997,7 +1027,7 @@ func (s *Store) GetPairedSystemByID(id string) (*PairedSystem, error) {
 }
 
 func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems ORDER BY created_at ASC`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours, provisioning_hold FROM paired_systems ORDER BY created_at ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -1007,7 +1037,7 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 	var systems []PairedSystem
 	for rows.Next() {
 		var ps PairedSystem
-		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours); err != nil {
+		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours, &ps.ProvisioningHold); err != nil {
 			return nil, err
 		}
 		systems = append(systems, ps)
@@ -1016,7 +1046,7 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 }
 
 func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours FROM paired_systems WHERE status != 'disabled' ORDER BY created_at ASC`
+	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours, provisioning_hold FROM paired_systems WHERE status != 'disabled' ORDER BY created_at ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -1026,7 +1056,7 @@ func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
 	var systems []PairedSystem
 	for rows.Next() {
 		var ps PairedSystem
-		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours); err != nil {
+		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours, &ps.ProvisioningHold); err != nil {
 			return nil, err
 		}
 		systems = append(systems, ps)
@@ -1129,7 +1159,8 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
             WHERE older.system_id=account_sync_events.system_id AND older.user_id=account_sync_events.user_id
             AND older.status='pending' AND older.attempts<5 AND older.rowid<account_sync_events.rowid)
           AND NOT EXISTS (SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id
-            AND (p.status='disabled' OR p.system_type NOT IN ('scim','suite_webhook','kypost','kypasswords','kybookmarks','kynotes')))
+            AND (p.status='disabled' OR p.provisioning_hold
+             OR p.system_type NOT IN ('scim','suite_webhook','kypost','kypasswords','kybookmarks','kynotes')))
 		  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 		  AND (lease_until IS NULL OR lease_until <= ?)
 		ORDER BY created_at ASC LIMIT ?`, now, now, limit)
@@ -1881,18 +1912,21 @@ func (s *Store) ConsumeRecoveryCode(userID, codeHash string) (bool, error) {
 
 // OAuth Clients
 func (s *Store) CreateOAuthClient(c *OAuthClient) error {
-	query := `INSERT INTO oauth_clients (id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO oauth_clients (id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	c.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, c.ID, c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.CreatedAt)
+	if c.PostLogoutRedirectURIsJSON == "" {
+		c.PostLogoutRedirectURIsJSON = "[]"
+	}
+	_, err := s.db.Exec(query, c.ID, c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.CreatedAt, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI)
 	return err
 }
 
 func (s *Store) GetOAuthClientByID(id string) (*OAuthClient, error) {
-	query := `SELECT id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at FROM oauth_clients WHERE id = ?`
+	query := `SELECT id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri FROM oauth_clients WHERE id = ?`
 	c := &OAuthClient{}
 	var secretHash sql.NullString
 	var launchURL sql.NullString
-	err := s.db.QueryRow(query, id).Scan(&c.ID, &c.ClientName, &c.ClientType, &secretHash, &c.RedirectURIsJSON, &c.AllowedScopesJSON, &launchURL, &c.Description, &c.IconName, &c.Enabled, &c.CreatedAt)
+	err := s.db.QueryRow(query, id).Scan(&c.ID, &c.ClientName, &c.ClientType, &secretHash, &c.RedirectURIsJSON, &c.AllowedScopesJSON, &launchURL, &c.Description, &c.IconName, &c.Enabled, &c.CreatedAt, &c.PostLogoutRedirectURIsJSON, &c.BackchannelLogoutURI)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1906,7 +1940,7 @@ func (s *Store) GetOAuthClientByID(id string) (*OAuthClient, error) {
 }
 
 func (s *Store) ListOAuthClients() ([]OAuthClient, error) {
-	query := `SELECT id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at FROM oauth_clients ORDER BY client_name ASC`
+	query := `SELECT id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri FROM oauth_clients ORDER BY client_name ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -1918,7 +1952,7 @@ func (s *Store) ListOAuthClients() ([]OAuthClient, error) {
 		var c OAuthClient
 		var secretHash sql.NullString
 		var launchURL sql.NullString
-		if err := rows.Scan(&c.ID, &c.ClientName, &c.ClientType, &secretHash, &c.RedirectURIsJSON, &c.AllowedScopesJSON, &launchURL, &c.Description, &c.IconName, &c.Enabled, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.ClientName, &c.ClientType, &secretHash, &c.RedirectURIsJSON, &c.AllowedScopesJSON, &launchURL, &c.Description, &c.IconName, &c.Enabled, &c.CreatedAt, &c.PostLogoutRedirectURIsJSON, &c.BackchannelLogoutURI); err != nil {
 			return nil, err
 		}
 		if secretHash.Valid {
@@ -1953,8 +1987,11 @@ func (s *Store) UpdateOAuthClientWithAudit(c *OAuthClient, revokeTokens bool, au
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE oauth_clients SET client_name = ?, client_type = ?, client_secret_hash = ?, redirect_uris_json = ?, allowed_scopes_json = ?, launch_url = ?, description = ?, icon_name = ?, enabled = ? WHERE id = ?`,
-		c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.ID); err != nil {
+	if c.PostLogoutRedirectURIsJSON == "" {
+		c.PostLogoutRedirectURIsJSON = "[]"
+	}
+	if _, err := tx.Exec(`UPDATE oauth_clients SET client_name = ?, client_type = ?, client_secret_hash = ?, redirect_uris_json = ?, allowed_scopes_json = ?, launch_url = ?, description = ?, icon_name = ?, enabled = ?, post_logout_redirect_uris_json = ?, backchannel_logout_uri = ? WHERE id = ?`,
+		c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI, c.ID); err != nil {
 		return err
 	}
 	if revokeTokens || !c.Enabled {
@@ -2036,11 +2073,11 @@ func (s *Store) CreateAuthorizationCode(code *AuthorizationCode) error {
 			return ErrAuthorizationInteraction
 		}
 	}
-	query := `INSERT INTO authorization_codes (id, code_hash, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, nonce, expires_at, created_at, session_id, primary_authenticated_at, factor_authenticated_at, factor_method, authentication_expires_at, auth_app_id, auth_policy_revision) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS
+	query := `INSERT INTO authorization_codes (id, code_hash, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, nonce, expires_at, created_at, session_id, primary_authenticated_at, factor_authenticated_at, factor_method, authentication_expires_at, auth_app_id, auth_policy_revision, role_revision) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS
  (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id
  JOIN sessions sess ON sess.user_id=e.user_id WHERE c.id=? AND c.enabled AND e.user_id=? AND sess.id=? AND sess.expires_at>? AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sess.id AND m.allowed))`
 	code.CreatedAt = time.Now().UTC()
-	result, err := tx.Exec(query, code.ID, code.CodeHash, code.ClientID, code.UserID, code.RedirectURI, code.Scope, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce, code.ExpiresAt, code.CreatedAt, code.SessionID, code.PrimaryAuthenticatedAt, code.FactorAuthenticatedAt, code.FactorMethod, code.AuthenticationExpiresAt, code.AuthenticationAppID, code.AuthenticationPolicyRevision, code.ClientID, code.UserID, code.SessionID, code.CreatedAt)
+	result, err := tx.Exec(query, code.ID, code.CodeHash, code.ClientID, code.UserID, code.RedirectURI, code.Scope, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce, code.ExpiresAt, code.CreatedAt, code.SessionID, code.PrimaryAuthenticatedAt, code.FactorAuthenticatedAt, code.FactorMethod, code.AuthenticationExpiresAt, code.AuthenticationAppID, code.AuthenticationPolicyRevision, code.RoleRevision, code.ClientID, code.UserID, code.SessionID, code.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -2055,9 +2092,9 @@ func (s *Store) CreateAuthorizationCode(code *AuthorizationCode) error {
 }
 
 func (s *Store) GetValidAuthorizationCode(codeHash string) (*AuthorizationCode, error) {
-	query := `SELECT id, code_hash, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, nonce, expires_at, used_at, created_at, session_id, primary_authenticated_at, factor_authenticated_at, factor_method, authentication_expires_at, auth_app_id, auth_policy_revision FROM authorization_codes WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?`
+	query := `SELECT id, code_hash, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, nonce, expires_at, used_at, created_at, session_id, primary_authenticated_at, factor_authenticated_at, factor_method, authentication_expires_at, auth_app_id, auth_policy_revision, role_revision FROM authorization_codes WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?`
 	code := &AuthorizationCode{}
-	err := s.db.QueryRow(query, codeHash, time.Now().UTC()).Scan(&code.ID, &code.CodeHash, &code.ClientID, &code.UserID, &code.RedirectURI, &code.Scope, &code.CodeChallenge, &code.CodeChallengeMethod, &code.Nonce, &code.ExpiresAt, &code.UsedAt, &code.CreatedAt, &code.SessionID, &code.PrimaryAuthenticatedAt, &code.FactorAuthenticatedAt, &code.FactorMethod, &code.AuthenticationExpiresAt, &code.AuthenticationAppID, &code.AuthenticationPolicyRevision)
+	err := s.db.QueryRow(query, codeHash, time.Now().UTC()).Scan(&code.ID, &code.CodeHash, &code.ClientID, &code.UserID, &code.RedirectURI, &code.Scope, &code.CodeChallenge, &code.CodeChallengeMethod, &code.Nonce, &code.ExpiresAt, &code.UsedAt, &code.CreatedAt, &code.SessionID, &code.PrimaryAuthenticatedAt, &code.FactorAuthenticatedAt, &code.FactorMethod, &code.AuthenticationExpiresAt, &code.AuthenticationAppID, &code.AuthenticationPolicyRevision, &code.RoleRevision)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -2090,7 +2127,7 @@ func (s *Store) RecordIssuedToken(t *IssuedToken) error {
 	query := `INSERT INTO issued_tokens (jti, user_id, client_id, expires_at, created_at, session_id)
  SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS
  (SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
- WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?)))`
+ WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND (users.ends_at IS NULL OR users.ends_at>unixepoch()) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?)))`
 	t.CreatedAt = time.Now().UTC()
 	res, err := s.db.Exec(query, t.JTI, t.UserID, t.ClientID, t.ExpiresAt, t.CreatedAt, t.SessionID, t.SessionID, t.UserID, t.CreatedAt, t.UserID, t.ClientID, t.AuthorizationCodeID, t.AuthorizationCodeID, t.SessionID, t.ClientID, t.UserID, t.CreatedAt, t.CreatedAt)
 	if err != nil {
@@ -2306,47 +2343,6 @@ func (s *Store) DeleteAuditEventsOlderThan(cutoff time.Time) error {
 	return err
 }
 
-func (s *Store) ListAuditEvents(limit, offset int) ([]AuditEvent, int, error) {
-	var total int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&total)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	query := `SELECT id, actor_id, actor_username, action, target_id, target_type, ip_address, user_agent, outcome, details_json, created_at FROM audit_events ORDER BY created_at DESC LIMIT ? OFFSET ?`
-	rows, err := s.db.Query(query, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	var events []AuditEvent
-	for rows.Next() {
-		var e AuditEvent
-		var actorID, actorUser, targetID, targetType, details sql.NullString
-		if err := rows.Scan(&e.ID, &actorID, &actorUser, &e.Action, &targetID, &targetType, &e.IPAddress, &e.UserAgent, &e.Outcome, &details, &e.CreatedAt); err != nil {
-			return nil, 0, err
-		}
-		if actorID.Valid {
-			e.ActorID = actorID.String
-		}
-		if actorUser.Valid {
-			e.ActorUsername = actorUser.String
-		}
-		if targetID.Valid {
-			e.TargetID = targetID.String
-		}
-		if targetType.Valid {
-			e.TargetType = targetType.String
-		}
-		if details.Valid {
-			e.DetailsJSON = details.String
-		}
-		events = append(events, e)
-	}
-	return events, total, nil
-}
-
 // GetSetting retrieves a configuration value from system_settings.
 // ErrNotFound is returned when a setting has never been written. Callers that need to tell
 // "unset" from "empty" branch on it; a setting deliberately set to "" is not ErrNotFound.
@@ -2459,7 +2455,7 @@ func (s *Store) RevokeUserAccess(userID string) error {
 }
 
 func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
-	if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID); err != nil {
+	if _, err := revokeSessionsTx(tx, now, `user_id=?`, userID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(
@@ -2467,14 +2463,11 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 		now, userID); err != nil {
 		return err
 	}
-	return revokeSessionGrantsTx(tx, `user_id=?`, now, userID)
-}
-
-// DeleteOtherUserSessions logs out every session for a user except keepSessionID, so
-// replacing a factor does not leave a co-resident stolen session logged in.
-func (s *Store) DeleteOtherUserSessions(userID, keepSessionID string) error {
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = ? AND id != ?`, userID, keepSessionID)
-	return err
+	if err := revokeSessionGrantsTx(tx, `user_id=?`, now, userID); err != nil {
+		return err
+	}
+	// An outstanding activation or reset link is a credential too.
+	return expireAccountTokensTx(tx, now, `user_id=?`, userID)
 }
 
 // PingContext proves the database is reachable and readable within the caller's deadline.

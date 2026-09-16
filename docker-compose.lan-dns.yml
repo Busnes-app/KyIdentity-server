@@ -1,9 +1,21 @@
 # Optional override: send the container's DNS lookups to your LAN's resolver, so names that
-# exist only there (a KyRecovery behind your own proxy) resolve inside the container. This
-# replaces the host's resolvers for every lookup this container makes, which is why it lives
-# in its own file instead of a default.
-#
-#   KYIDENTITY_DNS=192.168.1.1 docker compose -f docker-compose.yml -f docker-compose.lan-dns.yml up -d
+# exist only there (a KyRecovery behind your own proxy) resolve inside the container. It
+# replaces the host's resolvers for every lookup this container makes, which is why it is
+# not in the base file. Select it by adding it to COMPOSE_FILE in .env, never with -f: an
+# explicit -f list replaces COMPOSE_FILE outright. The snippet appends this file to whatever
+# chain .env already has (build overlay, local override) and touches nothing else; the
+# resolver sits next to it: the resolver comes from an exported
+# KYIDENTITY_DNS (`export KYIDENTITY_DNS=<addr>`; fish `set -x KYIDENTITY_DNS <addr>`) or, when that is unset, from the KYIDENTITY_DNS line
+# already in .env; there is no default, the block refuses to guess. An exported value overrides
+# .env, so re-running is a no-op only while KYIDENTITY_DNS is unset in your shell.
+#   (umask 077; touch .env \
+#     && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+#     && dns=${KYIDENTITY_DNS:-$({ grep '^KYIDENTITY_DNS=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-)} \
+#     && : "${dns:?no resolver chosen: export KYIDENTITY_DNS=<your LAN resolver> (fish: set -x KYIDENTITY_DNS <addr>), then re-run this block}" \
+#     && case ":$cf:" in *:docker-compose.lan-dns.yml:*) ;; *) cf="$cf:docker-compose.lan-dns.yml";; esac \
+#     && t=$(mktemp ./.env.XXXXXX) && { grep -v -e '^COMPOSE_FILE=' -e '^KYIDENTITY_DNS=' .env || [ $? -eq 1 ]; } > "$t" \
+#     && printf 'COMPOSE_FILE=%s\nKYIDENTITY_DNS=%s\n' "$cf" "$dns" >> "$t" && mv "$t" .env)
+#   docker compose up -d --force-recreate
 services:
   kyidentity-server:
     dns:

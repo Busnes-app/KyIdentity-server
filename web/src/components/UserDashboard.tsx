@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { User, Application } from '../types';
 import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
 import { parseApplications } from '../parsers';
+import { AccessRequests } from './AccessRequests';
 import { faviconUrl } from '../favicon';
 import { Image, Upload, ExternalLink, ArrowUpRight, Plus, Pencil } from 'lucide-react';
 import { LAUNCHER_ICONS, launcherIcon } from '../launcherIcons';
@@ -223,6 +224,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onNavigateTo
           {appList(links)}
         </>
       )}
+      {!manage && <AccessRequests />}
 
       {draft && (
         <div className="modal-backdrop" onMouseDown={() => setDraft(null)}>

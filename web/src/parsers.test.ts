@@ -1,6 +1,11 @@
-import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs } from './parsers';
+import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
+  parseAccessExplanation,
+  parseAccessRequest,
+  parseAlert,
+  parseAlertPage,
+  parseAlertSettings,
   parseGroupPage,
   parseGroupUserPage,
   parseApplications,
@@ -57,6 +62,18 @@ describe('parseUser', () => {
   // a valid account.
   it('refuses an error body where a user was expected', () => {
     expect(() => parseMe({ error: 'unauthorized' })).toThrow();
+  });
+
+  it('carries an account end date through and leaves it absent when unset', () => {
+    expect(parseMe({ ...user, endsAt: '2026-06-01T07:30:00Z' }).endsAt).toBe('2026-06-01T07:30:00Z');
+    expect(parseMe(user).endsAt).toBeUndefined();
+  });
+
+  it('reads delegated access and refuses a malformed block rather than inventing one', () => {
+    const access = { admin: false, helpdesk: true, auditor: false, appOwner: ['app-1'] };
+    expect(parseMe({ ...user, access }).access).toEqual(access);
+    expect(parseMe(user).access).toBeUndefined();
+    expect(() => parseMe({ ...user, access: { admin: 'yes' } })).toThrow(/admin/);
   });
 
   it('rejects a users list containing one malformed entry', () => {
@@ -130,6 +147,11 @@ describe('parsePairedSystems', () => {
   it('defaults groupsEnabled to false when absent', () => {
     expect(parsePairedSystems({ systems: [system] })[0].groupsEnabled).toBe(false);
     expect(parsePairedSystems({ systems: [{ ...system, groupsEnabled: true }] })[0].groupsEnabled).toBe(true);
+  });
+
+  it('defaults provisioningHold to false, and reads a connector held after a restore', () => {
+    expect(parsePairedSystems({ systems: [system] })[0].provisioningHold).toBe(false);
+    expect(parsePairedSystems({ systems: [{ ...system, provisioningHold: true }] })[0].provisioningHold).toBe(true);
   });
 
   it('defaults reconcileHours to 0 and refuses negative or fractional values', () => {
@@ -330,7 +352,7 @@ describe('group directory pages', () => {
 });
 
 it('validates app registry references and revisions', () => {
-  const record = { id: 'app', revision: 1, authenticationRevision: 1, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+  const record = { id: 'app', revision: 1, authenticationRevision: 1, roleRevision: 0, legacyRoleClaim: true, requestable: false, groupsClaim: false, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
   const page = { records: [record], total: 1, limit: 25, offset: 0 };
   expect(parseAppRecordPage(page).items[0]).toEqual(record);
   expect(() => parseAppRecordPage({ ...page, records: [{ ...record, revision: 0 }] })).toThrow();
@@ -339,7 +361,7 @@ it('validates app registry references and revisions', () => {
 });
 
 it('validates effective-access decisions and preview metadata', () => {
- const app = { id: 'app', revision: 1, authenticationRevision: 1, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'c', clientName: 'C', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+ const app = { id: 'app', revision: 1, authenticationRevision: 1, roleRevision: 0, legacyRoleClaim: true, requestable: false, groupsClaim: false, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'c', clientName: 'C', launcherId: '', launcherName: '', systemId: '', systemName: '' };
  const user = { id: 'u', username: 'User', displayName: '', status: 'active', direct: false, groupAssigned: true, effective: true, preview: false, reason: 'group_assignment' };
  const page = { app, users: [user], total: 1, limit: 25, offset: 0, losingAccess: 1, gainingAccess: 2 };
  expect(parseAppAccessPage(page).items[0].effective).toBe(true);
@@ -358,7 +380,7 @@ it('preserves a successful login when its authorization must restart', () => {
 
 
 describe('authentication policy boundary', () => {
- const record = { id: 'app', revision: 1, authenticationRevision: 1, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+ const record = { id: 'app', revision: 1, authenticationRevision: 1, roleRevision: 0, legacyRoleClaim: true, requestable: false, groupsClaim: false, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
  it('rejects invalid server policy before displaying editable controls', () => {
   for (const authentication of [null, {}, { mode: 'max_age', primaryMaxAge: 0, factor: 'mfa', factorMaxAge: 0 }, { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 60 }, { mode: 'reuse', primaryMaxAge: 0, factor: 'passkey', factorMaxAge: -1 }]) {
    expect(() => parseAppRecordPage({ records: [{ ...record, authentication }], total: 1, limit: 25, offset: 0 })).toThrow();
@@ -458,5 +480,151 @@ describe('parseSessionInventory', () => {
 
   it('rejects a session without an id', () => {
     expect(() => parseSessionInventory({ sessions: [{ ...session, id: 1 }], apps: [] })).toThrow();
+  });
+});
+
+describe('parseOAuthClients', () => {
+  it('reads post-logout redirect URIs and defaults them to none', () => {
+    const base = { id: 'app', clientName: 'App', clientType: 'public', redirectUrisJson: '["https://a/cb"]', allowedScopesJson: '["openid"]' };
+    expect(parseOAuthClients({ clients: [{ ...base, postLogoutRedirectUrisJson: '["https://a/bye"]' }] })[0]?.postLogoutRedirectUris).toEqual(['https://a/bye']);
+    expect(parseOAuthClients({ clients: [base] })[0]?.postLogoutRedirectUris).toEqual([]);
+  });
+});
+
+describe('parseSessionInventory logouts', () => {
+  const logout = { id: 'd1', clientId: 'kynotes', clientName: 'KyNotes', status: 'queued', attempts: 2, lastError: '503', nextAttemptAt: '2026-09-13T10:00:00Z', updatedAt: '2026-09-13T09:59:00Z' };
+
+  it('reads back-channel logout deliveries', () => {
+    const inv = parseSessionInventory({ sessions: [], apps: [], logouts: [logout] });
+    expect(inv.logouts[0]?.status).toBe('queued');
+    expect(inv.logouts[0]?.attempts).toBe(2);
+  });
+
+  it('defaults to no deliveries for an older server', () => {
+    expect(parseSessionInventory({ sessions: [], apps: [] }).logouts).toEqual([]);
+  });
+
+  // A delivery state the UI does not understand must not be shown as delivered.
+  it('refuses an unknown delivery status', () => {
+    expect(() => parseSessionInventory({ sessions: [], apps: [], logouts: [{ ...logout, status: 'done' }] })).toThrow();
+  });
+});
+
+describe('parseOAuthClients backchannel', () => {
+  it('reads the back-channel logout URI when present', () => {
+    const base = { id: 'app', clientName: 'App', clientType: 'public', redirectUrisJson: '[]', allowedScopesJson: '[]' };
+    expect(parseOAuthClients({ clients: [{ ...base, backchannelLogoutUri: 'https://a/bc' }] })[0]?.backchannelLogoutUri).toBe('https://a/bc');
+    expect(parseOAuthClients({ clients: [base] })[0]?.backchannelLogoutUri).toBeUndefined();
+  });
+});
+
+describe('parseOffboarding', () => {
+  const target = { systemId: 'notes', systemName: 'KyNotes', systemType: 'scim', systemStatus: 'active', revision: 2, recorded: true, acknowledged: true, verified: false, contradicted: false, blocked: false, observed: '', lastEvent: { type: 'user.deleted', status: 'delivered', attempts: 1, updatedAt: '2026-09-13T10:00:00Z' } };
+  const logout = { id: 'd1', clientId: 'kynotes', clientName: 'KyNotes', status: 'queued', attempts: 0, lastError: '', nextAttemptAt: '2026-09-13T10:00:00Z', updatedAt: '2026-09-13T09:59:00Z' };
+  const body = { userId: 'u1', active: false, deleted: true, acknowledged: false, verified: false, targets: [target], logouts: [logout] };
+
+  it('reads targets, sign-out deliveries and the completion flags', () => {
+    const off = parseOffboarding(body);
+    expect(off.deleted).toBe(true);
+    expect(off.logouts[0]?.status).toBe('queued');
+    expect(off.targets[0]?.lastEvent?.type).toBe('user.deleted');
+    expect(off.verified).toBe(false);
+  });
+
+  // A completion flag the server did not send must not read as complete.
+  it('requires explicit completion flags', () => {
+    expect(() => parseOffboarding({ ...body, verified: undefined })).toThrow();
+    expect(() => parseOffboarding({ ...body, targets: [{ ...target, observed: 'gone' }] })).toThrow();
+    expect(() => parseOffboarding({ ...body, targets: [{ ...target, contradicted: undefined }] })).toThrow();
+  });
+});
+
+describe('onboarding parsers', () => {
+  it('reads pending accounts and account links', () => {
+    expect(parseUser({ id: 'u', username: 'x', role: 'user', status: 'disabled', pending: true }).pending).toBe(true);
+    expect(parseUser({ id: 'u', username: 'x', role: 'user', status: 'active' }).pending).toBe(false);
+    const link = parseAccountLink({ kind: 'activation', delivery: 'manual', link: 'https://id/activate?token=t', expiresAt: '2026-09-14T10:00:00Z' });
+    expect(link.link).toContain('token=t');
+    expect(() => parseAccountLink({ kind: 'magic', delivery: 'manual', expiresAt: 'x' })).toThrow();
+  });
+
+  it('reads mail settings without ever expecting a password', () => {
+    const m = parseMailSettings({ host: 'smtp', port: 465, username: 'u', from: 'a@b.test', security: 'tls', hasPassword: true, configured: true });
+    expect(m.hasPassword).toBe(true);
+    expect('password' in m).toBe(false);
+    expect(() => parseMailSettings({ host: 'smtp', port: 25, from: 'a@b.test', security: 'none', hasPassword: false, configured: true })).toThrow();
+  });
+});
+
+describe('inbound SCIM parsers', () => {
+  it('reads connectors with their tokens and never expects a raw token in listings', () => {
+    const page = parseSCIMConnectors({ endpoint: 'https://id/scim/v2', connectors: [{ id: 'c1', name: 'Up', status: 'active', createdAt: '2026-09-13T10:00:00Z', users: 2, groups: 0, tokens: [{ id: 't1', scope: 'write', createdAt: '2026-09-13T10:00:00Z', revokedAt: '2026-09-13T11:00:00Z' }] }] });
+    expect(page.connectors[0]?.tokens[0]?.revokedAt).toBeDefined();
+    expect(page.connectors[0]?.users).toBe(2);
+    expect(page.connectors[0]?.groups).toBe(0);
+    expect(() => parseSCIMConnectors({ connectors: [{ id: 'c1', name: 'Up', status: 'weird', createdAt: 'x', users: 0, tokens: [] }] })).toThrow();
+  });
+
+  it('requires the raw value on a freshly issued token', () => {
+    expect(parseSCIMToken({ id: 't1', scope: 'read', createdAt: 'x', token: 'scim_abc' }).token).toBe('scim_abc');
+    expect(() => parseSCIMToken({ id: 't1', scope: 'read', createdAt: 'x' })).toThrow();
+  });
+
+  it('marks upstream-owned users', () => {
+    expect(parseUser({ id: 'u', username: 'x', role: 'user', status: 'disabled', sourceConnectorId: 'c1', externalId: 'e1', locallyDisabled: true }).locallyDisabled).toBe(true);
+  });
+});
+
+describe('parseAppRolesPage', () => {
+  const app = { id: 'a1', revision: 3, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, authenticationRevision: 1, roleRevision: 2, legacyRoleClaim: false, requestable: false, groupsClaim: true,
+    accessMode: 'assigned_only', enabled: true, clientId: 'c', clientName: 'C', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+  it('reads roles with their mappings and the claim settings', () => {
+    const page = parseAppRolesPage({ app, roles: [{ id: 'r', appId: 'a1', name: 'billing.admin', description: '', createdAt: 'x', users: [{ id: 'u', name: 'ada' }], groups: [] }] });
+    expect(page.roles[0]?.users[0]?.name).toBe('ada');
+    expect(page.app.groupsClaim).toBe(true);
+    expect(() => parseAppRolesPage({ app: { ...app, legacyRoleClaim: 'yes' }, roles: [] })).toThrow();
+  });
+});
+
+describe('parseAccessRequest', () => {
+  const request = { id: 'r1', appId: 'a1', appName: 'Billing', userId: 'u1', username: 'ada', reason: 'quarter close', durationSeconds: 3600, status: 'pending', createdAt: '2026-06-01T07:30:00Z', expiresAt: '2026-06-15T07:30:00Z' };
+  it('reads a request and its optional decision', () => {
+    expect(parseAccessRequest(request).status).toBe('pending');
+    expect(parseAccessRequest({ ...request, status: 'approved', decidedAt: '2026-06-02T07:30:00Z', decisionNote: 'ok' }).decisionNote).toBe('ok');
+  });
+  it.each(['granted', '', undefined])('refuses the unknown status %p rather than showing it as pending', (status) => {
+    expect(() => parseAccessRequest({ ...request, status })).toThrow(/status/);
+  });
+});
+
+describe('parseAlert', () => {
+  const alert = { id: 'al1', rule: 'recovery_use', key: 'u1', severity: 'warning', title: 'Recovery used for ada', summary: 'A recovery code was used to sign in as ada.', status: 'open', count: 2, firstSeen: '2026-06-01T07:30:00Z', lastSeen: '2026-06-01T07:31:00Z', delivery: { pending: 1, delivered: 0, failed: 0, skipped: 0, lastError: '' } };
+  it('reads an alert, its delivery summary and the acknowledgement', () => {
+    expect(parseAlert(alert).delivery.pending).toBe(1);
+    expect(parseAlert({ ...alert, status: 'acknowledged', acknowledgedBy: 'root', acknowledgedAt: '2026-06-01T08:00:00Z' }).acknowledgedBy).toBe('root');
+    expect(parseAlertPage({ alerts: [alert], total: 1, limit: 50, offset: 0 }).items).toHaveLength(1);
+    expect(parseAlertSettings({ loginFailureThreshold: 10, loginFailureWindowSeconds: 600, recipients: [{ id: 'u1', username: 'root' }] }).recipients[0]?.username).toBe('root');
+  });
+  it.each(['closed', '', undefined])('refuses the unknown status %p', (status) => {
+    expect(() => parseAlert({ ...alert, status })).toThrow(/status/);
+  });
+  it('refuses a missing delivery summary or a bad severity', () => {
+    expect(() => parseAlert({ ...alert, delivery: undefined })).toThrow(/delivery/);
+    expect(() => parseAlert({ ...alert, severity: 'fatal' })).toThrow(/severity/);
+    expect(() => parseAlertSettings({ loginFailureThreshold: -1, loginFailureWindowSeconds: 600, recipients: [] })).toThrow();
+  });
+});
+
+describe('parseAccessExplanation', () => {
+  const explanation = { appId: 'a', appName: 'Billing', userId: 'u', username: 'ada', allowed: false, reason: 'grants_expired', accessMode: 'assigned_only', appEnabled: true, clientEnabled: true, userStatus: 'active',
+    grants: [{ kind: 'direct', expiresAt: '2026-06-01T07:30:00Z', live: false }], roles: [], authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0 }, revision: 3, authenticationRevision: 1, roleRevision: 0, requestable: true };
+  it('reads a denial with its lapsed grant', () => {
+    const e = parseAccessExplanation({ explanation });
+    expect(e.allowed).toBe(false);
+    expect(e.grants[0].live).toBe(false);
+  });
+  it('refuses a verdict it cannot trust rather than showing access as allowed', () => {
+    expect(() => parseAccessExplanation({ explanation: { ...explanation, allowed: 'yes' } })).toThrow(/allowed/);
+    expect(() => parseAccessExplanation({ explanation: { ...explanation, grants: [{ kind: 'magic', live: true }] } })).toThrow(/kind/);
   });
 });
