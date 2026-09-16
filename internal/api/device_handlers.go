@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/audit"
-	"github.com/Busness-app/kyidentity-server/internal/crypto"
-	"github.com/Busness-app/kyidentity-server/internal/mfa"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/audit"
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/mfa"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 type DeviceHandler struct {

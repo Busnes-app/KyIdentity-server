@@ -1,6 +1,6 @@
 package oauth
 
-import "github.com/Busness-app/kyidentity-server/internal/store"
+import "github.com/Busnes-app/kyidentity-server/internal/store"
 
 // These context classes describe KyIdentity's verified login flow, not a NIST AAL
 // or a guarantee about hardware key storage. Recovery never claims ordinary MFA.

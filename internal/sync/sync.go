@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/mail"
+	"github.com/Busnes-app/kyidentity-server/internal/netguard"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/Busness-app/ky-primitives/scim"
 	"github.com/Busness-app/ky-primitives/syncauth"
-	"github.com/Busness-app/kyidentity-server/internal/crypto"
-	"github.com/Busness-app/kyidentity-server/internal/mail"
-	"github.com/Busness-app/kyidentity-server/internal/netguard"
-	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 

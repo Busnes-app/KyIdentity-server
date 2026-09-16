@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Busness-app/kyidentity-server/internal/oauth"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/oauth"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // EndSession implements OpenID Connect RP-Initiated Logout at /oauth/logout.

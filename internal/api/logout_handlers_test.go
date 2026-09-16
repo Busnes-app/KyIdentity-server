@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/oauth"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/oauth"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 const bye = "https://notes.urlxl.com/bye"

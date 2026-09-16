@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/google/uuid"
 )
 

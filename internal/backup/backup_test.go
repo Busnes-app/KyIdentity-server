@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/backup"
+	"github.com/Busnes-app/kyidentity-server/internal/config"
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/Busness-app/ky-primitives/capsule"
 	"github.com/Busness-app/ky-primitives/recoverykey"
-	"github.com/Busness-app/kyidentity-server/internal/backup"
-	"github.com/Busness-app/kyidentity-server/internal/config"
-	"github.com/Busness-app/kyidentity-server/internal/crypto"
-	"github.com/Busness-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 

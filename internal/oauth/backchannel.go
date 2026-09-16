@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/netguard"
+	"github.com/Busnes-app/kyidentity-server/internal/netguard"
 	"github.com/google/uuid"
 )
 

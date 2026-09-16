@@ -1,7 +1,7 @@
 **Repo:** kyidentity-server
-**PR:** #21 — https://github.com/Busness-app/kyidentity-server/pull/21
-**PR:** #22 — https://github.com/Busness-app/kyidentity-server/pull/22
-**PR:** #23 — https://github.com/Busness-app/kyidentity-server/pull/23
+**PR:** #21 — https://github.com/Busnes-app/kyidentity-server/pull/21
+**PR:** #22 — https://github.com/Busnes-app/kyidentity-server/pull/22
+**PR:** #23 — https://github.com/Busnes-app/kyidentity-server/pull/23
 **Worktree:** /home/yoshi/busness.app/kyidentity-server (master, a2d5dbc)
 
 # Recovery verification plan

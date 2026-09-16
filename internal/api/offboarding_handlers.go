@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // UserOffboarding shows how far a user's removal has propagated. It answers for deleted

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 func TestAppRegistryAdminAPI(t *testing.T) {

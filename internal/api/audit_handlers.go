@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // Export bounds. Package variables so a test can shrink them instead of seeding

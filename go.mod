@@ -1,4 +1,4 @@
-module github.com/Busness-app/kyidentity-server
+module github.com/Busnes-app/kyidentity-server
 
 go 1.26.6
 

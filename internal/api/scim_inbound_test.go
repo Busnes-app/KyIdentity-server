@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // scimCall is what an upstream directory sends: a Bearer token, no cookies, no CSRF.

@@ -3,18 +3,18 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Busness-app/kyidentity-server/internal/oauth"
+	"github.com/Busnes-app/kyidentity-server/internal/oauth"
 	"log"
 	"net/http"
 	"net/url"
 	"slices"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/audit"
-	"github.com/Busness-app/kyidentity-server/internal/auth"
-	"github.com/Busness-app/kyidentity-server/internal/crypto"
-	"github.com/Busness-app/kyidentity-server/internal/mfa"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/audit"
+	"github.com/Busnes-app/kyidentity-server/internal/auth"
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/mfa"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 

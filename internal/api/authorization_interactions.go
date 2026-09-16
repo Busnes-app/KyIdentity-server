@@ -4,14 +4,14 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"github.com/Busness-app/kyidentity-server/internal/oauth"
+	"github.com/Busnes-app/kyidentity-server/internal/oauth"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/crypto"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 const authorizationBrowserCookie = "kyidentity_authorization_browser"

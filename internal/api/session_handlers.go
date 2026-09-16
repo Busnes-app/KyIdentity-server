@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/audit"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/audit"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // SessionHandler lists and revokes browser sessions and per-app token grants. Revocation

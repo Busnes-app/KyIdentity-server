@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/Busness-app/ky-primitives/scim"
-	"github.com/Busness-app/kyidentity-server/internal/store"
 )
 
 const (

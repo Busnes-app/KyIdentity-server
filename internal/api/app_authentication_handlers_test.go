@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 func setTestAuthenticationPolicy(t *testing.T, db *store.Store, client string, p store.AppAuthenticationPolicy) {

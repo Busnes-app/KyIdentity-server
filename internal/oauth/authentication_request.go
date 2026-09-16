@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 const PasswordACR = "urn:kysignon:acr:password"

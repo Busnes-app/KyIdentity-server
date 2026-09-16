@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/Busness-app/kyidentity-server/internal/audit"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/audit"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // AlertHandler serves the alert inbox and its settings. Reading is administrators and
