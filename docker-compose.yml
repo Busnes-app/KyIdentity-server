@@ -17,16 +17,16 @@ services:
     # secrets. Re-run with a newer sha to move; delete the KYIDENTITY_IMAGE line to follow :latest
     # again. A source install is unaffected: the build overlay's image wins over this pin.
     #   sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
-    #   d=$(docker buildx imagetools inspect ghcr.io/busness-app/kyidentity-server:$sha --format '{{.Manifest.Digest}}') \
-    #     && gh attestation verify "oci://ghcr.io/busness-app/kyidentity-server@$d" --repo Busness-app/kyidentity-server \
-    #          --cert-identity https://github.com/Busness-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
-    #     && [ "$(gh attestation verify "oci://ghcr.io/busness-app/kyidentity-server@$d" --repo Busness-app/kyidentity-server \
-    #          --cert-identity https://github.com/Busness-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
+    #   d=$(docker buildx imagetools inspect ghcr.io/busnes-app/kyidentity-server:$sha --format '{{.Manifest.Digest}}') \
+    #     && gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/kyidentity-server \
+    #          --cert-identity https://github.com/Busnes-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
+    #     && [ "$(gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/kyidentity-server \
+    #          --cert-identity https://github.com/Busnes-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
     #          --format json --jq '.[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit')" = "$sha" ] \
     #     && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYIDENTITY_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
-    #         && echo "KYIDENTITY_IMAGE=ghcr.io/busness-app/kyidentity-server@$d" >> "$t" && mv "$t" .env) \
-    #     && grep -qxF "KYIDENTITY_IMAGE=ghcr.io/busness-app/kyidentity-server@$d" .env
-    image: ${KYIDENTITY_IMAGE:-ghcr.io/busness-app/kyidentity-server:latest}
+    #         && echo "KYIDENTITY_IMAGE=ghcr.io/busnes-app/kyidentity-server@$d" >> "$t" && mv "$t" .env) \
+    #     && grep -qxF "KYIDENTITY_IMAGE=ghcr.io/busnes-app/kyidentity-server@$d" .env
+    image: ${KYIDENTITY_IMAGE:-ghcr.io/busnes-app/kyidentity-server:latest}
     pull_policy: missing
     container_name: KyIdentity-Server
     restart: unless-stopped

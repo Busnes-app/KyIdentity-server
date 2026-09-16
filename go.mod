@@ -1,9 +1,9 @@
-module github.com/Busness-app/kyidentity-server
+module github.com/Busnes-app/kyidentity-server
 
 go 1.26.6
 
 require (
-	github.com/Busness-app/ky-primitives v0.6.0
+	github.com/Busnes-app/ky-primitives v0.8.0
 	github.com/google/uuid v1.6.0
 	golang.org/x/crypto v0.55.0
 	modernc.org/sqlite v1.56.0

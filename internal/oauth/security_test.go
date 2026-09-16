@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 

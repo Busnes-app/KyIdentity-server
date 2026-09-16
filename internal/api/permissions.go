@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // Delegated administration. Every admin route names one fixed permission; the acting

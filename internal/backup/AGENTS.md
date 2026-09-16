@@ -1,7 +1,7 @@
 # Backup
 
 ## Purpose
-KyIdentity's adapter over `github.com/Busness-app/ky-primitives/recoveryclient`, the suite's product-side backup package. The lib decides everything about keys, pairing, destinations, schedule, sealing, drilling and restoring; this package says what KyIdentity seals, what its drill checks, and how the store, the deployment key and the config map onto the lib's interfaces.
+KyIdentity's adapter over `github.com/Busnes-app/ky-primitives/recoveryclient`, the suite's product-side backup package. The lib decides everything about keys, pairing, destinations, schedule, sealing, drilling and restoring; this package says what KyIdentity seals, what its drill checks, and how the store, the deployment key and the config map onto the lib's interfaces.
 
 ## Ownership
 - `payload.go`: `CollectSealable` (database snapshot through the live handle, RSA signing key, encryption and secret keys, `recovery.pub` when present, config manifest), `Members`, the capsule paths, the verification recipe.

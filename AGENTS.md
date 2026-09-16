@@ -83,7 +83,7 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 - CI builds, audits, and tests the web app, and rejects stale committed `web/dist` assets.
 - CI audits and typechecks both push Workers and runs their shared and provider behavior tests.
 - CI builds the production image, probes `/readyz`, and verifies public HTTP issuers fail closed.
-- On a push to `master` that passes every job, `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busness-app/kysignon-server:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `kysignon-server:local`) so every compose command, recovery docs included, uses the local build.
+- On a push to `master` that passes every job, `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/kysignon-server:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `kysignon-server:local`) so every compose command, recovery docs included, uses the local build.
 
 # DOX framework
 

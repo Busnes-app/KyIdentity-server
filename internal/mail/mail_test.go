@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // fakeSMTP speaks just enough SMTP to accept one message, either behind implicit TLS or

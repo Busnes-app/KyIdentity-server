@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/netguard"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/netguard"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 func jwtHeader(t *testing.T, token string) map[string]any {

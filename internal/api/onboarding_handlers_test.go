@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/kyidentity-server/internal/mail"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/mail"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 func login(t *testing.T, srv *Server, username, password string) *httptest.ResponseRecorder {

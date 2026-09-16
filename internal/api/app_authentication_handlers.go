@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 func (h *AdminHandler) SetAppAuthenticationPolicy(w http.ResponseWriter, r *http.Request) {

@@ -3,8 +3,8 @@ package sync
 import (
 	"context"
 	"errors"
-	"github.com/Busness-app/ky-primitives/scim"
-	"github.com/Busness-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/ky-primitives/scim"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"io"
 	"net/http"
 	"strings"
