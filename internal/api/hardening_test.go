@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/recoverykey"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
-	"github.com/Busness-app/ky-primitives/recoverykey"
 	_ "modernc.org/sqlite"
 )
 

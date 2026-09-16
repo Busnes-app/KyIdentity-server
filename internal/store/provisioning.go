@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Busness-app/ky-primitives/scim"
+	"github.com/Busnes-app/ky-primitives/scim"
 	"github.com/google/uuid"
 )
 

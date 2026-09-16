@@ -1,7 +1,5 @@
-github.com/Busness-app/ky-primitives v0.5.1 h1:RZHdfCQjVilCJ8FgJcSCyLap6cQ8oJWmJYoLivgbZRc=
-github.com/Busness-app/ky-primitives v0.5.1/go.mod h1:cNU4XVPbGf9Dxx8WCB6gDNJj8NdQZI5c6Lr2V8Hp09M=
-github.com/Busness-app/ky-primitives v0.6.0 h1:5zqycnXl7Msuy3C4g+sg0UDCY8voIzxeNNhlJN9P0bg=
-github.com/Busness-app/ky-primitives v0.6.0/go.mod h1:cNU4XVPbGf9Dxx8WCB6gDNJj8NdQZI5c6Lr2V8Hp09M=
+github.com/Busnes-app/ky-primitives v0.8.0 h1:MV1UsqC9Vcf5vhDy4vC9nvLVqXpGRaZYoYhA5YEzBGw=
+github.com/Busnes-app/ky-primitives v0.8.0/go.mod h1:SOeb+4v8vakifKC9mPJZn+n83Zj8ktX5qqfKgpSWLPc=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 h1:LMLX+LgTNWpfvCBdFebv6EsYotImrt/Ppc5cXIriCSo=

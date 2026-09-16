@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Busness-app/ky-primitives/recoveryclient/guardtest"
+	"github.com/Busnes-app/ky-primitives/recoveryclient/guardtest"
 )
 
 // Nothing in this server opens a capsule sealed to the suite key, combines shares or rebuilds

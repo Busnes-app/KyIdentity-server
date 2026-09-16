@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/scim"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
-	"github.com/Busness-app/ky-primitives/scim"
 	"github.com/google/uuid"
 )
 

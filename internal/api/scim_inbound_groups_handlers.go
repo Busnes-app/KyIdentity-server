@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/scim"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
-	"github.com/Busness-app/ky-primitives/scim"
 )
 
 // Inbound SCIM Groups over the flat directory groups. The upstream owns displayName and

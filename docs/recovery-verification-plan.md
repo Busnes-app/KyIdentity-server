@@ -89,7 +89,7 @@ Independently checked this session:
   pre-library pairing sealer and exact legacy local-copy migration in automated
   fixtures; it does not establish the live deployment's history.
 - `go test -race ./cmd/kyidentity/...` passed.
-- `go test -race github.com/Busness-app/ky-primitives/recoveryclient -run
+- `go test -race github.com/Busnes-app/ky-primitives/recoveryclient -run
   'Restore|ReadShares' -count=1` passed with synthetic test material.
 - Built `/home/yoshi/.local/state/kyidentity-verification-295/kyidentity`. Go build
   metadata records revision `a2d5dbc59c0724fd96dc21a861f1e6ba33b38711`, dependency

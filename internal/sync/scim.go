@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/scim"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
-	"github.com/Busness-app/ky-primitives/scim"
 )
 
 func supportedSystemType(kind string) bool {

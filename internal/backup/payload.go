@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
-	"github.com/Busness-app/ky-primitives/recoveryclient"
 )
 
 // Relative paths inside a capsule. The restore drill and the restore command both have to
