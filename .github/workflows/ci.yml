@@ -15,20 +15,25 @@ jobs:
       - uses: actions/checkout@v4
       - name: image and attestation coordinates match this repository
         run: |
+          set -euo pipefail
           img="ghcr.io/${GITHUB_REPOSITORY,,}"
-          files="docker-compose.yml"; [ -f docs/RESTORE.md ] && files="$files docs/RESTORE.md"
+          # every compose file and every non-historical doc an operator might copy from
+          mapfile -t files < <(git ls-files 'docker-compose*.yml' '*.md' | grep -v '^docs/superpowers/')
+          [ "${#files[@]}" -ge 2 ] || { echo "no compose/doc files found"; exit 1; }
+          for f in "${files[@]}"; do [ -r "$f" ] || { echo "$f is not readable"; exit 1; }; done
           # the image key itself, not just some occurrence in a comment
           grep -E '^\s*image:' docker-compose.yml | grep -qF "$img" || { echo "image: does not default to $img"; exit 1; }
-          # every image coordinate an operator could paste, in either spelling of either org
-          seen=$(grep -ohE 'ghcr\.io/[A-Za-z0-9._/-]+' $files | sort -u)
+          # every image coordinate, in either spelling of any org; the retired namespace may be
+          # named only as a bare namespace (the README's warning), never as an image
+          seen=$(grep -ohE 'ghcr\.io/[A-Za-z0-9._/-]+' "${files[@]}" | sort -u || true)
           [ -n "$seen" ] || { echo "no image coordinate found"; exit 1; }
-          printf '%s\n' "$seen" | grep -vxF "$img" && { echo "image coordinate differs from $img"; exit 1; }
+          if bad=$(printf '%s\n' "$seen" | grep -vxF -e "$img" -e "ghcr.io/busness-app"); then echo "image coordinate outside $img:"; echo "$bad"; exit 1; fi
           # every identity the attestation check matches exactly, case included
-          ids=$(grep -ohE -- '(--repo |--cert-identity https://github\.com/)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+' $files | sed -E 's#^(--repo |--cert-identity https://github\.com/)##' | sort -u)
+          ids=$(grep -ohE -- '(--repo |--cert-identity https://github\.com/)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+' "${files[@]}" | sed -E 's#^(--repo |--cert-identity https://github\.com/)##' | sort -u || true)
           [ -n "$ids" ] || { echo "no attestation identity found"; exit 1; }
-          printf '%s\n' "$ids" | grep -vxF "$GITHUB_REPOSITORY" && { echo "attestation identity differs from $GITHUB_REPOSITORY"; exit 1; }
+          if bad=$(printf '%s\n' "$ids" | grep -vxF "$GITHUB_REPOSITORY"); then echo "attestation identity outside $GITHUB_REPOSITORY:"; echo "$bad"; exit 1; fi
           # README may only point at docs that exist
-          grep -ohE 'docs/[A-Za-z0-9._/-]+\.md' README.md | sort -u | xargs -r -I{} test -f {}
+          (grep -ohE 'docs/[A-Za-z0-9._/-]+\.md' README.md || true) | sort -u | xargs -r -I{} test -f {}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
