@@ -170,7 +170,7 @@ func TestAuthorizationInteractionMFA(t *testing.T) {
 				t.Fatal(err)
 			}
 			browser := interactionBrowser(t, srv)
-			q := url.Values{"client_id": {"app"}, "redirect_uri": {"https://app.example/cb"}, "response_type": {"code"}, "scope": {"openid"}, "code_challenge": {"challenge"}, "code_challenge_method": {"S256"}, "acr_values": {"urn:kyidentity:acr:mfa"}}
+			q := url.Values{"client_id": {"app"}, "redirect_uri": {"https://app.example/cb"}, "response_type": {"code"}, "scope": {"openid"}, "code_challenge": {"challenge"}, "code_challenge_method": {"S256"}, "acr_values": {"urn:kysignon:acr:mfa"}}
 			r := browser("GET", "/oauth/authorize?"+q.Encode(), nil)
 			location, _ := url.Parse(r.Header().Get("Location"))
 			raw := location.Query().Get("interaction")

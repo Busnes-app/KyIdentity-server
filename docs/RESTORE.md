@@ -19,7 +19,7 @@ Everything a fresh KyIdentity needs to be the old one:
 
 | Path in the capsule | What it is |
 |---|---|
-| `data/kyidentity.db` | The whole directory: users, sessions, OAuth clients, MFA state, audit log, settings |
+| `data/kyidentity.db` | The whole directory: users, sessions, OAuth clients, MFA state, audit log, settings; upgraded deployments may use `kysignon.db` |
 | `data/jwt_rs256.key` | The RSA signing key. Without it every issued token and every OIDC client breaks |
 | `data/encryption.key` | 32 bytes. Every TOTP secret and paired-system token in the database is encrypted under it |
 | `data/secret.key` | 32 bytes. Signs sessions and CSRF tokens |
@@ -126,7 +126,9 @@ The server reads keys from `/data` files unless the same keys are given by envir
 Choose one form and be consistent.
 
 **Docker Compose (the normal deployment).** The data volume must be empty before the copy,
-for the same reason Step 1 demands an empty directory. A capsule carries `kyidentity.db` but
+for the same reason Step 1 demands an empty directory. A capsule carries `kyidentity.db`; an
+in-place upgraded deployment may instead use `kysignon.db` according to the loader's
+compatibility rule, but a restored capsule always uses the current filename. The capsule never
 never its `-wal` and `-shm` sidecars; a write-ahead log left over from the old database
 would be replayed into the restored one at first open, mixing two databases. Any other
 leftover file the capsule does not overwrite would survive too.
@@ -210,7 +212,8 @@ against the restored server.
    Users, repeated for every user in the list. After hardware loss that is enough. After a
    suspected compromise it is not; rotating `secret.key` (step 3) is what invalidates every
    session and CSRF token at once, including any the list does not show you.
-2. Walk the old audit log in `old-data/kyidentity.db` from `created_at` to the moment the old
+2. Walk the old audit log in `old-data/kyidentity.db` (or `old-data/kysignon.db` for an
+   in-place-upgraded deployment) from `created_at` to the moment the old
    server was lost (the restored server's log stops at `created_at`), and re-apply
    what happened after the capsule: disabled accounts, rotated passwords, deleted or rotated
    OAuth clients, removed paired systems, reset MFA.
@@ -234,7 +237,9 @@ against the restored server.
    docker compose logs kyidentity-server | head -20
    ```
 
-   The listing must still show `encryption.key` and `kyidentity.db`. Environment form: if
+   The listing must still show `encryption.key` and the database file in use:
+   `kyidentity.db` for a restored capsule or `kysignon.db` for an in-place-upgraded deployment.
+   Environment form: if
    `KYIDENTITY_SECRET_KEY` is set, replace its value with `openssl rand -hex 32` written
    straight into `.env`, not echoed, then `docker compose up -d`; the RSA key is always a file.
 

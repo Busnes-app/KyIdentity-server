@@ -631,11 +631,12 @@ entire point. A server that could dictate the SAS could substitute keys undetect
 and every user's vault. The shipped M1 format is:
 
 ```
-message = "kyidentity-push-v1" || "|" || challengeId || "|" || ("approve"|"deny") || "|" || selectedDigits
+message = "kysignon-push-v1" || "|" || challengeId || "|" || ("approve"|"deny") || "|" || selectedDigits
 sig     = ECDSA-P256-SHA256(device_private_key, message)          // ASN.1 DER, base64
 ```
 
-M4 introduces `kyidentity-push-v2`, appending `encryptedClientShare` and `purpose`. The version
+M4 introduces `kysignon-push-v2`, appending `encryptedClientShare` and `purpose`. These prefixes
+are frozen wire constants and are not changed by the product rename. The version
 prefix domain-separates the two, so a v1 signature can never be replayed as a v2 approval that
 releases key material. See `mfa.PushResponseMessage`.
 

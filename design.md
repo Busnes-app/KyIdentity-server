@@ -136,7 +136,7 @@ KyIdentity natively manages mobile push devices and pairing tokens.
 3. In the KySecurity Authenticator app (or KyPost mobile app), the user scans the QR code or enters the PIN.
 4. The mobile app posts to `POST /api/notifications/native/register` with the pairing token, device ID, public key, and push push token.
 5. KyIdentity validates the token, registers the device in `native_devices`, and activates it as an MFA approver.
-6. When FCM rotates the delivery token, the paired device sends `PUT /api/notifications/native/devices/{deviceId}/push-token` with `pushToken`, Unix-millisecond `issuedAt`, and an ASN.1 ECDSA P-256/SHA-256 signature. The signed UTF-8 message is `kyidentity-push-token-v1|<issuer-origin>|<deviceId>|<issuedAt>|<lowercase-hex-SHA256-of-trimmed-token>`. Requests must be within five minutes of server time and newer than the device's last accepted refresh; success returns `204`, replay returns `409`, and the client must sign a current request after a stale-window failure.
+6. When FCM rotates the delivery token, the paired device sends `PUT /api/notifications/native/devices/{deviceId}/push-token` with `pushToken`, Unix-millisecond `issuedAt`, and an ASN.1 ECDSA P-256/SHA-256 signature. The signed UTF-8 message is `kysignon-push-token-v1|<issuer-origin>|<deviceId>|<issuedAt>|<lowercase-hex-SHA256-of-trimmed-token>`. This prefix is a frozen wire constant and is not changed by the product rename. Requests must be within five minutes of server time and newer than the device's last accepted refresh; success returns `204`, replay returns `409`, and the client must sign a current request after a stale-window failure.
 
 #### Push MFA Authentication
 

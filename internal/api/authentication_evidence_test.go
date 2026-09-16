@@ -94,7 +94,7 @@ func TestPasswordLoginEvidenceReachesOIDCToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims["auth_time"] != float64(sess.PrimaryAuthenticatedAt.Unix()) || claims["acr"] != "urn:kyidentity:acr:password" {
+	if claims["auth_time"] != float64(sess.PrimaryAuthenticatedAt.Unix()) || claims["acr"] != "urn:kysignon:acr:password" {
 		t.Fatalf("incorrect HTTP token claims: %v", claims)
 	}
 }

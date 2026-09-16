@@ -9,18 +9,18 @@ func addAuthenticationClaims(claims map[string]any, evidence store.Authenticatio
 		return
 	}
 	methods := []string{"pwd"}
-	context := "urn:kyidentity:acr:password"
+	context := "urn:kysignon:acr:password"
 	if evidence.FactorAuthenticatedAt != nil {
 		switch evidence.FactorMethod {
 		case "totp":
 			methods = append(methods, "otp", "mfa")
-			context = "urn:kyidentity:acr:mfa"
+			context = "urn:kysignon:acr:mfa"
 		case "push", "webauthn":
-			methods = append(methods, "urn:kyidentity:amr:"+evidence.FactorMethod, "mfa")
-			context = "urn:kyidentity:acr:mfa"
+			methods = append(methods, "urn:kysignon:amr:"+evidence.FactorMethod, "mfa")
+			context = "urn:kysignon:acr:mfa"
 		case "recovery":
-			methods = append(methods, "urn:kyidentity:amr:recovery")
-			context = "urn:kyidentity:acr:recovery"
+			methods = append(methods, "urn:kysignon:amr:recovery")
+			context = "urn:kysignon:acr:recovery"
 		}
 	}
 	// Use the primary proof time conservatively; completing a second factor does

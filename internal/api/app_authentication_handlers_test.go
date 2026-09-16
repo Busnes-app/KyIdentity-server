@@ -101,7 +101,7 @@ func TestAppAuthenticationFreshAndSilent(t *testing.T) {
 		t.Fatal("silent policy weakened", location)
 	}
 	q.Del("prompt")
-	q.Set("acr_values", "urn:kyidentity:acr:password")
+	q.Set("acr_values", "urn:kysignon:acr:password")
 	q.Set("max_age", "2147483647")
 	for range 2 {
 		raw := authorize(q).Query().Get("interaction")

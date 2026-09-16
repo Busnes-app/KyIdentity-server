@@ -73,7 +73,7 @@ drill (`go test -race ./internal/backup/... ./internal/api/...`) but cannot repl
 Do not run the runbook's production cutover steps, replace/delete the live volume,
 launch a restored server with live integrations, or rotate production keys during
 this drill. Preserve `encryption.key` and the sealer label
-`kyidentity:setting:kyrecovery_token`. On failure, retain only sanitized diagnostics
+`kysignon:setting:kyrecovery_token` (a frozen pairing-compatibility label). On failure, retain only sanitized diagnostics
 and clean up plaintext scratch material; investigate before retrying.
 
 DOX pass: this document applies existing responsibilities and verification rules;

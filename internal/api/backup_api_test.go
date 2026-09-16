@@ -119,7 +119,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 		}
 		var resp map[string]any
 		_ = json.NewDecoder(w.Body).Decode(&resp)
-		if resp["app_name"] != "KyIdentity" || resp["paired"] != false {
+		if resp["app_name"] != "KySignOn" || resp["paired"] != false {
 			t.Errorf("status %v", resp)
 		}
 	})
