@@ -41,6 +41,34 @@ func TestLegacyEnvironmentIsRejected(t *testing.T) {
 	}
 }
 
+func TestEmptyLegacyEnvironmentIsIgnored(t *testing.T) {
+	t.Setenv("KYSIGNON_ISSUER_URL", "")
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+	if _, err := Load(); err != nil {
+		t.Fatalf("empty legacy environment placeholder was rejected: %v", err)
+	}
+}
+
+func TestLegacyDatabasePathIsReused(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "kysignon.db")
+	if err := os.WriteFile(legacy, []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KYIDENTITY_DATA_DIR", dir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DBPath != legacy {
+		t.Fatalf("DBPath = %q, want existing legacy database %q", cfg.DBPath, legacy)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "kyidentity.db")); !os.IsNotExist(err) {
+		t.Fatalf("new database path was created or already exists: %v", err)
+	}
+}
+
 func TestWeakSecretKeyIsRejected(t *testing.T) {
 	withEnv(t, map[string]string{
 		"KYIDENTITY_DATA_DIR":   t.TempDir(),

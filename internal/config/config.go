@@ -94,7 +94,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	dbPath := getEnv("KYIDENTITY_DB_PATH", filepath.Join(dataDir, "kyidentity.db"))
+	dbPath := databasePath(dataDir)
 	rsaKeyPath := getEnv("KYIDENTITY_RSA_KEY_PATH", filepath.Join(dataDir, "jwt_rs256.key"))
 
 	port := getEnv("KYIDENTITY_PORT", "5867")
@@ -187,11 +187,25 @@ func Load() (*Config, error) {
 func rejectLegacyEnvironment() error {
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
-		if strings.HasPrefix(name, "KYSIGNON_") {
+		if strings.HasPrefix(name, "KYSIGNON_") && strings.TrimSpace(strings.TrimPrefix(entry, name+"=")) != "" {
 			return fmt.Errorf("legacy environment variable %s is set; use %s instead", name, "KYIDENTITY_"+strings.TrimPrefix(name, "KYSIGNON_"))
 		}
 	}
 	return nil
+}
+
+func databasePath(dataDir string) string {
+	if path := strings.TrimSpace(os.Getenv("KYIDENTITY_DB_PATH")); path != "" {
+		return path
+	}
+	current := filepath.Join(dataDir, "kyidentity.db")
+	legacy := filepath.Join(dataDir, "kysignon.db")
+	if _, err := os.Stat(current); os.IsNotExist(err) {
+		if _, legacyErr := os.Stat(legacy); legacyErr == nil {
+			return legacy
+		}
+	}
+	return current
 }
 
 // loadDepositInterval reads KYIDENTITY_BACKUP_DEPOSIT_INTERVAL: a Go duration, default 24h,
