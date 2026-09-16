@@ -47,12 +47,12 @@ The restored directory is the live directory in the clear. Treat it like the run
 With the binary (from a release, or `go build ./cmd/kyidentity`):
 
 ```bash
-kyidentity restore -capsule cap-KyIdentity-XXXXXXXX.kycap -to ./restored
+kyidentity restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored
 ```
 
-For a capsule made before the KyIdentity rename, add `-service KySignOn` and use its
-`KySignOn` filename, for example `kyidentity restore -service KySignOn -capsule
-KySignOn-cap-KySignOn-XXXXXXXX.kycap -to ./restored`.
+The capsule service identity remains `KySignOn` for compatibility with existing pairings
+and local filenames. If `KYIDENTITY_APP_NAME` is set to another value, pass
+`-service KySignOn` explicitly for these capsules.
 
 With Docker Compose, from the repository directory, mount the capsule and an empty target
 directory into a one-off container. Create the target yourself at mode 700 and run the
@@ -106,7 +106,7 @@ Failures you may see, and what they mean:
 
 | Message | Meaning |
 |---|---|
-| `capsule is for service "KyIdentity", this instance is "X"` | You passed `-service` or set `KYIDENTITY_APP_NAME` to something else. Only override `-service` if the backup was made under a different app name |
+| `capsule is for service "KySignOn", this instance is "X"` | You passed `-service` or set `KYIDENTITY_APP_NAME` to something else. Only override `-service` if the backup was made under a different app name |
 | `shamir: fewer shares than the threshold requires` | Fewer than k valid lines were read. Check for a missed line or a truncated paste |
 | `restore target directory is not empty` | Use an empty directory. The restore never overwrites |
 | a decrypt or integrity error | Wrong shares (from a different ceremony), a share mistyped, or a damaged file. Re-download and retry with the custodians |

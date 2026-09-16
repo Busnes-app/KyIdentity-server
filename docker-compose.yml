@@ -25,9 +25,6 @@ services:
     environment:
       KYIDENTITY_PORT: 5867
       KYIDENTITY_ISSUER_URL: ${KYIDENTITY_ISSUER_URL:?set KYIDENTITY_ISSUER_URL}
-      # Existing Compose pairings are pinned to KySignOn; changing this breaks deposits
-      # and makes old local capsule filenames invisible after the product rename.
-      KYIDENTITY_APP_NAME: ${KYIDENTITY_APP_NAME:-KySignOn}
       # Keep the legacy names visible to the process so a pre-rename .env fails closed
       # instead of being silently replaced by the defaults below.
       KYSIGNON_IP: ${KYSIGNON_IP:-}

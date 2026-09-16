@@ -141,7 +141,7 @@ func TestCollectSealableCarriesEverythingARestoreNeeds(t *testing.T) {
 			}
 		}
 	}
-	if payload.ServiceName != "KyIdentity" {
+	if payload.ServiceName != "KySignOn" {
 		t.Errorf("service name %q", payload.ServiceName)
 	}
 }
@@ -200,7 +200,7 @@ func TestDepositSealsToThePinnedKeyAndRecordsTheReceipt(t *testing.T) {
 		t.Errorf("sent to %s with %s", fake.url, fake.token)
 	}
 	m, rcpt := res.Manifest, res.Receipt
-	if rcpt == nil || m.ServiceName != "KyIdentity" || m.RecoveryKeyID != priv.Public().ID() || rcpt.CapsuleID != m.CapsuleID || res.LocalPath != "" {
+	if rcpt == nil || m.ServiceName != "KySignOn" || m.RecoveryKeyID != priv.Public().ID() || rcpt.CapsuleID != m.CapsuleID || res.LocalPath != "" {
 		t.Fatalf("result %+v", res)
 	}
 	if _, files, err := capsule.Open(fake.container, priv, t.TempDir()); err != nil || len(files) < 5 {
@@ -254,19 +254,19 @@ func TestLocalCopiesWithoutKyRecovery(t *testing.T) {
 
 func TestLegacyLocalCopyIsMigratedWithoutTouchingForeignFiles(t *testing.T) {
 	dir := t.TempDir()
-	legacy := "KyIdentity-cap-KyIdentity-123456789.kycap"
-	foreign := "KyIdentity-operator-export.kycap"
+	legacy := "KySignOn-cap-KySignOn-123456789.kycap"
+	foreign := "KySignOn-operator-export.kycap"
 	if err := os.WriteFile(filepath.Join(dir, legacy), []byte("sealed"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, foreign), []byte("foreign"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	copies, err := backup.ListLocalCopies(dir, "KyIdentity")
+	copies, err := backup.ListLocalCopies(dir, "KySignOn")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(copies) != 1 || copies[0].Name != "KyIdentity.cap-KyIdentity-123456789.kycap" {
+	if len(copies) != 1 || copies[0].Name != "KySignOn.cap-KySignOn-123456789.kycap" {
 		t.Fatalf("migrated copies = %+v", copies)
 	}
 	if _, err := os.Stat(filepath.Join(dir, legacy)); !os.IsNotExist(err) {

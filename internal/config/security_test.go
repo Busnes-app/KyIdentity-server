@@ -49,6 +49,17 @@ func TestEmptyLegacyEnvironmentIsIgnored(t *testing.T) {
 	}
 }
 
+func TestDefaultAppNamePreservesRecoveryIdentity(t *testing.T) {
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AppName != "KySignOn" {
+		t.Fatalf("AppName = %q, want KySignOn for existing pairings", cfg.AppName)
+	}
+}
+
 func TestLegacyDatabasePathIsReused(t *testing.T) {
 	dir := t.TempDir()
 	legacy := filepath.Join(dir, "kysignon.db")

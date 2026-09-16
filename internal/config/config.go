@@ -23,9 +23,9 @@ const KeyLength = 32
 // whole database and uploads it, and KyRecovery admits 60 deposits per token per 15 minutes.
 const MinBackupDepositInterval = 15 * time.Minute
 
-// DefaultAppName is the service name this instance pairs and seals under. KyRecovery pins
-// the name sent at pairing and checks every capsule against it.
-const DefaultAppName = "KyIdentity"
+// DefaultAppName is the stable KyRecovery pairing and capsule identity, not the product
+// display name. Existing KySignOn pairings and capsule filenames must remain usable.
+const DefaultAppName = "KySignOn"
 
 // DefaultBackupKeep is how many sealed capsules a local backup directory retains.
 const DefaultBackupKeep = 7
