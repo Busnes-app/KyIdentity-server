@@ -69,15 +69,15 @@ Tags are movable, `:<commit sha>` included, so the chain also checks that the at
 your commit as its source: the guarantee is the commit you named, not whatever the tag points at. The
 chain stops at the first failure and renames a same-directory staging file over `.env` only
 if the filtered copy was written in full, so your secrets are never truncated. The pin persists
-in `.env` after the drill: see the README's upgrade note for moving off it.
+in `.env` after the drill: see the README's upgrade note for moving off it. Images built before 2026-09-16 can no longer be verified by name: the owner they were attested under is not held by this project, so do not point `--repo` or `--cert-identity` at it. Pin a commit built after that date, or build that commit from source with `docker-compose.build.yml`.
 
 ```bash
 sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
 d=$(docker buildx imagetools inspect ghcr.io/busnes-app/kyidentity-server:$sha --format '{{.Manifest.Digest}}') \
-  && gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/kyidentity-server \
-       --cert-identity https://github.com/Busnes-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
-  && [ "$(gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/kyidentity-server \
-       --cert-identity https://github.com/Busnes-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
+  && gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/KyIdentity-server \
+       --cert-identity https://github.com/Busnes-app/KyIdentity-server/.github/workflows/ci.yml@refs/heads/master \
+  && [ "$(gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/KyIdentity-server \
+       --cert-identity https://github.com/Busnes-app/KyIdentity-server/.github/workflows/ci.yml@refs/heads/master \
        --format json --jq '.[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit')" = "$sha" ] \
   && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYIDENTITY_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
       && echo "KYIDENTITY_IMAGE=ghcr.io/busnes-app/kyidentity-server@$d" >> "$t" && mv "$t" .env) \

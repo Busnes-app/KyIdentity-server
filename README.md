@@ -1132,3 +1132,7 @@ particular directory product until that run is recorded.
 ordinary local accounts as they are, or disable them first. Disabling is refused when it
 would leave no active administrator. Its groups become ordinary local groups, its
 tokens die with it, and the choice is audited.
+
+## Upgrading from ghcr.io/busness-app
+
+The GitHub organisation was renamed on 2026-09-16 and the image now lives at `ghcr.io/busnes-app/kyidentity-server`. The project no longer controls `ghcr.io/busness-app`; GHCR does not redirect it, and anything served under that name must be treated as untrusted. If `KYIDENTITY_IMAGE` in `.env` still names the old namespace, re-pinning is required, not optional: run the digest procedure in `docs/RESTORE.md`, which resolves the commit you choose to a digest, verifies its attestation and writes the pin, then `docker compose pull`.

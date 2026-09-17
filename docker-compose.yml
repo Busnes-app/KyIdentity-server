@@ -16,12 +16,13 @@ services:
     # in full, so a failed check, an unreadable .env or a short write never replaces your
     # secrets. Re-run with a newer sha to move; delete the KYIDENTITY_IMAGE line to follow :latest
     # again. A source install is unaffected: the build overlay's image wins over this pin.
+#   Images built before 2026-09-16 cannot be verified by name any more (their owner is no longer held by this project); pin a later commit or build from source with docker-compose.build.yml.
     #   sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
     #   d=$(docker buildx imagetools inspect ghcr.io/busnes-app/kyidentity-server:$sha --format '{{.Manifest.Digest}}') \
-    #     && gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/kyidentity-server \
-    #          --cert-identity https://github.com/Busnes-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
-    #     && [ "$(gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/kyidentity-server \
-    #          --cert-identity https://github.com/Busnes-app/kyidentity-server/.github/workflows/ci.yml@refs/heads/master \
+    #     && gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/KyIdentity-server \
+    #          --cert-identity https://github.com/Busnes-app/KyIdentity-server/.github/workflows/ci.yml@refs/heads/master \
+    #     && [ "$(gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/KyIdentity-server \
+    #          --cert-identity https://github.com/Busnes-app/KyIdentity-server/.github/workflows/ci.yml@refs/heads/master \
     #          --format json --jq '.[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit')" = "$sha" ] \
     #     && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KYIDENTITY_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
     #         && echo "KYIDENTITY_IMAGE=ghcr.io/busnes-app/kyidentity-server@$d" >> "$t" && mv "$t" .env) \
