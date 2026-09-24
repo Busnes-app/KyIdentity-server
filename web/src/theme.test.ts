@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { THEMES, THEME_NAMES, isLight, isThemeName, themeVars } from './theme';
 
 describe('theme', () => {
-  it('ships the fifteen suite palettes with Patina Ky among them', () => {
-    expect(THEME_NAMES).toHaveLength(15);
+  it('ships Busnes defaults alongside the existing suite palettes', () => {
+    expect(THEME_NAMES).toHaveLength(17);
     expect(isThemeName('Patina Ky')).toBe(true);
   });
 
