@@ -348,6 +348,7 @@ func (s *Server) routes() *http.ServeMux {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		if s.staticFS != nil {
 			if data, err := fs.ReadFile(s.staticFS, "favicon.ico"); err == nil {
+				w.Header().Set("Content-Type", "image/x-icon")
 				_, _ = w.Write(data)
 				return
 			}
@@ -357,6 +358,7 @@ func (s *Server) routes() *http.ServeMux {
 			}
 		}
 		if data, err := os.ReadFile("web/dist/favicon.ico"); err == nil {
+			w.Header().Set("Content-Type", "image/x-icon")
 			_, _ = w.Write(data)
 			return
 		}
