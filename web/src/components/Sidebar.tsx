@@ -35,9 +35,7 @@ const ADMIN: Item[] = [
 
 export const Brand: React.FC = () => (
   <div className="brand">
-    <span className="brand-tile">
-      <Shield size={24} />
-    </span>
+    <img src="/app-icon.png" width={40} height={40} alt="" />
     <div>
       <b>KyIdentity</b>
       <small>ID Authority</small>

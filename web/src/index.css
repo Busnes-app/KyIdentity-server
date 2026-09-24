@@ -1667,3 +1667,35 @@ button {
   padding: 0.2rem 0;
   border-top: 1px dashed var(--line);
 }
+
+/* Busnes.app fallback before the stored palette is applied. */
+:root {
+  --bg: #f8f6f0;
+  --panel: #ffffff;
+  --ink: #566461;
+  --ink-strong: #182326;
+  --accent: #bf3f18;
+  --accent-soft: #fbf0ec;
+  --line: rgba(24, 35, 38, 0.22);
+  --glow: transparent;
+  --sidebar-start: #f2efe7;
+  --sidebar-end: #f2efe7;
+  --button-text: #ffffff;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+:root {
+  --bg: #182326;
+  --panel: #1f2b2e;
+  --ink: #b3bcb8;
+  --ink-strong: #f2efe8;
+  --accent: #f5865f;
+  --accent-soft: #2b2622;
+  --line: rgba(242, 239, 232, 0.24);
+  --glow: transparent;
+  --sidebar-start: #1f2b2e;
+  --sidebar-end: #1f2b2e;
+  --button-text: #182326;
+  color-scheme: dark;
+}
+}
