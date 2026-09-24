@@ -1159,6 +1159,18 @@ button {
   margin: 0 1.25rem 1rem;
 }
 
+.password-change-form {
+  padding: 0 1.25rem 1.25rem;
+}
+
+.password-change-form .form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  margin-bottom: 1.15rem;
+}
+
+.password-change-form .form-group { min-width: 0; margin-bottom: 0; }
+
 .device-list {
   display: flex;
   flex-direction: column;

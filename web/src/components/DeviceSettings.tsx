@@ -553,7 +553,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
             <h2>Password</h2>
           </div>
         </div>
-        <form onSubmit={handleChangePassword} className="login-form">
+        <form onSubmit={handleChangePassword} className="password-change-form">
           {pwError && <div className="alert-box error" role="alert">{pwError}</div>}
           {pwDone && <div className="alert-box" role="status">Password changed. Every other session and app was signed out.</div>}
           <div className="form-row">
