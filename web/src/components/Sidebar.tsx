@@ -64,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
         <button
           key={tab}
           onClick={() => setActiveTab(tab)}
+          className="ky-nav-item"
           aria-current={activeTab === tab ? 'page' : undefined}
         >
           <Icon size={17} />
