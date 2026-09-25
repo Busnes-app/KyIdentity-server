@@ -51,6 +51,15 @@ export function themeVars(name: ThemeName): Record<string, string> {
 
 export function applyTheme(name: ThemeName): void {
   const root = document.documentElement;
+  const sharedName = name === 'Busnes Light' ? 'busnes-light' : name === 'Busnes Dark' ? 'busnes-dark' : undefined;
+  for (const key of Object.keys(themeVars('Busnes Light'))) root.style.removeProperty(key);
+  if (sharedName) {
+    root.dataset.theme = sharedName;
+    delete root.dataset.scheme;
+    root.style.colorScheme = sharedName === 'busnes-dark' ? 'dark' : 'light';
+    return;
+  }
+  delete root.dataset.theme;
   for (const [key, value] of Object.entries(themeVars(name))) {
     root.style.setProperty(key, value);
   }
