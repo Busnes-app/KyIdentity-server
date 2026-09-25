@@ -1,8 +1,10 @@
+import { readChoice, saveChoice, watchChoice } from './ky-ui/theme';
+import { busnesPalettes } from './ky-ui/palettes';
 // The suite palettes, byte for byte from kypost-server frontend/src/theme.ts (the eleven
 // tokens the web apps share; the mail-only ones are dropped, as KyNotes and KyDNS do).
 export const THEMES = {
-  "Busnes Light": {"bg": "#f8f6f0", "panel": "#ffffff", "ink": "#566461", "inkStrong": "#182326", "accent": "#bf3f18", "accentSoft": "#fbf0ec", "line": "rgba(24, 35, 38, 0.22)", "glow": "transparent", "sidebarStart": "#f2efe7", "sidebarEnd": "#f2efe7", "buttonText": "#ffffff"},
-  "Busnes Dark": {"bg": "#182326", "panel": "#1f2b2e", "ink": "#b3bcb8", "inkStrong": "#f2efe8", "accent": "#f5865f", "accentSoft": "#2b2622", "line": "rgba(242, 239, 232, 0.24)", "glow": "transparent", "sidebarStart": "#1f2b2e", "sidebarEnd": "#1f2b2e", "buttonText": "#182326"},
+  "Busnes Light": busnesPalettes["Busnes Light"],
+  "Busnes Dark": busnesPalettes["Busnes Dark"],
   'Dark Matter': { bg: '#1a1a1e', panel: '#252530', ink: '#d4c5e2', inkStrong: '#e8ddf5', accent: '#c29a72', accentSoft: '#5a3f31', line: '#404050', glow: 'rgba(107, 74, 66, 0.25)', sidebarStart: '#1f1f24', sidebarEnd: '#2a2530', buttonText: '#24170f' },
   'Light Matter': { bg: '#f5efe5', panel: '#fff8ee', ink: '#4c3d32', inkStrong: '#2d1f15', accent: '#c29a72', accentSoft: '#e6d2be', line: '#c5b29d', glow: 'rgba(175, 126, 92, 0.2)', sidebarStart: '#ede2d2', sidebarEnd: '#e4d6c3', buttonText: '#24170f' },
   'Tropics': { bg: '#f4f1eb', panel: '#fffaf0', ink: '#43362d', inkStrong: '#241a14', accent: '#9bc400', accentSoft: '#d4e3a0', line: '#c4b7a3', glow: 'rgba(123, 165, 31, 0.2)', sidebarStart: '#ece5d8', sidebarEnd: '#e3dacb', buttonText: '#243100' },
@@ -70,7 +72,7 @@ export function applyTheme(name: ThemeName): void {
 
 export function storedTheme(): ThemeName {
   try {
-    const value = localStorage.getItem(THEME_KEY);
+    const value = readChoice(THEME_KEY);
     return isThemeName(value) ? value : defaultTheme();
   } catch {
     return defaultTheme();
@@ -79,13 +81,10 @@ export function storedTheme(): ThemeName {
 
 export function saveTheme(name: ThemeName): void {
   try {
-    localStorage.setItem(THEME_KEY, name);
+    saveChoice(THEME_KEY, name);
   } catch {
     // Storage off: the theme still applies for this page.
   }
 }
 
-if (typeof window !== "undefined") window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", () => {
-  try { if (isThemeName(localStorage.getItem(THEME_KEY))) return; } catch { /* Storage is optional. */ }
-  applyTheme(storedTheme());
-});
+if (typeof window !== 'undefined') watchChoice(THEME_KEY, () => applyTheme(storedTheme()), () => isThemeName(readChoice(THEME_KEY)));
