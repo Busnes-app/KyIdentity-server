@@ -111,9 +111,11 @@ func (s *Server) routes() *http.ServeMux {
 	backupH := NewBackupHandler(s.cfg, s.store, s.audit, s.middleware)
 	webauthnH := NewWebAuthnHandler(s.store, s.audit, s.mfaEngine, s.middleware, s.cfg.RPID, s.cfg.Origin)
 
-	// Liveness: this process is running and can serve a request. Nothing more is claimed,
-	// which is the only honest thing a liveness probe can say.
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	// The public suite health check is cached by its handler for five seconds.
+	mux.Handle("GET /healthz", s.healthHandler())
+
+	// Liveness only proves that this process can serve a request.
+	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "alive"})
 	})

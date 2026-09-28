@@ -139,15 +139,24 @@ Sign in with `admin` and the retrieved password.
 
 You can verify the status of the server at any time:
 
-* **Liveness** (is the process running):
+* **Suite health** (public `ky.health/1`): `/healthz` checks the database, signing key,
+  encryption key, and audit persistence. Results are cached for five seconds. It returns
+  `200` for `ok` or `degraded` and `503` for `down`. The JSON contains fixed check names,
+  states, and a fixed audit degradation reason; it does not expose internal errors, paths,
+  hostnames, versions, or uptime. This endpoint previously returned only `{"status":"alive"}`.
   ```bash
   curl http://localhost:5867/healthz
+  # Response includes "schema":"ky.health/1", "service":"kyidentity", "status":"ok", and checks.
+  ```
+* **Liveness** (is the process running, independent of dependencies):
+  ```bash
+  curl http://localhost:5867/livez
   # Response: {"status":"alive"}
   ```
 * **Readiness** (can this instance actually authenticate someone). Point your load balancer
   at this one. It runs a bounded database read and confirms the signing and encryption keys
-  are loaded, and returns `503` when they are not. `/healthz` deliberately proves none of
-  that; a process that can encode JSON while its database is gone is still down.
+  are loaded, and returns `503` when they are not. Unlike `/healthz`, it evaluates each
+  request immediately and keeps its existing response shape.
   ```bash
   curl http://localhost:5867/readyz
   # Response: {"status":"ready","checks":{"audit":"ok","database":"ok",...}}

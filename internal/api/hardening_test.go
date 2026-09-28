@@ -107,7 +107,7 @@ func TestNonDestructiveAdminRoutesStayReachable(t *testing.T) {
 	}
 }
 
-// Readiness must answer "can this instance authenticate someone", which /healthz never could.
+// Readiness must answer "can this instance authenticate someone" without a cached result.
 func TestReadinessReflectsDatabaseHealth(t *testing.T) {
 	srv, db, _, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
@@ -142,9 +142,9 @@ func TestReadinessReflectsDatabaseHealth(t *testing.T) {
 	// Liveness is deliberately unaffected; the process is still running and restarting it
 	// would not bring the volume back.
 	rr = httptest.NewRecorder()
-	srv.httpServer.Handler.ServeHTTP(rr, httptest.NewRequest("GET", "/healthz", nil))
-	if rr.Code != http.StatusOK {
-		t.Errorf("liveness failed for a running process: %d", rr.Code)
+	srv.httpServer.Handler.ServeHTTP(rr, httptest.NewRequest("GET", "/livez", nil))
+	if rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != `{"status":"alive"}` {
+		t.Errorf("liveness changed with database closed: %d %s", rr.Code, rr.Body.String())
 	}
 }
 
