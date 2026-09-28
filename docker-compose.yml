@@ -106,8 +106,7 @@ services:
       - kysignon_data:/data
 
     healthcheck:
-      # /readyz, not /healthz: this must go unhealthy when the database or key material is
-      # gone, rather than when the process has stopped answering at all.
+      # /readyz evaluates dependencies on every probe; /healthz caches for five seconds.
       test: ["CMD-SHELL", "wget -q --spider http://localhost:5867/readyz || exit 1"]
       interval: 30s
       timeout: 5s
