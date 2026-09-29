@@ -568,3 +568,30 @@ func TestSignOnFlagsRoundTrip(t *testing.T) {
 		t.Fatalf("ListUserNativeDevices CanSignOn: %+v %v", list, err)
 	}
 }
+
+func TestConsumeDeviceSignOnJTIIsSingleUse(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	exp := time.Now().UTC().Add(5 * time.Minute)
+	ok, err := s.ConsumeDeviceSignOnJTI("j-1", exp)
+	if err != nil || !ok {
+		t.Fatalf("first use: %v %v", ok, err)
+	}
+	ok, err = s.ConsumeDeviceSignOnJTI("j-1", exp)
+	if err != nil || ok {
+		t.Fatalf("replay: %v %v", ok, err)
+	}
+	// Expired rows are swept so the table cannot grow without bound.
+	if _, err := s.db.Exec(`UPDATE device_signon_jtis SET expires_at = ? WHERE jti = 'j-1'`, time.Now().UTC().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = s.ConsumeDeviceSignOnJTI("j-2", exp)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	var n int
+	_ = s.db.QueryRow(`SELECT count(*) FROM device_signon_jtis WHERE jti = 'j-1'`).Scan(&n)
+	if n != 0 {
+		t.Fatal("expired jti not swept")
+	}
+}

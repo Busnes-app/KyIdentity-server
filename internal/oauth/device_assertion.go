@@ -7,8 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
+	"time"
+
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
+	"github.com/google/uuid"
 )
 
 // deviceAssertion is the RFC 7523 assertion a paired KyAuth device signs with its
@@ -94,4 +100,127 @@ func verifyES256(pub *ecdsa.PublicKey, signingInput, sig []byte) bool {
 	}
 	digest := sha256.Sum256(signingInput)
 	return ecdsa.Verify(pub, digest[:], r, s)
+}
+
+const (
+	deviceAssertionMaxWindow = 300 * time.Second
+	deviceAssertionSkew      = 60 * time.Second
+)
+
+var ErrDeviceSignOnDisabled = errors.New("device sign-on is disabled")
+
+// ExchangeDeviceAssertion is the RFC 7523 jwt-bearer grant for a paired KyAuth device.
+// The assertion is the client authentication: the device's enrolled key is the only
+// thing that can produce it, so no client_secret is required for this grant.
+func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string) (*TokenResponse, string, error) {
+	a, input, sig, err := parseDeviceAssertion(compact)
+	if err != nil {
+		return nil, "", err
+	}
+	now := time.Now().UTC()
+	iat, assertionExp := time.Unix(a.IssuedAt, 0), time.Unix(a.ExpiresAt, 0)
+	switch {
+	case a.ClientID != clientID:
+		return nil, a.DeviceID, errors.New("client_id does not match the assertion")
+	case a.Audience != e.issuerURL+"/oauth/token":
+		return nil, a.DeviceID, errors.New("assertion audience is not this token endpoint")
+	case iat.After(now.Add(deviceAssertionSkew)):
+		return nil, a.DeviceID, errors.New("assertion issued in the future")
+	case assertionExp.Before(now.Add(-deviceAssertionSkew)):
+		return nil, a.DeviceID, errors.New("assertion expired")
+	case assertionExp.Sub(iat) > deviceAssertionMaxWindow:
+		return nil, a.DeviceID, errors.New("assertion validity window too long")
+	}
+	dev, err := e.store.GetNativeDevice(a.DeviceID)
+	if err != nil {
+		return nil, a.DeviceID, err
+	}
+	if dev == nil || dev.UserID != a.Subject || dev.PublicKey == "" {
+		return nil, a.DeviceID, errors.New("unknown device for subject")
+	}
+	if !dev.CanSignOn {
+		return nil, a.DeviceID, ErrDeviceSignOnDisabled
+	}
+	pub, err := crypto.ParseP256PublicKey(dev.PublicKey)
+	if err != nil || !verifyES256(pub, input, sig) {
+		return nil, a.DeviceID, errors.New("assertion signature invalid")
+	}
+	client, err := e.store.GetOAuthClientByID(clientID)
+	if err != nil || client == nil || !client.Enabled {
+		return nil, a.DeviceID, errors.New("unknown client")
+	}
+	fresh, err := e.store.ConsumeDeviceSignOnJTI(a.JTI, assertionExp.Add(deviceAssertionSkew))
+	if err != nil {
+		return nil, a.DeviceID, err
+	}
+	if !fresh {
+		return nil, a.DeviceID, errors.New("assertion replayed")
+	}
+	user, err := e.store.GetUserByID(a.Subject)
+	if err != nil {
+		return nil, a.DeviceID, err
+	}
+	if user == nil || user.Status != "active" {
+		return nil, a.DeviceID, errors.New("user not found or inactive")
+	}
+
+	// A device login session: no browser holds its token (the hash preimage is
+	// discarded), it exists so sid, EnsureClientSession and back-channel logout
+	// treat this sign-in like any other. FactorMethod is "push" because the
+	// proof is a signature from the enrolled push-approver key.
+	sess := &store.Session{
+		ID: uuid.NewString(), UserID: user.ID, SessionTokenHash: crypto.HashSHA256(uuid.NewString()),
+		IPAddress: ip, UserAgent: userAgent, ExpiresAt: now.Add(AccessTokenTTL), CreatedAt: now, LastActiveAt: now,
+		AuthenticationEvidence: store.AuthenticationEvidence{PrimaryAuthenticatedAt: &now, FactorAuthenticatedAt: &now, FactorMethod: "push"},
+	}
+	if err := e.store.CreateSession(sess); err != nil {
+		return nil, a.DeviceID, err
+	}
+	scope, err := e.GrantedScope(clientID, "openid profile email")
+	if err != nil {
+		return nil, a.DeviceID, err
+	}
+	exp := now.Add(AccessTokenTTL)
+	if end, err := e.store.AccessEndsAt(user.ID, clientID); err != nil {
+		return nil, a.DeviceID, err
+	} else if end != nil && end.Before(exp) {
+		exp = *end
+	}
+	accessJTI := uuid.NewString()
+	if err := e.store.RecordIssuedToken(&store.IssuedToken{JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: sess.ID}); err != nil {
+		return nil, a.DeviceID, fmt.Errorf("failed to record issued token: %w", err)
+	}
+	accessToken, err := e.keyManager.SignJWT(map[string]any{
+		"iss": e.issuerURL, "sub": user.ID, "aud": clientID, "exp": exp.Unix(), "iat": now.Unix(),
+		"jti": accessJTI, "scope": scope, "token_use": "access_token",
+	})
+	if err != nil {
+		return nil, a.DeviceID, fmt.Errorf("failed to sign access token: %w", err)
+	}
+	sid, err := e.store.EnsureClientSession(clientID, sess.ID, user.ID)
+	if err != nil {
+		return nil, a.DeviceID, fmt.Errorf("failed to bind session to client: %w", err)
+	}
+	claims, err := e.identityClaims(user, clientID, scope)
+	if err != nil {
+		return nil, a.DeviceID, err
+	}
+	claims["sid"] = sid
+	claims["iss"] = e.issuerURL
+	claims["aud"] = clientID
+	claims["exp"] = exp.Unix()
+	claims["iat"] = now.Unix()
+	claims["jti"] = uuid.NewString()
+	claims["token_use"] = "id_token"
+	claims["auth_time"] = now.Unix()
+	claims["amr"] = []string{"hwk", "user", "urn:kysignon:amr:push", "mfa"}
+	claims["acr"] = "urn:kysignon:acr:mfa"
+	claims["signon_method"] = "device"
+	claims["device_id"] = dev.ID
+	idToken, err := e.keyManager.SignJWT(claims)
+	if err != nil {
+		return nil, a.DeviceID, fmt.Errorf("failed to sign ID token: %w", err)
+	}
+	_ = e.store.TouchNativeDeviceLastSeen(dev.ID, now)
+	return &TokenResponse{AccessToken: accessToken, TokenType: "Bearer", ExpiresIn: int(exp.Sub(now).Seconds()), IDToken: idToken, Scope: scope}, dev.ID, nil
 }

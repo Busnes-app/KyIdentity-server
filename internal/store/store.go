@@ -2531,3 +2531,25 @@ func (s *Store) PingContext(ctx context.Context) error {
 	var n int
 	return s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 1`).Scan(&n)
 }
+
+// ConsumeDeviceSignOnJTI records a device assertion id once. A second call for the
+// same jti returns false. Rows past their expiry are swept on every call; the
+// assertion they guard is refused by exp anyway.
+func (s *Store) ConsumeDeviceSignOnJTI(jti string, expiresAt time.Time) (bool, error) {
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`DELETE FROM device_signon_jtis WHERE expires_at < ?`, now); err != nil {
+		return false, err
+	}
+	res, err := s.db.Exec(`INSERT OR IGNORE INTO device_signon_jtis (jti, expires_at) VALUES (?, ?)`, jti, expiresAt.UTC())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// TouchNativeDeviceLastSeen records that a device just authenticated.
+func (s *Store) TouchNativeDeviceLastSeen(deviceID string, at time.Time) error {
+	_, err := s.db.Exec(`UPDATE native_devices SET last_seen_at = ? WHERE id = ?`, at.UTC(), deviceID)
+	return err
+}
