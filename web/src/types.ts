@@ -57,6 +57,7 @@ export interface NativeDevice {
   platform?: string;
   pushToken?: string;
   isMfaApprover: boolean;
+  canSignOn: boolean;
   lastSeenAt?: string;
   createdAt: string;
 }

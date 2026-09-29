@@ -157,6 +157,7 @@ export function parseDevice(value: unknown): NativeDevice {
     platform: optStr(o, 'platform'),
     pushToken: optStr(o, 'pushToken'),
     isMfaApprover: bool(o, 'isMfaApprover'),
+    canSignOn: bool(o, 'canSignOn'),
     lastSeenAt: optStr(o, 'lastSeenAt'),
     createdAt: optStr(o, 'createdAt') ?? '',
   };
