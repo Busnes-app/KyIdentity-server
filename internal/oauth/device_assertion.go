@@ -35,7 +35,7 @@ func parseDeviceAssertion(compact string) (*deviceAssertion, []byte, []byte, err
 	if len(parts) != 3 {
 		return nil, nil, nil, errors.New("assertion is not a compact JWS")
 	}
-	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	headerJSON, err := base64.RawURLEncoding.Strict().DecodeString(parts[0])
 	if err != nil {
 		return nil, nil, nil, errors.New("bad header encoding")
 	}
@@ -50,7 +50,7 @@ func parseDeviceAssertion(compact string) (*deviceAssertion, []byte, []byte, err
 	if alg != "ES256" || typ != "JWT" || kid == "" || len(header) != 3 {
 		return nil, nil, nil, errors.New("header must be exactly alg=ES256, typ=JWT, kid")
 	}
-	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	claimsJSON, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
 	if err != nil {
 		return nil, nil, nil, errors.New("bad claims encoding")
 	}
@@ -72,7 +72,7 @@ func parseDeviceAssertion(compact string) (*deviceAssertion, []byte, []byte, err
 	if c.Sub == "" || c.Aud == "" || c.ClientID == "" || c.JTI == "" || c.Iat == 0 || c.Exp == 0 {
 		return nil, nil, nil, errors.New("missing claim")
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	sig, err := base64.RawURLEncoding.Strict().DecodeString(parts[2])
 	if err != nil {
 		return nil, nil, nil, errors.New("bad signature encoding")
 	}
@@ -83,7 +83,7 @@ func parseDeviceAssertion(compact string) (*deviceAssertion, []byte, []byte, err
 // verifyES256 checks a JWS raw r||s signature over signingInput. DER input is
 // refused by length; r and s outside [1, n) are refused before the curve math.
 func verifyES256(pub *ecdsa.PublicKey, signingInput, sig []byte) bool {
-	if pub == nil || len(sig) != 64 {
+	if pub == nil || pub.Curve != elliptic.P256() || len(sig) != 64 {
 		return false
 	}
 	r := new(big.Int).SetBytes(sig[:32])
