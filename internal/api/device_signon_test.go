@@ -146,7 +146,141 @@ func TestTokenEndpointDeviceSignOnGrant(t *testing.T) {
 	}
 	claims["jti"] = uuid.NewString()
 	rec = post(signAssertion(t, priv, dev.ID, claims))
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "device_signon_disabled") {
+	const wantDisabled = `{"error":"invalid_grant","error_description":"device_signon_disabled"}`
+	if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != wantDisabled {
 		t.Fatalf("disabled: status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+type signOnEnv struct {
+	server *Server
+	db     *store.Store
+	user   *store.User
+	priv   *ecdsa.PrivateKey
+	dev    *store.NativeDevice
+}
+
+func newSignOnEnv(t *testing.T) *signOnEnv {
+	t.Helper()
+	server, db, _, mfaEngine, _, cleanup := setupTestServer(t)
+	t.Cleanup(cleanup)
+	user := newUser(t, db, "user")
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	spki, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: base64.StdEncoding.EncodeToString(spki), PushToken: "fcm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &signOnEnv{server: server, db: db, user: user, priv: priv, dev: dev}
+}
+
+func (e *signOnEnv) client(t *testing.T, clientType, secretHash string) *store.OAuthClient {
+	t.Helper()
+	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "App", ClientType: clientType, ClientSecretHash: secretHash, RedirectURIsJSON: `["https://app.example/cb"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
+	if err := e.db.CreateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	allowTestAppAccess(t, e.db, c.ID)
+	return c
+}
+
+func (e *signOnEnv) assertion(t *testing.T, clientID string) string {
+	t.Helper()
+	now := time.Now().Unix()
+	return signAssertion(t, e.priv, e.dev.ID, map[string]any{"iss": "device:" + e.dev.ID, "sub": e.user.ID, "aud": e.server.cfg.IssuerURL + "/oauth/token", "client_id": clientID, "iat": now, "exp": now + 120, "jti": uuid.NewString()})
+}
+
+func (e *signOnEnv) post(assertion, clientID string, basicUser string) *httptest.ResponseRecorder {
+	form := url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"}, "assertion": {assertion}, "client_id": {clientID}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if basicUser != "" {
+		req.SetBasicAuth(basicUser, "wrong-secret")
+	}
+	e.server.httpServer.Handler.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestDeviceSignOnConfidentialClientNeedsNoSecret(t *testing.T) {
+	e := newSignOnEnv(t)
+	conf := e.client(t, "confidential", "private-client-hash")
+	other := e.client(t, "public", "")
+
+	rec := e.post(e.assertion(t, conf.ID), conf.ID, "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "id_token") {
+		t.Fatalf("confidential without secret: status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// Basic auth naming a different client overrides client_id; the claim binding must refuse it.
+	rec = e.post(e.assertion(t, conf.ID), conf.ID, other.ID)
+	const want = `{"error":"invalid_grant","error_description":"The device assertion is invalid"}`
+	if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != want {
+		t.Fatalf("client mismatch: status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDeviceSignOnRateLimit(t *testing.T) {
+	e := newSignOnEnv(t)
+	c := e.client(t, "public", "")
+	for i := 0; i < 10; i++ {
+		if rec := e.post("garbage", c.ID, ""); rec.Code != http.StatusBadRequest {
+			t.Fatalf("request %d: status %d", i+1, rec.Code)
+		}
+	}
+	rec := e.post("garbage", c.ID, "")
+	if rec.Code != http.StatusTooManyRequests || strings.TrimSpace(rec.Body.String()) != `{"error":"slow_down"}` {
+		t.Fatalf("11th: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("429 must be no-store")
+	}
+}
+
+func TestDeviceSignOnAudit(t *testing.T) {
+	e := newSignOnEnv(t)
+	c := e.client(t, "public", "")
+	good := e.assertion(t, c.ID)
+	if rec := e.post(good, c.ID, ""); rec.Code != http.StatusOK {
+		t.Fatalf("success: status %d body %s", rec.Code, rec.Body.String())
+	}
+	const bad = "garbage-assertion-marker"
+	if rec := e.post(bad, c.ID, ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("failure: status %d", rec.Code)
+	}
+	events, _, err := e.db.ListAuditEvents(100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var okRow, failRow *store.AuditEvent
+	for i := range events {
+		ev := &events[i]
+		if ev.Action != "device.signon" {
+			continue
+		}
+		if strings.Contains(ev.DetailsJSON, good) || strings.Contains(ev.DetailsJSON, bad) {
+			t.Fatalf("audit details leak the assertion: %s", ev.DetailsJSON)
+		}
+		if ev.TargetType != "device" {
+			t.Fatalf("target type %q", ev.TargetType)
+		}
+		if ev.Outcome == "success" {
+			okRow = ev
+		} else {
+			failRow = ev
+		}
+	}
+	if okRow == nil || failRow == nil {
+		t.Fatalf("missing rows: %+v", events)
+	}
+	if okRow.TargetID != e.dev.ID || !strings.Contains(okRow.DetailsJSON, c.ID) {
+		t.Fatalf("success row: %+v", okRow)
+	}
+	if failRow.TargetID != "" || !strings.Contains(failRow.DetailsJSON, c.ID) || !strings.Contains(failRow.DetailsJSON, `"error"`) {
+		t.Fatalf("failure row: %+v", failRow)
 	}
 }

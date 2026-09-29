@@ -291,6 +291,7 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		clientSecret = p
 	}
 
+	// No client_secret here: the signed device assertion is the client authentication.
 	if grantType == "urn:ietf:params:oauth:grant-type:jwt-bearer" {
 		h.deviceSignOn(w, r, r.FormValue("assertion"), clientID)
 		return
