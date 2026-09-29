@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -117,7 +118,7 @@ func TestDevicePairingAndRegistration(t *testing.T) {
 	defer cleanup()
 
 	// 1. Generate 90s device pairing PIN/token
-	token, pin, expiresAt, err := engine.GenerateDevicePairingToken(user.ID)
+	token, pin, expiresAt, err := engine.GenerateDevicePairingToken(user.ID, true)
 	if err != nil {
 		t.Fatalf("GenerateDevicePairingToken failed: %v", err)
 	}
@@ -420,5 +421,56 @@ func TestPushChallengeDigitsAreDistinctAndInRange(t *testing.T) {
 			}
 			seen[d] = true
 		}
+	}
+}
+
+func TestPairingTokenSignOnFlagReachesDevice(t *testing.T) {
+	engine, _, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+
+	for _, signOn := range []bool{false, true} {
+		token, _, _, err := engine.GenerateDevicePairingToken(user.ID, signOn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, devicePub := signingKey(t)
+		dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{
+			PairingToken:     token,
+			DeviceName:       "phone",
+			DeviceIdentifier: fmt.Sprintf("ident-%v", signOn),
+			PublicKey:        devicePub,
+			PushToken:        "fcm-token",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dev.CanSignOn != signOn {
+			t.Fatalf("signOn=%v: device CanSignOn=%v", signOn, dev.CanSignOn)
+		}
+	}
+}
+
+func TestPINPairingSignOnFlagReachesDevice(t *testing.T) {
+	engine, _, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+
+	_, pin, _, err := engine.GenerateDevicePairingToken(user.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, devicePub := signingKey(t)
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{
+		PINCode:          pin,
+		UserID:           user.ID,
+		DeviceName:       "phone",
+		DeviceIdentifier: "ident-pin",
+		PublicKey:        devicePub,
+		PushToken:        "fcm-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dev.CanSignOn {
+		t.Fatal("PIN path granted sign-on from a signOn=false token")
 	}
 }

@@ -75,7 +75,7 @@ func TestDeviceWithoutPublicKeyIsRejected(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestDeviceWithMalformedPublicKeyIsRejected(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestDeviceWithoutPushTokenIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestDeviceWithValidKeyPairsAndCanApprove(t *testing.T) {
 	u := mfaUser(t, db)
 
 	key, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,11 +248,11 @@ func TestPairingPINIsHashedAndScopedToItsUser(t *testing.T) {
 	alice := mfaUser(t, db)
 	bob := mfaUser(t, db)
 
-	_, alicePIN, _, err := e.GenerateDevicePairingToken(alice.ID)
+	_, alicePIN, _, err := e.GenerateDevicePairingToken(alice.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, bobPIN, _, err := e.GenerateDevicePairingToken(bob.ID); err != nil {
+	if _, bobPIN, _, err := e.GenerateDevicePairingToken(bob.ID, true); err != nil {
 		t.Fatal(err)
 	} else if bobPIN == alicePIN {
 		t.Skip("PIN collision between the two users, rerun")
@@ -332,7 +332,7 @@ func TestExpiredPairingTokenIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestMFAResetExpiresPendingDevicePairingTokens(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func TestPairingTokenCannotBeConsumedAfterExpiry(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestPushChallengeDispatchesToRegisteredRelayToken(t *testing.T) {
 	u := mfaUser(t, e.store)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestStaleRelayTokenIsClearedWithoutDeletingDevice(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestUnsupportedDevicePlatformIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -48,7 +49,17 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 		return
 	}
 
-	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID)
+	// Optional body; absent or empty means the device may sign on.
+	var body struct {
+		SignOn *bool `json:"signOn"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+		return
+	}
+	signOn := body.SignOn == nil || *body.SignOn
+
+	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID, signOn)
 	if err != nil {
 		log.Printf("device pairing token creation failed for user %s: %v", user.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -68,10 +79,11 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 	}
 	qrBytes, _ := json.Marshal(qrPayload)
 
-	h.audit.Record("device.pairing_token_generated", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	h.audit.Record("device.pairing_token_generated", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"signOn": signOn})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
+		"signOn":       signOn,
 		"pairingToken": token,
 		"pinCode":      pin,
 		"expiresAt":    expiresAt,
