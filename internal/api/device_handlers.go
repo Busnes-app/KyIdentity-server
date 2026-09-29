@@ -44,11 +44,6 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err := consumeStepUp(h.store, r); err != nil {
-		writeStepUpError(w, err)
-		return
-	}
-
 	// Optional body; absent or empty means the device may sign on.
 	var body struct {
 		SignOn *bool `json:"signOn"`
@@ -58,6 +53,11 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 		return
 	}
 	signOn := body.SignOn == nil || *body.SignOn
+
+	if err := consumeStepUp(h.store, r); err != nil {
+		writeStepUpError(w, err)
+		return
+	}
 
 	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID, signOn)
 	if err != nil {
