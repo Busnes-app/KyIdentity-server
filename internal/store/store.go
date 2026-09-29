@@ -1632,7 +1632,7 @@ func (s *Store) DeleteUserMFAMethods(userID string) error {
 	if _, err := tx.Exec(`DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0 WHERE user_id = ?`, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0, can_sign_on = 0 WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE device_pairing_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL`, time.Now().UTC(), userID); err != nil {
@@ -2474,7 +2474,7 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 	if _, err := tx.Exec(`DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0 WHERE user_id = ?`, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0, can_sign_on = 0 WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	if err := revokeUserAccessTx(tx, userID, now); err != nil {

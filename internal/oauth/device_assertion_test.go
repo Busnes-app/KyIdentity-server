@@ -271,41 +271,68 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	}
 }
 
+func (f *signOnFixture) secondClient(t *testing.T) *store.OAuthClient {
+	t.Helper()
+	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "Other", ClientType: "public",
+		RedirectURIsJSON: `["https://other.local/callback"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
+	if err := f.db.CreateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	allowTestAppAccess(t, f.db, c.ID)
+	return c
+}
+
+func (f *signOnFixture) secondUser(t *testing.T) *store.User {
+	t.Helper()
+	u := &store.User{ID: uuid.NewString(), Username: "bob", DisplayName: "Bob", Email: "bob@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := f.db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
 func TestExchangeDeviceAssertionRefusals(t *testing.T) {
 	f := newSignOnFixture(t)
 	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	clientB := f.secondClient(t)
+	userB := f.secondUser(t)
+	disabled := f.secondClient(t)
+	disabled.Enabled = false
+	if err := f.db.UpdateOAuthClient(disabled); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.UpsertNativeDevice(&store.NativeDevice{ID: "dev-nokey", UserID: f.user.ID, DeviceName: "k", DeviceIdentifier: "ident-nokey", IsMFAApprover: true, CanSignOn: true}); err != nil {
+		t.Fatal(err)
+	}
 	sign := func(k *ecdsa.PrivateKey, kid string, m func(map[string]any)) string {
 		return signDeviceAssertionForTest(t, k, testHeader(kid), f.claims(m))
 	}
-	cases := map[string]func() (string, string){
-		"sibling key":    func() (string, string) { return sign(other, "dev-1", nil), f.client.ID },
-		"form client_id": func() (string, string) { return sign(f.priv, "dev-1", nil), "someone-else" },
-		"claim client_id": func() (string, string) {
-			return sign(f.priv, "dev-1", func(c map[string]any) { c["client_id"] = "someone-else" }), "someone-else"
-		},
-		"wrong aud": func() (string, string) {
-			return sign(f.priv, "dev-1", func(c map[string]any) { c["aud"] = "https://evil/oauth/token" }), f.client.ID
-		},
-		"wrong sub": func() (string, string) {
-			return sign(f.priv, "dev-1", func(c map[string]any) { c["sub"] = "someone" }), f.client.ID
-		},
-		"expired": func() (string, string) {
-			return sign(f.priv, "dev-1", func(c map[string]any) { c["iat"] = time.Now().Unix() - 400; c["exp"] = time.Now().Unix() - 100 }), f.client.ID
-		},
-		"window too long": func() (string, string) {
-			return sign(f.priv, "dev-1", func(c map[string]any) { c["exp"] = time.Now().Unix() + 3600 }), f.client.ID
-		},
-		"future iat": func() (string, string) {
-			return sign(f.priv, "dev-1", func(c map[string]any) { c["iat"] = time.Now().Unix() + 300; c["exp"] = time.Now().Unix() + 400 }), f.client.ID
-		},
-		"unknown device": func() (string, string) {
-			return sign(f.priv, "dev-9", func(c map[string]any) { c["iss"] = "device:dev-9" }), f.client.ID
-		},
+	type tc struct {
+		compact, clientID string
+		want              error
 	}
-	for name, mk := range cases {
-		compact, clientID := mk()
-		if _, _, err := f.engine.ExchangeDeviceAssertion(compact, clientID, "127.0.0.1", "test"); err == nil {
-			t.Errorf("%s: accepted", name)
+	cases := map[string]tc{
+		"sibling key":         {sign(other, "dev-1", nil), f.client.ID, errAssertionSignature},
+		"form client_id":      {sign(f.priv, "dev-1", nil), clientB.ID, errAssertionClient},
+		"claim client_id":     {sign(f.priv, "dev-1", func(c map[string]any) { c["client_id"] = clientB.ID }), f.client.ID, errAssertionClient},
+		"unregistered client": {sign(f.priv, "dev-1", func(c map[string]any) { c["client_id"] = "someone-else" }), "someone-else", errUnknownClient},
+		"disabled client":     {sign(f.priv, "dev-1", func(c map[string]any) { c["client_id"] = disabled.ID }), disabled.ID, errUnknownClient},
+		"wrong aud":           {sign(f.priv, "dev-1", func(c map[string]any) { c["aud"] = "https://evil/oauth/token" }), f.client.ID, errAssertionAudience},
+		"wrong sub":           {sign(f.priv, "dev-1", func(c map[string]any) { c["sub"] = userB.ID }), f.client.ID, errUnknownDevice},
+		"expired":             {sign(f.priv, "dev-1", func(c map[string]any) { c["iat"] = time.Now().Unix() - 400; c["exp"] = time.Now().Unix() - 100 }), f.client.ID, errAssertionExpired},
+		"window too long":     {sign(f.priv, "dev-1", func(c map[string]any) { c["exp"] = time.Now().Unix() + 3600 }), f.client.ID, errAssertionWindow},
+		"exp before iat":      {sign(f.priv, "dev-1", func(c map[string]any) { c["exp"] = time.Now().Unix() - 10 }), f.client.ID, errAssertionWindow},
+		"future iat":          {sign(f.priv, "dev-1", func(c map[string]any) { c["iat"] = time.Now().Unix() + 300; c["exp"] = time.Now().Unix() + 400 }), f.client.ID, errAssertionFuture},
+		"unknown device":      {sign(f.priv, "dev-9", func(c map[string]any) { c["iss"] = "device:dev-9" }), f.client.ID, errUnknownDevice},
+		"empty public key":    {sign(f.priv, "dev-nokey", func(c map[string]any) { c["iss"] = "device:dev-nokey" }), f.client.ID, errUnknownDevice},
+	}
+	for name, c := range cases {
+		_, devID, err := f.engine.ExchangeDeviceAssertion(c.compact, c.clientID, "127.0.0.1", "test")
+		if !errors.Is(err, c.want) {
+			t.Errorf("%s: got %v, want %v", name, err, c.want)
+		}
+		if devID != "" && c.want != errUnknownClient {
+			t.Errorf("%s: unverified device id %q returned", name, devID)
 		}
 	}
 }
@@ -316,8 +343,8 @@ func TestExchangeDeviceAssertionReplay(t *testing.T) {
 	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); err == nil {
-		t.Fatal("replayed jti accepted")
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, errAssertionReplay) {
+		t.Fatalf("replayed jti: %v", err)
 	}
 }
 
@@ -338,7 +365,60 @@ func TestExchangeDeviceAssertionInactiveUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
-	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); err == nil {
-		t.Fatal("inactive user issued a token")
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, errUserInactive) {
+		t.Fatalf("inactive user: %v", err)
+	}
+}
+
+func TestExchangeDeviceAssertionDoesNotProbeFlags(t *testing.T) {
+	f := newSignOnFixture(t)
+	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, other, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, errAssertionSignature) {
+		t.Fatalf("want signature error, got %v", err)
+	}
+}
+
+func TestExchangeDeviceAssertionRequiresApprover(t *testing.T) {
+	f := newSignOnFixture(t)
+	spki, _ := x509.MarshalPKIXPublicKey(&f.priv.PublicKey)
+	dev := &store.NativeDevice{ID: "dev-2", UserID: f.user.ID, DeviceName: "p2", DeviceIdentifier: "ident-2",
+		PublicKey: base64.StdEncoding.EncodeToString(spki), IsMFAApprover: false, CanSignOn: true}
+	if err := f.db.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-2"), f.claims(func(c map[string]any) { c["iss"] = "device:dev-2" }))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, ErrDeviceSignOnDisabled) {
+		t.Fatalf("non-approver: %v", err)
+	}
+}
+
+func TestExchangeDeviceAssertionRefusedAfterMFAReset(t *testing.T) {
+	f := newSignOnFixture(t)
+	if err := f.db.ResetUserMFA(f.user.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, ErrDeviceSignOnDisabled) {
+		t.Fatalf("after reset: %v", err)
+	}
+}
+
+func TestExchangeDeviceAssertionHonoursAppPolicy(t *testing.T) {
+	f := newSignOnFixture(t)
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	// Reload: allowTestAppAccess bumped the revision.
+	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "reuse", Factor: "passkey"}, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, errAppPolicy) {
+		t.Fatalf("passkey policy: %v", err)
 	}
 }
