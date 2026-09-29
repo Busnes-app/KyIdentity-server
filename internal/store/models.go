@@ -101,6 +101,7 @@ type NativeDevice struct {
 	PushToken            string     `json:"pushToken,omitempty"`
 	PushTokenUpdatedAtMS int64      `json:"-"`
 	IsMFAApprover        bool       `json:"isMfaApprover"`
+	CanSignOn            bool       `json:"canSignOn"`
 	LastSeenAt           *time.Time `json:"lastSeenAt,omitempty"`
 	CreatedAt            time.Time  `json:"createdAt"`
 }
@@ -110,6 +111,7 @@ type DevicePairingToken struct {
 	UserID    string     `json:"userId"`
 	TokenHash string     `json:"-"`
 	PINHash   string     `json:"-"`
+	SignOn    bool       `json:"signOn"`
 	ExpiresAt time.Time  `json:"expiresAt"`
 	UsedAt    *time.Time `json:"usedAt,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`

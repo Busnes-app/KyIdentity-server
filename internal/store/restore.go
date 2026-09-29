@@ -36,6 +36,7 @@ var restoredCleared = []string{
 	"step_up_tokens",
 	"account_tokens",
 	"device_pairing_tokens",
+	"device_signon_jtis",
 	"login_failures",
 	"sync_delivery_attempts",
 }
