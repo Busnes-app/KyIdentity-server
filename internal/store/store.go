@@ -1505,6 +1505,23 @@ func (s *Store) SetNativeDeviceMFAApprover(deviceID, userID string, isApprover b
 	return s.changeEnrollmentDevice(userID, `UPDATE native_devices SET is_mfa_approver = ? WHERE id = ? AND user_id = ?`, isApprover, deviceID, userID)
 }
 
+// SetNativeDeviceCanSignOn is not an enrollment change, so it needs none of
+// changeEnrollmentDevice's compliance checks.
+func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool) error {
+	res, err := s.db.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ?`, enabled, deviceID, userID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) DeleteNativeDevice(deviceID, userID string) error {
 	return s.changeEnrollmentDevice(userID, `DELETE FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID)
 }

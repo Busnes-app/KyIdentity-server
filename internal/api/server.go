@@ -162,6 +162,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/user/devices", authM(http.HandlerFunc(devH.ListUserDevices)))
 	mux.Handle("DELETE /api/user/devices/{id}", authM(http.HandlerFunc(devH.DeleteUserDevice)))
 	mux.Handle("PUT /api/notifications/native/devices/{id}/mfa", authM(http.HandlerFunc(devH.SetDeviceMFAApprover)))
+	mux.Handle("PUT /api/notifications/native/devices/{id}/sign-on", authM(http.HandlerFunc(devH.SetDeviceSignOn)))
 
 	mux.Handle("POST /api/user/mfa/totp/setup", authM(http.HandlerFunc(devH.SetupTOTP)))
 	mux.Handle("POST /api/user/mfa/totp/enable", authM(http.HandlerFunc(devH.EnableTOTP)))
