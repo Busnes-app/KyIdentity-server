@@ -277,10 +277,39 @@ func TestDeviceSignOnAudit(t *testing.T) {
 	if okRow == nil || failRow == nil {
 		t.Fatalf("missing rows: %+v", events)
 	}
+	if okRow.ActorID != e.user.ID || okRow.ActorUsername != e.user.Username {
+		t.Fatalf("success row names no actor: %+v", okRow)
+	}
 	if okRow.TargetID != e.dev.ID || !strings.Contains(okRow.DetailsJSON, c.ID) {
 		t.Fatalf("success row: %+v", okRow)
 	}
 	if failRow.TargetID != "" || !strings.Contains(failRow.DetailsJSON, c.ID) || !strings.Contains(failRow.DetailsJSON, `"error"`) {
 		t.Fatalf("failure row: %+v", failRow)
+	}
+}
+
+func TestSetDeviceSignOnNeedsApprover(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	u := newUser(t, db, "user")
+	cookie := newSession(t, db, u, time.Now().UTC().Add(time.Hour))
+	if err := db.UpsertNativeDevice(&store.NativeDevice{ID: "dev-1", UserID: u.ID, DeviceName: "p", DeviceIdentifier: "i", IsMFAApprover: false, CanSignOn: true}); err != nil {
+		t.Fatal(err)
+	}
+	put := func(body string) *httptest.ResponseRecorder {
+		return adminRequestNoStepUp(t, srv, http.MethodPut, "/api/notifications/native/devices/dev-1/sign-on", cookie, body)
+	}
+	rec := put(`{"canSignOn":true}`)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "device_not_approver") {
+		t.Fatalf("enable on non-approver: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if rec := put(`{"canSignOn":false}`); rec.Code != http.StatusOK {
+		t.Fatalf("disable on non-approver: status %d", rec.Code)
+	}
+	if got, _ := db.GetNativeDevice("dev-1"); got.CanSignOn {
+		t.Fatal("disable did not persist")
+	}
+	if rec := put(`{"canSignOn":true}`); rec.Code != http.StatusConflict {
+		t.Fatalf("re-enable: status %d", rec.Code)
 	}
 }

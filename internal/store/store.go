@@ -1366,7 +1366,8 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 	if dev.Platform == "" {
 		dev.Platform = "android"
 	}
-	if _, err := tx.Exec(`
+	// RETURNING: on re-pairing the conflict keeps the stored row's id and created_at.
+	if err := tx.QueryRow(`
 		INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, last_seen_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id, device_identifier) DO UPDATE SET
@@ -1377,7 +1378,8 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 			is_mfa_approver = excluded.is_mfa_approver,
 			can_sign_on = excluded.can_sign_on,
 			last_seen_at = excluded.last_seen_at
-	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.LastSeenAt, dev.CreatedAt); err != nil {
+		RETURNING id, created_at
+	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.LastSeenAt, dev.CreatedAt).Scan(&dev.ID, &dev.CreatedAt); err != nil {
 		return false, err
 	}
 
@@ -1505,10 +1507,14 @@ func (s *Store) SetNativeDeviceMFAApprover(deviceID, userID string, isApprover b
 	return s.changeEnrollmentDevice(userID, `UPDATE native_devices SET is_mfa_approver = ? WHERE id = ? AND user_id = ?`, isApprover, deviceID, userID)
 }
 
+// ErrDeviceNotApprover means sign-on was requested for a device that is not an MFA approver.
+var ErrDeviceNotApprover = errors.New("device is not an MFA approver")
+
 // SetNativeDeviceCanSignOn is not an enrollment change, so it needs none of
-// changeEnrollmentDevice's compliance checks.
+// changeEnrollmentDevice's compliance checks. Enabling needs an approver device;
+// disabling is always allowed.
 func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool) error {
-	res, err := s.db.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ?`, enabled, deviceID, userID)
+	res, err := s.db.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (? = 0 OR is_mfa_approver = 1)`, enabled, deviceID, userID, enabled)
 	if err != nil {
 		return err
 	}
@@ -1516,10 +1522,14 @@ func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool) 
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return sql.ErrNoRows
+	if n == 1 {
+		return nil
 	}
-	return nil
+	var exists int
+	if err := s.db.QueryRow(`SELECT 1 FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID).Scan(&exists); err != nil {
+		return err // sql.ErrNoRows when the device is not the user's
+	}
+	return ErrDeviceNotApprover
 }
 
 func (s *Store) DeleteNativeDevice(deviceID, userID string) error {

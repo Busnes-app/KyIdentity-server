@@ -255,10 +255,10 @@ func (h *OAuthHandler) deviceSignOn(w http.ResponseWriter, r *http.Request, asse
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "slow_down"})
 		return
 	}
-	tokenResp, deviceID, err := h.oauthEngine.ExchangeDeviceAssertion(assertion, clientID, ip, r.UserAgent())
+	tokenResp, who, err := h.oauthEngine.ExchangeDeviceAssertion(assertion, clientID, ip, r.UserAgent())
 	if err != nil {
 		// The precise reason is audit-only; the caller learns nothing about which check failed.
-		h.audit.Record("device.signon", "", "", deviceID, "device", ip, r.UserAgent(), "failure", map[string]any{"clientId": clientID, "error": err.Error()})
+		h.audit.Record("device.signon", who.UserID, who.Username, who.DeviceID, "device", ip, r.UserAgent(), "failure", map[string]any{"clientId": clientID, "error": err.Error()})
 		description := "The device assertion is invalid"
 		if errors.Is(err, oauth.ErrDeviceSignOnDisabled) {
 			description = "device_signon_disabled"
@@ -267,7 +267,7 @@ func (h *OAuthHandler) deviceSignOn(w http.ResponseWriter, r *http.Request, asse
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": description})
 		return
 	}
-	h.audit.Record("device.signon", "", "", deviceID, "device", ip, r.UserAgent(), "success", map[string]any{"clientId": clientID})
+	h.audit.Record("device.signon", who.UserID, who.Username, who.DeviceID, "device", ip, r.UserAgent(), "success", map[string]any{"clientId": clientID})
 	_ = json.NewEncoder(w).Encode(tokenResp)
 }
 

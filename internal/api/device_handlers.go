@@ -287,6 +287,10 @@ func (h *DeviceHandler) SetDeviceSignOn(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
 		return
 	}
+	if errors.Is(err, store.ErrDeviceNotApprover) {
+		http.Error(w, `{"error":"device_not_approver"}`, http.StatusConflict)
+		return
+	}
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

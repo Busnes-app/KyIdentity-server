@@ -417,7 +417,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
         </div>
 
         <label className="text-sm">
-          <input type="checkbox" checked={pairSignOn} onChange={(e) => setPairSignOn(e.target.checked)} />{' '}
+          <input type="checkbox" checked={pairSignOn} disabled={!permitted('push')} onChange={(e) => setPairSignOn(e.target.checked)} />{' '}
           Allow this phone to sign in to suite apps (KyPost, KyVault, ...)
         </label>
 
@@ -438,14 +438,16 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                   <span className="device-id-mono">{dev.deviceIdentifier}</span>
                 </div>
                 <div className="device-status">
-                  <span className="badge-approver">
-                    <CheckCircle size={12} /> Push approver
-                  </span>
+                  {dev.isMfaApprover && (
+                    <span className="badge-approver">
+                      <CheckCircle size={12} /> Push approver
+                    </span>
+                  )}
                   <label className="text-sm">
                     <input
                       type="checkbox"
                       checked={dev.canSignOn}
-                      disabled={restricted}
+                      disabled={restricted || !dev.isMfaApprover}
                       onChange={(e) => handleToggleSignOn(dev.id, e.target.checked)}
                     />{' '}
                     Sign in to apps

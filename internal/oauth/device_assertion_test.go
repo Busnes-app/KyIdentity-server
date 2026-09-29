@@ -251,12 +251,12 @@ func (f *signOnFixture) claims(mutate func(map[string]any)) map[string]any {
 func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	f := newSignOnFixture(t)
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
-	resp, devID, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test")
+	resp, who, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if devID != "dev-1" || resp.IDToken == "" || resp.AccessToken == "" {
-		t.Fatalf("resp %+v dev %q", resp, devID)
+	if who.DeviceID != "dev-1" || who.UserID != f.user.ID || who.Username != "alice" || resp.IDToken == "" || resp.AccessToken == "" {
+		t.Fatalf("resp %+v who %+v", resp, who)
 	}
 	claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
 	if err != nil {
@@ -327,12 +327,12 @@ func TestExchangeDeviceAssertionRefusals(t *testing.T) {
 		"empty public key":    {sign(f.priv, "dev-nokey", func(c map[string]any) { c["iss"] = "device:dev-nokey" }), f.client.ID, errUnknownDevice},
 	}
 	for name, c := range cases {
-		_, devID, err := f.engine.ExchangeDeviceAssertion(c.compact, c.clientID, "127.0.0.1", "test")
+		_, who, err := f.engine.ExchangeDeviceAssertion(c.compact, c.clientID, "127.0.0.1", "test")
 		if !errors.Is(err, c.want) {
 			t.Errorf("%s: got %v, want %v", name, err, c.want)
 		}
-		if devID != "" && c.want != errUnknownClient {
-			t.Errorf("%s: unverified device id %q returned", name, devID)
+		if who.DeviceID != "" && c.want != errUnknownClient {
+			t.Errorf("%s: unverified device id %q returned", name, who.DeviceID)
 		}
 	}
 }
@@ -413,12 +413,51 @@ func TestExchangeDeviceAssertionHonoursAppPolicy(t *testing.T) {
 	if err != nil || len(rows) == 0 {
 		t.Fatal(err)
 	}
-	// Reload: allowTestAppAccess bumped the revision.
 	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "reuse", Factor: "passkey"}, rows[0].Revision, nil); err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
 	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, errAppPolicy) {
 		t.Fatalf("passkey policy: %v", err)
+	}
+}
+
+func TestExchangeDeviceAssertionRefusesUserWithoutAppAccess(t *testing.T) {
+	f := newSignOnFixture(t)
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppPolicy(rows[0].ID, "assigned_only", true, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, store.ErrAppAccessDenied) {
+		t.Fatalf("unassigned user: %v", err)
+	}
+	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("refused sign-on left %d session(s) behind", len(after)-len(before))
+	}
+}
+
+func TestExchangeDeviceAssertionRequiresOpenIDScope(t *testing.T) {
+	f := newSignOnFixture(t)
+	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "NoOpenID", ClientType: "public",
+		RedirectURIsJSON: `["https://noid.local/callback"]`, AllowedScopesJSON: `["profile","email"]`, Enabled: true}
+	if err := f.db.CreateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	allowTestAppAccess(t, f.db, c.ID)
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(m map[string]any) { m["client_id"] = c.ID }))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, c.ID, "127.0.0.1", "test"); !errors.Is(err, errNoOpenIDScope) {
+		t.Fatalf("no openid scope: %v", err)
 	}
 }
