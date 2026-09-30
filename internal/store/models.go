@@ -205,6 +205,7 @@ type AuthorizationCode struct {
 type IssuedToken struct {
 	AuthorizationCodeID string           `json:"-"` // Checked at registration, not stored.
 	Policy              AppPolicyBinding `json:"-"` // Code-less grants: checked at registration, not stored.
+	Device              DeviceBinding    `json:"-"` // Device sign-on: checked at registration, not stored.
 	SessionID           string           `json:"-"`
 	JTI                 string           `json:"jti"`
 	UserID              string           `json:"userId"`
@@ -212,6 +213,15 @@ type IssuedToken struct {
 	ExpiresAt           time.Time        `json:"expiresAt"`
 	RevokedAt           *time.Time       `json:"revokedAt,omitempty"`
 	CreatedAt           time.Time        `json:"createdAt"`
+}
+
+// DeviceBinding names the native device a sign-on token was verified against.
+// RecordIssuedToken refuses the token unless that device still belongs to the user,
+// holds the same key and may sign on.
+type DeviceBinding struct {
+	ID        string
+	UserID    string
+	PublicKey string
 }
 
 type Application struct {

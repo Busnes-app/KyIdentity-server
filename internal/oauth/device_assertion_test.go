@@ -6,13 +6,16 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"math/big"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
@@ -207,6 +210,7 @@ func TestParseDeviceAssertionRejectsInvalidClaims(t *testing.T) {
 type signOnFixture struct {
 	engine *Engine
 	db     *store.Store
+	dbPath string
 	user   *store.User
 	client *store.OAuthClient
 	priv   *ecdsa.PrivateKey
@@ -214,8 +218,18 @@ type signOnFixture struct {
 
 func newSignOnFixture(t *testing.T) *signOnFixture {
 	t.Helper()
-	engine, db, cleanup := setupTestOAuthEngine(t)
-	t.Cleanup(cleanup)
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := store.New(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	km, err := crypto.LoadOrCreateRSAKey(filepath.Join(dir, "jwt.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngine(db, km, "http://localhost:5867")
 	user := &store.User{ID: uuid.NewString(), Username: "alice", DisplayName: "Alice", Email: "alice@example.com", PasswordHash: "x", Role: "user", Status: "active"}
 	if err := db.CreateUser(user); err != nil {
 		t.Fatal(err)
@@ -233,7 +247,7 @@ func newSignOnFixture(t *testing.T) *signOnFixture {
 	if err := db.UpsertNativeDevice(dev); err != nil {
 		t.Fatal(err)
 	}
-	return &signOnFixture{engine: engine, db: db, user: user, client: client, priv: priv}
+	return &signOnFixture{engine: engine, db: db, dbPath: dbPath, user: user, client: client, priv: priv}
 }
 
 func (f *signOnFixture) claims(mutate func(map[string]any)) map[string]any {
@@ -638,5 +652,93 @@ func TestExchangeDeviceAssertionIssuesWhenPolicyUnchanged(t *testing.T) {
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
 	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); err != nil || !ran {
 		t.Fatalf("unchanged policy: err=%v hook ran=%v", err, ran)
+	}
+}
+
+// issuedTokenCount reads issued_tokens directly: the store has no listing, and the
+// refusal must leave no row behind.
+func (f *signOnFixture) issuedTokenCount(t *testing.T) int {
+	t.Helper()
+	raw, err := sql.Open("sqlite", f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var n int
+	if err := raw.QueryRow(`SELECT COUNT(*) FROM issued_tokens WHERE user_id=?`, f.user.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// raceDeviceEdit runs edit between the engine's device validation and token
+// registration, for a user without mandatory MFA, and asserts the exchange is refused
+// as device_signon_disabled with no session or token left behind.
+func raceDeviceEdit(t *testing.T, edit func(f *signOnFixture) error) {
+	t.Helper()
+	f := newSignOnFixture(t)
+	beforeDeviceTokenRecord = func() {
+		if err := edit(f); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { beforeDeviceTokenRecord = func() {} })
+	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, ErrDeviceSignOnDisabled) || errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("token issued or misnamed across a device change: %v", err)
+	}
+	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("refused sign-on left %d session(s) behind", len(after)-len(before))
+	}
+	if n := f.issuedTokenCount(t); n != 0 {
+		t.Fatalf("refused sign-on left %d issued token(s)", n)
+	}
+}
+
+func TestExchangeDeviceAssertionRefusesMFAResetBeforeIssue(t *testing.T) {
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.ResetUserMFA(f.user.ID, nil) })
+}
+
+func TestExchangeDeviceAssertionRefusesMFAMethodsDeletedBeforeIssue(t *testing.T) {
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DeleteUserMFAMethods(f.user.ID) })
+}
+
+func TestExchangeDeviceAssertionRefusesSignOnDisabledBeforeIssue(t *testing.T) {
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false) })
+}
+
+func TestExchangeDeviceAssertionRefusesDeviceDeletedBeforeIssue(t *testing.T) {
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DeleteNativeDevice("dev-1", f.user.ID) })
+}
+
+func TestExchangeDeviceAssertionRefusesKeyChangedBeforeIssue(t *testing.T) {
+	raceDeviceEdit(t, func(f *signOnFixture) error {
+		other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		spki, _ := x509.MarshalPKIXPublicKey(&other.PublicKey)
+		// Re-pairing the same phone keeps the device id and replaces its key.
+		return f.db.UpsertNativeDevice(&store.NativeDevice{ID: "dev-1", UserID: f.user.ID, DeviceName: "phone", DeviceIdentifier: "ident-1",
+			PublicKey: base64.StdEncoding.EncodeToString(spki), IsMFAApprover: true, CanSignOn: true})
+	})
+}
+
+func TestExchangeDeviceAssertionIssuesWhenDeviceUnchanged(t *testing.T) {
+	f := newSignOnFixture(t)
+	ran := false
+	beforeDeviceTokenRecord = func() { ran = true }
+	t.Cleanup(func() { beforeDeviceTokenRecord = func() {} })
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); err != nil || !ran {
+		t.Fatalf("unchanged device: err=%v hook ran=%v", err, ran)
+	}
+	if n := f.issuedTokenCount(t); n != 1 {
+		t.Fatalf("issued tokens: %d", n)
 	}
 }

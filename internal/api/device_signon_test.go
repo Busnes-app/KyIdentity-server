@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -347,5 +348,33 @@ func TestDeviceSignOnNotPermittedIsNamed(t *testing.T) {
 	const generic = `{"error":"invalid_grant","error_description":"The device assertion is invalid"}`
 	if rec := e.post("garbage", c.ID, ""); rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != generic {
 		t.Fatalf("garbage: status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// An MFA reset landing after the engine validated the device but before the token is
+// recorded must answer device_signon_disabled. The api package cannot reach the
+// engine's hook, so a trigger on the device login session's insert applies the reset's
+// device effect inside that window.
+func TestDeviceSignOnResetMidExchangeIsDisabled(t *testing.T) {
+	e := newSignOnEnv(t)
+	c := e.client(t, "public", "")
+	raw, err := sql.Open("sqlite", e.server.cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`CREATE TRIGGER reset_mid_exchange AFTER INSERT ON sessions BEGIN UPDATE native_devices SET is_mfa_approver=0, can_sign_on=0 WHERE user_id=NEW.user_id; END`); err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"error":"invalid_grant","error_description":"device_signon_disabled"}`
+	if rec := e.post(e.assertion(t, c.ID), c.ID, ""); rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != want {
+		t.Fatalf("reset mid-exchange: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var tokens, sessions int
+	if err := raw.QueryRow(`SELECT (SELECT COUNT(*) FROM issued_tokens WHERE user_id=?), (SELECT COUNT(*) FROM sessions WHERE user_id=?)`, e.user.ID, e.user.ID).Scan(&tokens, &sessions); err != nil {
+		t.Fatal(err)
+	}
+	if tokens != 0 || sessions != 0 {
+		t.Fatalf("refusal left %d token(s), %d session(s)", tokens, sessions)
 	}
 }

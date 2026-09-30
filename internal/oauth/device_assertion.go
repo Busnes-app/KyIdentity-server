@@ -251,8 +251,13 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	}()
 	accessJTI := uuid.NewString()
 	beforeDeviceTokenRecord()
-	// Binding the evaluated revisions refuses the token if a policy or role edit landed since.
-	if err := e.store.RecordIssuedToken(&store.IssuedToken{JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: sess.ID, Policy: binding}); errors.Is(err, store.ErrAppAccessDenied) {
+	// Binding the evaluated revisions and device refuses the token if a policy or role
+	// edit, MFA reset, sign-on toggle, device delete or key change landed since.
+	if err := e.store.RecordIssuedToken(&store.IssuedToken{JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: sess.ID, Policy: binding, Device: store.DeviceBinding{ID: dev.ID, UserID: dev.UserID, PublicKey: dev.PublicKey}}); errors.Is(err, store.ErrAppAccessDenied) {
+		// The user's remedy for a device that lost eligibility is the devices page.
+		if cur, rerr := e.store.GetNativeDevice(dev.ID); rerr == nil && (cur == nil || cur.UserID != dev.UserID || cur.PublicKey != dev.PublicKey || !cur.CanSignOn || !cur.IsMFAApprover) {
+			return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnDisabled, err)
+		}
 		return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnNotPermitted, err)
 	} else if err != nil {
 		return nil, who, fmt.Errorf("failed to record issued token: %w", err)
