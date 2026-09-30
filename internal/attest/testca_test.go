@@ -87,3 +87,42 @@ func (c *testCA) reissueIntermediateWithExtension(t *testing.T, kdDER []byte) []
 	}
 	return der
 }
+
+// leafNB is leaf with an explicit NotBefore; a nil kdDER yields a plain certificate.
+func (c *testCA) leafNB(t *testing.T, devicePub *ecdsa.PublicKey, kdDER []byte, serial int64, notBefore, notAfter time.Time) []byte {
+	t.Helper()
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(serial), Subject: pkix.Name{CommonName: "Android Keystore Key"},
+		NotBefore: notBefore, NotAfter: notAfter,
+	}
+	if kdDER != nil {
+		tmpl.ExtraExtensions = []pkix.Extension{{Id: ExtensionOID, Value: kdDER}}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.inter, devicePub, c.interKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
+}
+
+// lookalike returns a CA pair whose top certificate names subjectSerial but is signed by c.root.
+func (c *testCA) lookalike(t *testing.T, subjectSerial string, notAfter time.Time) *testCA {
+	t.Helper()
+	mk := func(serial int64, cn, sn string, parent *x509.Certificate, pk *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
+		k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		tmpl := &x509.Certificate{
+			SerialNumber: big.NewInt(serial), Subject: pkix.Name{CommonName: cn, SerialNumber: sn},
+			NotBefore: time.Now().Add(-time.Hour), NotAfter: notAfter, IsCA: true, BasicConstraintsValid: true,
+			KeyUsage: x509.KeyUsageCertSign,
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, &k.PublicKey, pk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert, _ := x509.ParseCertificate(der)
+		return cert, k, der
+	}
+	top, topKey, topDER := mk(3, "lookalike", subjectSerial, c.root, c.rootKey)
+	inter, interKey, interDER := mk(4, "lookalike inter", "", top, topKey)
+	return &testCA{top, inter, topKey, interKey, topDER, interDER}
+}

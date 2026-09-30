@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,14 +117,95 @@ func TestVerifyRefusals(t *testing.T) {
 		"empty chain": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
 			return nil, roots(ca), staticStatus{}
 		},
+		"wrong algorithm": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			return withHW(t, ca, d, c, w, authList(t, setOfIntTag(t, 1, 2), intTag(t, 2, 1), intTag(t, 10, 1), intTag(t, 504, 3), intTag(t, 702, 0)))
+		},
+		"wrong curve": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			return withHW(t, ca, d, c, w, authList(t, setOfIntTag(t, 1, 2), intTag(t, 2, 3), intTag(t, 10, 2), intTag(t, 504, 3), intTag(t, 702, 0)))
+		},
+		"wrong purpose": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			return withHW(t, ca, d, c, w, authList(t, setOfIntTag(t, 1, 0), intTag(t, 2, 3), intTag(t, 10, 1), intTag(t, 504, 3), intTag(t, 702, 0)))
+		},
+		"user auth type zero": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			return withHW(t, ca, d, c, w, authList(t, setOfIntTag(t, 1, 2), intTag(t, 2, 3), intTag(t, 10, 1), intTag(t, 504, 0), intTag(t, 702, 0)))
+		},
+		"origin absent": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			return withHW(t, ca, d, c, w, authList(t, setOfIntTag(t, 1, 2), intTag(t, 2, 3), intTag(t, 10, 1), intTag(t, 504, 3)))
+		},
+		"root of trust absent with setting on": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			w.RequireLockedBootloader = true
+			return withHW(t, ca, d, c, w, authList(t, setOfIntTag(t, 1, 2), intTag(t, 2, 3), intTag(t, 10, 1), intTag(t, 504, 3), intTag(t, 702, 0)))
+		},
+		"locked but unverified": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			w.RequireLockedBootloader = true
+			return withHW(t, ca, d, c, w, authList(t, setOfIntTag(t, 1, 2), intTag(t, 2, 3), intTag(t, 10, 1), intTag(t, 504, 3), intTag(t, 702, 0), rootOfTrustTag(t, true, 2)))
+		},
+		"locked but failed": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			w.RequireLockedBootloader = true
+			return withHW(t, ca, d, c, w, authList(t, setOfIntTag(t, 1, 2), intTag(t, 2, 3), intTag(t, 10, 1), intTag(t, 504, 3), intTag(t, 702, 0), rootOfTrustTag(t, true, 3)))
+		},
+		"leaf not yet valid": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			kd := keyDescriptionDER(t, kdOpts{attLevel: 2, kmLevel: 2, challenge: w.Challenge, hardware: goodHardware(t), software: goodSoftware(t, digest)})
+			return [][]byte{ca.leafNB(t, &d.PublicKey, kd, 112, time.Now().Add(time.Hour), time.Now().Add(2*time.Hour)), c[1], c[2]}, roots(ca), staticStatus{}
+		},
+		"no attestation extension": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			return [][]byte{ca.leafNB(t, &d.PublicKey, nil, 113, time.Now().Add(-time.Hour), time.Now().Add(time.Hour)), c[1], c[2]}, roots(ca), staticStatus{}
+		},
+		"no application id": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			kd := keyDescriptionDER(t, kdOpts{attLevel: 2, kmLevel: 2, challenge: w.Challenge, hardware: goodHardware(t), software: authList(t)})
+			return [][]byte{ca.leaf(t, &d.PublicKey, kd, 114, time.Now().Add(time.Hour)), c[1], c[2]}, roots(ca), staticStatus{}
+		},
+		"expired intermediate": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			old := newTestCA(t, "testroot", time.Now().Add(-time.Minute))
+			kd := keyDescriptionDER(t, kdOpts{attLevel: 2, kmLevel: 2, challenge: w.Challenge, hardware: goodHardware(t), software: goodSoftware(t, digest)})
+			return [][]byte{old.leaf(t, &d.PublicKey, kd, 115, time.Now().Add(time.Hour)), old.interDER}, roots(old), staticStatus{}
+		},
+		"legacy subject on untrusted-legacy chain cert": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			fake := ca.lookalike(t, LegacyRSARootSerialNumber, time.Now().Add(-time.Minute))
+			kd := keyDescriptionDER(t, kdOpts{attLevel: 2, kmLevel: 2, challenge: w.Challenge, hardware: goodHardware(t), software: goodSoftware(t, digest)})
+			return [][]byte{fake.leaf(t, &d.PublicKey, kd, 116, time.Now().Add(-time.Minute)), fake.interDER, fake.rootDER}, roots(ca), staticStatus{}
+		},
+	}
+	reasons := map[string]string{
+		"untrusted root":                                "trusted root",
+		"broken signature":                              "not signed by",
+		"revoked intermediate":                          "revoked",
+		"status unknown":                                "status list unavailable",
+		"challenge mismatch":                            "challenge mismatch",
+		"key mismatch":                                  "attested key differs",
+		"software level":                                "security level",
+		"levels differ":                                 "security level",
+		"auth timeout":                                  "per-use user authentication",
+		"no auth required":                              "per-use user authentication",
+		"user auth only in software list":               "per-use user authentication",
+		"imported origin":                               "generated in hardware",
+		"wrong package":                                 "attested app is not",
+		"wrong digest":                                  "signature not pinned",
+		"extension twice":                               "more than once",
+		"expired leaf under non-legacy root":            "outside validity",
+		"unlocked with setting on":                      "bootloader not locked",
+		"empty chain":                                   "no chain",
+		"wrong algorithm":                               "EC P-256",
+		"wrong curve":                                   "EC P-256",
+		"wrong purpose":                                 "EC P-256",
+		"user auth type zero":                           "per-use user authentication",
+		"origin absent":                                 "generated in hardware",
+		"root of trust absent with setting on":          "bootloader not locked (unknown)",
+		"locked but unverified":                         "bootloader not locked (unknown)",
+		"locked but failed":                             "bootloader not locked (unknown)",
+		"leaf not yet valid":                            "certificate 0 outside validity",
+		"no attestation extension":                      "no attestation extension",
+		"no application id":                             "no attestation application id",
+		"expired intermediate":                          "certificate 1 outside validity",
+		"legacy subject on untrusted-legacy chain cert": "outside validity",
 	}
 	for name, m := range cases {
 		t.Run(name, func(t *testing.T) {
 			ca, dev, chain, want := good(t)
 			chain, rs, st := m(t, ca, dev, chain, &want)
 			r := Verify(chain, want, rs, st)
-			if r.Level != "none" || r.Reason == "" {
-				t.Fatalf("%s: %+v", name, r)
+			if r.Level != "none" || !strings.Contains(r.Reason, reasons[name]) || r.Reason == "" {
+				t.Fatalf("%s: want reason containing %q: %+v", name, reasons[name], r)
 			}
 		})
 	}
@@ -185,4 +267,10 @@ func TestEmbeddedRootsParse(t *testing.T) {
 	if !found {
 		t.Fatalf("legacy RSA root not embedded; subjects: %v", certs)
 	}
+}
+
+// withHW re-issues the leaf at security level TEE with the given hardware list.
+func withHW(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation, hw []byte) ([][]byte, Roots, Status) {
+	kd := keyDescriptionDER(t, kdOpts{attLevel: 1, kmLevel: 1, challenge: w.Challenge, hardware: hw, software: goodSoftware(t, digest)})
+	return [][]byte{ca.leaf(t, &d.PublicKey, kd, 120, time.Now().Add(time.Hour)), c[1], c[2]}, roots(ca), staticStatus{}
 }

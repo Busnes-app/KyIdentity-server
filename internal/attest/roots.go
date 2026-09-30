@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"sync"
-	"time"
 
 	_ "embed"
 )
@@ -87,7 +86,6 @@ type RefreshingRoots struct {
 	fetched []*x509.Certificate
 	url     string
 	fetch   func(url string) ([]byte, http.Header, error)
-	last    time.Time
 }
 
 func NewRefreshingRoots(base []*x509.Certificate, url string, fetch func(string) ([]byte, http.Header, error)) *RefreshingRoots {
@@ -111,7 +109,7 @@ func (r *RefreshingRoots) Refresh() error {
 		return err
 	}
 	r.mu.Lock()
-	r.fetched, r.last = certs, time.Now()
+	r.fetched = certs
 	r.mu.Unlock()
 	return nil
 }

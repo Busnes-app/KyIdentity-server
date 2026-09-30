@@ -52,7 +52,7 @@ func (s *StatusList) Refresh() error {
 	set := make(map[string]struct{}, len(doc.Entries))
 	for serial, e := range doc.Entries {
 		if e.Status == "REVOKED" || e.Status == "SUSPENDED" {
-			set[strings.ToLower(serial)] = struct{}{}
+			set[strings.ToLower(strings.TrimLeft(serial, "0"))] = struct{}{}
 		}
 	}
 	maxAge := 24 * time.Hour
@@ -81,8 +81,8 @@ func (s *StatusList) Revoked(serialHex string) (bool, bool) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.entries == nil {
-		return false, false
+	if s.entries == nil || time.Since(s.loadedAt) > 3*s.maxAge {
+		return false, false // never loaded, or too old to trust; Verify does not fetch
 	}
 	_, hit := s.entries[strings.ToLower(strings.TrimLeft(serialHex, "0"))]
 	return hit, true
