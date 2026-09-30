@@ -29,8 +29,13 @@ func (e *Engine) SweepAttestations(status attest.Status, requireLocked bool, aud
 		if reason == "" {
 			continue
 		}
-		if err := e.store.SetNativeDeviceAttestation(d.ID, "none", d.BootState, d.AttestationSerials, time.Now()); err != nil {
+		// Bound to the key read above: a device re-paired since then keeps its new grade.
+		changed, err := e.store.SetNativeDeviceAttestation(d.ID, d.PublicKey, "none", d.BootState, d.AttestationSerials, time.Now())
+		if err != nil {
 			return downgraded, err
+		}
+		if !changed {
+			continue
 		}
 		audit(d.ID, d.UserID, reason)
 		downgraded++

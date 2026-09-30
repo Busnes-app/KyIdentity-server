@@ -1383,26 +1383,14 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 	if err != nil {
 		return false, err
 	}
-	dev.CreatedAt = now
-	dev.LastSeenAt = &now
-	if dev.Platform == "" {
-		dev.Platform = "android"
+	attestedAt, serials, err := dev.prepareEnrollment(now)
+	if err != nil {
+		return false, err
 	}
 	// RETURNING: on re-pairing the conflict keeps the stored row's id and created_at.
-	if err := tx.QueryRow(`
-		INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, last_seen_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(user_id, device_identifier) DO UPDATE SET
-			device_name = excluded.device_name,
-			platform = excluded.platform,
-			public_key = excluded.public_key,
-			push_token = excluded.push_token,
-			is_mfa_approver = excluded.is_mfa_approver,
-			can_sign_on = excluded.can_sign_on,
-			attested_level = 'none', attested_at = NULL, boot_state = 'unknown', attestation_serials = '[]',
-			last_seen_at = excluded.last_seen_at
+	if err := tx.QueryRow(nativeDeviceUpsert+`
 		RETURNING id, created_at
-	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.LastSeenAt, dev.CreatedAt).Scan(&dev.ID, &dev.CreatedAt); err != nil {
+	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt).Scan(&dev.ID, &dev.CreatedAt); err != nil {
 		return false, err
 	}
 
@@ -1423,10 +1411,11 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 	return true, tx.Commit()
 }
 
-func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
-	query := `
-	INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, last_seen_at, created_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+// nativeDeviceUpsert enrols a device, or re-pairs it in place. The grade is the request's own,
+// written with the key it graded, so a re-pair never inherits the previous key's grade.
+const nativeDeviceUpsert = `
+	INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials, last_seen_at, created_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(user_id, device_identifier) DO UPDATE SET
 		device_name = excluded.device_name,
 		platform = excluded.platform,
@@ -1434,16 +1423,65 @@ func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
 		push_token = excluded.push_token,
 		is_mfa_approver = excluded.is_mfa_approver,
 		can_sign_on = excluded.can_sign_on,
-		attested_level = 'none', attested_at = NULL, boot_state = 'unknown', attestation_serials = '[]',
-		last_seen_at = excluded.last_seen_at
-	`
-	now := time.Now().UTC()
-	dev.CreatedAt = now
-	dev.LastSeenAt = &now
-	if dev.Platform == "" {
-		dev.Platform = "android"
+		attested_level = excluded.attested_level,
+		attested_at = excluded.attested_at,
+		boot_state = excluded.boot_state,
+		attestation_serials = excluded.attestation_serials,
+		last_seen_at = excluded.last_seen_at`
+
+// prepareEnrollment stamps an enrolment at now and returns the attestation column values.
+// An ungraded device enrols as none/unknown.
+func (d *NativeDevice) prepareEnrollment(now time.Time) (any, string, error) {
+	d.CreatedAt = now
+	d.LastSeenAt = &now
+	if d.Platform == "" {
+		d.Platform = "android"
 	}
-	return s.changeEnrollmentDevice(dev.UserID, query, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.LastSeenAt, dev.CreatedAt)
+	if d.AttestedLevel == "" {
+		d.AttestedLevel = "none"
+	}
+	if d.BootState == "" {
+		d.BootState = "unknown"
+	}
+	d.AttestedAt = nil
+	attestedAt, serials, err := attestationColumns(d.AttestedLevel, d.BootState, d.AttestationSerials, now)
+	if attestedAt != nil {
+		d.AttestedAt = &now
+	}
+	return attestedAt, serials, err
+}
+
+// attestationColumns validates a grade and encodes it for native_devices.
+func attestationColumns(level, bootState string, serials []string, at time.Time) (any, string, error) {
+	switch level {
+	case "none", "tee", "strongbox":
+	default:
+		return nil, "", fmt.Errorf("invalid attested level %q", level)
+	}
+	switch bootState {
+	case "locked-verified", "locked-selfsigned", "unlocked", "unknown":
+	default:
+		return nil, "", fmt.Errorf("invalid boot state %q", bootState)
+	}
+	if serials == nil {
+		serials = []string{}
+	}
+	raw, err := json.Marshal(serials)
+	if err != nil {
+		return nil, "", err
+	}
+	if level == "none" {
+		return nil, string(raw), nil
+	}
+	return at.UTC(), string(raw), nil
+}
+
+func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
+	attestedAt, serials, err := dev.prepareEnrollment(time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return s.changeEnrollmentDevice(dev.UserID, nativeDeviceUpsert, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt)
 }
 
 func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
@@ -1485,21 +1523,19 @@ func (s *Store) listNativeDevices(clause string, args ...any) ([]NativeDevice, e
 	return devices, rows.Err()
 }
 
-// SetNativeDeviceAttestation records the verified attestation outcome for a device.
-func (s *Store) SetNativeDeviceAttestation(deviceID, level, bootState string, serials []string, at time.Time) error {
-	if serials == nil {
-		serials = []string{}
-	}
-	raw, err := json.Marshal(serials)
+// SetNativeDeviceAttestation regrades a device, only while it still holds publicKey. It
+// reports false when the device was removed or re-paired since it was read.
+func (s *Store) SetNativeDeviceAttestation(deviceID, publicKey, level, bootState string, serials []string, at time.Time) (bool, error) {
+	attestedAt, raw, err := attestationColumns(level, bootState, serials, at)
 	if err != nil {
-		return err
+		return false, err
 	}
-	var attestedAt any
-	if level != "none" {
-		attestedAt = at.UTC()
+	res, err := s.db.Exec(`UPDATE native_devices SET attested_level=?, attested_at=?, boot_state=?, attestation_serials=? WHERE id=? AND public_key=?`, level, attestedAt, bootState, raw, deviceID, publicKey)
+	if err != nil {
+		return false, err
 	}
-	_, err = s.db.Exec(`UPDATE native_devices SET attested_level=?, attested_at=?, boot_state=?, attestation_serials=? WHERE id=?`, level, attestedAt, bootState, string(raw), deviceID)
-	return err
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 // GetNativeDevice returns the exact enrolled device named by a device-authenticated request.

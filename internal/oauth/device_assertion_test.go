@@ -878,8 +878,12 @@ func (f *signOnFixture) sessionCount(t *testing.T) int {
 
 func (f *signOnFixture) attest(t *testing.T, level string) {
 	t.Helper()
-	if err := f.db.SetNativeDeviceAttestation("dev-1", level, "locked-verified", []string{"1"}, time.Now()); err != nil {
+	dev, err := f.db.GetNativeDevice("dev-1")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if ok, err := f.db.SetNativeDeviceAttestation("dev-1", dev.PublicKey, level, "locked-verified", []string{"1"}, time.Now()); err != nil || !ok {
+		t.Fatalf("attest: %v %v", ok, err)
 	}
 }
 

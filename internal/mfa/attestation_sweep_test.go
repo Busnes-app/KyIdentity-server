@@ -11,9 +11,21 @@ type staticStatus map[string]bool
 
 func (s staticStatus) Revoked(serial string) (bool, bool) { return s[serial], true }
 
-type unknownStatus struct{}
+// unknownStatus says revoked but not known, as a stale list would.
+type unknownStatus map[string]bool
 
-func (unknownStatus) Revoked(string) (bool, bool) { return false, false }
+func (s unknownStatus) Revoked(serial string) (bool, bool) { return s[serial], false }
+
+// repairingStatus re-pairs a device with a new key while the sweep is mid-flight.
+type repairingStatus struct {
+	staticStatus
+	repair func()
+}
+
+func (s repairingStatus) Revoked(serial string) (bool, bool) {
+	s.repair()
+	return s.staticStatus.Revoked(serial)
+}
 
 func TestSweepDowngradesRevokedAndUnlocked(t *testing.T) {
 	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
@@ -23,8 +35,8 @@ func TestSweepDowngradesRevokedAndUnlocked(t *testing.T) {
 		if err := dbStore.UpsertNativeDevice(dev); err != nil {
 			t.Fatal(err)
 		}
-		if err := dbStore.SetNativeDeviceAttestation(id, "tee", boot, serials, time.Now()); err != nil {
-			t.Fatal(err)
+		if ok, err := dbStore.SetNativeDeviceAttestation(id, "pk", "tee", boot, serials, time.Now()); err != nil || !ok {
+			t.Fatalf("attest %s: %v %v", id, ok, err)
 		}
 	}
 	mk("ok", "locked-verified", []string{"aa"})
@@ -44,8 +56,36 @@ func TestSweepDowngradesRevokedAndUnlocked(t *testing.T) {
 		t.Fatalf("reasons %v", reasons)
 	}
 	// status unknown: nothing is downgraded (fail safe for the sweep; registration is the strict path)
-	n, _ = engine.SweepAttestations(unknownStatus{}, false, func(string, string, string) {})
-	if n != 0 {
-		t.Fatal("unknown status must not downgrade")
+	mk("revoked", "locked-verified", []string{"bb"})
+	n, err = engine.SweepAttestations(unknownStatus{"bb": true}, false, func(string, string, string) {})
+	if err != nil || n != 0 {
+		t.Fatalf("unknown status must not downgrade: n=%d err=%v", n, err)
+	}
+	if d, _ := dbStore.GetNativeDevice("revoked"); d.AttestedLevel != "tee" {
+		t.Fatalf("unknown status downgraded a listed serial: %s", d.AttestedLevel)
+	}
+}
+
+func TestSweepSkipsDeviceRepairedMidSweep(t *testing.T) {
+	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	dev := &store.NativeDevice{ID: "d", UserID: user.ID, DeviceName: "d", DeviceIdentifier: "d", PublicKey: "old", IsMFAApprover: true,
+		AttestedLevel: "tee", BootState: "locked-verified", AttestationSerials: []string{"bb"}}
+	if err := dbStore.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	repair := func() {
+		if err := dbStore.UpsertNativeDevice(&store.NativeDevice{ID: "new", UserID: user.ID, DeviceName: "d", DeviceIdentifier: "d", PublicKey: "new", IsMFAApprover: true,
+			AttestedLevel: "strongbox", BootState: "locked-verified", AttestationSerials: []string{"cc"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	audited := 0
+	n, err := engine.SweepAttestations(repairingStatus{staticStatus{"bb": true}, repair}, false, func(string, string, string) { audited++ })
+	if err != nil || n != 0 || audited != 0 {
+		t.Fatalf("n=%d audited=%d err=%v", n, audited, err)
+	}
+	if d, _ := dbStore.GetNativeDevice("d"); d.PublicKey != "new" || d.AttestedLevel != "strongbox" {
+		t.Fatalf("re-paired device downgraded: key=%s level=%s", d.PublicKey, d.AttestedLevel)
 	}
 }

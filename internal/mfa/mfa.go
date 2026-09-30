@@ -312,6 +312,8 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 		IsMFAApprover:    true, // Enrolled devices are default approvers
 		CanSignOn:        validToken.SignOn,
 	}
+	// Graded before the enrolment write, which stores the grade with the key it graded.
+	e.gradeAttestation(req, device)
 
 	enrolled, err := e.store.RegisterNativeDeviceWithPairingToken(validToken.ID, device, &store.MFAMethod{
 		ID:         uuid.New().String(),
@@ -325,32 +327,27 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	if !enrolled {
 		return nil, errors.New("pairing token has already been redeemed or expired")
 	}
-
-	// Grading never fails a registration; a bad chain is graded none.
-	device.AttestedLevel, device.BootState, device.AttestedAt = "none", "unknown", nil
-	if len(req.Attestation) > 0 && e.attestor != nil {
-		chain := make([][]byte, 0, len(req.Attestation))
-		for _, b64 := range req.Attestation {
-			der, err := base64.StdEncoding.DecodeString(b64)
-			if err != nil {
-				chain = nil
-				break
-			}
-			chain = append(chain, der)
-		}
-		spki, _ := crypto.P256SPKI(req.PublicKey)
-		res := e.attestor.Verify(chain, attest.Expectation{Challenge: ExpectedChallenge(req), PublicKeySPKI: spki})
-		device.AttestedLevel, device.BootState, device.AttestationReason = res.Level, res.BootState, res.Reason
-		now := time.Now().UTC()
-		if err := e.store.SetNativeDeviceAttestation(device.ID, res.Level, res.BootState, res.Serials, now); err != nil {
-			return nil, err
-		}
-		if res.Level != "none" {
-			device.AttestedAt = &now
-		}
-	}
-
 	return device, nil
+}
+
+// gradeAttestation grades the request's attestation chain onto device. Grading never fails
+// a registration; a missing or bad chain is graded none.
+func (e *Engine) gradeAttestation(req *NativeDeviceRegisterRequest, device *store.NativeDevice) {
+	if len(req.Attestation) == 0 || e.attestor == nil {
+		return
+	}
+	chain := make([][]byte, 0, len(req.Attestation))
+	for _, b64 := range req.Attestation {
+		der, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			chain = nil
+			break
+		}
+		chain = append(chain, der)
+	}
+	spki, _ := crypto.P256SPKI(req.PublicKey)
+	res := e.attestor.Verify(chain, attest.Expectation{Challenge: ExpectedChallenge(req), PublicKeySPKI: spki})
+	device.AttestedLevel, device.BootState, device.AttestationSerials, device.AttestationReason = res.Level, res.BootState, res.Serials, res.Reason
 }
 
 func normalizeDevicePlatform(platform string) (string, error) {

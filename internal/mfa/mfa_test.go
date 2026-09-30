@@ -591,3 +591,44 @@ func TestRegisterNativeDeviceBadChainStillPairs(t *testing.T) {
 		t.Fatalf("device must be stored: %v %+v", err, stored)
 	}
 }
+
+// interleavingAttestor re-pairs the same device with an unattested key from inside Verify.
+type interleavingAttestor struct {
+	result attest.Result
+	during func()
+}
+
+func (a *interleavingAttestor) Verify([][]byte, attest.Expectation) attest.Result {
+	a.during()
+	return a.result
+}
+
+func TestRegisterNativeDeviceGradeStaysWithItsKey(t *testing.T) {
+	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	first, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	second, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	_, pub1 := signingKey(t)
+	_, pub2 := signingKey(t)
+	engine.SetAttestor(&interleavingAttestor{
+		result: attest.Result{Level: "strongbox", BootState: "locked-verified", Serials: []string{"1"}},
+		during: func() {
+			if _, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: second, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub2, PushToken: "fcm"}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	})
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: first, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub1, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := dbStore.GetNativeDevice(dev.ID)
+	switch {
+	case stored.PublicKey == pub2 && stored.AttestedLevel != "none":
+		t.Fatalf("unattested key inherited grade %s", stored.AttestedLevel)
+	case stored.PublicKey == pub1 && stored.AttestedLevel != "strongbox":
+		t.Fatalf("attested key lost its grade: %s", stored.AttestedLevel)
+	case stored.PublicKey != pub1 && stored.PublicKey != pub2:
+		t.Fatal("stored key is neither registration's")
+	}
+}
