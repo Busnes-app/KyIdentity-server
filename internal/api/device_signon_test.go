@@ -325,3 +325,27 @@ func TestSetDeviceSignOnNeedsApprover(t *testing.T) {
 		t.Fatalf("re-enable: status %d", rec.Code)
 	}
 }
+
+func TestDeviceSignOnNotPermittedIsNamed(t *testing.T) {
+	e := newSignOnEnv(t)
+	c := e.client(t, "public", "")
+	admin := newUser(t, e.db, "admin")
+	if err := e.db.SetMFAMethod(&store.MFAMethod{ID: uuid.NewString(), UserID: admin.ID, MethodType: "totp", EncryptedSecret: "x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := e.db.CreateSession(&store.Session{ID: "policy-admin", UserID: admin.ID, SessionTokenHash: "policy-admin", ExpiresAt: now.Add(time.Hour), AuthenticationEvidence: store.AuthenticationEvidence{PrimaryAuthenticatedAt: &now, FactorAuthenticatedAt: &now, FactorMethod: "totp"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.SetEnrollmentPolicy(store.EnrollmentPolicy{Scope: "organization", Required: true, AllowedMethods: []string{"totp", "push"}, GraceSeconds: 3600, Revision: 1}, "policy-admin", nil); err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"error":"invalid_grant","error_description":"signon_not_permitted"}`
+	if rec := e.post(e.assertion(t, c.ID), c.ID, ""); rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != want {
+		t.Fatalf("MFA-required user: status %d body %s", rec.Code, rec.Body.String())
+	}
+	const generic = `{"error":"invalid_grant","error_description":"The device assertion is invalid"}`
+	if rec := e.post("garbage", c.ID, ""); rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != generic {
+		t.Fatalf("garbage: status %d body %s", rec.Code, rec.Body.String())
+	}
+}

@@ -275,9 +275,9 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	}
 }
 
-// requireOrganizationMFA turns on the organization enrollment policy with push allowed,
-// so the fixture's device is a compliant factor and grace does not apply.
-func (f *signOnFixture) requireOrganizationMFA(t *testing.T) {
+// requireOrganizationMFA turns on the organization enrollment policy, activated by a
+// compliant TOTP administrator.
+func (f *signOnFixture) requireOrganizationMFA(t *testing.T, methods []string, grace int64) {
 	t.Helper()
 	admin := &store.User{ID: uuid.NewString(), Username: "admin", Email: "admin@example.com", PasswordHash: "x", Role: "admin", Status: "active"}
 	if err := f.db.CreateUser(admin); err != nil {
@@ -292,7 +292,7 @@ func (f *signOnFixture) requireOrganizationMFA(t *testing.T) {
 	if err := f.db.CreateSession(sess); err != nil {
 		t.Fatal(err)
 	}
-	p := store.EnrollmentPolicy{Scope: "organization", Required: true, AllowedMethods: []string{"totp", "push"}, GraceSeconds: 3600, Revision: 1}
+	p := store.EnrollmentPolicy{Scope: "organization", Required: true, AllowedMethods: methods, GraceSeconds: grace, Revision: 1}
 	if err := f.db.SetEnrollmentPolicy(p, sess.ID, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -300,13 +300,14 @@ func (f *signOnFixture) requireOrganizationMFA(t *testing.T) {
 
 func TestExchangeDeviceAssertionRefusedWhereMFAIsRequired(t *testing.T) {
 	f := newSignOnFixture(t)
-	f.requireOrganizationMFA(t)
+	// Push allowed: the device is a compliant factor, so grace does not apply.
+	f.requireOrganizationMFA(t, []string{"totp", "push"}, 3600)
 	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
-	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, store.ErrAppAccessDenied) {
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, store.ErrAppAccessDenied) || !errors.Is(err, ErrDeviceSignOnNotPermitted) {
 		t.Fatalf("MFA-required user: %v", err)
 	}
 	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
@@ -328,8 +329,69 @@ func TestExchangeDeviceAssertionRefusedByFactorPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
-	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, errAppPolicy) {
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, ErrDeviceSignOnNotPermitted) {
 		t.Fatalf("mfa policy: %v", err)
+	}
+}
+
+// fresh and max_age mean a recently entered password, which a device sign-on never has.
+func TestExchangeDeviceAssertionPasswordPolicyModes(t *testing.T) {
+	cases := map[string]struct {
+		policy store.AppAuthenticationPolicy
+		issued bool
+	}{
+		"reuse":   {store.AppAuthenticationPolicy{Mode: "reuse", Factor: "password"}, true},
+		"fresh":   {store.AppAuthenticationPolicy{Mode: "fresh", Factor: "password"}, false},
+		"max_age": {store.AppAuthenticationPolicy{Mode: "max_age", Factor: "password", PrimaryMaxAge: 3600}, false},
+	}
+	for name, c := range cases {
+		f := newSignOnFixture(t)
+		rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+		if err != nil || len(rows) == 0 {
+			t.Fatal(err)
+		}
+		if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, c.policy, rows[0].Revision, nil); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+		_, _, err = f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test")
+		if c.issued && err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if !c.issued && !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+			t.Errorf("%s: want ErrDeviceSignOnNotPermitted, got %v", name, err)
+		}
+	}
+}
+
+// Pins the enrollment grace clause: with push outside the allowed methods and no allowed
+// factor enrolled, the view admits the device session like a password login until the deadline.
+func TestExchangeDeviceAssertionEnrollmentGrace(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		grace  int64
+		issued bool
+	}{{"inside grace", 3600, true}, {"deadline passed", 0, false}} {
+		f := newSignOnFixture(t)
+		f.requireOrganizationMFA(t, []string{"totp"}, c.grace)
+		compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+		resp, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test")
+		if !c.issued {
+			if !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+				t.Errorf("%s: want ErrDeviceSignOnNotPermitted, got %v", c.name, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if amr, _ := claims["amr"].([]any); len(amr) != 1 || amr[0] != "pop" || claims["acr"] != DeviceACR {
+			t.Fatalf("%s: amr %v acr %v", c.name, claims["amr"], claims["acr"])
+		}
 	}
 }
 

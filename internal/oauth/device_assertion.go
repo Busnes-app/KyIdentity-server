@@ -116,6 +116,9 @@ type DeviceSignOnActor struct {
 
 var ErrDeviceSignOnDisabled = errors.New("device sign-on is disabled")
 
+// ErrDeviceSignOnNotPermitted: the device verified, but policy refuses this sign-in.
+var ErrDeviceSignOnNotPermitted = errors.New("device sign-on not permitted")
+
 // Refusal reasons. The handler maps all of them to invalid_grant; they exist for
 // audit and tests.
 var (
@@ -129,7 +132,7 @@ var (
 	errAssertionReplay    = errors.New("assertion replayed")
 	errUnknownClient      = errors.New("unknown client")
 	errUserInactive       = errors.New("user not found or inactive")
-	errAppPolicy          = errors.New("app sign-in policy not satisfied")
+	errAppPolicy          = fmt.Errorf("%w: app sign-in policy not satisfied", ErrDeviceSignOnNotPermitted)
 	errNoOpenIDScope      = errors.New("client may not be granted the openid scope")
 )
 
@@ -212,7 +215,8 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	if err != nil {
 		return nil, who, err
 	}
-	if !policy.Valid() || policy.EvidenceReason(evidence, now) != "" {
+	// fresh and max_age mean "password entered recently"; a device sign-on has no password.
+	if !policy.Valid() || policy.Mode != "reuse" || policy.EvidenceReason(evidence, now) != "" {
 		return nil, who, errAppPolicy
 	}
 	exp := now.Add(AccessTokenTTL)
@@ -248,7 +252,9 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	accessJTI := uuid.NewString()
 	beforeDeviceTokenRecord()
 	// Binding the evaluated revisions refuses the token if a policy or role edit landed since.
-	if err := e.store.RecordIssuedToken(&store.IssuedToken{JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: sess.ID, Policy: binding}); err != nil {
+	if err := e.store.RecordIssuedToken(&store.IssuedToken{JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: sess.ID, Policy: binding}); errors.Is(err, store.ErrAppAccessDenied) {
+		return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnNotPermitted, err)
+	} else if err != nil {
 		return nil, who, fmt.Errorf("failed to record issued token: %w", err)
 	}
 	accessToken, err := e.keyManager.SignJWT(map[string]any{

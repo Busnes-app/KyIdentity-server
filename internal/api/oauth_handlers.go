@@ -257,11 +257,14 @@ func (h *OAuthHandler) deviceSignOn(w http.ResponseWriter, r *http.Request, asse
 	}
 	tokenResp, who, err := h.oauthEngine.ExchangeDeviceAssertion(assertion, clientID, ip, r.UserAgent())
 	if err != nil {
-		// The precise reason is audit-only; the caller learns nothing about which check failed.
+		// The precise reason is audit-only; pre-signature failures stay generic.
 		h.audit.Record("device.signon", who.UserID, who.Username, who.DeviceID, "device", ip, r.UserAgent(), "failure", map[string]any{"clientId": clientID, "error": err.Error()})
 		description := "The device assertion is invalid"
+		// Both reasons arise only after the signature verified, so only the key holder learns them.
 		if errors.Is(err, oauth.ErrDeviceSignOnDisabled) {
 			description = "device_signon_disabled"
+		} else if errors.Is(err, oauth.ErrDeviceSignOnNotPermitted) {
+			description = "signon_not_permitted"
 		}
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": description})

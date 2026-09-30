@@ -774,7 +774,8 @@ rejected atomically, including concurrent device/passkey removals. Administrator
 reset remains available, revokes sessions and ends any remaining enrollment grace.
 
 **Authentication claims describe the login that established the session.** `auth_time`
-is the time the password was verified, preserved across later SSO redirects. The second
+is the time the password was verified (for device sign-on, the time the device assertion
+was verified), preserved across later SSO redirects. The second
 factor's verification time is recorded separately; completing MFA or issuing a token
 does not refresh the password's age. ID tokens expose these method/context values:
 
