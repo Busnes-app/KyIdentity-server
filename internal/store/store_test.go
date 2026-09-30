@@ -595,3 +595,82 @@ func TestConsumeDeviceSignOnJTIIsSingleUse(t *testing.T) {
 		t.Fatal("expired jti not swept")
 	}
 }
+
+func TestAttestationColumnsMigrateAndRoundTrip(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	for _, col := range []string{"attested_level", "attested_at", "boot_state", "attestation_serials"} {
+		var n int
+		if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('native_devices') WHERE name = ?`, col).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("column %s missing: %d %v", col, n, err)
+		}
+	}
+	u := createTestUser(t, s)
+	dev := &NativeDevice{ID: "d1", UserID: u.ID, DeviceName: "p", DeviceIdentifier: "i", PublicKey: "pk", IsMFAApprover: true, CanSignOn: true}
+	if err := s.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetNativeDevice("d1")
+	if got.AttestedLevel != "none" || got.BootState != "unknown" || got.AttestedAt != nil {
+		t.Fatalf("defaults: %+v", got)
+	}
+	at := time.Now().UTC().Truncate(time.Second)
+	if err := s.SetNativeDeviceAttestation("d1", "tee", "locked-verified", []string{"0a1b", "ff"}, at); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetNativeDevice("d1")
+	if got.AttestedLevel != "tee" || got.BootState != "locked-verified" || got.AttestedAt == nil || !got.AttestedAt.Equal(at) || len(got.AttestationSerials) != 2 {
+		t.Fatalf("after set: %+v", got)
+	}
+	list, _ := s.ListUserNativeDevices(u.ID)
+	if list[0].AttestedLevel != "tee" {
+		t.Fatalf("list: %+v", list[0])
+	}
+	attested, _ := s.ListAttestedDevices()
+	if len(attested) != 1 || attested[0].ID != "d1" {
+		t.Fatalf("attested: %+v", attested)
+	}
+	if err := s.UpsertNativeDevice(&NativeDevice{ID: "d2", UserID: u.ID, DeviceName: "p", DeviceIdentifier: "i", PublicKey: "pk2"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetNativeDevice("d1"); got.AttestedLevel != "none" || got.AttestedAt != nil || got.BootState != "unknown" || len(got.AttestationSerials) != 0 {
+		t.Fatalf("re-pair kept grade: %+v", got)
+	}
+	if err := s.SetNativeDeviceAttestation("d1", "tee", "locked-verified", nil, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetNativeDeviceAttestation("d1", "none", "unlocked", nil, at); err != nil {
+		t.Fatal(err)
+	}
+	attested, _ = s.ListAttestedDevices()
+	if len(attested) != 0 {
+		t.Fatal("downgraded device still listed")
+	}
+}
+
+func TestRecordIssuedTokenChecksAttestedLevel(t *testing.T) {
+	s, u, a := appAccessFixture(t)
+	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertNativeDevice(&NativeDevice{ID: "d1", UserID: u.ID, DeviceName: "p", DeviceIdentifier: "i", PublicKey: "pk", IsMFAApprover: true, CanSignOn: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetNativeDeviceAttestation("d1", "tee", "locked-verified", nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tok := func(id string) *IssuedToken {
+		tk := accessToken(u, id, "")
+		tk.Device = DeviceBinding{ID: "d1", UserID: u.ID, PublicKey: "pk", AttestedLevel: "tee"}
+		return tk
+	}
+	if err := s.RecordIssuedToken(tok("t1")); err != nil {
+		t.Fatalf("attested device refused: %v", err)
+	}
+	if err := s.SetNativeDeviceAttestation("d1", "none", "unknown", nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordIssuedToken(tok("t2")); !errors.Is(err, ErrAppAccessDenied) {
+		t.Fatalf("downgraded device: got %v, want ErrAppAccessDenied", err)
+	}
+}

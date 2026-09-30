@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -136,6 +137,10 @@ func (s *Store) migrate() error {
 		push_token_updated_at_ms INTEGER NOT NULL DEFAULT 0,
 		is_mfa_approver BOOLEAN NOT NULL DEFAULT 0,
 		can_sign_on BOOLEAN NOT NULL DEFAULT 0,
+		attested_level TEXT NOT NULL DEFAULT 'none',
+		attested_at DATETIME,
+		boot_state TEXT NOT NULL DEFAULT 'unknown',
+		attestation_serials TEXT NOT NULL DEFAULT '[]',
 		last_seen_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(user_id, device_identifier)
@@ -345,6 +350,9 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if err := s.migrateDevicePairingTokenSignOn(); err != nil {
+		return err
+	}
+	if err := s.migrateNativeDeviceAttestation(); err != nil {
 		return err
 	}
 	if err := s.migrateSCIM(); err != nil {
@@ -574,6 +582,20 @@ func (s *Store) migrateNativeDeviceCanSignOn() error {
 
 func (s *Store) migrateDevicePairingTokenSignOn() error {
 	return s.addColumnIfMissing("device_pairing_tokens", "sign_on", `ALTER TABLE device_pairing_tokens ADD COLUMN sign_on BOOLEAN NOT NULL DEFAULT 0`)
+}
+
+func (s *Store) migrateNativeDeviceAttestation() error {
+	for _, m := range []struct{ col, alter string }{
+		{"attested_level", `ALTER TABLE native_devices ADD COLUMN attested_level TEXT NOT NULL DEFAULT 'none'`},
+		{"attested_at", `ALTER TABLE native_devices ADD COLUMN attested_at DATETIME`},
+		{"boot_state", `ALTER TABLE native_devices ADD COLUMN boot_state TEXT NOT NULL DEFAULT 'unknown'`},
+		{"attestation_serials", `ALTER TABLE native_devices ADD COLUMN attestation_serials TEXT NOT NULL DEFAULT '[]'`},
+	} {
+		if err := s.addColumnIfMissing("native_devices", m.col, m.alter); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // addColumnIfMissing runs alter unless table already has column.
@@ -1377,6 +1399,7 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 			push_token = excluded.push_token,
 			is_mfa_approver = excluded.is_mfa_approver,
 			can_sign_on = excluded.can_sign_on,
+			attested_level = 'none', attested_at = NULL, boot_state = 'unknown', attestation_serials = '[]',
 			last_seen_at = excluded.last_seen_at
 		RETURNING id, created_at
 	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.LastSeenAt, dev.CreatedAt).Scan(&dev.ID, &dev.CreatedAt); err != nil {
@@ -1411,6 +1434,7 @@ func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
 		push_token = excluded.push_token,
 		is_mfa_approver = excluded.is_mfa_approver,
 		can_sign_on = excluded.can_sign_on,
+		attested_level = 'none', attested_at = NULL, boot_state = 'unknown', attestation_serials = '[]',
 		last_seen_at = excluded.last_seen_at
 	`
 	now := time.Now().UTC()
@@ -1423,8 +1447,16 @@ func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
 }
 
 func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
-	query := `SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, last_seen_at, created_at FROM native_devices WHERE user_id = ? ORDER BY created_at DESC`
-	rows, err := s.db.Query(query, userID)
+	return s.listNativeDevices(`WHERE user_id = ? ORDER BY created_at DESC`, userID)
+}
+
+// ListAttestedDevices returns every device holding an attested level.
+func (s *Store) ListAttestedDevices() ([]NativeDevice, error) {
+	return s.listNativeDevices(`WHERE attested_level <> 'none' ORDER BY created_at DESC`)
+}
+
+func (s *Store) listNativeDevices(clause string, args ...any) ([]NativeDevice, error) {
+	rows, err := s.db.Query(`SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials, last_seen_at, created_at FROM native_devices `+clause, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1434,7 +1466,12 @@ func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
 	for rows.Next() {
 		var dev NativeDevice
 		var pubKey, pushTok sql.NullString
-		if err := rows.Scan(&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform, &pubKey, &pushTok, &dev.IsMFAApprover, &dev.CanSignOn, &dev.LastSeenAt, &dev.CreatedAt); err != nil {
+		var attestedAt sql.NullTime
+		var serials string
+		if err := rows.Scan(&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform, &pubKey, &pushTok, &dev.IsMFAApprover, &dev.CanSignOn, &dev.AttestedLevel, &attestedAt, &dev.BootState, &serials, &dev.LastSeenAt, &dev.CreatedAt); err != nil {
+			return nil, err
+		}
+		if err := dev.setAttestation(attestedAt, serials); err != nil {
 			return nil, err
 		}
 		if pubKey.Valid {
@@ -1445,23 +1482,46 @@ func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
 		}
 		devices = append(devices, dev)
 	}
-	return devices, nil
+	return devices, rows.Err()
+}
+
+// SetNativeDeviceAttestation records the verified attestation outcome for a device.
+func (s *Store) SetNativeDeviceAttestation(deviceID, level, bootState string, serials []string, at time.Time) error {
+	if serials == nil {
+		serials = []string{}
+	}
+	raw, err := json.Marshal(serials)
+	if err != nil {
+		return err
+	}
+	var attestedAt any
+	if level != "none" {
+		attestedAt = at.UTC()
+	}
+	_, err = s.db.Exec(`UPDATE native_devices SET attested_level=?, attested_at=?, boot_state=?, attestation_serials=? WHERE id=?`, level, attestedAt, bootState, string(raw), deviceID)
+	return err
 }
 
 // GetNativeDevice returns the exact enrolled device named by a device-authenticated request.
 func (s *Store) GetNativeDevice(deviceID string) (*NativeDevice, error) {
 	var dev NativeDevice
 	var pubKey, pushTok sql.NullString
+	var attestedAt sql.NullTime
+	var serials string
 	err := s.db.QueryRow(`
 		SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token,
-		       push_token_updated_at_ms, is_mfa_approver, can_sign_on, last_seen_at, created_at
+		       push_token_updated_at_ms, is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials,
+		       last_seen_at, created_at
 		FROM native_devices WHERE id = ?`, deviceID).Scan(
 		&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform,
-		&pubKey, &pushTok, &dev.PushTokenUpdatedAtMS, &dev.IsMFAApprover, &dev.CanSignOn, &dev.LastSeenAt, &dev.CreatedAt)
+		&pubKey, &pushTok, &dev.PushTokenUpdatedAtMS, &dev.IsMFAApprover, &dev.CanSignOn, &dev.AttestedLevel, &attestedAt, &dev.BootState, &serials, &dev.LastSeenAt, &dev.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := dev.setAttestation(attestedAt, serials); err != nil {
 		return nil, err
 	}
 	if pubKey.Valid {
@@ -2191,10 +2251,10 @@ func (s *Store) RecordIssuedToken(t *IssuedToken) error {
 	query := `INSERT INTO issued_tokens (jti, user_id, client_id, expires_at, created_at, session_id)
  SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS
  (SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
- WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND (users.ends_at IS NULL OR users.ends_at>unixepoch()) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?))) AND (?='' OR EXISTS(SELECT 1 FROM app_registry policy WHERE policy.id=? AND policy.client_id=? AND policy.auth_revision=? AND policy.role_revision=?)) AND (?='' OR EXISTS(SELECT 1 FROM native_devices d WHERE d.id=? AND d.user_id=? AND d.public_key=? AND d.can_sign_on AND d.is_mfa_approver))`
+ WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND (users.ends_at IS NULL OR users.ends_at>unixepoch()) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?))) AND (?='' OR EXISTS(SELECT 1 FROM app_registry policy WHERE policy.id=? AND policy.client_id=? AND policy.auth_revision=? AND policy.role_revision=?)) AND (?='' OR EXISTS(SELECT 1 FROM native_devices d WHERE d.id=? AND d.user_id=? AND d.public_key=? AND d.can_sign_on AND d.is_mfa_approver AND d.attested_level=?))`
 	t.CreatedAt = time.Now().UTC()
 	b, d := t.Policy, t.Device
-	res, err := s.db.Exec(query, t.JTI, t.UserID, t.ClientID, t.ExpiresAt, t.CreatedAt, t.SessionID, t.SessionID, t.UserID, t.CreatedAt, t.UserID, t.ClientID, t.AuthorizationCodeID, t.AuthorizationCodeID, t.SessionID, t.ClientID, t.UserID, t.CreatedAt, t.CreatedAt, b.AppID, b.AppID, t.ClientID, b.AuthRevision, b.RoleRevision, d.ID, d.ID, d.UserID, d.PublicKey)
+	res, err := s.db.Exec(query, t.JTI, t.UserID, t.ClientID, t.ExpiresAt, t.CreatedAt, t.SessionID, t.SessionID, t.UserID, t.CreatedAt, t.UserID, t.ClientID, t.AuthorizationCodeID, t.AuthorizationCodeID, t.SessionID, t.ClientID, t.UserID, t.CreatedAt, t.CreatedAt, b.AppID, b.AppID, t.ClientID, b.AuthRevision, b.RoleRevision, d.ID, d.ID, d.UserID, d.PublicKey, d.AttestedLevel)
 	if err != nil {
 		return err
 	}

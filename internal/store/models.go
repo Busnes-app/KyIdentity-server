@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"encoding/json"
 	"time"
 )
 
@@ -102,6 +104,10 @@ type NativeDevice struct {
 	PushTokenUpdatedAtMS int64      `json:"-"`
 	IsMFAApprover        bool       `json:"isMfaApprover"`
 	CanSignOn            bool       `json:"canSignOn"`
+	AttestedLevel        string     `json:"attestedLevel"` // none | tee | strongbox
+	AttestedAt           *time.Time `json:"attestedAt,omitempty"`
+	BootState            string     `json:"bootState"` // locked-verified | locked-selfsigned | unlocked | unknown
+	AttestationSerials   []string   `json:"-"`
 	LastSeenAt           *time.Time `json:"lastSeenAt,omitempty"`
 	CreatedAt            time.Time  `json:"createdAt"`
 }
@@ -219,9 +225,16 @@ type IssuedToken struct {
 // RecordIssuedToken refuses the token unless that device still belongs to the user,
 // holds the same key and may sign on.
 type DeviceBinding struct {
-	ID        string
-	UserID    string
-	PublicKey string
+	ID, UserID, PublicKey string
+	AttestedLevel         string // the level the grant evaluated; the INSERT refuses if it changed
+}
+
+func (d *NativeDevice) setAttestation(at sql.NullTime, serials string) error {
+	if at.Valid {
+		t := at.Time.UTC()
+		d.AttestedAt = &t
+	}
+	return json.Unmarshal([]byte(serials), &d.AttestationSerials)
 }
 
 type Application struct {
