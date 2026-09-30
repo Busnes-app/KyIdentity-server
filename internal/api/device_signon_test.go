@@ -131,6 +131,18 @@ func TestTokenEndpointDeviceSignOnGrant(t *testing.T) {
 	if body.IDToken == "" || body.RefreshToken != "" {
 		t.Fatalf("body %s", rec.Body.String())
 	}
+	parts := strings.Split(body.IDToken, ".")
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var idClaims struct {
+		AMR []string `json:"amr"`
+		ACR string   `json:"acr"`
+	}
+	if err := json.Unmarshal(payload, &idClaims); err != nil || len(idClaims.AMR) != 1 || idClaims.AMR[0] != "hwk" || idClaims.ACR != "urn:kysignon:acr:device" {
+		t.Fatalf("device sign-on must be single factor: %s", payload)
+	}
 
 	rec = post("not-a-jwt")
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"invalid_grant"`) ||

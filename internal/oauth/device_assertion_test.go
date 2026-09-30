@@ -265,9 +265,71 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	if claims["aud"] != f.client.ID || claims["sub"] != f.user.ID || claims["signon_method"] != "device" || claims["device_id"] != "dev-1" || claims["sid"] == "" || claims["iss"] != f.engine.issuerURL {
 		t.Fatalf("claims %v", claims)
 	}
+	// Single factor: the device key alone must never claim MFA.
 	amr, _ := claims["amr"].([]any)
-	if len(amr) == 0 || amr[0] != "hwk" {
-		t.Fatalf("amr %v", claims["amr"])
+	if len(amr) != 1 || amr[0] != "hwk" || claims["acr"] != DeviceACR {
+		t.Fatalf("amr %v acr %v", claims["amr"], claims["acr"])
+	}
+	if at, _ := claims["auth_time"].(float64); at == 0 || time.Since(time.Unix(int64(at), 0)) > time.Minute {
+		t.Fatalf("auth_time %v", claims["auth_time"])
+	}
+}
+
+// requireOrganizationMFA turns on the organization enrollment policy with push allowed,
+// so the fixture's device is a compliant factor and grace does not apply.
+func (f *signOnFixture) requireOrganizationMFA(t *testing.T) {
+	t.Helper()
+	admin := &store.User{ID: uuid.NewString(), Username: "admin", Email: "admin@example.com", PasswordHash: "x", Role: "admin", Status: "active"}
+	if err := f.db.CreateUser(admin); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.SetMFAMethod(&store.MFAMethod{ID: uuid.NewString(), UserID: admin.ID, MethodType: "totp", EncryptedSecret: "x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	sess := &store.Session{ID: uuid.NewString(), UserID: admin.ID, SessionTokenHash: uuid.NewString(), ExpiresAt: at.Add(time.Hour),
+		AuthenticationEvidence: store.AuthenticationEvidence{PrimaryAuthenticatedAt: &at, FactorAuthenticatedAt: &at, FactorMethod: "totp"}}
+	if err := f.db.CreateSession(sess); err != nil {
+		t.Fatal(err)
+	}
+	p := store.EnrollmentPolicy{Scope: "organization", Required: true, AllowedMethods: []string{"totp", "push"}, GraceSeconds: 3600, Revision: 1}
+	if err := f.db.SetEnrollmentPolicy(p, sess.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExchangeDeviceAssertionRefusedWhereMFAIsRequired(t *testing.T) {
+	f := newSignOnFixture(t)
+	f.requireOrganizationMFA(t)
+	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, store.ErrAppAccessDenied) {
+		t.Fatalf("MFA-required user: %v", err)
+	}
+	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("refused sign-on left %d session(s) behind", len(after)-len(before))
+	}
+}
+
+func TestExchangeDeviceAssertionRefusedByFactorPolicy(t *testing.T) {
+	f := newSignOnFixture(t)
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "reuse", Factor: "mfa"}, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, errAppPolicy) {
+		t.Fatalf("mfa policy: %v", err)
 	}
 }
 

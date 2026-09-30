@@ -205,9 +205,9 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	if !hasScope(scope, "openid") {
 		return nil, who, errNoOpenIDScope
 	}
-	// FactorMethod is "push" because the proof is a signature from the enrolled
-	// push-approver key.
-	evidence := store.AuthenticationEvidence{PrimaryAuthenticatedAt: &now, FactorAuthenticatedAt: &now, FactorMethod: "push"}
+	// Single factor: nothing proves the device key is hardware-bound or user-verified,
+	// so mfa_session_access and factor-requiring app policies refuse this session.
+	evidence := store.AuthenticationEvidence{PrimaryAuthenticatedAt: &now}
 	policy, binding, err := e.store.ClientAuthenticationPolicyBinding(clientID)
 	if err != nil {
 		return nil, who, err
@@ -274,8 +274,8 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	claims["jti"] = uuid.NewString()
 	claims["token_use"] = "id_token"
 	claims["auth_time"] = now.Unix()
-	claims["amr"] = []string{"hwk", "user", "urn:kysignon:amr:push", "mfa"}
-	claims["acr"] = "urn:kysignon:acr:mfa"
+	claims["amr"] = []string{"hwk"}
+	claims["acr"] = DeviceACR
 	claims["signon_method"] = "device"
 	claims["device_id"] = dev.ID
 	idToken, err := e.keyManager.SignJWT(claims)
