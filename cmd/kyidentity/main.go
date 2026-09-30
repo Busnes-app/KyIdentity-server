@@ -140,10 +140,7 @@ func main() {
 		b, _ := hex.DecodeString(d) // validated by config.Load
 		digests = append(digests, b)
 	}
-	mfaEngine.SetAttestor(attest.NewVerifier(attestRoots, attestStatus, "org.kysecurity.authenticator", digests, func() bool {
-		s, _ := dbStore.AttestationSettings()
-		return s.RequireLockedBootloader
-	}))
+	mfaEngine.SetAttestor(attest.NewVerifier(attestRoots, attestStatus, "org.kysecurity.authenticator", digests, requireLockedBootloader(dbStore.AttestationSettings, log.Printf)))
 	go func() {
 		if err := attestRoots.Refresh(); err != nil {
 			log.Printf("attestation roots refresh failed: %v", err)
@@ -639,4 +636,17 @@ func httpFetch(url string) ([]byte, http.Header, error) {
 		return nil, nil, err
 	}
 	return body, resp.Header, nil
+}
+
+// requireLockedBootloader reads the admin policy per grade. A failed read keeps the
+// requirement on: an error may only downgrade a grade, never relax the policy.
+func requireLockedBootloader(read func() (store.AttestationSettings, error), warn func(string, ...any)) func() bool {
+	return func() bool {
+		s, err := read()
+		if err != nil {
+			warn("attestation settings unreadable, requiring locked bootloader: %v", err)
+			return true
+		}
+		return s.RequireLockedBootloader
+	}
 }

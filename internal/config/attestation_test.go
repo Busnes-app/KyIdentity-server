@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -11,6 +12,10 @@ func attestEnv(t *testing.T) {
 
 func TestAttestationDefaults(t *testing.T) {
 	attestEnv(t)
+	for _, k := range []string{"KYIDENTITY_ATTESTATION_STATUS_URL", "KYIDENTITY_KYAUTH_CERT_SHA256", "KYIDENTITY_ATTESTATION_EXTRA_ROOTS"} {
+		t.Setenv(k, "") // registers restore on cleanup
+		os.Unsetenv(k)
+	}
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
