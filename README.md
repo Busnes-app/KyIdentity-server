@@ -797,6 +797,12 @@ does not refresh the password's age. ID tokens expose these method/context value
 | Password + recovery code | `pwd`, `urn:kysignon:amr:recovery` | `urn:kysignon:acr:recovery` |
 | Paired device key (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
 
+A device sign-on ID token also carries `signon_method: device`, `device_id`, and `origin`:
+the `https://host[:port]` of the relay the user typed into KyAuth, which the device signed
+and KyIdentity matched against the origins of the client's registered redirect URIs.
+Register every public origin a consumer server is reached on (its browser SSO redirect URI
+already does this); a relay on any other origin is refused.
+
 These are KyIdentity context classes, not NIST assurance levels or assertions that keys
 are hardware-backed. Recovery does not claim ordinary MFA. The standard method names
 follow [RFC 8176](https://www.rfc-editor.org/rfc/rfc8176.html); the URNs are local contracts.

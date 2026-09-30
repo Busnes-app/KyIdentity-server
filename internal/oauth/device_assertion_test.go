@@ -12,6 +12,7 @@ import (
 	"errors"
 	"math/big"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func testHeader(kid string) map[string]any {
 func testClaims() map[string]any {
 	return map[string]any{
 		"iss": "device:dev-1", "sub": "user-1", "aud": "https://id.example/oauth/token",
-		"client_id": "kypost", "iat": int64(1000), "exp": int64(1200), "jti": "j-1",
+		"client_id": "kypost", "origin": "https://kypost.example", "iat": int64(1000), "exp": int64(1200), "jti": "j-1",
 	}
 }
 
@@ -54,7 +55,7 @@ func TestParseDeviceAssertionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.DeviceID != "dev-1" || a.Subject != "user-1" || a.ClientID != "kypost" || a.JTI != "j-1" || a.IssuedAt != 1000 || a.ExpiresAt != 1200 || a.Audience != "https://id.example/oauth/token" {
+	if a.DeviceID != "dev-1" || a.Subject != "user-1" || a.ClientID != "kypost" || a.JTI != "j-1" || a.IssuedAt != 1000 || a.ExpiresAt != 1200 || a.Audience != "https://id.example/oauth/token" || a.Origin != "https://kypost.example" {
 		t.Fatalf("claims: %+v", a)
 	}
 	if !verifyES256(&priv.PublicKey, input, sig) {
@@ -174,6 +175,21 @@ func TestParseDeviceAssertionRejectsInvalidClaims(t *testing.T) {
 		{"empty jti", func(c map[string]any) { c["jti"] = "" }},
 		{"zero iat", func(c map[string]any) { c["iat"] = int64(0) }},
 		{"zero exp", func(c map[string]any) { c["exp"] = int64(0) }},
+		{"missing origin", func(c map[string]any) { delete(c, "origin") }},
+		{"empty origin", func(c map[string]any) { c["origin"] = "" }},
+		{"non-string origin", func(c map[string]any) { c["origin"] = 443 }},
+		{"http origin", func(c map[string]any) { c["origin"] = "http://kypost.example" }},
+		{"schemeless origin", func(c map[string]any) { c["origin"] = "kypost.example" }},
+		{"origin with path", func(c map[string]any) { c["origin"] = "https://kypost.example/login" }},
+		{"origin with query", func(c map[string]any) { c["origin"] = "https://kypost.example?x=1" }},
+		{"origin with empty query", func(c map[string]any) { c["origin"] = "https://kypost.example?" }},
+		{"origin with fragment", func(c map[string]any) { c["origin"] = "https://kypost.example#x" }},
+		{"origin with userinfo", func(c map[string]any) { c["origin"] = "https://evil@kypost.example" }},
+		{"origin without host", func(c map[string]any) { c["origin"] = "https://" }},
+		{"origin with empty port", func(c map[string]any) { c["origin"] = "https://kypost.example:" }},
+		{"origin with port 0", func(c map[string]any) { c["origin"] = "https://kypost.example:0" }},
+		{"opaque origin", func(c map[string]any) { c["origin"] = "https:kypost.example" }},
+		{"oversized origin", func(c map[string]any) { c["origin"] = "https://" + strings.Repeat("a", 250) + ".example" }},
 	}
 	for _, tt := range claimTests {
 		c := testClaims()
@@ -254,7 +270,7 @@ func (f *signOnFixture) claims(mutate func(map[string]any)) map[string]any {
 	now := time.Now().Unix()
 	c := map[string]any{
 		"iss": "device:dev-1", "sub": f.user.ID, "aud": f.engine.issuerURL + "/oauth/token",
-		"client_id": f.client.ID, "iat": now, "exp": now + 120, "jti": uuid.NewString(),
+		"client_id": f.client.ID, "origin": "https://kypost.local", "iat": now, "exp": now + 120, "jti": uuid.NewString(),
 	}
 	if mutate != nil {
 		mutate(c)
@@ -276,7 +292,7 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims["aud"] != f.client.ID || claims["sub"] != f.user.ID || claims["signon_method"] != "device" || claims["device_id"] != "dev-1" || claims["sid"] == "" || claims["iss"] != f.engine.issuerURL {
+	if claims["aud"] != f.client.ID || claims["sub"] != f.user.ID || claims["signon_method"] != "device" || claims["device_id"] != "dev-1" || claims["sid"] == "" || claims["iss"] != f.engine.issuerURL || claims["origin"] != "https://kypost.local" {
 		t.Fatalf("claims %v", claims)
 	}
 	// Single factor: the device key alone must never claim MFA.
@@ -594,7 +610,7 @@ func TestExchangeDeviceAssertionRequiresOpenIDScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, f.db, c.ID)
-	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(m map[string]any) { m["client_id"] = c.ID }))
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(m map[string]any) { m["client_id"] = c.ID; m["origin"] = "https://noid.local" }))
 	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, c.ID, "127.0.0.1", "test"); !errors.Is(err, errNoOpenIDScope) {
 		t.Fatalf("no openid scope: %v", err)
 	}
@@ -741,4 +757,104 @@ func TestExchangeDeviceAssertionIssuesWhenDeviceUnchanged(t *testing.T) {
 	if n := f.issuedTokenCount(t); n != 1 {
 		t.Fatalf("issued tokens: %d", n)
 	}
+}
+
+func TestCanonicalOrigin(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://kypost.example":       "https://kypost.example",
+		"https://kypost.example/":      "https://kypost.example",
+		"https://KyPost.Example":       "https://kypost.example",
+		"HTTPS://kypost.example":       "https://kypost.example",
+		"https://kypost.example:443":   "https://kypost.example",
+		"https://kypost.example:8443":  "https://kypost.example:8443",
+		"https://kypost.example:08443": "https://kypost.example:8443",
+		"https://[2001:DB8::1]:443":    "https://[2001:db8::1]",
+		"https://[2001:db8::1]:8443":   "https://[2001:db8::1]:8443",
+		"https://kypost.example:65535": "https://kypost.example:65535",
+	} {
+		if got, ok := canonicalOrigin(in); !ok || got != want {
+			t.Errorf("%q: got %q %v, want %q", in, got, ok, want)
+		}
+	}
+	if _, ok := canonicalOrigin("https://kypost.example:65536"); ok {
+		t.Error("port above 65535 accepted")
+	}
+}
+
+// signOrigin exchanges an assertion carrying origin against client.
+func (f *signOnFixture) signOrigin(t *testing.T, client *store.OAuthClient, origin string) (*TokenResponse, error) {
+	t.Helper()
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(c map[string]any) {
+		c["client_id"] = client.ID
+		c["origin"] = origin
+	}))
+	resp, _, err := f.engine.ExchangeDeviceAssertion(compact, client.ID, "127.0.0.1", "test")
+	return resp, err
+}
+
+func (f *signOnFixture) clientWithRedirects(t *testing.T, redirectURIsJSON string) *store.OAuthClient {
+	t.Helper()
+	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "Relay", ClientType: "public",
+		RedirectURIsJSON: redirectURIsJSON, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
+	if err := f.db.CreateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	allowTestAppAccess(t, f.db, c.ID)
+	return c
+}
+
+func TestExchangeDeviceAssertionBindsOrigin(t *testing.T) {
+	f := newSignOnFixture(t)
+	multi := f.clientWithRedirects(t, `["https://relay.example/cb","https://Mail.Example:443/oauth/callback?x=1","https://relay.example:8443/cb","http://plain.example/cb"]`)
+	cases := []struct {
+		name, origin string
+		ok           bool
+		want         string
+	}{
+		{"first origin", "https://relay.example", true, "https://relay.example"},
+		{"second origin, registered with :443 and uppercase", "https://mail.example", true, "https://mail.example"},
+		{"explicit :443 and uppercase in assertion", "https://MAIL.example:443", true, "https://mail.example"},
+		{"registered non-default port", "https://relay.example:8443", true, "https://relay.example:8443"},
+		{"different host", "https://evil.example", false, ""},
+		{"same host, unregistered port", "https://relay.example:9443", false, ""},
+		{"subdomain of registered host", "https://a.relay.example", false, ""},
+		{"https form of an http-only redirect URI", "https://plain.example", false, ""},
+	}
+	for _, c := range cases {
+		before := f.sessionCount(t)
+		resp, err := f.signOrigin(t, multi, c.origin)
+		if !c.ok {
+			if !errors.Is(err, errAssertionOrigin) || errors.Is(err, ErrDeviceSignOnNotPermitted) || errors.Is(err, ErrDeviceSignOnDisabled) {
+				t.Errorf("%s: got %v, want errAssertionOrigin", c.name, err)
+			}
+			if after := f.sessionCount(t); after != before {
+				t.Errorf("%s: refusal left %d session(s)", c.name, after-before)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if f.sessionCount(t) != before+1 {
+			t.Errorf("%s: session count does not see device sessions", c.name)
+		}
+		claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
+		if err != nil || claims["origin"] != c.want {
+			t.Errorf("%s: origin claim %v (%v)", c.name, claims["origin"], err)
+		}
+	}
+	// The fixture client's own origin does not carry over to another client.
+	if _, err := f.signOrigin(t, multi, "https://kypost.local"); !errors.Is(err, errAssertionOrigin) {
+		t.Fatalf("another client's origin: %v", err)
+	}
+}
+
+func (f *signOnFixture) sessionCount(t *testing.T) int {
+	t.Helper()
+	s, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(s)
 }

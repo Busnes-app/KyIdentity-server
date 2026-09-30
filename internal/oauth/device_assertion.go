@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,12 +26,73 @@ type deviceAssertion struct {
 	Subject   string
 	Audience  string
 	ClientID  string
+	Origin    string // canonical
 	JTI       string
 	IssuedAt  int64
 	ExpiresAt int64
 }
 
-const maxAssertionLen = 4096
+const (
+	maxAssertionLen = 4096
+	maxOriginLen    = 256
+)
+
+// canonicalOrigin accepts only a bare https origin and returns it as
+// https://host[:port] with a lowercase host and the default port dropped.
+func canonicalOrigin(raw string) (string, bool) {
+	if len(raw) > maxOriginLen || strings.ContainsAny(raw, "?#") {
+		return "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Path != "" && u.Path != "/") {
+		return "", false
+	}
+	return originOf(u)
+}
+
+// originOf derives the canonical origin of an absolute https URL, ignoring its path.
+func originOf(u *url.URL) (string, bool) {
+	host := strings.ToLower(u.Hostname())
+	if u.Scheme != "https" || u.Opaque != "" || u.User != nil || host == "" {
+		return "", false
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if u.Port() == "" {
+		if strings.HasSuffix(u.Host, ":") {
+			return "", false
+		}
+		return "https://" + host, true
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return "", false
+	}
+	if port == 443 {
+		return "https://" + host, true
+	}
+	return "https://" + host + ":" + strconv.Itoa(port), true
+}
+
+// registeredOrigin reports whether origin is the origin of one of the client's
+// registered redirect URIs.
+func registeredOrigin(redirectURIsJSON, origin string) bool {
+	var registered []string
+	if err := json.Unmarshal([]byte(redirectURIsJSON), &registered); err != nil {
+		return false
+	}
+	for _, candidate := range registered {
+		u, err := url.Parse(strings.TrimSpace(candidate))
+		if err != nil {
+			continue
+		}
+		if o, ok := originOf(u); ok && o == origin {
+			return true
+		}
+	}
+	return false
+}
 
 // parseDeviceAssertion splits a compact JWS and pins the header to exactly what
 // KyAuth emits. It verifies nothing about the signature; that needs the device row.
@@ -65,6 +128,7 @@ func parseDeviceAssertion(compact string) (*deviceAssertion, []byte, []byte, err
 		Sub      string `json:"sub"`
 		Aud      string `json:"aud"`
 		ClientID string `json:"client_id"`
+		Origin   string `json:"origin"`
 		JTI      string `json:"jti"`
 		Iat      int64  `json:"iat"`
 		Exp      int64  `json:"exp"`
@@ -78,11 +142,15 @@ func parseDeviceAssertion(compact string) (*deviceAssertion, []byte, []byte, err
 	if c.Sub == "" || c.Aud == "" || c.ClientID == "" || c.JTI == "" || c.Iat == 0 || c.Exp == 0 {
 		return nil, nil, nil, errors.New("missing claim")
 	}
+	origin, ok := canonicalOrigin(c.Origin)
+	if !ok {
+		return nil, nil, nil, errors.New("origin must be a bare https origin")
+	}
 	sig, err := base64.RawURLEncoding.Strict().DecodeString(parts[2])
 	if err != nil {
 		return nil, nil, nil, errors.New("bad signature encoding")
 	}
-	a := &deviceAssertion{DeviceID: kid, Subject: c.Sub, Audience: c.Aud, ClientID: c.ClientID, JTI: c.JTI, IssuedAt: c.Iat, ExpiresAt: c.Exp}
+	a := &deviceAssertion{DeviceID: kid, Subject: c.Sub, Audience: c.Aud, ClientID: c.ClientID, Origin: origin, JTI: c.JTI, IssuedAt: c.Iat, ExpiresAt: c.Exp}
 	return a, []byte(parts[0] + "." + parts[1]), sig, nil
 }
 
@@ -107,11 +175,13 @@ const (
 	deviceAssertionSkew      = 60 * time.Second
 )
 
-// DeviceSignOnActor names the authenticated device and its user, for audit.
+// DeviceSignOnActor names the authenticated device and its user, and the relay
+// origin it signed, for audit.
 type DeviceSignOnActor struct {
 	DeviceID string
 	UserID   string
 	Username string
+	Origin   string
 }
 
 var ErrDeviceSignOnDisabled = errors.New("device sign-on is disabled")
@@ -131,6 +201,7 @@ var (
 	errAssertionSignature = errors.New("assertion signature invalid")
 	errAssertionReplay    = errors.New("assertion replayed")
 	errUnknownClient      = errors.New("unknown client")
+	errAssertionOrigin    = errors.New("assertion origin is not a registered origin of the client")
 	errUserInactive       = errors.New("user not found or inactive")
 	errAppPolicy          = fmt.Errorf("%w: app sign-in policy not satisfied", ErrDeviceSignOnNotPermitted)
 	errNoOpenIDScope      = errors.New("client may not be granted the openid scope")
@@ -175,7 +246,7 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 		return nil, DeviceSignOnActor{}, errAssertionSignature
 	}
 	// Past this point the device is authenticated, so its identity is safe to audit.
-	who := DeviceSignOnActor{DeviceID: dev.ID, UserID: dev.UserID}
+	who := DeviceSignOnActor{DeviceID: dev.ID, UserID: dev.UserID, Origin: a.Origin}
 	if !dev.CanSignOn || !dev.IsMFAApprover {
 		return nil, who, ErrDeviceSignOnDisabled
 	}
@@ -185,6 +256,11 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	}
 	if client == nil || !client.Enabled {
 		return nil, who, errUnknownClient
+	}
+	// The relay names the client_id; only a registered origin stops one relay from
+	// minting a token for another.
+	if !registeredOrigin(client.RedirectURIsJSON, a.Origin) {
+		return nil, who, errAssertionOrigin
 	}
 	fresh, err := e.store.ConsumeDeviceSignOnJTI(a.JTI, assertionExp.Add(deviceAssertionSkew))
 	if err != nil {
@@ -289,6 +365,7 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	claims["acr"] = DeviceACR
 	claims["signon_method"] = "device"
 	claims["device_id"] = dev.ID
+	claims["origin"] = a.Origin
 	idToken, err := e.keyManager.SignJWT(claims)
 	if err != nil {
 		return nil, who, fmt.Errorf("failed to sign ID token: %w", err)
