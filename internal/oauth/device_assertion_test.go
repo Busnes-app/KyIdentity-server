@@ -461,3 +461,58 @@ func TestExchangeDeviceAssertionRequiresOpenIDScope(t *testing.T) {
 		t.Fatalf("no openid scope: %v", err)
 	}
 }
+
+// raceAppEdit runs edit between the engine's policy evaluation and token registration,
+// then asserts the exchange is refused as app access and leaves no session behind.
+func raceAppEdit(t *testing.T, edit func(f *signOnFixture, app store.AppRecord) error) {
+	t.Helper()
+	f := newSignOnFixture(t)
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	beforeDeviceTokenRecord = func() {
+		if err := edit(f, rows[0]); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { beforeDeviceTokenRecord = func() {} })
+	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, store.ErrAppAccessDenied) {
+		t.Fatalf("token issued across an app edit: %v", err)
+	}
+	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("refused sign-on left %d session(s) behind", len(after)-len(before))
+	}
+}
+
+func TestExchangeDeviceAssertionRefusesPolicyTightenedBeforeIssue(t *testing.T) {
+	raceAppEdit(t, func(f *signOnFixture, app store.AppRecord) error {
+		return f.db.SetAppAuthenticationPolicy(app.ID, store.AppAuthenticationPolicy{Mode: "reuse", Factor: "passkey"}, app.Revision, nil)
+	})
+}
+
+func TestExchangeDeviceAssertionRefusesRoleRevisionBumpBeforeIssue(t *testing.T) {
+	raceAppEdit(t, func(f *signOnFixture, app store.AppRecord) error {
+		return f.db.SetAppClaimSettings(app.ID, !app.LegacyRoleClaim, app.GroupsClaim, app.Revision, nil)
+	})
+}
+
+func TestExchangeDeviceAssertionIssuesWhenPolicyUnchanged(t *testing.T) {
+	f := newSignOnFixture(t)
+	ran := false
+	beforeDeviceTokenRecord = func() { ran = true }
+	t.Cleanup(func() { beforeDeviceTokenRecord = func() {} })
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); err != nil || !ran {
+		t.Fatalf("unchanged policy: err=%v hook ran=%v", err, ran)
+	}
+}

@@ -133,6 +133,9 @@ var (
 	errNoOpenIDScope      = errors.New("client may not be granted the openid scope")
 )
 
+// beforeDeviceTokenRecord is a test seam between policy evaluation and token registration.
+var beforeDeviceTokenRecord = func() {}
+
 // ExchangeDeviceAssertion is the RFC 7523 jwt-bearer grant for a paired KyAuth device.
 // The assertion is the client authentication: the device's enrolled key is the only
 // thing that can produce it, so no client_secret is required for this grant. The
@@ -205,7 +208,7 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	// FactorMethod is "push" because the proof is a signature from the enrolled
 	// push-approver key.
 	evidence := store.AuthenticationEvidence{PrimaryAuthenticatedAt: &now, FactorAuthenticatedAt: &now, FactorMethod: "push"}
-	policy, err := e.store.ClientAuthenticationPolicy(clientID)
+	policy, binding, err := e.store.ClientAuthenticationPolicyBinding(clientID)
 	if err != nil {
 		return nil, who, err
 	}
@@ -243,7 +246,9 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 		}
 	}()
 	accessJTI := uuid.NewString()
-	if err := e.store.RecordIssuedToken(&store.IssuedToken{JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: sess.ID}); err != nil {
+	beforeDeviceTokenRecord()
+	// Binding the evaluated revisions refuses the token if a policy or role edit landed since.
+	if err := e.store.RecordIssuedToken(&store.IssuedToken{JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: sess.ID, Policy: binding}); err != nil {
 		return nil, who, fmt.Errorf("failed to record issued token: %w", err)
 	}
 	accessToken, err := e.keyManager.SignJWT(map[string]any{

@@ -98,9 +98,23 @@ func (s *Store) migrateAppAuthentication() error {
 }
 
 func (s *Store) ClientAuthenticationPolicy(clientID string) (AppAuthenticationPolicy, error) {
-	var p AppAuthenticationPolicy
-	err := s.db.QueryRow(`SELECT auth_mode,auth_primary_max_age,auth_factor,auth_factor_max_age FROM app_registry WHERE client_id=?`, clientID).Scan(&p.Mode, &p.PrimaryMaxAge, &p.Factor, &p.FactorMaxAge)
+	p, _, err := s.ClientAuthenticationPolicyBinding(clientID)
 	return p, err
+}
+
+// AppPolicyBinding names the app_registry revisions a policy decision was made against.
+// RecordIssuedToken refuses the token if the app has moved on since.
+type AppPolicyBinding struct {
+	AppID        string
+	AuthRevision int
+	RoleRevision int
+}
+
+func (s *Store) ClientAuthenticationPolicyBinding(clientID string) (AppAuthenticationPolicy, AppPolicyBinding, error) {
+	var p AppAuthenticationPolicy
+	var b AppPolicyBinding
+	err := s.db.QueryRow(`SELECT id,auth_revision,role_revision,auth_mode,auth_primary_max_age,auth_factor,auth_factor_max_age FROM app_registry WHERE client_id=?`, clientID).Scan(&b.AppID, &b.AuthRevision, &b.RoleRevision, &p.Mode, &p.PrimaryMaxAge, &p.Factor, &p.FactorMaxAge)
+	return p, b, err
 }
 
 func (s *Store) SetAppAuthenticationPolicy(id string, p AppAuthenticationPolicy, revision int, audit *AuditEvent) error {
