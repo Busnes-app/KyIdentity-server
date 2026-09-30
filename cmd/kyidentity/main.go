@@ -216,7 +216,7 @@ func main() {
 				if err := attestStatus.Refresh(); err != nil {
 					log.Printf("attestation status refresh failed: %v", err)
 				}
-				n, err := mfaEngine.SweepAttestations(attestStatus, requireLockedBootloader(dbStore.AttestationSettings, log.Printf)(), func(id, uid, reason string) {
+				n, err := mfaEngine.SweepAttestations(attestStatus, sweepRequireLocked(dbStore.AttestationSettings, log.Printf), func(id, uid, reason string) {
 					_ = auditLogger.Record("device.attestation_downgraded", "", "", id, "device", "", "sweep", "success", map[string]any{"userId": uid, "reason": reason})
 				})
 				log.Printf("attestation sweep: %d downgraded", n)
@@ -666,4 +666,15 @@ func requireLockedBootloader(read func() (store.AttestationSettings, error), war
 		}
 		return s.RequireLockedBootloader
 	}
+}
+
+// sweepRequireLocked is the sweep's bootloader policy. Unlike registration it does not fail
+// closed on a read error: a downgrade needs re-pairing to undo, so unknown state downgrades no one.
+func sweepRequireLocked(read func() (store.AttestationSettings, error), warn func(string, ...any)) bool {
+	s, err := read()
+	if err != nil {
+		warn("attestation sweep: settings unreadable, skipping bootloader check: %v", err)
+		return false
+	}
+	return s.RequireLockedBootloader
 }

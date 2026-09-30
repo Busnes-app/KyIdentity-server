@@ -26,3 +26,22 @@ func TestRequireLockedBootloaderFailsClosed(t *testing.T) {
 		t.Fatalf("successful reads must not warn: %d", warned)
 	}
 }
+
+func TestSweepRequireLocked(t *testing.T) {
+	var warned string
+	warn := func(f string, _ ...any) { warned = f }
+	if sweepRequireLocked(func() (store.AttestationSettings, error) { return store.AttestationSettings{}, errors.New("db down") }, warn) {
+		t.Fatal("read error must skip the bootloader check")
+	}
+	if warned == "" {
+		t.Fatal("read error must be logged")
+	}
+	for _, want := range []bool{true, false} {
+		got := sweepRequireLocked(func() (store.AttestationSettings, error) {
+			return store.AttestationSettings{RequireLockedBootloader: want}, nil
+		}, warn)
+		if got != want {
+			t.Fatalf("want %v got %v", want, got)
+		}
+	}
+}
