@@ -785,7 +785,7 @@ does not refresh the password's age. ID tokens expose these method/context value
 | Password + signed push | `pwd`, `urn:kysignon:amr:push`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + passkey | `pwd`, `urn:kysignon:amr:webauthn`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + recovery code | `pwd`, `urn:kysignon:amr:recovery` | `urn:kysignon:acr:recovery` |
-| Paired device key (device sign-on, single factor) | `hwk` | `urn:kysignon:acr:device` |
+| Paired device key (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
 
 These are KyIdentity context classes, not NIST assurance levels or assertions that keys
 are hardware-backed. Recovery does not claim ordinary MFA. The standard method names

@@ -267,7 +267,7 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	}
 	// Single factor: the device key alone must never claim MFA.
 	amr, _ := claims["amr"].([]any)
-	if len(amr) != 1 || amr[0] != "hwk" || claims["acr"] != DeviceACR {
+	if len(amr) != 1 || amr[0] != "pop" || claims["acr"] != DeviceACR {
 		t.Fatalf("amr %v acr %v", claims["amr"], claims["acr"])
 	}
 	if at, _ := claims["auth_time"].(float64); at == 0 || time.Since(time.Unix(int64(at), 0)) > time.Minute {

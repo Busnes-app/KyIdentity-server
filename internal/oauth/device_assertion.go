@@ -274,7 +274,7 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	claims["jti"] = uuid.NewString()
 	claims["token_use"] = "id_token"
 	claims["auth_time"] = now.Unix()
-	claims["amr"] = []string{"hwk"}
+	claims["amr"] = []string{"pop"}
 	claims["acr"] = DeviceACR
 	claims["signon_method"] = "device"
 	claims["device_id"] = dev.ID

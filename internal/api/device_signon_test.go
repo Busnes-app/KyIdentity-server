@@ -140,7 +140,7 @@ func TestTokenEndpointDeviceSignOnGrant(t *testing.T) {
 		AMR []string `json:"amr"`
 		ACR string   `json:"acr"`
 	}
-	if err := json.Unmarshal(payload, &idClaims); err != nil || len(idClaims.AMR) != 1 || idClaims.AMR[0] != "hwk" || idClaims.ACR != "urn:kysignon:acr:device" {
+	if err := json.Unmarshal(payload, &idClaims); err != nil || len(idClaims.AMR) != 1 || idClaims.AMR[0] != "pop" || idClaims.ACR != "urn:kysignon:acr:device" {
 		t.Fatalf("device sign-on must be single factor: %s", payload)
 	}
 
