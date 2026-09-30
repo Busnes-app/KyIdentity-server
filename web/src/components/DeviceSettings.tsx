@@ -25,6 +25,7 @@ import {
   Copy,
   Check,
   Plus,
+  ShieldCheck,
 } from 'lucide-react';
 
 /** Which account-security change the step-up prompt is currently gating. */
@@ -443,6 +444,10 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                       <CheckCircle size={12} /> Push approver
                     </span>
                   )}
+                  {dev.attestedLevel === 'strongbox' && <span className="badge-type"><ShieldCheck size={12} /> Attested: StrongBox</span>}
+                  {dev.attestedLevel === 'tee' && <span className="badge-type"><ShieldCheck size={12} /> Attested: TEE</span>}
+                  {dev.attestedLevel === 'none' && <span className="text-muted text-sm">Not attested. Pair KyAuth again to attest this phone.</span>}
+                  {dev.bootState === 'unlocked' && <span className="text-muted text-sm">Bootloader unlocked.</span>}
                   <label className="text-sm">
                     <input
                       type="checkbox"

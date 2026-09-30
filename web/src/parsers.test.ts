@@ -637,6 +637,16 @@ describe('parseDevice', () => {
     expect(parseDevice({ ...dev, canSignOn: true }).canSignOn).toBe(true);
     expect(parseDevice(dev).canSignOn).toBe(false);
   });
+
+  it('reads the attestation grade and boot state, defaulting to the least trusted', () => {
+    const d = parseDevice({ ...dev, attestedLevel: 'strongbox', bootState: 'locked-verified' });
+    expect(d.attestedLevel).toBe('strongbox');
+    expect(d.bootState).toBe('locked-verified');
+    expect(parseDevice({ ...dev, attestedLevel: 'tee' }).attestedLevel).toBe('tee');
+    expect(parseDevice(dev).attestedLevel).toBe('none');
+    expect(parseDevice(dev).bootState).toBe('unknown');
+    expect(parseDevice({ ...dev, attestedLevel: 'platinum' }).attestedLevel).toBe('none');
+  });
 });
 
 describe('parseAttestationSettings', () => {
