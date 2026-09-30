@@ -6,6 +6,7 @@ import {
   parseAlert,
   parseAlertPage,
   parseAlertSettings,
+  parseAttestationSettings,
   parseGroupPage,
   parseGroupUserPage,
   parseApplications,
@@ -635,5 +636,12 @@ describe('parseDevice', () => {
   it('reads canSignOn and treats a missing flag as off', () => {
     expect(parseDevice({ ...dev, canSignOn: true }).canSignOn).toBe(true);
     expect(parseDevice(dev).canSignOn).toBe(false);
+  });
+});
+
+describe('parseAttestationSettings', () => {
+  it('reads the locked-bootloader flag and refuses a non-boolean', () => {
+    expect(parseAttestationSettings({ requireLockedBootloader: true }).requireLockedBootloader).toBe(true);
+    expect(() => parseAttestationSettings({ requireLockedBootloader: 'yes' })).toThrow();
   });
 });

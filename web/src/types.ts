@@ -333,3 +333,4 @@ export interface SCIMConnector { id: string; name: string; status: 'active' | 'd
 
 export interface AppRolePrincipal { id: string; name: string }
 export interface AppRole { id: string; appId: string; name: string; description: string; createdAt: string; users: AppRolePrincipal[]; groups: AppRolePrincipal[] }
+export interface AttestationSettings { requireLockedBootloader: boolean }
