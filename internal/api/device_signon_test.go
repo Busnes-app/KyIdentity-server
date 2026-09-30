@@ -116,7 +116,7 @@ func TestTokenEndpointDeviceSignOnGrant(t *testing.T) {
 		return rec
 	}
 	now := time.Now().Unix()
-	claims := map[string]any{"iss": "device:" + dev.ID, "sub": user.ID, "aud": server.cfg.IssuerURL + "/oauth/token", "client_id": client.ID, "iat": now, "exp": now + 120, "jti": uuid.NewString()}
+	claims := map[string]any{"iss": "device:" + dev.ID, "sub": user.ID, "aud": server.cfg.IssuerURL + "/oauth/token", "client_id": client.ID, "origin": "https://kypost.example", "iat": now, "exp": now + 120, "jti": uuid.NewString()}
 	rec := post(signAssertion(t, priv, dev.ID, claims))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
@@ -138,10 +138,11 @@ func TestTokenEndpointDeviceSignOnGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	var idClaims struct {
-		AMR []string `json:"amr"`
-		ACR string   `json:"acr"`
+		AMR    []string `json:"amr"`
+		ACR    string   `json:"acr"`
+		Origin string   `json:"origin"`
 	}
-	if err := json.Unmarshal(payload, &idClaims); err != nil || len(idClaims.AMR) != 1 || idClaims.AMR[0] != "pop" || idClaims.ACR != "urn:kysignon:acr:device" {
+	if err := json.Unmarshal(payload, &idClaims); err != nil || len(idClaims.AMR) != 1 || idClaims.AMR[0] != "pop" || idClaims.ACR != "urn:kysignon:acr:device" || idClaims.Origin != "https://kypost.example" {
 		t.Fatalf("device sign-on must be single factor: %s", payload)
 	}
 
@@ -201,10 +202,16 @@ func (e *signOnEnv) client(t *testing.T, clientType, secretHash string) *store.O
 	return c
 }
 
+// assertion signs for the origin of e.client's redirect URI.
 func (e *signOnEnv) assertion(t *testing.T, clientID string) string {
 	t.Helper()
+	return e.assertionFrom(t, clientID, "https://app.example")
+}
+
+func (e *signOnEnv) assertionFrom(t *testing.T, clientID, origin string) string {
+	t.Helper()
 	now := time.Now().Unix()
-	return signAssertion(t, e.priv, e.dev.ID, map[string]any{"iss": "device:" + e.dev.ID, "sub": e.user.ID, "aud": e.server.cfg.IssuerURL + "/oauth/token", "client_id": clientID, "iat": now, "exp": now + 120, "jti": uuid.NewString()})
+	return signAssertion(t, e.priv, e.dev.ID, map[string]any{"iss": "device:" + e.dev.ID, "sub": e.user.ID, "aud": e.server.cfg.IssuerURL + "/oauth/token", "client_id": clientID, "origin": origin, "iat": now, "exp": now + 120, "jti": uuid.NewString()})
 }
 
 func (e *signOnEnv) post(assertion, clientID string, basicUser string) *httptest.ResponseRecorder {
@@ -293,7 +300,7 @@ func TestDeviceSignOnAudit(t *testing.T) {
 	if okRow.ActorID != e.user.ID || okRow.ActorUsername != e.user.Username {
 		t.Fatalf("success row names no actor: %+v", okRow)
 	}
-	if okRow.TargetID != e.dev.ID || !strings.Contains(okRow.DetailsJSON, c.ID) {
+	if okRow.TargetID != e.dev.ID || !strings.Contains(okRow.DetailsJSON, c.ID) || !strings.Contains(okRow.DetailsJSON, `"origin":"https://app.example"`) {
 		t.Fatalf("success row: %+v", okRow)
 	}
 	if failRow.TargetID != "" || !strings.Contains(failRow.DetailsJSON, c.ID) || !strings.Contains(failRow.DetailsJSON, `"error"`) {
@@ -377,4 +384,27 @@ func TestDeviceSignOnResetMidExchangeIsDisabled(t *testing.T) {
 	if tokens != 0 || sessions != 0 {
 		t.Fatalf("refusal left %d token(s), %d session(s)", tokens, sessions)
 	}
+}
+
+// A relay presenting another relay's client_id is refused generically, and the audit
+// row names the origin it presented.
+func TestDeviceSignOnOriginMismatch(t *testing.T) {
+	e := newSignOnEnv(t)
+	c := e.client(t, "public", "")
+	rec := e.post(e.assertionFrom(t, c.ID, "https://evil.example"), c.ID, "")
+	const generic = `{"error":"invalid_grant","error_description":"The device assertion is invalid"}`
+	if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != generic {
+		t.Fatalf("origin mismatch: status %d body %s", rec.Code, rec.Body.String())
+	}
+	events, _, err := e.db.ListAuditEvents(100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Action == "device.signon" && ev.Outcome == "failure" &&
+			strings.Contains(ev.DetailsJSON, `"origin":"https://evil.example"`) && strings.Contains(ev.DetailsJSON, c.ID) && ev.TargetID == e.dev.ID {
+			return
+		}
+	}
+	t.Fatalf("no failure audit row with the presented origin: %+v", events)
 }
