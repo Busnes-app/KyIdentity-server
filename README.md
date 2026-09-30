@@ -823,8 +823,8 @@ devices earn MFA-grade sign-on; `none` stays single factor. Configuration:
 
 A daily sweep refreshes the roots and status list and downgrades devices whose key was revoked.
 Audit actions: `device.attestation_downgraded`, `admin.attestation_configured`; `device.registered`
-records `attestedLevel`, `bootState` and `attestationReason`. Emulators ship software KeyMint,
-so `tee`/`strongbox` has only been exercised with real hardware; pair a physical phone to confirm.
+records `attestedLevel`, `bootState` and `attestationReason`. Emulators ship software KeyMint and always grade `none`, so the `tee`/`strongbox` path has not
+been verified on hardware yet; pair a physical phone to confirm.
 
 These are KyIdentity context classes, not NIST assurance levels. Only `hwk` from a verified
 attestation asserts a hardware-backed key. Recovery does not claim ordinary MFA. The standard method names
