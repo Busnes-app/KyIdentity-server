@@ -50,6 +50,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
   // Device Pairing State
   const [showPairModal, setShowPairModal] = useState(false);
   const [pairPin, setPairPin] = useState('');
+  const [pairSignOn, setPairSignOn] = useState(true);
   const [pairExpiresAt, setPairExpiresAt] = useState<number | null>(null);
   const [pairStartedAt, setPairStartedAt] = useState<number | null>(null);
   const [countdown, setCountdown] = useState(90);
@@ -200,7 +201,11 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
       setShowPairModal(true);
       setPairStartedAt(Date.now());
       setPairDeviceIdsBefore(new Set(devices.map((dev) => dev.id)));
-      const data = await apiJson('/api/user/devices/pairing-token', parsePairingToken, { method: 'POST', stepUpToken });
+      const data = await apiJson('/api/user/devices/pairing-token', parsePairingToken, {
+        method: 'POST',
+        stepUpToken,
+        body: JSON.stringify({ signOn: pairSignOn }),
+      });
       setPairPin(data.pinCode);
       const exp = new Date(data.expiresAt).getTime();
       setPairExpiresAt(exp);
@@ -364,6 +369,18 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
     requestStepUp('passkey-delete', id);
   };
 
+  const handleToggleSignOn = async (deviceId: string, canSignOn: boolean) => {
+    try {
+      await apiJson(`/api/notifications/native/devices/${deviceId}/sign-on`, parseSuccess, {
+        method: 'PUT',
+        body: JSON.stringify({ canSignOn }),
+      });
+      fetchDevices();
+    } catch (err) {
+      alert(errorMessage(err, 'Failed to update device'));
+    }
+  };
+
   const handleDeleteDevice = async (deviceId: string) => {
     if (!confirm('Are you sure you want to disconnect this device?')) return;
     try {
@@ -399,6 +416,11 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
           </button>
         </div>
 
+        <label className="text-sm">
+          <input type="checkbox" checked={pairSignOn} disabled={!permitted('push')} onChange={(e) => setPairSignOn(e.target.checked)} />{' '}
+          Allow this phone to sign in to suite apps (KyPost, KyVault, ...)
+        </label>
+
         <div className="device-list">
           {devices.length === 0 ? (
             <div className="empty-box">
@@ -416,8 +438,22 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                   <span className="device-id-mono">{dev.deviceIdentifier}</span>
                 </div>
                 <div className="device-status">
-                  <span className="badge-approver">
-                    <CheckCircle size={12} /> Push approver
+                  {dev.isMfaApprover && (
+                    <span className="badge-approver">
+                      <CheckCircle size={12} /> Push approver
+                    </span>
+                  )}
+                  <label className="text-sm">
+                    <input
+                      type="checkbox"
+                      checked={dev.canSignOn}
+                      disabled={restricted || !dev.isMfaApprover}
+                      onChange={(e) => handleToggleSignOn(dev.id, e.target.checked)}
+                    />{' '}
+                    Sign in to apps
+                  </label>
+                  <span className="text-muted text-sm">
+                    Off: this phone still approves MFA but cannot sign you in to KyPost or other suite apps.
                   </span>
                 </div>
                 <button

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -43,12 +45,22 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Optional body; absent or empty means the device may sign on.
+	var body struct {
+		SignOn *bool `json:"signOn"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+		return
+	}
+	signOn := body.SignOn == nil || *body.SignOn
+
 	if err := consumeStepUp(h.store, r); err != nil {
 		writeStepUpError(w, err)
 		return
 	}
 
-	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID)
+	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID, signOn)
 	if err != nil {
 		log.Printf("device pairing token creation failed for user %s: %v", user.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -68,10 +80,11 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 	}
 	qrBytes, _ := json.Marshal(qrPayload)
 
-	h.audit.Record("device.pairing_token_generated", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	h.audit.Record("device.pairing_token_generated", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"signOn": signOn})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
+		"signOn":       signOn,
 		"pairingToken": token,
 		"pinCode":      pin,
 		"expiresAt":    expiresAt,
@@ -245,6 +258,43 @@ func (h *DeviceHandler) SetDeviceMFAApprover(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// SetDeviceSignOn enables/disables a device as a sign-on device.
+func (h *DeviceHandler) SetDeviceSignOn(w http.ResponseWriter, r *http.Request) {
+	user := GetUserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	deviceID := r.PathValue("id")
+	var req struct {
+		CanSignOn bool `json:"canSignOn"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+		return
+	}
+	err := h.store.SetNativeDeviceCanSignOn(deviceID, user.ID, req.CanSignOn)
+	outcome := "success"
+	if err != nil {
+		outcome = "failure"
+	}
+	h.audit.Record("device.sign_on_changed", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), outcome, map[string]any{"canSignOn": req.CanSignOn})
+	if errors.Is(err, sql.ErrNoRows) {
+		http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		return
+	}
+	if errors.Is(err, store.ErrDeviceNotApprover) {
+		http.Error(w, `{"error":"device_not_approver"}`, http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

@@ -13,6 +13,9 @@ import (
 const PasswordACR = "urn:kysignon:acr:password"
 const MFAACR = "urn:kysignon:acr:mfa"
 
+// DeviceACR marks a single-factor device sign-on. It is issued, never requestable.
+const DeviceACR = "urn:kysignon:acr:device"
+
 // AuthenticationRequest only strengthens the ordinary SSO login requirements.
 // A zero maximum age means one fresh interaction, not an unachievable zero-second
 // lifetime for the resulting code. Positive ages are checked again at exchange.

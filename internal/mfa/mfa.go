@@ -191,7 +191,7 @@ func (e *Engine) VerifyAndConsumeRecoveryCode(userID, code string) (bool, error)
 }
 
 // GenerateDevicePairingToken generates a 90s ephemeral PIN & token for registering a native mobile device.
-func (e *Engine) GenerateDevicePairingToken(userID string) (token string, pin string, expiresAt time.Time, err error) {
+func (e *Engine) GenerateDevicePairingToken(userID string, signOn bool) (token string, pin string, expiresAt time.Time, err error) {
 	rawToken, err := crypto.GenerateRandomHex(24)
 	if err != nil {
 		return "", "", time.Time{}, err
@@ -209,6 +209,7 @@ func (e *Engine) GenerateDevicePairingToken(userID string) (token string, pin st
 		UserID:    userID,
 		TokenHash: tokenHash,
 		PINHash:   crypto.HashSHA256(pin),
+		SignOn:    signOn,
 		ExpiresAt: expiresAt,
 	}
 
@@ -285,6 +286,7 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 		PublicKey:        req.PublicKey,
 		PushToken:        strings.TrimSpace(req.PushToken),
 		IsMFAApprover:    true, // Enrolled devices are default approvers
+		CanSignOn:        validToken.SignOn,
 	}
 
 	enrolled, err := e.store.RegisterNativeDeviceWithPairingToken(validToken.ID, device, &store.MFAMethod{

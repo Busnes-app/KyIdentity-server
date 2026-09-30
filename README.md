@@ -783,7 +783,8 @@ rejected atomically, including concurrent device/passkey removals. Administrator
 reset remains available, revokes sessions and ends any remaining enrollment grace.
 
 **Authentication claims describe the login that established the session.** `auth_time`
-is the time the password was verified, preserved across later SSO redirects. The second
+is the time the password was verified (for device sign-on, the time the device assertion
+was verified), preserved across later SSO redirects. The second
 factor's verification time is recorded separately; completing MFA or issuing a token
 does not refresh the password's age. ID tokens expose these method/context values:
 
@@ -794,6 +795,7 @@ does not refresh the password's age. ID tokens expose these method/context value
 | Password + signed push | `pwd`, `urn:kysignon:amr:push`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + passkey | `pwd`, `urn:kysignon:amr:webauthn`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + recovery code | `pwd`, `urn:kysignon:amr:recovery` | `urn:kysignon:acr:recovery` |
+| Paired device key (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
 
 These are KyIdentity context classes, not NIST assurance levels or assertions that keys
 are hardware-backed. Recovery does not claim ordinary MFA. The standard method names

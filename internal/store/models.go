@@ -101,6 +101,7 @@ type NativeDevice struct {
 	PushToken            string     `json:"pushToken,omitempty"`
 	PushTokenUpdatedAtMS int64      `json:"-"`
 	IsMFAApprover        bool       `json:"isMfaApprover"`
+	CanSignOn            bool       `json:"canSignOn"`
 	LastSeenAt           *time.Time `json:"lastSeenAt,omitempty"`
 	CreatedAt            time.Time  `json:"createdAt"`
 }
@@ -110,6 +111,7 @@ type DevicePairingToken struct {
 	UserID    string     `json:"userId"`
 	TokenHash string     `json:"-"`
 	PINHash   string     `json:"-"`
+	SignOn    bool       `json:"signOn"`
 	ExpiresAt time.Time  `json:"expiresAt"`
 	UsedAt    *time.Time `json:"usedAt,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
@@ -201,14 +203,25 @@ type AuthorizationCode struct {
 
 // IssuedToken records an access token so it can be revoked before it expires.
 type IssuedToken struct {
-	AuthorizationCodeID string     `json:"-"` // Checked at registration, not stored.
-	SessionID           string     `json:"-"`
-	JTI                 string     `json:"jti"`
-	UserID              string     `json:"userId"`
-	ClientID            string     `json:"clientId"`
-	ExpiresAt           time.Time  `json:"expiresAt"`
-	RevokedAt           *time.Time `json:"revokedAt,omitempty"`
-	CreatedAt           time.Time  `json:"createdAt"`
+	AuthorizationCodeID string           `json:"-"` // Checked at registration, not stored.
+	Policy              AppPolicyBinding `json:"-"` // Code-less grants: checked at registration, not stored.
+	Device              DeviceBinding    `json:"-"` // Device sign-on: checked at registration, not stored.
+	SessionID           string           `json:"-"`
+	JTI                 string           `json:"jti"`
+	UserID              string           `json:"userId"`
+	ClientID            string           `json:"clientId"`
+	ExpiresAt           time.Time        `json:"expiresAt"`
+	RevokedAt           *time.Time       `json:"revokedAt,omitempty"`
+	CreatedAt           time.Time        `json:"createdAt"`
+}
+
+// DeviceBinding names the native device a sign-on token was verified against.
+// RecordIssuedToken refuses the token unless that device still belongs to the user,
+// holds the same key and may sign on.
+type DeviceBinding struct {
+	ID        string
+	UserID    string
+	PublicKey string
 }
 
 type Application struct {

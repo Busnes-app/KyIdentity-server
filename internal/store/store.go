@@ -135,6 +135,7 @@ func (s *Store) migrate() error {
 		push_token TEXT,
 		push_token_updated_at_ms INTEGER NOT NULL DEFAULT 0,
 		is_mfa_approver BOOLEAN NOT NULL DEFAULT 0,
+		can_sign_on BOOLEAN NOT NULL DEFAULT 0,
 		last_seen_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(user_id, device_identifier)
@@ -146,11 +147,17 @@ func (s *Store) migrate() error {
 		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		token_hash TEXT NOT NULL UNIQUE,
 		pin_hash TEXT NOT NULL,
+		sign_on BOOLEAN NOT NULL DEFAULT 0,
 		expires_at DATETIME NOT NULL,
 		used_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_device_pairing_tokens_hash ON device_pairing_tokens(token_hash);
+
+	CREATE TABLE IF NOT EXISTS device_signon_jtis (
+		jti TEXT PRIMARY KEY,
+		expires_at DATETIME NOT NULL
+	);
 
 	CREATE TABLE IF NOT EXISTS mfa_methods (
 		id TEXT PRIMARY KEY,
@@ -332,6 +339,12 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if err := s.migrateNativeDevicePushTokenReplayState(); err != nil {
+		return err
+	}
+	if err := s.migrateNativeDeviceCanSignOn(); err != nil {
+		return err
+	}
+	if err := s.migrateDevicePairingTokenSignOn(); err != nil {
 		return err
 	}
 	if err := s.migrateSCIM(); err != nil {
@@ -555,6 +568,27 @@ func (s *Store) migrateNativeDevicePushTokenReplayState() error {
 	return err
 }
 
+func (s *Store) migrateNativeDeviceCanSignOn() error {
+	return s.addColumnIfMissing("native_devices", "can_sign_on", `ALTER TABLE native_devices ADD COLUMN can_sign_on BOOLEAN NOT NULL DEFAULT 0`)
+}
+
+func (s *Store) migrateDevicePairingTokenSignOn() error {
+	return s.addColumnIfMissing("device_pairing_tokens", "sign_on", `ALTER TABLE device_pairing_tokens ADD COLUMN sign_on BOOLEAN NOT NULL DEFAULT 0`)
+}
+
+// addColumnIfMissing runs alter unless table already has column.
+func (s *Store) addColumnIfMissing(table, column, alter string) error {
+	var n int
+	if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, table, column).Scan(&n); err != nil {
+		return err
+	}
+	if n == 1 {
+		return nil
+	}
+	_, err := s.db.Exec(alter)
+	return err
+}
+
 // migrateLegacyDevicePairingTokens removes the pre-hash pin_code column. Pairing tokens
 // expire in 90 seconds, so preserving plaintext credentials during a schema migration is
 // strictly worse than forcing a fresh pairing attempt.
@@ -573,6 +607,7 @@ func (s *Store) migrateLegacyDevicePairingTokens() error {
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			token_hash TEXT NOT NULL UNIQUE,
 			pin_hash TEXT NOT NULL,
+			sign_on BOOLEAN NOT NULL DEFAULT 0,
 			expires_at DATETIME NOT NULL,
 			used_at DATETIME,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1236,17 +1271,17 @@ func (s *Store) DeleteDeliveredSyncEvents(olderThan time.Time) error {
 
 // Native Device & MFA Methods
 func (s *Store) CreateDevicePairingToken(token *DevicePairingToken) error {
-	query := `INSERT INTO device_pairing_tokens (id, user_id, token_hash, pin_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO device_pairing_tokens (id, user_id, token_hash, pin_hash, sign_on, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
 	token.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, token.ID, token.UserID, token.TokenHash, token.PINHash, token.ExpiresAt, token.CreatedAt)
+	_, err := s.db.Exec(query, token.ID, token.UserID, token.TokenHash, token.PINHash, token.SignOn, token.ExpiresAt, token.CreatedAt)
 	return err
 }
 
-const devicePairingTokenColumns = `id, user_id, token_hash, pin_hash, expires_at, used_at, created_at`
+const devicePairingTokenColumns = `id, user_id, token_hash, pin_hash, sign_on, expires_at, used_at, created_at`
 
 func scanDevicePairingToken(row *sql.Row) (*DevicePairingToken, error) {
 	t := &DevicePairingToken{}
-	err := row.Scan(&t.ID, &t.UserID, &t.TokenHash, &t.PINHash, &t.ExpiresAt, &t.UsedAt, &t.CreatedAt)
+	err := row.Scan(&t.ID, &t.UserID, &t.TokenHash, &t.PINHash, &t.SignOn, &t.ExpiresAt, &t.UsedAt, &t.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1331,17 +1366,20 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 	if dev.Platform == "" {
 		dev.Platform = "android"
 	}
-	if _, err := tx.Exec(`
-		INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, last_seen_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	// RETURNING: on re-pairing the conflict keeps the stored row's id and created_at.
+	if err := tx.QueryRow(`
+		INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, last_seen_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id, device_identifier) DO UPDATE SET
 			device_name = excluded.device_name,
 			platform = excluded.platform,
 			public_key = excluded.public_key,
 			push_token = excluded.push_token,
 			is_mfa_approver = excluded.is_mfa_approver,
+			can_sign_on = excluded.can_sign_on,
 			last_seen_at = excluded.last_seen_at
-	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.LastSeenAt, dev.CreatedAt); err != nil {
+		RETURNING id, created_at
+	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.LastSeenAt, dev.CreatedAt).Scan(&dev.ID, &dev.CreatedAt); err != nil {
 		return false, err
 	}
 
@@ -1364,14 +1402,15 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 
 func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
 	query := `
-	INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, last_seen_at, created_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, last_seen_at, created_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(user_id, device_identifier) DO UPDATE SET
 		device_name = excluded.device_name,
 		platform = excluded.platform,
 		public_key = excluded.public_key,
 		push_token = excluded.push_token,
 		is_mfa_approver = excluded.is_mfa_approver,
+		can_sign_on = excluded.can_sign_on,
 		last_seen_at = excluded.last_seen_at
 	`
 	now := time.Now().UTC()
@@ -1380,11 +1419,11 @@ func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
 	if dev.Platform == "" {
 		dev.Platform = "android"
 	}
-	return s.changeEnrollmentDevice(dev.UserID, query, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.LastSeenAt, dev.CreatedAt)
+	return s.changeEnrollmentDevice(dev.UserID, query, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.LastSeenAt, dev.CreatedAt)
 }
 
 func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
-	query := `SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, last_seen_at, created_at FROM native_devices WHERE user_id = ? ORDER BY created_at DESC`
+	query := `SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, last_seen_at, created_at FROM native_devices WHERE user_id = ? ORDER BY created_at DESC`
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
 		return nil, err
@@ -1395,7 +1434,7 @@ func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
 	for rows.Next() {
 		var dev NativeDevice
 		var pubKey, pushTok sql.NullString
-		if err := rows.Scan(&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform, &pubKey, &pushTok, &dev.IsMFAApprover, &dev.LastSeenAt, &dev.CreatedAt); err != nil {
+		if err := rows.Scan(&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform, &pubKey, &pushTok, &dev.IsMFAApprover, &dev.CanSignOn, &dev.LastSeenAt, &dev.CreatedAt); err != nil {
 			return nil, err
 		}
 		if pubKey.Valid {
@@ -1415,10 +1454,10 @@ func (s *Store) GetNativeDevice(deviceID string) (*NativeDevice, error) {
 	var pubKey, pushTok sql.NullString
 	err := s.db.QueryRow(`
 		SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token,
-		       push_token_updated_at_ms, is_mfa_approver, last_seen_at, created_at
+		       push_token_updated_at_ms, is_mfa_approver, can_sign_on, last_seen_at, created_at
 		FROM native_devices WHERE id = ?`, deviceID).Scan(
 		&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform,
-		&pubKey, &pushTok, &dev.PushTokenUpdatedAtMS, &dev.IsMFAApprover, &dev.LastSeenAt, &dev.CreatedAt)
+		&pubKey, &pushTok, &dev.PushTokenUpdatedAtMS, &dev.IsMFAApprover, &dev.CanSignOn, &dev.LastSeenAt, &dev.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1466,6 +1505,31 @@ func (s *Store) UpdateNativeDevicePushToken(deviceID, pushToken string, issuedAt
 
 func (s *Store) SetNativeDeviceMFAApprover(deviceID, userID string, isApprover bool) error {
 	return s.changeEnrollmentDevice(userID, `UPDATE native_devices SET is_mfa_approver = ? WHERE id = ? AND user_id = ?`, isApprover, deviceID, userID)
+}
+
+// ErrDeviceNotApprover means sign-on was requested for a device that is not an MFA approver.
+var ErrDeviceNotApprover = errors.New("device is not an MFA approver")
+
+// SetNativeDeviceCanSignOn is not an enrollment change, so it needs none of
+// changeEnrollmentDevice's compliance checks. Enabling needs an approver device;
+// disabling is always allowed.
+func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool) error {
+	res, err := s.db.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (? = 0 OR is_mfa_approver = 1)`, enabled, deviceID, userID, enabled)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 1 {
+		return nil
+	}
+	var exists int
+	if err := s.db.QueryRow(`SELECT 1 FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID).Scan(&exists); err != nil {
+		return err // sql.ErrNoRows when the device is not the user's
+	}
+	return ErrDeviceNotApprover
 }
 
 func (s *Store) DeleteNativeDevice(deviceID, userID string) error {
@@ -1578,7 +1642,7 @@ func (s *Store) DeleteUserMFAMethods(userID string) error {
 	if _, err := tx.Exec(`DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0 WHERE user_id = ?`, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0, can_sign_on = 0 WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE device_pairing_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL`, time.Now().UTC(), userID); err != nil {
@@ -2127,9 +2191,10 @@ func (s *Store) RecordIssuedToken(t *IssuedToken) error {
 	query := `INSERT INTO issued_tokens (jti, user_id, client_id, expires_at, created_at, session_id)
  SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS
  (SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
- WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND (users.ends_at IS NULL OR users.ends_at>unixepoch()) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?)))`
+ WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND (users.ends_at IS NULL OR users.ends_at>unixepoch()) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?))) AND (?='' OR EXISTS(SELECT 1 FROM app_registry policy WHERE policy.id=? AND policy.client_id=? AND policy.auth_revision=? AND policy.role_revision=?)) AND (?='' OR EXISTS(SELECT 1 FROM native_devices d WHERE d.id=? AND d.user_id=? AND d.public_key=? AND d.can_sign_on AND d.is_mfa_approver))`
 	t.CreatedAt = time.Now().UTC()
-	res, err := s.db.Exec(query, t.JTI, t.UserID, t.ClientID, t.ExpiresAt, t.CreatedAt, t.SessionID, t.SessionID, t.UserID, t.CreatedAt, t.UserID, t.ClientID, t.AuthorizationCodeID, t.AuthorizationCodeID, t.SessionID, t.ClientID, t.UserID, t.CreatedAt, t.CreatedAt)
+	b, d := t.Policy, t.Device
+	res, err := s.db.Exec(query, t.JTI, t.UserID, t.ClientID, t.ExpiresAt, t.CreatedAt, t.SessionID, t.SessionID, t.UserID, t.CreatedAt, t.UserID, t.ClientID, t.AuthorizationCodeID, t.AuthorizationCodeID, t.SessionID, t.ClientID, t.UserID, t.CreatedAt, t.CreatedAt, b.AppID, b.AppID, t.ClientID, b.AuthRevision, b.RoleRevision, d.ID, d.ID, d.UserID, d.PublicKey)
 	if err != nil {
 		return err
 	}
@@ -2420,7 +2485,7 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 	if _, err := tx.Exec(`DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0 WHERE user_id = ?`, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0, can_sign_on = 0 WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	if err := revokeUserAccessTx(tx, userID, now); err != nil {
@@ -2476,4 +2541,26 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 func (s *Store) PingContext(ctx context.Context) error {
 	var n int
 	return s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 1`).Scan(&n)
+}
+
+// ConsumeDeviceSignOnJTI records a device assertion id once. A second call for the
+// same jti returns false. Rows past their expiry are swept on every call; the
+// assertion they guard is refused by exp anyway.
+func (s *Store) ConsumeDeviceSignOnJTI(jti string, expiresAt time.Time) (bool, error) {
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`DELETE FROM device_signon_jtis WHERE expires_at < ?`, now); err != nil {
+		return false, err
+	}
+	res, err := s.db.Exec(`INSERT OR IGNORE INTO device_signon_jtis (jti, expires_at) VALUES (?, ?)`, jti, expiresAt.UTC())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// TouchNativeDeviceLastSeen records that a device just authenticated.
+func (s *Store) TouchNativeDeviceLastSeen(deviceID string, at time.Time) error {
+	_, err := s.db.Exec(`UPDATE native_devices SET last_seen_at = ? WHERE id = ?`, at.UTC(), deviceID)
+	return err
 }

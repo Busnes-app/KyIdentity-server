@@ -493,3 +493,105 @@ func TestMFAWipesRemovePasskeys(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceSignOnColumnsMigrate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE native_devices (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		device_name TEXT NOT NULL, device_identifier TEXT NOT NULL, platform TEXT NOT NULL DEFAULT 'android',
+		public_key TEXT, push_token TEXT, push_token_updated_at_ms INTEGER NOT NULL DEFAULT 0,
+		is_mfa_approver BOOLEAN NOT NULL DEFAULT 0, last_seen_at DATETIME, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(user_id, device_identifier));
+		CREATE TABLE device_pairing_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		token_hash TEXT NOT NULL UNIQUE, pin_hash TEXT NOT NULL, expires_at DATETIME NOT NULL, used_at DATETIME,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+		INSERT INTO native_devices(id,user_id,device_name,device_identifier) VALUES ('d1','u1','old phone','ident-1');`); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Close()
+
+	s, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	for table, col := range map[string]string{"native_devices": "can_sign_on", "device_pairing_tokens": "sign_on"} {
+		var n int
+		if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("%s.%s missing after migration", table, col)
+		}
+	}
+	dev, err := s.GetNativeDevice("d1")
+	if err != nil || dev == nil {
+		t.Fatalf("GetNativeDevice: %v %v", dev, err)
+	}
+	if dev.CanSignOn {
+		t.Fatal("a pre-existing device must not gain sign-on by migration")
+	}
+	var n int
+	if err := s.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='device_signon_jtis'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("device_signon_jtis table missing: %d %v", n, err)
+	}
+}
+
+func TestSignOnFlagsRoundTrip(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+
+	tok := &DevicePairingToken{ID: "t1", UserID: u.ID, TokenHash: "h1", PINHash: "p1", SignOn: true, ExpiresAt: time.Now().UTC().Add(time.Minute)}
+	if err := s.CreateDevicePairingToken(tok); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetValidDevicePairingToken("h1")
+	if err != nil || got == nil || !got.SignOn {
+		t.Fatalf("SignOn not persisted: %+v %v", got, err)
+	}
+
+	dev := &NativeDevice{ID: "d1", UserID: u.ID, DeviceName: "phone", DeviceIdentifier: "ident", CanSignOn: true}
+	if err := s.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	one, err := s.GetNativeDevice("d1")
+	if err != nil || one == nil || !one.CanSignOn {
+		t.Fatalf("GetNativeDevice CanSignOn: %+v %v", one, err)
+	}
+	list, err := s.ListUserNativeDevices(u.ID)
+	if err != nil || len(list) != 1 || !list[0].CanSignOn {
+		t.Fatalf("ListUserNativeDevices CanSignOn: %+v %v", list, err)
+	}
+}
+
+func TestConsumeDeviceSignOnJTIIsSingleUse(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	exp := time.Now().UTC().Add(5 * time.Minute)
+	ok, err := s.ConsumeDeviceSignOnJTI("j-1", exp)
+	if err != nil || !ok {
+		t.Fatalf("first use: %v %v", ok, err)
+	}
+	ok, err = s.ConsumeDeviceSignOnJTI("j-1", exp)
+	if err != nil || ok {
+		t.Fatalf("replay: %v %v", ok, err)
+	}
+	// Expired rows are swept so the table cannot grow without bound.
+	if _, err := s.db.Exec(`UPDATE device_signon_jtis SET expires_at = ? WHERE jti = 'j-1'`, time.Now().UTC().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = s.ConsumeDeviceSignOnJTI("j-2", exp)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	var n int
+	_ = s.db.QueryRow(`SELECT count(*) FROM device_signon_jtis WHERE jti = 'j-1'`).Scan(&n)
+	if n != 0 {
+		t.Fatal("expired jti not swept")
+	}
+}

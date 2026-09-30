@@ -1,4 +1,4 @@
-import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage } from './parsers';
+import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseDevice, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseAccessExplanation,
@@ -626,5 +626,14 @@ describe('parseAccessExplanation', () => {
   it('refuses a verdict it cannot trust rather than showing access as allowed', () => {
     expect(() => parseAccessExplanation({ explanation: { ...explanation, allowed: 'yes' } })).toThrow(/allowed/);
     expect(() => parseAccessExplanation({ explanation: { ...explanation, grants: [{ kind: 'magic', live: true }] } })).toThrow(/kind/);
+  });
+});
+
+describe('parseDevice', () => {
+  const dev = { id: 'd1', isMfaApprover: true, createdAt: '2026-01-01T00:00:00Z' };
+
+  it('reads canSignOn and treats a missing flag as off', () => {
+    expect(parseDevice({ ...dev, canSignOn: true }).canSignOn).toBe(true);
+    expect(parseDevice(dev).canSignOn).toBe(false);
   });
 });
