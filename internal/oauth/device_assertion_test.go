@@ -297,8 +297,8 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	}
 	// Single factor: the device key alone must never claim MFA.
 	amr, _ := claims["amr"].([]any)
-	if len(amr) != 1 || amr[0] != "pop" || claims["acr"] != DeviceACR {
-		t.Fatalf("amr %v acr %v", claims["amr"], claims["acr"])
+	if len(amr) != 1 || amr[0] != "pop" || claims["acr"] != DeviceACR || claims["attested"] != nil {
+		t.Fatalf("amr %v acr %v attested %v", claims["amr"], claims["acr"], claims["attested"])
 	}
 	if at, _ := claims["auth_time"].(float64); at == 0 || time.Since(time.Unix(int64(at), 0)) > time.Minute {
 		t.Fatalf("auth_time %v", claims["auth_time"])
@@ -911,6 +911,16 @@ func TestUnattestedDeviceStillRefusedUnderMandatoryMFA(t *testing.T) {
 	}
 }
 
+func TestAttestedDeviceRefusedWhereOrganizationDisallowsPush(t *testing.T) {
+	f := newSignOnFixture(t)
+	f.requireOrganizationMFA(t, []string{"totp"}, 0)
+	f.attest(t, "strongbox")
+	_, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	if !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("want not permitted, got %v", err)
+	}
+}
+
 func TestAttestedDeviceAllowsFreshPasswordPolicy(t *testing.T) {
 	f := newSignOnFixture(t)
 	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
@@ -934,8 +944,8 @@ func TestDowngradeDuringExchangeRefuses(t *testing.T) {
 	t.Cleanup(func() { beforeDeviceTokenRecord = func() {} })
 	tokens, sessions := f.issuedTokenCount(t), f.sessionCount(t)
 	_, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
-	if !errors.Is(err, ErrDeviceSignOnDisabled) && !errors.Is(err, ErrDeviceSignOnNotPermitted) {
-		t.Fatalf("downgrade mid-exchange must refuse, got %v", err)
+	if !errors.Is(err, ErrDeviceSignOnDisabled) || errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("downgrade mid-exchange must refuse as disabled, got %v", err)
 	}
 	if n := f.issuedTokenCount(t); n != tokens {
 		t.Fatalf("issued tokens %d -> %d", tokens, n)
