@@ -875,3 +875,68 @@ func (f *signOnFixture) sessionCount(t *testing.T) int {
 	}
 	return len(s)
 }
+
+func (f *signOnFixture) attest(t *testing.T, level string) {
+	t.Helper()
+	if err := f.db.SetNativeDeviceAttestation("dev-1", level, "locked-verified", []string{"1"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAttestedDeviceSatisfiesMandatoryMFA(t *testing.T) {
+	f := newSignOnFixture(t)
+	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)
+	f.attest(t, "tee")
+	resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	amr, _ := claims["amr"].([]any)
+	if len(amr) != 3 || amr[0] != "hwk" || amr[1] != "user" || amr[2] != "mfa" || claims["acr"] != "urn:kysignon:acr:mfa" || claims["attested"] != "tee" {
+		t.Fatalf("claims %v", claims)
+	}
+}
+
+func TestUnattestedDeviceStillRefusedUnderMandatoryMFA(t *testing.T) {
+	f := newSignOnFixture(t)
+	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)
+	_, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	if !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("want not permitted, got %v", err)
+	}
+}
+
+func TestAttestedDeviceAllowsFreshPasswordPolicy(t *testing.T) {
+	f := newSignOnFixture(t)
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "fresh", Factor: "password"}, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.attest(t, "tee")
+	resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	if err != nil || resp == nil || resp.IDToken == "" {
+		t.Fatalf("attested device under fresh policy: %v", err)
+	}
+}
+
+func TestDowngradeDuringExchangeRefuses(t *testing.T) {
+	f := newSignOnFixture(t)
+	f.attest(t, "strongbox")
+	beforeDeviceTokenRecord = func() { f.attest(t, "none") }
+	t.Cleanup(func() { beforeDeviceTokenRecord = func() {} })
+	tokens, sessions := f.issuedTokenCount(t), f.sessionCount(t)
+	_, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	if !errors.Is(err, ErrDeviceSignOnDisabled) && !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("downgrade mid-exchange must refuse, got %v", err)
+	}
+	if n := f.issuedTokenCount(t); n != tokens {
+		t.Fatalf("issued tokens %d -> %d", tokens, n)
+	}
+	if n := f.sessionCount(t); n != sessions {
+		t.Fatalf("sessions %d -> %d", sessions, n)
+	}
+}

@@ -284,15 +284,19 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	if !hasScope(scope, "openid") {
 		return nil, who, errNoOpenIDScope
 	}
-	// Single factor: nothing proves the device key is hardware-bound or user-verified,
-	// so mfa_session_access and factor-requiring app policies refuse this session.
+	// An attested key is hardware-bound and user-verified per use: two factors. Otherwise single factor.
+	attested := dev.AttestedLevel == "tee" || dev.AttestedLevel == "strongbox"
 	evidence := store.AuthenticationEvidence{PrimaryAuthenticatedAt: &now}
+	if attested {
+		evidence.FactorAuthenticatedAt, evidence.FactorMethod = &now, "push"
+	}
 	policy, binding, err := e.store.ClientAuthenticationPolicyBinding(clientID)
 	if err != nil {
 		return nil, who, err
 	}
-	// fresh and max_age mean "password entered recently"; a device sign-on has no password.
-	if !policy.Valid() || policy.Mode != "reuse" || policy.EvidenceReason(evidence, now) != "" {
+	// fresh and max_age mean "password entered recently"; only an attested device is allowed past them.
+	modeOK := attested || policy.Mode == "reuse"
+	if !policy.Valid() || !modeOK || policy.EvidenceReason(evidence, now) != "" {
 		return nil, who, errAppPolicy
 	}
 	exp := now.Add(AccessTokenTTL)
@@ -331,7 +335,7 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	// edit, MFA reset, sign-on toggle, device delete or key change landed since.
 	if err := e.store.RecordIssuedToken(&store.IssuedToken{JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: sess.ID, Policy: binding, Device: store.DeviceBinding{ID: dev.ID, UserID: dev.UserID, PublicKey: dev.PublicKey, AttestedLevel: dev.AttestedLevel}}); errors.Is(err, store.ErrAppAccessDenied) {
 		// The user's remedy for a device that lost eligibility is the devices page.
-		if cur, rerr := e.store.GetNativeDevice(dev.ID); rerr == nil && (cur == nil || cur.UserID != dev.UserID || cur.PublicKey != dev.PublicKey || !cur.CanSignOn || !cur.IsMFAApprover) {
+		if cur, rerr := e.store.GetNativeDevice(dev.ID); rerr == nil && (cur == nil || cur.UserID != dev.UserID || cur.PublicKey != dev.PublicKey || !cur.CanSignOn || !cur.IsMFAApprover || cur.AttestedLevel != dev.AttestedLevel) {
 			return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnDisabled, err)
 		}
 		return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnNotPermitted, err)
@@ -361,8 +365,14 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	claims["jti"] = uuid.NewString()
 	claims["token_use"] = "id_token"
 	claims["auth_time"] = now.Unix()
-	claims["amr"] = []string{"pop"}
-	claims["acr"] = DeviceACR
+	if attested {
+		claims["amr"] = []string{"hwk", "user", "mfa"}
+		claims["acr"] = "urn:kysignon:acr:mfa"
+		claims["attested"] = dev.AttestedLevel
+	} else {
+		claims["amr"] = []string{"pop"}
+		claims["acr"] = DeviceACR
+	}
 	claims["signon_method"] = "device"
 	claims["device_id"] = dev.ID
 	claims["origin"] = a.Origin
