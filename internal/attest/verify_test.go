@@ -6,6 +6,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +166,37 @@ func TestVerifyRefusals(t *testing.T) {
 			fake := ca.lookalike(t, LegacyRSARootSerialNumber, time.Now().Add(-time.Minute))
 			kd := keyDescriptionDER(t, kdOpts{attLevel: 2, kmLevel: 2, challenge: w.Challenge, hardware: goodHardware(t), software: goodSoftware(t, digest)})
 			return [][]byte{fake.leaf(t, &d.PublicKey, kd, 116, time.Now().Add(-time.Minute)), fake.interDER, fake.rootDER}, roots(ca), staticStatus{}
+		},
+		"non-CA intermediate": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			tmpl := &x509.Certificate{
+				SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "test intermediate"},
+				NotBefore: ca.inter.NotBefore, NotAfter: ca.inter.NotAfter, IsCA: false, BasicConstraintsValid: true,
+				KeyUsage: x509.KeyUsageCertSign,
+			}
+			der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.root, &ca.interKey.PublicKey, ca.rootKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return [][]byte{c[0], der, c[2]}, roots(ca), staticStatus{}
+		},
+		"leaf as issuer": func(t *testing.T, ca *testCA, d *ecdsa.PrivateKey, c [][]byte, w *Expectation) ([][]byte, Roots, Status) {
+			leaf, err := x509.ParseCertificate(c[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			sk, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			kd := keyDescriptionDER(t, kdOpts{attLevel: 2, kmLevel: 2, challenge: w.Challenge, hardware: goodHardware(t), software: goodSoftware(t, digest)})
+			tmpl := &x509.Certificate{
+				SerialNumber: big.NewInt(130), Subject: pkix.Name{CommonName: "sub leaf"},
+				NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+				ExtraExtensions: []pkix.Extension{{Id: ExtensionOID, Value: kd}},
+			}
+			sub, err := x509.CreateCertificate(rand.Reader, tmpl, leaf, &sk.PublicKey, d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.PublicKeySPKI = spki(t, &sk.PublicKey)
+			return [][]byte{sub, c[0], c[1], c[2]}, roots(ca), staticStatus{}
 		},
 	}
 	reasons := map[string]string{
