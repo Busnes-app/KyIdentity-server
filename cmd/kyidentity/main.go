@@ -191,6 +191,7 @@ func main() {
 	// Background housekeeping. Every table below is written by unauthenticated or
 	// per-request paths, so none of them may grow without bound.
 	go func() {
+		var lastSweep time.Time
 		housekeep := func() {
 			_ = dbStore.CleanupExpiredSessions()
 			_ = dbStore.DeleteExpiredMFATokens()
@@ -207,6 +208,22 @@ func main() {
 			_, _ = dbStore.DeleteOrphanedLauncherIcons(time.Hour)
 			if err := clearFirstRunPasswordFile(dbStore, cfg.DataDir); err != nil {
 				log.Printf("Housekeeping: %v", err)
+			}
+			if time.Since(lastSweep) >= 24*time.Hour {
+				if err := attestRoots.Refresh(); err != nil {
+					log.Printf("attestation roots refresh failed: %v", err)
+				}
+				if err := attestStatus.Refresh(); err != nil {
+					log.Printf("attestation status refresh failed: %v", err)
+				}
+				n, err := mfaEngine.SweepAttestations(attestStatus, requireLockedBootloader(dbStore.AttestationSettings, log.Printf)(), func(id, uid, reason string) {
+					_ = auditLogger.Record("device.attestation_downgraded", "", "", id, "device", "", "sweep", "success", map[string]any{"userId": uid, "reason": reason})
+				})
+				log.Printf("attestation sweep: %d downgraded", n)
+				if err != nil {
+					log.Printf("attestation sweep failed: %v", err)
+				}
+				lastSweep = time.Now()
 			}
 		}
 		housekeep()
