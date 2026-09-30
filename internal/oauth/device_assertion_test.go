@@ -850,6 +850,23 @@ func TestExchangeDeviceAssertionBindsOrigin(t *testing.T) {
 	}
 }
 
+func TestExchangeDeviceAssertionRefusesClientWithoutHTTPSRedirect(t *testing.T) {
+	f := newSignOnFixture(t)
+	for name, uris := range map[string]string{
+		"no redirect URIs":    `[]`,
+		"only http redirects": `["http://relay.example/cb","http://other.example/cb"]`,
+	} {
+		c := f.clientWithRedirects(t, uris)
+		before := f.sessionCount(t)
+		if _, err := f.signOrigin(t, c, "https://relay.example"); !errors.Is(err, errAssertionOrigin) {
+			t.Errorf("%s: got %v, want errAssertionOrigin", name, err)
+		}
+		if after := f.sessionCount(t); after != before {
+			t.Errorf("%s: refusal left %d session(s)", name, after-before)
+		}
+	}
+}
+
 func (f *signOnFixture) sessionCount(t *testing.T) int {
 	t.Helper()
 	s, err := f.db.ListUserSessions(f.user.ID, time.Hour)
