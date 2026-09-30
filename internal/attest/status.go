@@ -69,7 +69,11 @@ func (s *StatusList) Refresh() error {
 	return nil
 }
 
+// Stale reports whether the list is due a refresh. A disabled list never is.
 func (s *StatusList) Stale() bool {
+	if s.disabled {
+		return false
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.entries == nil || time.Since(s.loadedAt) > s.maxAge

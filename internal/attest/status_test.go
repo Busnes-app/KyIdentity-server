@@ -66,6 +66,9 @@ func TestStatusListMaxAgeAndStaleness(t *testing.T) {
 	if _, known := s.Revoked("abc"); known {
 		t.Fatal("list past 3x max-age must be unknown")
 	}
+	if NewStatusList("", nil).Stale() {
+		t.Fatal("a disabled list is never due a refresh")
+	}
 }
 
 func TestStatusListFailedRefreshKeepsPrevious(t *testing.T) {

@@ -1,6 +1,8 @@
 package attest
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -79,17 +81,19 @@ func LoadExtraRoots(path string) ([]*x509.Certificate, error) {
 }
 
 // RefreshingRoots serves the embedded and extra roots plus whatever the root endpoint published
-// at the last successful refresh. A failed refresh keeps the previous set.
+// at the last successful refresh. A failed refresh keeps the previous set. A fetched root
+// outside the base set widens trust, so each refresh reports it through warn.
 type RefreshingRoots struct {
 	mu      sync.RWMutex
 	base    []*x509.Certificate
 	fetched []*x509.Certificate
 	url     string
 	fetch   func(url string) ([]byte, http.Header, error)
+	warn    func(string, ...any)
 }
 
-func NewRefreshingRoots(base []*x509.Certificate, url string, fetch func(string) ([]byte, http.Header, error)) *RefreshingRoots {
-	return &RefreshingRoots{base: base, url: url, fetch: fetch}
+func NewRefreshingRoots(base []*x509.Certificate, url string, fetch func(string) ([]byte, http.Header, error), warn func(string, ...any)) *RefreshingRoots {
+	return &RefreshingRoots{base: base, url: url, fetch: fetch, warn: warn}
 }
 
 func (r *RefreshingRoots) Refresh() error {
@@ -108,10 +112,24 @@ func (r *RefreshingRoots) Refresh() error {
 	if err != nil {
 		return err
 	}
+	for _, c := range certs {
+		if !r.inBase(c) {
+			r.warn("attestation root not in the embedded or extra set is now trusted: subject %q, sha256 %x", c.Subject.String(), sha256.Sum256(c.Raw))
+		}
+	}
 	r.mu.Lock()
 	r.fetched = certs
 	r.mu.Unlock()
 	return nil
+}
+
+func (r *RefreshingRoots) inBase(c *x509.Certificate) bool {
+	for _, b := range r.base {
+		if bytes.Equal(b.Raw, c.Raw) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *RefreshingRoots) Pool() (*x509.CertPool, []*x509.Certificate) {

@@ -130,7 +130,7 @@ func main() {
 		log.Fatalf("Failed to load extra attestation roots: %v", err)
 	}
 	_, base := embedded.Pool()
-	attestRoots := attest.NewRefreshingRoots(append(base, extra...), "https://android.googleapis.com/attestation/root", httpFetch)
+	attestRoots := attest.NewRefreshingRoots(append(base, extra...), "https://android.googleapis.com/attestation/root", httpFetch, log.Printf)
 	attestStatus := attest.NewStatusList(cfg.AttestationStatusURL, httpFetch)
 	if cfg.AttestationStatusURL == "" {
 		log.Print("attestation revocation check disabled: KYIDENTITY_ATTESTATION_STATUS_URL is empty")
@@ -141,14 +141,6 @@ func main() {
 		digests = append(digests, b)
 	}
 	mfaEngine.SetAttestor(attest.NewVerifier(attestRoots, attestStatus, "org.kysecurity.authenticator", digests, requireLockedBootloader(dbStore.AttestationSettings, log.Printf)))
-	go func() {
-		if err := attestRoots.Refresh(); err != nil {
-			log.Printf("attestation roots refresh failed: %v", err)
-		}
-		if err := attestStatus.Refresh(); err != nil {
-			log.Printf("attestation status refresh failed: %v", err)
-		}
-	}()
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
 	adminCount, err := dbStore.CountAdmins()
@@ -209,13 +201,14 @@ func main() {
 			if err := clearFirstRunPasswordFile(dbStore, cfg.DataDir); err != nil {
 				log.Printf("Housekeeping: %v", err)
 			}
-			if time.Since(lastSweep) >= 24*time.Hour {
+			lastSweep = runAttestationHousekeeping(time.Now(), lastSweep, attestStatus.Stale(), func() {
 				if err := attestRoots.Refresh(); err != nil {
 					log.Printf("attestation roots refresh failed: %v", err)
 				}
 				if err := attestStatus.Refresh(); err != nil {
 					log.Printf("attestation status refresh failed: %v", err)
 				}
+			}, func() {
 				n, err := mfaEngine.SweepAttestations(attestStatus, sweepRequireLocked(dbStore.AttestationSettings, log.Printf), func(id, uid, reason string) {
 					_ = auditLogger.Record("device.attestation_downgraded", "", "", id, "device", "", "sweep", "success", map[string]any{"userId": uid, "reason": reason})
 				})
@@ -223,8 +216,7 @@ func main() {
 				if err != nil {
 					log.Printf("attestation sweep failed: %v", err)
 				}
-				lastSweep = time.Now()
-			}
+			})
 		}
 		housekeep()
 
@@ -636,7 +628,25 @@ func restoreServiceHelp() string {
 	return "expected service name (default: $KYIDENTITY_APP_NAME or " + config.DefaultAppName + ")"
 }
 
-var fetchClient = &http.Client{Timeout: 10 * time.Second}
+// runAttestationHousekeeping refreshes the attestation caches whenever the status list is stale
+// or the daily sweep is due, so a failed fetch is retried next tick. It returns the sweep time.
+func runAttestationHousekeeping(now, lastSweep time.Time, stale bool, refresh, sweep func()) time.Time {
+	due := now.Sub(lastSweep) >= 24*time.Hour
+	if stale || due {
+		refresh()
+	}
+	if !due {
+		return lastSweep
+	}
+	sweep()
+	return now
+}
+
+// fetchClient refuses redirects: a 3xx fails as non-2xx instead of leaving the pinned host.
+var fetchClient = &http.Client{
+	Timeout:       10 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
 
 // httpFetch GETs url for the attestation caches; the body is capped at 4 MiB.
 func httpFetch(url string) ([]byte, http.Header, error) {

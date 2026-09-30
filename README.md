@@ -821,7 +821,9 @@ devices earn MFA-grade sign-on; `none` stays single factor. Configuration:
   default off): refuse, and daily downgrade, devices whose bootloader is unlocked. The boot state
   is recorded either way.
 
-A daily sweep refreshes the roots and status list and downgrades devices whose key was revoked.
+The roots and status list are refreshed whenever the list goes stale (a failed fetch retries within
+15 minutes; redirects are refused, and a newly published root is logged), and a daily sweep
+downgrades devices whose key was revoked.
 Audit actions: `device.attestation_downgraded`, `admin.attestation_configured`; `device.registered`
 records `attestedLevel`, `bootState` and `attestationReason`. Emulators ship software KeyMint and always grade `none`, so the `tee`/`strongbox` path has not
 been verified on hardware yet; pair a physical phone to confirm.
