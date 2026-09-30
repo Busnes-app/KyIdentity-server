@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 
 	"github.com/Busnes-app/kyidentity-server/internal/api"
+	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
@@ -118,6 +121,37 @@ func main() {
 		log.Fatalf("Failed to initialize push relay sender: %v", err)
 	}
 	mfaEngine.SetPushSender(relaySender)
+	embedded, err := attest.LoadEmbeddedRoots()
+	if err != nil {
+		log.Fatalf("Failed to load attestation roots: %v", err)
+	}
+	extra, err := attest.LoadExtraRoots(cfg.AttestationExtraRoots)
+	if err != nil {
+		log.Fatalf("Failed to load extra attestation roots: %v", err)
+	}
+	_, base := embedded.Pool()
+	attestRoots := attest.NewRefreshingRoots(append(base, extra...), "https://android.googleapis.com/attestation/root", httpFetch)
+	attestStatus := attest.NewStatusList(cfg.AttestationStatusURL, httpFetch)
+	if cfg.AttestationStatusURL == "" {
+		log.Print("attestation revocation check disabled: KYIDENTITY_ATTESTATION_STATUS_URL is empty")
+	}
+	digests := make([][]byte, 0, len(cfg.KyAuthCertSHA256))
+	for _, d := range cfg.KyAuthCertSHA256 {
+		b, _ := hex.DecodeString(d) // validated by config.Load
+		digests = append(digests, b)
+	}
+	mfaEngine.SetAttestor(attest.NewVerifier(attestRoots, attestStatus, "org.kysecurity.authenticator", digests, func() bool {
+		s, _ := dbStore.AttestationSettings()
+		return s.RequireLockedBootloader
+	}))
+	go func() {
+		if err := attestRoots.Refresh(); err != nil {
+			log.Printf("attestation roots refresh failed: %v", err)
+		}
+		if err := attestStatus.Refresh(); err != nil {
+			log.Printf("attestation status refresh failed: %v", err)
+		}
+	}()
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
 	adminCount, err := dbStore.CountAdmins()
@@ -586,4 +620,23 @@ func runRestore(args []string) {
 
 func restoreServiceHelp() string {
 	return "expected service name (default: $KYIDENTITY_APP_NAME or " + config.DefaultAppName + ")"
+}
+
+var fetchClient = &http.Client{Timeout: 10 * time.Second}
+
+// httpFetch GETs url for the attestation caches; the body is capped at 4 MiB.
+func httpFetch(url string) ([]byte, http.Header, error) {
+	resp, err := fetchClient.Get(url)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, nil, err
+	}
+	return body, resp.Header, nil
 }

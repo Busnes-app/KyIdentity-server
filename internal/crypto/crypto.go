@@ -409,3 +409,13 @@ func (m *JWTKeyManager) verifyJWT(tokenString string, allowExpired bool) (map[st
 
 	return claims, nil
 }
+
+// P256SPKI returns the DER SubjectPublicKeyInfo of a P-256 key in either form
+// ParseP256PublicKey accepts.
+func P256SPKI(encoded string) ([]byte, error) {
+	pub, err := ParseP256PublicKey(encoded)
+	if err != nil {
+		return nil, err
+	}
+	return x509.MarshalPKIXPublicKey(pub)
+}

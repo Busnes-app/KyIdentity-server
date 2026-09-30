@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -154,5 +155,20 @@ func TestVerifyECDSAP256(t *testing.T) {
 	otherSPKI, _ := x509.MarshalPKIXPublicKey(&other.PublicKey)
 	if VerifyECDSAP256(base64.StdEncoding.EncodeToString(otherSPKI), msg, sigB64) {
 		t.Fatal("signature verified against the wrong public key")
+	}
+}
+
+func TestP256SPKIAcceptsBothForms(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	want, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	raw := elliptic.Marshal(elliptic.P256(), key.PublicKey.X, key.PublicKey.Y)
+	for name, in := range map[string][]byte{"spki": want, "sec1": raw} {
+		got, err := P256SPKI(base64.StdEncoding.EncodeToString(in))
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if _, err := P256SPKI("AAAA"); err == nil {
+		t.Fatal("garbage key accepted")
 	}
 }

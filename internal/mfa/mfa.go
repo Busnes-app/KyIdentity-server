@@ -4,8 +4,10 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -17,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
@@ -26,6 +29,25 @@ type Engine struct {
 	store         *store.Store
 	encryptionKey []byte
 	pushSender    PushSender
+	attestor      Attestor
+}
+
+// Attestor grades a device key attestation chain.
+type Attestor interface {
+	Verify(chain [][]byte, want attest.Expectation) attest.Result
+}
+
+// SetAttestor installs the chain verifier; nil grades every registration none.
+func (e *Engine) SetAttestor(a Attestor) { e.attestor = a }
+
+// ExpectedChallenge is the attestation challenge KyAuth binds to the credential it redeems.
+func ExpectedChallenge(req *NativeDeviceRegisterRequest) []byte {
+	cred := req.PairingToken
+	if cred == "" {
+		cred = req.UserID + "|" + req.PINCode
+	}
+	sum := sha256.Sum256([]byte("kyidentity-attest-v1|" + cred))
+	return sum[:]
 }
 
 func NewEngine(s *store.Store, encryptionKey []byte) *Engine {
@@ -229,6 +251,8 @@ type NativeDeviceRegisterRequest struct {
 	Platform         string `json:"platform,omitempty"`
 	PublicKey        string `json:"publicKey,omitempty"`
 	PushToken        string `json:"pushToken,omitempty"`
+	// Attestation is the base64 DER Android key attestation chain, leaf first.
+	Attestation []string `json:"attestation,omitempty"`
 }
 
 // RegisterNativeDevice registers a device presented with a valid 90s pairing token, or a
@@ -300,6 +324,30 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	}
 	if !enrolled {
 		return nil, errors.New("pairing token has already been redeemed or expired")
+	}
+
+	// Grading never fails a registration; a bad chain is graded none.
+	device.AttestedLevel, device.BootState, device.AttestedAt = "none", "unknown", nil
+	if len(req.Attestation) > 0 && e.attestor != nil {
+		chain := make([][]byte, 0, len(req.Attestation))
+		for _, b64 := range req.Attestation {
+			der, err := base64.StdEncoding.DecodeString(b64)
+			if err != nil {
+				chain = nil
+				break
+			}
+			chain = append(chain, der)
+		}
+		spki, _ := crypto.P256SPKI(req.PublicKey)
+		res := e.attestor.Verify(chain, attest.Expectation{Challenge: ExpectedChallenge(req), PublicKeySPKI: spki})
+		device.AttestedLevel, device.BootState, device.AttestationReason = res.Level, res.BootState, res.Reason
+		now := time.Now().UTC()
+		if err := e.store.SetNativeDeviceAttestation(device.ID, res.Level, res.BootState, res.Serials, now); err != nil {
+			return nil, err
+		}
+		if res.Level != "none" {
+			device.AttestedAt = &now
+		}
 	}
 
 	return device, nil

@@ -108,6 +108,7 @@ type NativeDevice struct {
 	AttestedAt           *time.Time `json:"attestedAt,omitempty"`
 	BootState            string     `json:"bootState"` // locked-verified | locked-selfsigned | unlocked | unknown
 	AttestationSerials   []string   `json:"-"`
+	AttestationReason    string     `json:"-"` // transient: why grading fell short, for the audit row
 	LastSeenAt           *time.Time `json:"lastSeenAt,omitempty"`
 	CreatedAt            time.Time  `json:"createdAt"`
 }
