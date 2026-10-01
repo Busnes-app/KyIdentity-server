@@ -564,7 +564,8 @@ factors and recovery codes are in the capsule and keep working, so the restore r
 asks for connector credentials to be reviewed for rotation before delivery resumes.
 Procedures are in [docs/RUNBOOKS.md](docs/RUNBOOKS.md) and
 [docs/RESTORE.md](docs/RESTORE.md); what has and has not been verified for a release is
-in [docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md).
+in [docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md). Device attestation checks that need a
+physical phone are in [docs/attestation-verification-plan.md](docs/attestation-verification-plan.md).
 
 ## Integration Requirements
 
