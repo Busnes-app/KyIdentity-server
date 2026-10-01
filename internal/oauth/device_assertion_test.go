@@ -971,9 +971,37 @@ func TestAttestedAssertionAgeCountsAgainstMaxAge(t *testing.T) {
 	if err != nil || resp == nil {
 		t.Fatalf("fresh assertion: %v", err)
 	}
-	// The token deadline counts from the signature, not the exchange.
-	if resp.ExpiresIn > 50 {
-		t.Fatalf("expires_in %d exceeds iat+max_age", resp.ExpiresIn)
+	// The deadline counts from the signature, not the exchange; seconds truncate, so allow a few.
+	if resp.ExpiresIn < 45 || resp.ExpiresIn > 50 {
+		t.Fatalf("expires_in %d, want 45..50", resp.ExpiresIn)
+	}
+}
+
+// A phone clock up to the skew ahead must not produce future evidence.
+func TestAttestedAssertionWithFutureIatIsClamped(t *testing.T) {
+	f := newSignOnFixture(t)
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "max_age", Factor: "password", PrimaryMaxAge: 60}, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.attest(t, "tee")
+	iat := time.Now().Unix() + 30
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(c map[string]any) { c["iat"], c["exp"] = iat, iat+120 }))
+	resp, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "t")
+	if err != nil {
+		t.Fatalf("future iat: %v", err)
+	}
+	claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at, _ := claims["auth_time"].(float64)
+	tokIat, _ := claims["iat"].(float64)
+	if at == 0 || at > tokIat {
+		t.Fatalf("auth_time %v after token iat %v", at, tokIat)
 	}
 }
 

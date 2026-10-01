@@ -288,6 +288,9 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	attested := dev.AttestedLevel == "tee" || dev.AttestedLevel == "strongbox"
 	// The per-use authentication happened when the phone signed, not at exchange.
 	authAt := iat.UTC()
+	if authAt.After(now) {
+		authAt = now // a fast phone clock must not yield future evidence
+	}
 	evidence := store.AuthenticationEvidence{PrimaryAuthenticatedAt: &authAt}
 	if attested {
 		evidence.FactorAuthenticatedAt, evidence.FactorMethod = &authAt, "push"
