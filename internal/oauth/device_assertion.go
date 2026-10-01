@@ -286,9 +286,11 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	}
 	// An attested key is hardware-bound and user-verified per use: two factors. Otherwise single factor.
 	attested := dev.AttestedLevel == "tee" || dev.AttestedLevel == "strongbox"
-	evidence := store.AuthenticationEvidence{PrimaryAuthenticatedAt: &now}
+	// The per-use authentication happened when the phone signed, not at exchange.
+	authAt := iat.UTC()
+	evidence := store.AuthenticationEvidence{PrimaryAuthenticatedAt: &authAt}
 	if attested {
-		evidence.FactorAuthenticatedAt, evidence.FactorMethod = &now, "push"
+		evidence.FactorAuthenticatedAt, evidence.FactorMethod = &authAt, "push"
 	}
 	policy, binding, err := e.store.ClientAuthenticationPolicyBinding(clientID)
 	if err != nil {
@@ -364,7 +366,7 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	claims["iat"] = now.Unix()
 	claims["jti"] = uuid.NewString()
 	claims["token_use"] = "id_token"
-	claims["auth_time"] = now.Unix()
+	claims["auth_time"] = authAt.Unix()
 	if attested {
 		claims["amr"] = []string{"hwk", "user", "mfa"}
 		claims["acr"] = "urn:kysignon:acr:mfa"

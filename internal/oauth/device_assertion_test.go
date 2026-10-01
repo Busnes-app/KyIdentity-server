@@ -280,7 +280,8 @@ func (f *signOnFixture) claims(mutate func(map[string]any)) map[string]any {
 
 func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	f := newSignOnFixture(t)
-	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
+	iat := time.Now().Unix() - 100
+	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(c map[string]any) { c["iat"], c["exp"] = iat, iat+200 }))
 	resp, who, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test")
 	if err != nil {
 		t.Fatal(err)
@@ -300,8 +301,8 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	if len(amr) != 1 || amr[0] != "pop" || claims["acr"] != DeviceACR || claims["attested"] != nil {
 		t.Fatalf("amr %v acr %v attested %v", claims["amr"], claims["acr"], claims["attested"])
 	}
-	if at, _ := claims["auth_time"].(float64); at == 0 || time.Since(time.Unix(int64(at), 0)) > time.Minute {
-		t.Fatalf("auth_time %v", claims["auth_time"])
+	if at, _ := claims["auth_time"].(float64); int64(at) != iat {
+		t.Fatalf("auth_time %v, want assertion iat %d", claims["auth_time"], iat)
 	}
 }
 
@@ -891,11 +892,15 @@ func TestAttestedDeviceSatisfiesMandatoryMFA(t *testing.T) {
 	f := newSignOnFixture(t)
 	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)
 	f.attest(t, "tee")
-	resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	iat := time.Now().Unix() - 100
+	resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(c map[string]any) { c["iat"], c["exp"] = iat, iat+200 })), f.client.ID, "127.0.0.1", "t")
 	if err != nil {
 		t.Fatal(err)
 	}
 	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	if at, _ := claims["auth_time"].(float64); int64(at) != iat {
+		t.Fatalf("auth_time %v, want assertion iat %d", claims["auth_time"], iat)
+	}
 	amr, _ := claims["amr"].([]any)
 	if len(amr) != 3 || amr[0] != "hwk" || amr[1] != "user" || amr[2] != "mfa" || claims["acr"] != "urn:kysignon:acr:mfa" || claims["attested"] != "tee" {
 		t.Fatalf("claims %v", claims)
@@ -934,6 +939,41 @@ func TestAttestedDeviceAllowsFreshPasswordPolicy(t *testing.T) {
 	resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
 	if err != nil || resp == nil || resp.IDToken == "" {
 		t.Fatalf("attested device under fresh policy: %v", err)
+	}
+}
+
+// The user authenticated when the phone signed, so an old assertion carries old evidence.
+func TestAttestedAssertionAgeCountsAgainstMaxAge(t *testing.T) {
+	f := newSignOnFixture(t)
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "max_age", Factor: "password", PrimaryMaxAge: 60}, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.attest(t, "tee")
+	signAt := func(age int64) string {
+		iat := time.Now().Unix() - age
+		return signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(c map[string]any) { c["iat"], c["exp"] = iat, iat+age+60 }))
+	}
+	_, _, err = f.engine.ExchangeDeviceAssertion(signAt(200), f.client.ID, "127.0.0.1", "t")
+	if !errors.Is(err, errAppPolicy) || !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("stale assertion: want errAppPolicy, got %v", err)
+	}
+	if n := f.issuedTokenCount(t); n != 0 {
+		t.Fatalf("issued tokens %d", n)
+	}
+	if n := f.sessionCount(t); n != 0 {
+		t.Fatalf("sessions %d", n)
+	}
+	resp, _, err := f.engine.ExchangeDeviceAssertion(signAt(10), f.client.ID, "127.0.0.1", "t")
+	if err != nil || resp == nil {
+		t.Fatalf("fresh assertion: %v", err)
+	}
+	// The token deadline counts from the signature, not the exchange.
+	if resp.ExpiresIn > 50 {
+		t.Fatalf("expires_in %d exceeds iat+max_age", resp.ExpiresIn)
 	}
 }
 
