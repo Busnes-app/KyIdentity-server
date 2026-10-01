@@ -95,7 +95,7 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 // RegisterNativeDevice allows native mobile client to exchange 90s pairing token or PIN for registration.
 func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Request) {
 	var req mfa.NativeDeviceRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid_request","error_description":"Malformed JSON body"}`, http.StatusBadRequest)
 		return
 	}
@@ -107,7 +107,10 @@ func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Requ
 	}
 
 	h.audit.Record("device.registered", dev.UserID, "", dev.ID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"deviceName": dev.DeviceName,
+		"deviceName":        dev.DeviceName,
+		"attestedLevel":     dev.AttestedLevel,
+		"bootState":         dev.BootState,
+		"attestationReason": dev.AttestationReason,
 	})
 
 	w.Header().Set("Content-Type", "application/json")

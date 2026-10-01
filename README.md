@@ -795,7 +795,8 @@ does not refresh the password's age. ID tokens expose these method/context value
 | Password + signed push | `pwd`, `urn:kysignon:amr:push`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + passkey | `pwd`, `urn:kysignon:amr:webauthn`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + recovery code | `pwd`, `urn:kysignon:amr:recovery` | `urn:kysignon:acr:recovery` |
-| Paired device key (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
+| Paired device key, unattested (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
+| Paired device key, hardware-attested (TEE or StrongBox) | `hwk`, `user`, `mfa` | `urn:kysignon:acr:mfa` |
 
 A device sign-on ID token also carries `signon_method: device`, `device_id`, and `origin`:
 the `https://host[:port]` of the relay address the user typed into the consumer app (KyPost),
@@ -806,8 +807,29 @@ origin (scheme, host, port): relays sharing an origin with different paths are o
 domain. Each consumer server accepts only its own configured base-URL origin, so registering
 extra aliases at KyIdentity does not widen what a consumer accepts.
 
-These are KyIdentity context classes, not NIST assurance levels or assertions that keys
-are hardware-backed. Recovery does not claim ordinary MFA. The standard method names
+An attested device's ID token also carries `attested: tee|strongbox`. At pairing, KyAuth
+uploads its Android Key Attestation chain; KyIdentity verifies it and grades the device
+`none`, `tee` or `strongbox`. Pairing never fails because of attestation, but only attested
+devices earn MFA-grade sign-on; `none` stays single factor. Configuration:
+
+- `KYIDENTITY_ATTESTATION_STATUS_URL`: Google's revocation status list (default Google's; empty
+  disables the check and logs a startup warning).
+- `KYIDENTITY_ATTESTATION_EXTRA_ROOTS`: extra PEM trust roots, added to Google's.
+- `KYIDENTITY_KYAUTH_CERT_SHA256`: comma-separated SHA-256 digests of accepted KyAuth signing
+  certificates (default is the release key).
+- Admin setting `attestation.requireLockedBootloader` (Enrollment policies, "Device sign-on";
+  default off): refuse, and daily downgrade, devices whose bootloader is unlocked. The boot state
+  is recorded either way.
+
+The roots and status list are refreshed whenever the list goes stale (a failed fetch retries within
+15 minutes; redirects are refused, and a newly published root is logged), and a daily sweep
+downgrades devices whose key was revoked.
+Audit actions: `device.attestation_downgraded`, `admin.attestation_configured`; `device.registered`
+records `attestedLevel`, `bootState` and `attestationReason`. Emulators ship software KeyMint and always grade `none`, so the `tee`/`strongbox` path has not
+been verified on hardware yet; pair a physical phone to confirm.
+
+These are KyIdentity context classes, not NIST assurance levels. Only `hwk` from a verified
+attestation asserts a hardware-backed key. Recovery does not claim ordinary MFA. The standard method names
 follow [RFC 8176](https://www.rfc-editor.org/rfc/rfc8176.html); the URNs are local contracts.
 Administrator per-app freshness policies are implemented as described above; further work
 is tracked in [the access lifecycle plan](docs/access-lifecycle-plan.md).

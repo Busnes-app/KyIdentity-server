@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiJson, apiRequest, errorMessage } from '../api';
-import { parseEnrollmentPolicies, parseEnrollmentPreview } from '../parsers';
+import { parseAttestationSettings, parseEnrollmentPolicies, parseEnrollmentPreview } from '../parsers';
 import type { DirectoryGroup, EnrollmentPolicy, EnrollmentPreview } from '../types';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 
@@ -14,7 +14,15 @@ export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup;
  const [busy,setBusy]=useState(false);
  const {requestGrant,stepUpPrompt}=useStepUp();
  const reload=async()=>{try{setPolicies(await apiJson(listPath,parseEnrollmentPolicies));}catch(err){setError(errorMessage(err,'Could not load policies'));}};
+ const [lockedBootloader,setLockedBootloader]=useState<boolean|null>(null);
  useEffect(()=>{void reload();},[]);
+ useEffect(()=>{if(group)return;apiJson('/api/admin/attestation/settings',parseAttestationSettings).then(s=>setLockedBootloader(s.requireLockedBootloader)).catch(err=>setError(errorMessage(err,'Could not load device sign-on setting')));},[group]);
+ const saveBootloader=async(value:boolean)=>{
+  setBusy(true);setError(null);
+  try{const path='/api/admin/attestation/settings';const stepUpToken=await requestGrant(value?'Require a locked bootloader for MFA-grade device sign-on.':'Stop requiring a locked bootloader for MFA-grade device sign-on.',`PUT ${path}`);
+   setLockedBootloader((await apiJson(path,parseAttestationSettings,{method:'PUT',stepUpToken,body:JSON.stringify({requireLockedBootloader:value})})).requireLockedBootloader);
+  }catch(err){if(!isCancelled(err))setError(errorMessage(err,'Could not save device sign-on setting'));}finally{setBusy(false);}
+ };
  const change=(p:EnrollmentPolicy)=>{setDraft(p);setPreview(null);setError(null);};
  const inspect=async(event:React.FormEvent)=>{
   event.preventDefault();if(!draft)return;setBusy(true);setError(null);
@@ -44,6 +52,10 @@ export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup;
     <button type="button" className="primary-btn" disabled={busy||!preview.canActivate} onClick={apply}>Apply policy</button>
    </div>}
   </div></form>}
+  {!group&&<div className="settings-section"><div className="modal-body"><h2>Device sign-on</h2>
+   <div className="form-group"><label><input type="checkbox" checked={lockedBootloader??false} disabled={busy||lockedBootloader===null} onChange={e=>void saveBootloader(e.target.checked)}/> Require a locked bootloader for MFA-grade device sign-on</label></div>
+   <p>Off: the bootloader state is recorded but not enforced. On: new pairings and the daily sweep refuse MFA grade for unlocked bootloaders.</p>
+  </div></div>}
   {stepUpPrompt}
  </div>;
 }

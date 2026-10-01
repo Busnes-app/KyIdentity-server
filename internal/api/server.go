@@ -105,6 +105,7 @@ func (s *Server) routes() *http.ServeMux {
 	onboardH := NewOnboardingHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL, s.cfg.EncryptionKey)
 	requestH := NewAccessRequestHandler(s.store, s.audit, s.middleware, s.cfg.EncryptionKey)
 	alertH := NewAlertHandler(s.store, s.audit, s.middleware)
+	attestationH := NewAttestationHandler(s.store, s.audit, s.middleware)
 	scimH := NewSCIMHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
 	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
@@ -281,6 +282,8 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/alerts/{id}/acknowledge", permAdmin, false, http.HandlerFunc(alertH.Acknowledge)},
 		{"GET", "/api/admin/alerts/settings", permRead, false, http.HandlerFunc(alertH.GetSettings)},
 		{"PUT", "/api/admin/alerts/settings", permAdmin, true, http.HandlerFunc(alertH.PutSettings)},
+		{"GET", "/api/admin/attestation/settings", permRead, false, http.HandlerFunc(attestationH.GetSettings)},
+		{"PUT", "/api/admin/attestation/settings", permAdmin, true, http.HandlerFunc(attestationH.PutSettings)},
 		{"POST", "/api/admin/backup/drill", permAdmin, false, http.HandlerFunc(backupH.RunDrill)},
 		{"GET", "/api/admin/backup/export-capsule", permAdmin, true, http.HandlerFunc(backupH.ExportCapsule)},
 		{"POST", "/api/admin/backup/pair-remote", permAdmin, true, http.HandlerFunc(backupH.PairRemote)},

@@ -1,6 +1,7 @@
 package mfa
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
@@ -504,5 +506,129 @@ func TestRePairingReturnsStoredDevice(t *testing.T) {
 	}
 	if stored.PublicKey != pub2 || !stored.CanSignOn {
 		t.Fatalf("stored device: key match %v, CanSignOn %v", stored.PublicKey == pub2, stored.CanSignOn)
+	}
+}
+
+func TestExpectedChallengeMatchesKyAuth(t *testing.T) {
+	tok := &NativeDeviceRegisterRequest{PairingToken: "abc123"}
+	if got := ExpectedChallenge(tok); fmt.Sprintf("%x", got) != fmt.Sprintf("%x", sha256.Sum256([]byte("kyidentity-attest-v1|abc123"))) {
+		t.Fatalf("token challenge %x", got)
+	}
+	pin := &NativeDeviceRegisterRequest{PINCode: "123456", UserID: "u1"}
+	if got := ExpectedChallenge(pin); fmt.Sprintf("%x", got) != fmt.Sprintf("%x", sha256.Sum256([]byte("kyidentity-attest-v1|u1|123456"))) {
+		t.Fatalf("pin challenge %x", got)
+	}
+	both := &NativeDeviceRegisterRequest{PairingToken: "tok", PINCode: "123456", UserID: "u1"}
+	if got := ExpectedChallenge(both); fmt.Sprintf("%x", got) != fmt.Sprintf("%x", sha256.Sum256([]byte("kyidentity-attest-v1|tok"))) {
+		t.Fatal("token must win when both present")
+	}
+}
+
+type fakeAttestor struct {
+	want   []byte
+	result attest.Result
+	calls  int
+	chain  [][]byte
+}
+
+func (f *fakeAttestor) Verify(chain [][]byte, want attest.Expectation) attest.Result {
+	f.calls++
+	f.chain = chain
+	if !bytes.Equal(want.Challenge, f.want) {
+		return attest.Result{Level: "none", Reason: "test: unexpected challenge", BootState: "unknown"}
+	}
+	return f.result
+}
+
+func TestRegisterNativeDeviceRecordsAttestation(t *testing.T) {
+	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	fa := &fakeAttestor{want: ExpectedChallenge(&NativeDeviceRegisterRequest{PairingToken: token}), result: attest.Result{Level: "strongbox", BootState: "locked-verified", Serials: []string{"1", "2"}}}
+	engine.SetAttestor(fa)
+	_, pub := signingKey(t)
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fa.calls != 1 || dev.AttestedLevel != "strongbox" || dev.BootState != "locked-verified" || dev.AttestedAt == nil {
+		t.Fatalf("%+v calls=%d", dev, fa.calls)
+	}
+	stored, _ := dbStore.GetNativeDevice(dev.ID)
+	if stored.AttestedLevel != "strongbox" || len(stored.AttestationSerials) != 2 {
+		t.Fatalf("stored %+v", stored)
+	}
+}
+
+func TestRegisterNativeDeviceWithoutAttestationIsNone(t *testing.T) {
+	engine, _, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	fa := &fakeAttestor{}
+	engine.SetAttestor(fa)
+	_, pub := signingKey(t)
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm"})
+	if err != nil || dev.AttestedLevel != "none" || fa.calls != 0 {
+		t.Fatalf("%v %+v calls=%d", err, dev, fa.calls)
+	}
+}
+
+func TestRegisterNativeDeviceBadChainStillPairs(t *testing.T) {
+	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	fa := &fakeAttestor{want: ExpectedChallenge(&NativeDeviceRegisterRequest{PairingToken: token}), result: attest.Result{Level: "none", Reason: "no chain", BootState: "unknown"}}
+	engine.SetAttestor(fa)
+	_, pub := signingKey(t)
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm", Attestation: []string{"!!not base64!!"}})
+	if err != nil || dev.AttestedLevel != "none" || dev.AttestationReason != "no chain" {
+		t.Fatalf("%v %+v", err, dev)
+	}
+	if fa.calls != 1 || fa.chain != nil {
+		t.Fatalf("attestor must see a nil chain once: calls=%d chain=%v", fa.calls, fa.chain)
+	}
+	if stored, err := dbStore.GetNativeDevice(dev.ID); err != nil || stored == nil || stored.AttestedLevel != "none" {
+		t.Fatalf("device must be stored: %v %+v", err, stored)
+	}
+}
+
+// interleavingAttestor re-pairs the same device with an unattested key from inside Verify.
+type interleavingAttestor struct {
+	result attest.Result
+	during func()
+}
+
+func (a *interleavingAttestor) Verify([][]byte, attest.Expectation) attest.Result {
+	a.during()
+	return a.result
+}
+
+func TestRegisterNativeDeviceGradeStaysWithItsKey(t *testing.T) {
+	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	first, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	second, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	_, pub1 := signingKey(t)
+	_, pub2 := signingKey(t)
+	engine.SetAttestor(&interleavingAttestor{
+		result: attest.Result{Level: "strongbox", BootState: "locked-verified", Serials: []string{"1"}},
+		during: func() {
+			if _, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: second, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub2, PushToken: "fcm"}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	})
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: first, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub1, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := dbStore.GetNativeDevice(dev.ID)
+	switch {
+	case stored.PublicKey == pub2 && stored.AttestedLevel != "none":
+		t.Fatalf("unattested key inherited grade %s", stored.AttestedLevel)
+	case stored.PublicKey == pub1 && stored.AttestedLevel != "strongbox":
+		t.Fatalf("attested key lost its grade: %s", stored.AttestedLevel)
+	case stored.PublicKey != pub1 && stored.PublicKey != pub2:
+		t.Fatal("stored key is neither registration's")
 	}
 }

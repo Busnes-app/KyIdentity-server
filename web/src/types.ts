@@ -58,6 +58,8 @@ export interface NativeDevice {
   pushToken?: string;
   isMfaApprover: boolean;
   canSignOn: boolean;
+  attestedLevel: 'none' | 'tee' | 'strongbox';
+  bootState: string;
   lastSeenAt?: string;
   createdAt: string;
 }
@@ -333,3 +335,4 @@ export interface SCIMConnector { id: string; name: string; status: 'active' | 'd
 
 export interface AppRolePrincipal { id: string; name: string }
 export interface AppRole { id: string; appId: string; name: string; description: string; createdAt: string; users: AppRolePrincipal[]; groups: AppRolePrincipal[] }
+export interface AttestationSettings { requireLockedBootloader: boolean }

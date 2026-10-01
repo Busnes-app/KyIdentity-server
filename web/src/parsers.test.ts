@@ -6,6 +6,7 @@ import {
   parseAlert,
   parseAlertPage,
   parseAlertSettings,
+  parseAttestationSettings,
   parseGroupPage,
   parseGroupUserPage,
   parseApplications,
@@ -635,5 +636,22 @@ describe('parseDevice', () => {
   it('reads canSignOn and treats a missing flag as off', () => {
     expect(parseDevice({ ...dev, canSignOn: true }).canSignOn).toBe(true);
     expect(parseDevice(dev).canSignOn).toBe(false);
+  });
+
+  it('reads the attestation grade and boot state, defaulting to the least trusted', () => {
+    const d = parseDevice({ ...dev, attestedLevel: 'strongbox', bootState: 'locked-verified' });
+    expect(d.attestedLevel).toBe('strongbox');
+    expect(d.bootState).toBe('locked-verified');
+    expect(parseDevice({ ...dev, attestedLevel: 'tee' }).attestedLevel).toBe('tee');
+    expect(parseDevice(dev).attestedLevel).toBe('none');
+    expect(parseDevice(dev).bootState).toBe('unknown');
+    expect(parseDevice({ ...dev, attestedLevel: 'platinum' }).attestedLevel).toBe('none');
+  });
+});
+
+describe('parseAttestationSettings', () => {
+  it('reads the locked-bootloader flag and refuses a non-boolean', () => {
+    expect(parseAttestationSettings({ requireLockedBootloader: true }).requireLockedBootloader).toBe(true);
+    expect(() => parseAttestationSettings({ requireLockedBootloader: 'yes' })).toThrow();
   });
 });

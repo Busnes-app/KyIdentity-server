@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, OwnAccessRequests, AccessExplanation } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, OwnAccessRequests, AccessExplanation } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -158,6 +158,9 @@ export function parseDevice(value: unknown): NativeDevice {
     pushToken: optStr(o, 'pushToken'),
     isMfaApprover: bool(o, 'isMfaApprover'),
     canSignOn: bool(o, 'canSignOn'),
+    // Display-only: an unrecognised grade reads as unattested, never as trusted.
+    attestedLevel: o.attestedLevel === 'tee' || o.attestedLevel === 'strongbox' ? o.attestedLevel : 'none',
+    bootState: optStr(o, 'bootState') ?? 'unknown',
     lastSeenAt: optStr(o, 'lastSeenAt'),
     createdAt: optStr(o, 'createdAt') ?? '',
   };
@@ -625,6 +628,9 @@ export function parseAlertSettings(value: unknown): AlertSettings {
     loginFailureThreshold: directoryCount(o, 'loginFailureThreshold'), loginFailureWindowSeconds: directoryCount(o, 'loginFailureWindowSeconds'),
     recipients: list(o.recipients, item => { const r = obj(item, 'an alert recipient'); return { id: str(r, 'id'), username: str(r, 'username') }; }),
   };
+}
+export function parseAttestationSettings(value: unknown): AttestationSettings {
+  return { requireLockedBootloader: requiredBool(obj(value, 'attestation settings'), 'requireLockedBootloader') };
 }
 export function parseAccessExplanation(value: unknown): AccessExplanation {
   const o = obj(value, 'an access explanation response');

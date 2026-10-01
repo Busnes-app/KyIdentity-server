@@ -3,12 +3,14 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -81,7 +83,15 @@ type Config struct {
 	// HTTPS stays mandatory; only the address rule is relaxed. Off by default because it turns
 	// every scheduled deposit into an unattended request into the internal network.
 	BackupAllowPrivateRecovery bool
+	// AttestationExtraRoots is an optional PEM file of extra attestation roots.
+	AttestationExtraRoots string
+	// AttestationStatusURL is Google's revocation list; empty disables the check.
+	AttestationStatusURL string
+	// KyAuthCertSHA256 lists accepted KyAuth signing-certificate digests (lowercase hex).
+	KyAuthCertSHA256 []string
 }
+
+var certDigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Load loads configuration from environment variables. Anything malformed is an error:
 // a server that silently downgrades a misconfigured key is worse than one that will not start.
@@ -154,6 +164,26 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	attestationExtraRoots := strings.TrimSpace(os.Getenv("KYIDENTITY_ATTESTATION_EXTRA_ROOTS"))
+	attestationStatusURL := "https://android.googleapis.com/attestation/status"
+	if v, ok := os.LookupEnv("KYIDENTITY_ATTESTATION_STATUS_URL"); ok {
+		attestationStatusURL = strings.TrimSpace(v)
+	}
+	if attestationStatusURL != "" && !strings.HasPrefix(attestationStatusURL, "https://") {
+		return nil, errors.New("KYIDENTITY_ATTESTATION_STATUS_URL must be https")
+	}
+	kyAuthCertSHA256 := []string{"52f61684029401fcb0137b334ad41907f83948fa1ec1377834f3b4291765fd7b"}
+	if v := strings.TrimSpace(os.Getenv("KYIDENTITY_KYAUTH_CERT_SHA256")); v != "" {
+		kyAuthCertSHA256 = nil
+		for _, d := range strings.Split(v, ",") {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if !certDigestRE.MatchString(d) {
+				return nil, fmt.Errorf("KYIDENTITY_KYAUTH_CERT_SHA256: %q is not a 64-hex digest", d)
+			}
+			kyAuthCertSHA256 = append(kyAuthCertSHA256, d)
+		}
+	}
+
 	return &Config{
 		Port:                       port,
 		IssuerURL:                  issuerURL,
@@ -181,6 +211,9 @@ func Load() (*Config, error) {
 		BackupDir:                  backupDir,
 		BackupKeep:                 backupKeep,
 		BackupAllowPrivateRecovery: strings.EqualFold(os.Getenv("KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY"), "true"),
+		AttestationExtraRoots:      attestationExtraRoots,
+		AttestationStatusURL:       attestationStatusURL,
+		KyAuthCertSHA256:           kyAuthCertSHA256,
 	}, nil
 }
 

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 
 	"github.com/Busnes-app/kyidentity-server/internal/api"
+	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
@@ -118,6 +121,26 @@ func main() {
 		log.Fatalf("Failed to initialize push relay sender: %v", err)
 	}
 	mfaEngine.SetPushSender(relaySender)
+	embedded, err := attest.LoadEmbeddedRoots()
+	if err != nil {
+		log.Fatalf("Failed to load attestation roots: %v", err)
+	}
+	extra, err := attest.LoadExtraRoots(cfg.AttestationExtraRoots)
+	if err != nil {
+		log.Fatalf("Failed to load extra attestation roots: %v", err)
+	}
+	_, base := embedded.Pool()
+	attestRoots := attest.NewRefreshingRoots(append(base, extra...), "https://android.googleapis.com/attestation/root", httpFetch, log.Printf)
+	attestStatus := attest.NewStatusList(cfg.AttestationStatusURL, httpFetch)
+	if cfg.AttestationStatusURL == "" {
+		log.Print("attestation revocation check disabled: KYIDENTITY_ATTESTATION_STATUS_URL is empty")
+	}
+	digests := make([][]byte, 0, len(cfg.KyAuthCertSHA256))
+	for _, d := range cfg.KyAuthCertSHA256 {
+		b, _ := hex.DecodeString(d) // validated by config.Load
+		digests = append(digests, b)
+	}
+	mfaEngine.SetAttestor(attest.NewVerifier(attestRoots, attestStatus, "org.kysecurity.authenticator", digests, requireLockedBootloader(dbStore.AttestationSettings, log.Printf)))
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
 	adminCount, err := dbStore.CountAdmins()
@@ -160,6 +183,7 @@ func main() {
 	// Background housekeeping. Every table below is written by unauthenticated or
 	// per-request paths, so none of them may grow without bound.
 	go func() {
+		var lastSweep time.Time
 		housekeep := func() {
 			_ = dbStore.CleanupExpiredSessions()
 			_ = dbStore.DeleteExpiredMFATokens()
@@ -177,6 +201,22 @@ func main() {
 			if err := clearFirstRunPasswordFile(dbStore, cfg.DataDir); err != nil {
 				log.Printf("Housekeeping: %v", err)
 			}
+			lastSweep = runAttestationHousekeeping(time.Now(), lastSweep, attestStatus.Stale(), func() {
+				if err := attestRoots.Refresh(); err != nil {
+					log.Printf("attestation roots refresh failed: %v", err)
+				}
+				if err := attestStatus.Refresh(); err != nil {
+					log.Printf("attestation status refresh failed: %v", err)
+				}
+			}, func() {
+				n, err := mfaEngine.SweepAttestations(attestStatus, sweepRequireLocked(dbStore.AttestationSettings, log.Printf), func(id, uid, reason string) {
+					_ = auditLogger.Record("device.attestation_downgraded", "", "", id, "device", "", "sweep", "success", map[string]any{"userId": uid, "reason": reason})
+				})
+				log.Printf("attestation sweep: %d downgraded", n)
+				if err != nil {
+					log.Printf("attestation sweep failed: %v", err)
+				}
+			})
 		}
 		housekeep()
 
@@ -586,4 +626,65 @@ func runRestore(args []string) {
 
 func restoreServiceHelp() string {
 	return "expected service name (default: $KYIDENTITY_APP_NAME or " + config.DefaultAppName + ")"
+}
+
+// runAttestationHousekeeping refreshes the attestation caches whenever the status list is stale
+// or the daily sweep is due, so a failed fetch is retried next tick. It returns the sweep time.
+func runAttestationHousekeeping(now, lastSweep time.Time, stale bool, refresh, sweep func()) time.Time {
+	due := now.Sub(lastSweep) >= 24*time.Hour
+	if stale || due {
+		refresh()
+	}
+	if !due {
+		return lastSweep
+	}
+	sweep()
+	return now
+}
+
+// fetchClient refuses redirects: a 3xx fails as non-2xx instead of leaving the pinned host.
+var fetchClient = &http.Client{
+	Timeout:       10 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// httpFetch GETs url for the attestation caches; the body is capped at 4 MiB.
+func httpFetch(url string) ([]byte, http.Header, error) {
+	resp, err := fetchClient.Get(url)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, nil, err
+	}
+	return body, resp.Header, nil
+}
+
+// requireLockedBootloader reads the admin policy per grade. A failed read keeps the
+// requirement on: an error may only downgrade a grade, never relax the policy.
+func requireLockedBootloader(read func() (store.AttestationSettings, error), warn func(string, ...any)) func() bool {
+	return func() bool {
+		s, err := read()
+		if err != nil {
+			warn("attestation settings unreadable, requiring locked bootloader: %v", err)
+			return true
+		}
+		return s.RequireLockedBootloader
+	}
+}
+
+// sweepRequireLocked is the sweep's bootloader policy. Unlike registration it does not fail
+// closed on a read error: a downgrade needs re-pairing to undo, so unknown state downgrades no one.
+func sweepRequireLocked(read func() (store.AttestationSettings, error), warn func(string, ...any)) bool {
+	s, err := read()
+	if err != nil {
+		warn("attestation sweep: settings unreadable, skipping bootloader check: %v", err)
+		return false
+	}
+	return s.RequireLockedBootloader
 }
