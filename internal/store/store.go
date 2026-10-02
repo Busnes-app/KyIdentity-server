@@ -374,6 +374,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateLegacyDevicePairingTokens(); err != nil {
 		return err
 	}
+	if err := s.migrateLegacyPairedSystems(); err != nil {
+		return err
+	}
 	if err := s.migrateAuthenticationEvidence(); err != nil {
 		return err
 	}
@@ -635,6 +638,25 @@ func (s *Store) migrateLegacyDevicePairingTokens() error {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX idx_device_pairing_tokens_hash ON device_pairing_tokens(token_hash);`)
+	return err
+}
+
+// migrateLegacyPairedSystems removes what KySignOn-era databases still carry and current
+// code no longer writes: the NOT NULL paired_systems.hmac_secret_hash, which fails every
+// insert (it never held a usable secret; rows are kept), and the retired
+// system_pairing_tokens table, whose foreign key without ON DELETE blocks deleting any
+// user who issued a token. Those tokens expired after 90 seconds and nothing reads them.
+func (s *Store) migrateLegacyPairedSystems() error {
+	var n int
+	if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('paired_systems') WHERE name = 'hmac_secret_hash'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 1 {
+		if _, err := s.db.Exec(`ALTER TABLE paired_systems DROP COLUMN hmac_secret_hash`); err != nil {
+			return err
+		}
+	}
+	_, err := s.db.Exec(`DROP TABLE IF EXISTS system_pairing_tokens`)
 	return err
 }
 
