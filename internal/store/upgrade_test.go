@@ -12,6 +12,9 @@ import (
 // legacySchema is the directory as it was before the access lifecycle work: no app
 // registry, no access modes, no authentication evidence on sessions, no delivery lease
 // or provisioning revision on the outbox, and an outbox still foreign-keyed to users.
+// It also keeps what KySignOn-era databases still carry: the NOT NULL
+// paired_systems.hmac_secret_hash and the retired system_pairing_tokens table, whose
+// foreign key to users has no ON DELETE action.
 // Upgrading one of these is what an operator does when they pull a new image.
 const legacySchema = `
 CREATE TABLE users (
@@ -33,9 +36,15 @@ CREATE TABLE oauth_clients (
  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE paired_systems (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, system_type TEXT NOT NULL, callback_url TEXT NOT NULL,
- hmac_secret_encrypted TEXT NOT NULL,
+ hmac_secret_hash TEXT NOT NULL, hmac_secret_encrypted TEXT NOT NULL,
  status TEXT NOT NULL CHECK (status IN ('active','failing','disabled')),
  last_synced_at DATETIME, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE system_pairing_tokens (
+ id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, pin_hash TEXT NOT NULL,
+ pin_attempts INTEGER NOT NULL DEFAULT 0, system_type TEXT NOT NULL,
+ created_by_user_id TEXT NOT NULL REFERENCES users(id), expires_at DATETIME NOT NULL,
+ used_at DATETIME, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_system_pairing_tokens_hash ON system_pairing_tokens(token_hash);
 CREATE TABLE account_sync_events (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  system_id TEXT NOT NULL, event_type TEXT NOT NULL, payload_json TEXT NOT NULL,
@@ -65,13 +74,16 @@ func legacyDatabase(t *testing.T) string {
 	exec(legacySchema)
 	exec(`INSERT INTO users(id,username,display_name,email,password_hash,role,status) VALUES
  ('u-admin','root','Root','root@test.invalid','x','admin','active'),
- ('u-staff','staff','Staff','staff@test.invalid','x','user','active')`)
+ ('u-staff','staff','Staff','staff@test.invalid','x','user','active'),
+ ('u-former','former','Former','former@test.invalid','x','admin','active')`)
 	exec(`INSERT INTO sessions(id,user_id,session_token_hash,ip_address,user_agent,expires_at) VALUES
  ('s-legacy','u-staff','legacy-hash','203.0.113.4','old-browser',?)`, time.Now().UTC().Add(24*time.Hour))
 	exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,launch_url)
  VALUES('c-wiki','Wiki','confidential','hash','["https://wiki.test/cb"]','["openid"]','https://wiki.test/')`)
-	exec(`INSERT INTO paired_systems(id,name,system_type,callback_url,hmac_secret_encrypted,status)
- VALUES('sys-hr','HR','scim','https://hr.test/scim/v2','sealed','active')`)
+	exec(`INSERT INTO paired_systems(id,name,system_type,callback_url,hmac_secret_hash,hmac_secret_encrypted,status,last_synced_at,created_at)
+ VALUES('sys-hr','HR','scim','https://hr.test/scim/v2','','sealed','failing','2026-08-01 10:00:00','2026-07-01 09:00:00')`)
+	exec(`INSERT INTO system_pairing_tokens(id,token_hash,pin_hash,system_type,created_by_user_id,expires_at)
+ VALUES('spt-1','spt-hash','pin-hash','kypost','u-former','2026-08-16 00:00:00')`)
 	exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,status) VALUES
  ('ev-1','u-staff','sys-hr','user.created','{}','pending'),
  ('ev-2','u-staff','sys-hr','user.updated','{}','pending')`)
@@ -198,6 +210,23 @@ func TestUpgradeFromPreFeatureDatabase(t *testing.T) {
 	}
 	if primary.Valid || factor.Valid || method != "" {
 		t.Fatalf("upgrade invented authentication evidence: %v %v %q", primary, factor, method)
+	}
+
+	// KySignOn-era leftovers are gone, so pairing a system and deleting the user who
+	// once issued a system pairing token both work; the paired system keeps its fields.
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "sys-new", Name: "New", SystemType: "scim", CallbackURL: "https://new.test/scim/v2", HMACSecretEncrypted: "sealed-new", Status: "active"}); err != nil {
+		t.Fatal("pairing a system after the upgrade:", err)
+	}
+	hr, err := s.GetPairedSystemByID("sys-hr")
+	if err != nil || hr == nil {
+		t.Fatalf("legacy paired system: %+v %v", hr, err)
+	}
+	if hr.Name != "HR" || hr.SystemType != "scim" || hr.CallbackURL != "https://hr.test/scim/v2" || hr.HMACSecretEncrypted != "sealed" || hr.Status != "failing" ||
+		hr.LastSyncedAt == nil || !hr.LastSyncedAt.Equal(time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)) || !hr.CreatedAt.Equal(time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)) {
+		t.Fatalf("legacy paired system changed: %+v", hr)
+	}
+	if err := s.DeleteUser("u-former"); err != nil {
+		t.Fatal("deleting a user who issued a retired system pairing token:", err)
 	}
 
 	// Queued deliveries survive with a revision, so provisioning picks up where it left off.
