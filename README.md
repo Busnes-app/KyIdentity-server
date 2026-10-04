@@ -8,7 +8,7 @@ Built in Go with a focus on simplicity, minimal external dependencies, and nativ
 
 ## Core Capabilities
 
-1. **Authoritative User Directory & Real-Time Sync**: Create, manage, and deactivate accounts from a unified portal. Changes automatically propagate to paired KySecurity downstream products via HMAC-SHA256 signed sync webhooks.
+1. **Authoritative User Directory & Real-Time Sync**: Create, manage, and deactivate accounts from a unified portal. Changes automatically propagate to paired KySecurity downstream products via HMAC-SHA256 signed sync webhooks. Administrators can export bounded signed [KyPost recovery evidence](docs/KYPOST_RECOVERY_EVIDENCE.md); this supplies current authority without releasing a restore hold.
 2. **OpenID Connect & OAuth 2.0 Provider**: RFC-compliant authorization code flow with PKCE (`S256`), dynamic JWKS key discovery (`/.well-known/jwks.json`), and RS256 token signing.
 3. **Multi-Factor Authentication (MFA)**:
    - **TOTP Authenticator Apps**: Standard RFC 6238 time-based one-time passwords with encrypted secrets at rest (AES-256-GCM).
@@ -1023,6 +1023,12 @@ the rest receive the identifier and `active=false`.
 
 **Resync** re-sends every in-scope account (and assigned group) and never provisions a
 user outside scope.
+
+For native KyPost recovery, `POST /api/admin/systems/{id}/recovery-evidence`
+(global admin, operation-bound step-up) returns a nonce-bound complete signed
+snapshot for 1–256 requested restored subjects, including explicit inactive
+entries and known sync revisions. See the [wire and operator contract](docs/KYPOST_RECOVERY_EVIDENCE.md).
+This does not release either restore hold; a held identity connection refuses export.
 
 ### Reconciliation
 
