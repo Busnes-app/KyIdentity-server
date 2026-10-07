@@ -515,6 +515,8 @@ func IssuerOrigin(issuerURL string) (string, error) {
 	}
 	if port != "" {
 		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
 	}
 	return scheme + "://" + host, nil
 }

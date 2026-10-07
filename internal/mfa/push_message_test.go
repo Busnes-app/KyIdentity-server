@@ -45,6 +45,9 @@ func TestIssuerOrigin(t *testing.T) {
 		"https://id.example.com:443":             "https://id.example.com",
 		"https://id.example.com:8443/kyidentity": "https://id.example.com:8443",
 		"http://127.0.0.1:8080":                  "http://127.0.0.1:8080",
+		"https://[::1]":                          "https://[::1]",
+		"https://[::1]:443":                      "https://[::1]",
+		"https://[::1]:8443/x":                   "https://[::1]:8443",
 	} {
 		if got, err := IssuerOrigin(in); err != nil || got != want {
 			t.Errorf("IssuerOrigin(%q) = %q, %v; want %q", in, got, err, want)
