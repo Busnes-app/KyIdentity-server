@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -139,13 +140,15 @@ func (s *RelaySender) SendPush(dev store.NativeDevice, ch MFAChallengePush) erro
 		"body":     messageBody,
 		"platform": dev.Platform,
 		"data": map[string]string{
-			"type":           "mfa_challenge",
-			"title":          title,
-			"body":           messageBody,
-			"challengeId":    ch.ChallengeID,
-			"deviceId":       dev.ID,
-			"deviceUserId":   dev.UserID,
-			"devicePlatform": dev.Platform,
+			"type":             "mfa_challenge",
+			"title":            title,
+			"body":             messageBody,
+			"challengeId":      ch.ChallengeID,
+			"deviceId":         dev.ID,
+			"deviceUserId":     dev.UserID,
+			"purpose":          ch.Purpose,
+			"expiresAtEpochMs": strconv.FormatInt(ch.ExpiresAtMS, 10),
+			"devicePlatform":   dev.Platform,
 		},
 	})
 	req, err := http.NewRequest(http.MethodPost, endpoint.url+"/send", bytes.NewReader(body))

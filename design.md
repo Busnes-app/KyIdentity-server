@@ -145,11 +145,32 @@ KyIdentity natively manages mobile push devices and pairing tokens.
    - `challengeId` (UUID)
    - `matchDigits` (random 2-digit number, e.g., `42`)
    - `decoyDigits` (array of alternative numbers)
-   - Expiration (5 minutes)
-3. KyIdentity dispatches the push challenge to the user's paired device via push relay (or places it in `GET /api/notifications/native/pull` for pull-mode clients).
+   - `purpose` (`login` or `step_up`)
+   - Expiration (5 minutes, whole seconds)
+3. KyIdentity dispatches the push challenge (data: `challengeId`, `deviceId`, `deviceUserId`, `devicePlatform`, `purpose`, `expiresAtEpochMs` as a decimal string; never digits) to the user's paired device via push relay (or places it in `GET /api/notifications/native/pull` for pull-mode clients).
 4. The browser displays the prompt: *"Select 42 on your authenticator device"* and begins polling `POST /api/auth/mfa/push/poll`.
 5. The user opens the notification on their mobile device and taps the matching number `42`.
-6. The mobile app sends `POST /api/mfa/push/respond` with the signed response.
+6. The mobile app sends `POST /api/mfa/push/respond` with `challengeId`, `deviceId`, `selectedDigits`, `approve` and `signature`. Only the named device's key is tried (it must belong to the challenge's user, be an MFA approver and hold a key); any other failure is the same generic error. The signature is ECDSA-P256-SHA256 (ASN.1 DER, base64) over, UTF-8 and `|`-joined with no trailing separator:
+
+   ```
+   kyidentity-push-v2|{origin}|{userId}|{deviceId}|{challengeId}|{purpose}|{expiresAtMs}|{verb}|{digits}
+   ```
+
+   `origin` comes from `KYIDENTITY_ISSUER_URL`, never the request: scheme and host lowercased, default port (443/80) dropped, path, query and userinfo dropped. `verb` is `approve` or `deny`; `digits` is empty on deny. Any field containing `|`, or an empty origin, user, device or challenge ID, is refused. v1 is not accepted.
+
+   | Issuer URL | Origin |
+   |---|---|
+   | `https://ID.Example.com/` | `https://id.example.com` |
+   | `https://id.example.com:443` | `https://id.example.com` |
+   | `https://id.example.com:8443/kyidentity` | `https://id.example.com:8443` |
+   | `http://127.0.0.1:8080` | `http://127.0.0.1:8080` |
+
+   Golden vectors (asserted in `internal/mfa/push_message_test.go`):
+
+   ```
+   kyidentity-push-v2|https://id.example.com|u-123|d-456|c-789|login|1791331200000|approve|42
+   kyidentity-push-v2|https://id.example.com|u-123|d-456|c-789|step_up|1791331200000|deny|
+   ```
 7. Upon successful match, the polling browser receives confirmation and calls `POST /api/auth/mfa/push/finish` to complete authentication and receive the authorization code or session cookie.
 
 ### 5.3 OIDC Login Flow for KySecurity Suite Applications

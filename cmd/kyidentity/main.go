@@ -141,6 +141,11 @@ func main() {
 		digests = append(digests, b)
 	}
 	mfaEngine.SetAttestor(attest.NewVerifier(attestRoots, attestStatus, "org.kysecurity.authenticator", digests, requireLockedBootloader(dbStore.AttestationSettings, log.Printf)))
+	pushOrigin, err := mfa.IssuerOrigin(cfg.IssuerURL)
+	if err != nil {
+		log.Fatalf("Invalid issuer URL for push approvals: %v", err)
+	}
+	mfaEngine.SetIssuerOrigin(pushOrigin)
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
 	adminCount, err := dbStore.CountAdmins()

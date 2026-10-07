@@ -140,7 +140,8 @@ type MFAChallenge struct {
 	MethodType      string     `json:"methodType"`
 	MatchDigits     string     `json:"matchDigits"`
 	DecoyDigitsJSON string     `json:"decoyDigitsJson"`
-	Status          string     `json:"status"` // "pending", "approved", "denied", "expired"
+	Status          string     `json:"status"`  // "pending", "approved", "denied", "expired"
+	Purpose         string     `json:"purpose"` // "login" or "step_up"
 	ExpiresAt       time.Time  `json:"expiresAt"`
 	CreatedAt       time.Time  `json:"createdAt"`
 }
