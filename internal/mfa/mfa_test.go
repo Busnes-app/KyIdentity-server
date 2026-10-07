@@ -660,3 +660,21 @@ func TestCreatePushChallengePurposeAndExpiry(t *testing.T) {
 		t.Fatal("accepted unknown purpose")
 	}
 }
+
+func TestRespondRefusedWithoutIssuerOrigin(t *testing.T) {
+	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	device := pairSigningDevice(t, dbStore, user.ID, "phone-1")
+	ch, err := engine.CreatePushChallenge(user.ID, "login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.SetIssuerOrigin("")
+	ok, _, err := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, device.sign(t, ch, true, ch.MatchDigits))
+	if ok || err == nil {
+		t.Fatalf("response accepted without an issuer origin: ok=%v err=%v", ok, err)
+	}
+	if status, _, _ := engine.CheckPushChallenge(ch.ID); status != "pending" {
+		t.Fatalf("challenge status = %s, want pending", status)
+	}
+}
