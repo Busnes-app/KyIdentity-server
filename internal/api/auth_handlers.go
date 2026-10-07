@@ -246,7 +246,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 		var challengeID string
 		if hasPush {
-			challenge, err := h.mfaEngine.CreatePushChallenge(user.ID)
+			challenge, err := h.mfaEngine.CreatePushChallenge(user.ID, "login")
 			if err == nil && challenge != nil {
 				challengeID = challenge.ID
 				resp.ChallengeID = challenge.ID
@@ -534,6 +534,7 @@ func (h *AuthHandler) FinishPushLogin(w http.ResponseWriter, r *http.Request) {
 
 type PushRespondRequest struct {
 	ChallengeID    string `json:"challengeId"`
+	DeviceID       string `json:"deviceId"`
 	SelectedDigits string `json:"selectedDigits"`
 	Approve        bool   `json:"approve"`
 	Signature      string `json:"signature"`
@@ -543,7 +544,7 @@ type PushRespondRequest struct {
 // no session; the device signature over the challenge is what authenticates it.
 func (h *AuthHandler) RespondPush(w http.ResponseWriter, r *http.Request) {
 	var req PushRespondRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ChallengeID == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ChallengeID == "" || req.DeviceID == "" {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
@@ -552,7 +553,7 @@ func (h *AuthHandler) RespondPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	approved, deviceID, err := h.mfaEngine.RespondPushChallenge(req.ChallengeID, req.SelectedDigits, req.Approve, req.Signature)
+	approved, deviceID, err := h.mfaEngine.RespondPushChallenge(req.ChallengeID, req.DeviceID, req.SelectedDigits, req.Approve, req.Signature)
 	if err != nil {
 		ip := h.middleware.ClientIP(r)
 		if errors.Is(err, mfa.ErrUnsignedDevice) {

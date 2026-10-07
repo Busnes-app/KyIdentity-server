@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,8 @@ import (
 )
 
 const testPassword = "valid-secret-password-123"
+
+const testIssuerOrigin = "http://localhost:5867"
 
 type pushFixture struct {
 	server   *Server
@@ -122,10 +125,21 @@ func (f *pushFixture) login(t *testing.T) (mfaToken, challengeID string) {
 	return resp.MFAToken, resp.ChallengeID
 }
 
-func (f *pushFixture) sign(t *testing.T, challengeID string, approve bool, digits string) string {
+func (f *pushFixture) sign(t *testing.T, ch *store.MFAChallenge, approve bool, digits string) string {
 	t.Helper()
-	digest := sha256.Sum256(mfa.PushResponseMessage(challengeID, approve, digits))
-	sig, err := ecdsa.SignASN1(rand.Reader, f.devKey, digest[:])
+	return signPush(t, f.devKey, f.deviceID, ch, testIssuerOrigin, approve, digits)
+}
+
+// signPush signs the v2 message for one device and challenge.
+func signPush(t *testing.T, key *ecdsa.PrivateKey, deviceID string, ch *store.MFAChallenge, origin string, approve bool, digits string) string {
+	t.Helper()
+	msg, err := mfa.PushResponseMessage(mfa.PushBinding{Origin: origin, UserID: ch.UserID, DeviceID: deviceID, ChallengeID: ch.ID,
+		Purpose: ch.Purpose, ExpiresAtMS: ch.ExpiresAt.UnixMilli()}, approve, digits)
+	if err != nil {
+		t.Fatalf("PushResponseMessage failed: %v", err)
+	}
+	digest := sha256.Sum256(msg)
+	sig, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
 	if err != nil {
 		t.Fatalf("SignASN1 failed: %v", err)
 	}
@@ -158,22 +172,21 @@ func TestForgedMFATokenCannotFinishPushLogin(t *testing.T) {
 	}
 	mPriv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	mDER, _ := x509.MarshalPKIXPublicKey(&mPriv.PublicKey)
+	mDevID := uuid.New().String()
 	if err := f.store.UpsertNativeDevice(&store.NativeDevice{
-		ID: uuid.New().String(), UserID: mallory.ID, DeviceName: "mallory-phone",
+		ID: mDevID, UserID: mallory.ID, DeviceName: "mallory-phone",
 		DeviceIdentifier: "mallory-phone", PublicKey: base64.StdEncoding.EncodeToString(mDER),
 		IsMFAApprover: true,
 	}); err != nil {
 		t.Fatalf("UpsertNativeDevice failed: %v", err)
 	}
 
-	challenge, err := f.server.mfaEngine.CreatePushChallenge(mallory.ID)
+	challenge, err := f.server.mfaEngine.CreatePushChallenge(mallory.ID, "login")
 	if err != nil {
 		t.Fatalf("CreatePushChallenge failed: %v", err)
 	}
-	digest := sha256.Sum256(mfa.PushResponseMessage(challenge.ID, true, challenge.MatchDigits))
-	sig, _ := ecdsa.SignASN1(rand.Reader, mPriv, digest[:])
 	approved, _, err := f.server.mfaEngine.RespondPushChallenge(
-		challenge.ID, challenge.MatchDigits, true, base64.StdEncoding.EncodeToString(sig))
+		challenge.ID, mDevID, challenge.MatchDigits, true, signPush(t, mPriv, mDevID, challenge, testIssuerOrigin, true, challenge.MatchDigits))
 	if err != nil || !approved {
 		t.Fatalf("setup: expected mallory's own challenge to be approved, got %v %v", approved, err)
 	}
@@ -208,7 +221,7 @@ func (f *pushFixture) approvedChallengeFor(t *testing.T, username string) *store
 	if err := f.store.CreateUser(other); err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
-	challenge, err := f.server.mfaEngine.CreatePushChallenge(other.ID)
+	challenge, err := f.server.mfaEngine.CreatePushChallenge(other.ID, "login")
 	if err != nil {
 		t.Fatalf("CreatePushChallenge failed: %v", err)
 	}
@@ -309,9 +322,10 @@ func TestPushHappyPathStillWorks(t *testing.T) {
 
 	rec := f.post(t, "/api/mfa/push/respond", map[string]any{
 		"challengeId":    challengeID,
+		"deviceId":       f.deviceID,
 		"selectedDigits": challenge.MatchDigits,
 		"approve":        true,
-		"signature":      f.sign(t, challengeID, true, challenge.MatchDigits),
+		"signature":      f.sign(t, challenge, true, challenge.MatchDigits),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("signed approval rejected: %d %s", rec.Code, rec.Body.String())
@@ -379,4 +393,83 @@ func TestLoginResponseCarriesNoKeyMaterial(t *testing.T) {
 			t.Fatalf("login response leaked %q: %+v", forbidden, body)
 		}
 	}
+}
+
+// respondTo posts a push response and returns the recorder.
+func (f *pushFixture) respondTo(t *testing.T, ch *store.MFAChallenge, deviceID, signature string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := map[string]any{"challengeId": ch.ID, "selectedDigits": ch.MatchDigits, "approve": true, "signature": signature}
+	if deviceID != "" {
+		body["deviceId"] = deviceID
+	}
+	return f.post(t, "/api/mfa/push/respond", body)
+}
+
+func (f *pushFixture) requirePending(t *testing.T, challengeID string) {
+	t.Helper()
+	if status, _, err := f.server.mfaEngine.CheckPushChallenge(challengeID); err != nil || status != "pending" {
+		t.Fatalf("challenge status = %q, %v; want pending", status, err)
+	}
+}
+
+func TestPushRespondRejectsAnotherUsersDevice(t *testing.T) {
+	f, cleanup := newPushFixture(t)
+	defer cleanup()
+
+	bob := &store.User{ID: uuid.New().String(), Username: "bob", Email: "bob@example.com", PasswordHash: "mock-hash", Role: "user", Status: "active"}
+	if err := f.store.CreateUser(bob); err != nil {
+		t.Fatal(err)
+	}
+	bKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	bDER, _ := x509.MarshalPKIXPublicKey(&bKey.PublicKey)
+	bDevID := uuid.New().String()
+	if err := f.store.UpsertNativeDevice(&store.NativeDevice{ID: bDevID, UserID: bob.ID, DeviceName: "bob-phone", DeviceIdentifier: "bob-phone",
+		PublicKey: base64.StdEncoding.EncodeToString(bDER), IsMFAApprover: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, challengeID := f.login(t)
+	ch, err := f.store.GetMFAChallenge(challengeID)
+	if err != nil || ch == nil {
+		t.Fatal(err)
+	}
+	rec := f.respondTo(t, ch, bDevID, signPush(t, bKey, bDevID, ch, testIssuerOrigin, true, ch.MatchDigits))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "challenge_error") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	f.requirePending(t, challengeID)
+}
+
+func TestPushRespondRejectsV1Signature(t *testing.T) {
+	f, cleanup := newPushFixture(t)
+	defer cleanup()
+
+	_, challengeID := f.login(t)
+	ch, err := f.store.GetMFAChallenge(challengeID)
+	if err != nil || ch == nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("kysignon-push-v1|" + ch.ID + "|approve|" + ch.MatchDigits))
+	sig, _ := ecdsa.SignASN1(rand.Reader, f.devKey, digest[:])
+	rec := f.respondTo(t, ch, f.deviceID, base64.StdEncoding.EncodeToString(sig))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("v1 signature: %d %s", rec.Code, rec.Body.String())
+	}
+	f.requirePending(t, challengeID)
+}
+
+func TestPushRespondRequiresDeviceID(t *testing.T) {
+	f, cleanup := newPushFixture(t)
+	defer cleanup()
+
+	_, challengeID := f.login(t)
+	ch, err := f.store.GetMFAChallenge(challengeID)
+	if err != nil || ch == nil {
+		t.Fatal(err)
+	}
+	rec := f.respondTo(t, ch, "", f.sign(t, ch, true, ch.MatchDigits))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing deviceId: %d %s", rec.Code, rec.Body.String())
+	}
+	f.requirePending(t, challengeID)
 }

@@ -131,11 +131,15 @@ func TestPushStepUpRequiresSignedApproval(t *testing.T) {
 	if r := readStepUpReply(t, call("/api/auth/step-up/finish", body)); r.Kind != "pending" {
 		t.Fatal("pending push produced grant")
 	}
-	approval := map[string]any{"challengeId": challenge.Proof, "selectedDigits": c.MatchDigits, "approve": true}
+	approval := map[string]any{"challengeId": challenge.Proof, "deviceId": f.deviceID, "selectedDigits": c.MatchDigits, "approve": true}
 	if r := f.post(t, "/api/mfa/push/respond", approval); r.Code == 200 {
 		t.Fatal("unsigned approval accepted")
 	}
-	approval["signature"] = f.sign(t, challenge.Proof, true, c.MatchDigits)
+	pc, err := f.store.GetMFAChallenge(challenge.Proof)
+	if err != nil || pc == nil || pc.Purpose != "step_up" {
+		t.Fatalf("push challenge = %+v, %v", pc, err)
+	}
+	approval["signature"] = f.sign(t, pc, true, c.MatchDigits)
 	if r := f.post(t, "/api/mfa/push/respond", approval); r.Code != 200 {
 		t.Fatal(r.Body.String())
 	}

@@ -1774,16 +1774,16 @@ func (s *Store) DeleteUserMFAMethods(userID string) error {
 
 // MFA Challenges
 func (s *Store) CreateMFAChallenge(ch *MFAChallenge) error {
-	query := `INSERT INTO mfa_challenges (id, user_id, method_type, match_digits, decoy_digits_json, status, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO mfa_challenges (id, user_id, method_type, match_digits, decoy_digits_json, status, purpose, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	ch.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, ch.ID, ch.UserID, ch.MethodType, ch.MatchDigits, ch.DecoyDigitsJSON, ch.Status, ch.ExpiresAt, ch.CreatedAt)
+	_, err := s.db.Exec(query, ch.ID, ch.UserID, ch.MethodType, ch.MatchDigits, ch.DecoyDigitsJSON, ch.Status, ch.Purpose, ch.ExpiresAt, ch.CreatedAt)
 	return err
 }
 
 func (s *Store) GetMFAChallenge(challengeID string) (*MFAChallenge, error) {
-	query := `SELECT id, user_id, method_type, match_digits, decoy_digits_json, status, expires_at, created_at, verified_at FROM mfa_challenges WHERE id = ?`
+	query := `SELECT id, user_id, method_type, match_digits, decoy_digits_json, status, purpose, expires_at, created_at, verified_at FROM mfa_challenges WHERE id = ?`
 	ch := &MFAChallenge{}
-	err := s.db.QueryRow(query, challengeID).Scan(&ch.ID, &ch.UserID, &ch.MethodType, &ch.MatchDigits, &ch.DecoyDigitsJSON, &ch.Status, &ch.ExpiresAt, &ch.CreatedAt, &ch.VerifiedAt)
+	err := s.db.QueryRow(query, challengeID).Scan(&ch.ID, &ch.UserID, &ch.MethodType, &ch.MatchDigits, &ch.DecoyDigitsJSON, &ch.Status, &ch.Purpose, &ch.ExpiresAt, &ch.CreatedAt, &ch.VerifiedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

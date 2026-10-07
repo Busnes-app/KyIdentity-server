@@ -144,12 +144,20 @@ func TestDeviceWithValidKeyPairsAndCanApprove(t *testing.T) {
 		t.Fatalf("a device with a valid P-256 key was rejected: %v", err)
 	}
 
-	ch, err := e.CreatePushChallenge(u.ID)
+	ch, err := e.CreatePushChallenge(u.ID, "login")
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig := sign(t, key, PushResponseMessage(ch.ID, true, ch.MatchDigits))
-	approved, _, err := e.RespondPushChallenge(ch.ID, ch.MatchDigits, true, sig)
+	devs, err := db.ListUserNativeDevices(u.ID)
+	if err != nil || len(devs) != 1 {
+		t.Fatalf("devices = %d, %v", len(devs), err)
+	}
+	msg, err := PushResponseMessage(PushBinding{Origin: testOrigin, UserID: u.ID, DeviceID: devs[0].ID, ChallengeID: ch.ID,
+		Purpose: ch.Purpose, ExpiresAtMS: ch.ExpiresAt.UnixMilli()}, true, ch.MatchDigits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, _, err := e.RespondPushChallenge(ch.ID, devs[0].ID, ch.MatchDigits, true, sign(t, key, msg))
 	if err != nil || !approved {
 		t.Errorf("a correctly signed approval failed: approved=%v err=%v", approved, err)
 	}
@@ -416,7 +424,7 @@ func TestPushChallengeDispatchesToRegisteredRelayToken(t *testing.T) {
 
 	sender := &fakePushSender{}
 	e.SetPushSender(sender)
-	if _, err := e.CreatePushChallenge(u.ID); err != nil {
+	if _, err := e.CreatePushChallenge(u.ID, "login"); err != nil {
 		t.Fatal(err)
 	}
 	if len(sender.sent) != 1 {
@@ -445,7 +453,7 @@ func TestStaleRelayTokenIsClearedWithoutDeletingDevice(t *testing.T) {
 	}
 
 	e.SetPushSender(&fakePushSender{err: ErrStalePushToken})
-	if _, err := e.CreatePushChallenge(u.ID); err != nil {
+	if _, err := e.CreatePushChallenge(u.ID, "login"); err != nil {
 		t.Fatal(err)
 	}
 	devices, err := db.ListUserNativeDevices(u.ID)
