@@ -1,6 +1,6 @@
 module github.com/Busnes-app/kyidentity-server
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/Busnes-app/ky-primitives v0.9.0
