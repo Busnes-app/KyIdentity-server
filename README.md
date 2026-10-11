@@ -823,7 +823,7 @@ devices earn MFA-grade sign-on; `none` stays single factor. Configuration:
   default off): refuse, and daily downgrade, devices whose bootloader is unlocked. The boot state
   is recorded either way.
 
-iOS App Attest (`internal/appattest`, contract `KyAuth-iOS/docs/specs/2026-10-11-ios-app-attest.md`):
+iOS App Attest (`internal/appattest`, contract `2026-10-11-ios-app-attest.md` in [KyAuth-iOS specs](https://github.com/Busnes-app/KyAuth-iOS/tree/master/docs/specs)):
 graded only for `platform: "ios"` with an `appAttest {keyId, attestation}` field; Android chains
 are graded only for `platform: "android"`. The object must chain to the embedded, fingerprint-pinned
 Apple App Attestation Root CA at the current time, carry the nonce
