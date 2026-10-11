@@ -1,0 +1,55 @@
+version: 2
+
+# Same policy as ky-server-base: three days of cooldown on every ecosystem, ky-primitives
+# bumps in their own PR. web/dist is committed and CI diff-checks it, so an npm bump that
+# changes the bundle needs `npm run build` committed to the Dependabot branch.
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      ky-primitives:
+        patterns: ["github.com/Busnes-app/ky-primitives*"]
+      go:
+        patterns: ["*"]
+        exclude-patterns: ["github.com/Busnes-app/ky-primitives*"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: npm
+    directories: [/web, /workers/apns, /workers/fcn]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      npm-build:
+        dependency-type: development
+      npm-runtime:
+        dependency-type: production
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: "chore(deps)"
