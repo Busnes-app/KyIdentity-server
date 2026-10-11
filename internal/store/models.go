@@ -93,6 +93,12 @@ type AccountSyncEvent struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
+// Push transports a device can register.
+const (
+	PushTransportFCM         = "fcm"
+	PushTransportUnifiedPush = "unifiedpush"
+)
+
 type NativeDevice struct {
 	ID                   string     `json:"id"`
 	UserID               string     `json:"userId"`
@@ -102,6 +108,9 @@ type NativeDevice struct {
 	PublicKey            string     `json:"publicKey,omitempty"`
 	PushToken            string     `json:"pushToken,omitempty"`
 	PushTokenUpdatedAtMS int64      `json:"-"`
+	PushTransport        string     `json:"pushTransport"` // fcm | unifiedpush
+	PushP256dh           string     `json:"-"`             // unifiedpush receiver key, base64url
+	PushAuth             string     `json:"-"`             // unifiedpush auth secret, base64url
 	IsMFAApprover        bool       `json:"isMfaApprover"`
 	CanSignOn            bool       `json:"canSignOn"`
 	AttestedLevel        string     `json:"attestedLevel"` // none | tee | strongbox

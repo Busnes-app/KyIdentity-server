@@ -68,7 +68,7 @@ func TestPushTokenRefreshRollsBackWhenItsAuditRowCannotBeWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	audit := poisonedAudit(t, s, "device.push_token_refreshed", dev.ID)
-	if _, err := s.UpdateNativeDevicePushToken(dev.ID, "new", 1, time.Now().UTC(), audit); err == nil {
+	if _, err := s.UpdateNativeDevicePushToken(dev.ID, PushTransportFCM, "new", "", "", 1, time.Now().UTC(), audit); err == nil {
 		t.Fatal("an unauditable push-token refresh reported success")
 	}
 	stored, err := s.GetNativeDevice(dev.ID)
