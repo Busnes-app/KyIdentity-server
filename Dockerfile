@@ -19,7 +19,7 @@ COPY --from=frontend-builder /app/web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /kyidentity ./cmd/kyidentity
 
 # Stage 3: Minimal Production Image
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S kyidentity && adduser -S kyidentity -G kyidentity \
     && mkdir -p /data /css /fonts \
