@@ -1,7 +1,7 @@
 # Multi-stage build for KyIdentity Server
 
 # Stage 1: Build React Frontend
-FROM node:22-alpine AS frontend-builder
+FROM node:26-alpine AS frontend-builder
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
