@@ -148,7 +148,7 @@ func main() {
 		log.Fatalf("Invalid issuer URL for push approvals: %v", err)
 	}
 	mfaEngine.SetIssuerOrigin(pushOrigin)
-	unifiedPush, err := mfa.NewUnifiedPushSender(filepath.Join(cfg.DataDir, "push-vapid-private.key"), pushOrigin)
+	unifiedPush, err := mfa.NewUnifiedPushSender(filepath.Join(cfg.DataDir, config.VAPIDKeyFile), pushOrigin)
 	if err != nil {
 		log.Fatalf("Failed to initialize UnifiedPush sender: %v", err)
 	}

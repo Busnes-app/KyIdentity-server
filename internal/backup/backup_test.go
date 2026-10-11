@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +104,10 @@ func TestCollectSealableCarriesEverythingARestoreNeeds(t *testing.T) {
 	if err := st.SetSetting("canary", "still-in-the-wal"); err != nil {
 		t.Fatal(err)
 	}
+	vapid := []byte("vapid-private-key-fixture\n")
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, config.VAPIDKeyFile), vapid, 0600); err != nil {
+		t.Fatal(err)
+	}
 	payload, err := backup.CollectSealable(cfg, st, "1.0.0")
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +123,12 @@ func TestCollectSealableCarriesEverythingARestoreNeeds(t *testing.T) {
 		if len(got[want]) == 0 {
 			t.Errorf("missing %s", want)
 		}
+	}
+	if string(got["data/"+config.VAPIDKeyFile]) != string(vapid) {
+		t.Error("VAPID key is not carried byte for byte")
+	}
+	if m := backup.Members(cfg); !slices.Contains(m, "data/"+config.VAPIDKeyFile) {
+		t.Errorf("members %v omit the VAPID key", m)
 	}
 	if string(got["data/encryption.key"]) != string(cfg.EncryptionKey) {
 		t.Error("encryption key is not the loaded one byte for byte")

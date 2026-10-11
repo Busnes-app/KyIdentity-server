@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -159,7 +160,12 @@ func TestUnifiedPushSenderEncryptsChallenge(t *testing.T) {
 	if err := json.Unmarshal(decryptRFC8291(t, rk, body), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := challengeData(dev, MFAChallengePush{ChallengeID: "ch1", Purpose: "login", ExpiresAtMS: expires})
+	// Spelled out, not built with challengeData: KyAuth's parser needs every one of these.
+	want := map[string]string{
+		"type": "mfa_challenge", "title": "Sign-in request", "body": "Open KySecurity Authenticator to review.",
+		"challengeId": "ch1", "deviceId": "dev1", "deviceUserId": "u1", "purpose": "login",
+		"expiresAtEpochMs": strconv.FormatInt(expires, 10), "devicePlatform": "android",
+	}
 	if len(got) != len(want) {
 		t.Fatalf("payload = %v, want %v", got, want)
 	}

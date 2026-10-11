@@ -33,6 +33,7 @@ Everything a fresh KyIdentity needs to be the old one:
 | `data/encryption.key` | 32 bytes. Every TOTP secret and paired-system token in the database is encrypted under it |
 | `data/secret.key` | 32 bytes. Signs sessions and CSRF tokens |
 | `data/recovery.pub` | The suite recovery public key, so the restored server comes back pinned (present when the backup was paired) |
+| `data/push-vapid-private.key` | The UnifiedPush VAPID key, so the restored server keeps its push identity (present once the server has started with UnifiedPush support) |
 | `config/kyidentity.json` | Issuer URL, port, TTLs, app name. For your reference when re-deploying; nothing reads it |
 
 The restored directory is the live directory in the clear. Treat it like the running server's
