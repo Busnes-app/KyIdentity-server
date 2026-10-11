@@ -12,7 +12,7 @@ jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: image and attestation coordinates match this repository
         run: |
           set -euo pipefail
@@ -52,7 +52,7 @@ jobs:
           bad=$(printf '%s\n' "$certs" | grep -vxF "$ident" || true); [ -z "$bad" ] || { echo "--cert-identity outside $ident:"; echo "$bad"; exit 1; }
           # README may only point at docs that exist
           (grep -ohE 'docs/[A-Za-z0-9._/-]+\.md' README.md || true) | sort -u | xargs -r -I{} test -f {}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           check-latest: true
@@ -64,7 +64,7 @@ jobs:
           test -z "$unformatted"
       - run: go build ./...
       - run: go vet ./...
-      - uses: golang/govulncheck-action@v1
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
       # Go's default is 10 minutes per package, which the api suite under -race now
       # exceeds on a runner. This is a hang detector, not a performance budget.
       - run: go test -race -count=1 -timeout 20m ./...
@@ -75,8 +75,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -90,8 +90,8 @@ jobs:
   relay:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -115,7 +115,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker build -t kyidentity-ci .
       - name: Smoke test production image
         run: |
