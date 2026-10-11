@@ -8,6 +8,7 @@ import (
 
 // SweepAttestations drops attested devices whose certificates are now revoked or
 // whose bootloader no longer satisfies policy. An unknown status list never downgrades.
+// App Attest devices are skipped: no serials to revoke, and boot state is an Android rule.
 func (e *Engine) SweepAttestations(status attest.Status, requireLocked bool, audit func(deviceID, userID, reason string)) (int, error) {
 	devices, err := e.store.ListAttestedDevices()
 	if err != nil {
@@ -15,6 +16,9 @@ func (e *Engine) SweepAttestations(status attest.Status, requireLocked bool, aud
 	}
 	downgraded := 0
 	for _, d := range devices {
+		if d.AttestedLevel == "appattest" {
+			continue
+		}
 		reason := ""
 		for _, s := range d.AttestationSerials {
 			revoked, known := status.Revoked(s)

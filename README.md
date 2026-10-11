@@ -797,7 +797,7 @@ does not refresh the password's age. ID tokens expose these method/context value
 | Password + passkey | `pwd`, `urn:kysignon:amr:webauthn`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + recovery code | `pwd`, `urn:kysignon:amr:recovery` | `urn:kysignon:acr:recovery` |
 | Paired device key, unattested (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
-| Paired device key, hardware-attested (TEE or StrongBox) | `hwk`, `user`, `mfa` | `urn:kysignon:acr:mfa` |
+| Paired device key, hardware-attested (TEE or StrongBox) or App Attest (iOS) | `hwk`, `user`, `mfa` | `urn:kysignon:acr:mfa` |
 
 A device sign-on ID token also carries `signon_method: device`, `device_id`, and `origin`:
 the `https://host[:port]` of the relay address the user typed into the consumer app (KyPost),
@@ -808,9 +808,10 @@ origin (scheme, host, port): relays sharing an origin with different paths are o
 domain. Each consumer server accepts only its own configured base-URL origin, so registering
 extra aliases at KyIdentity does not widen what a consumer accepts.
 
-An attested device's ID token also carries `attested: tee|strongbox`. At pairing, KyAuth
-uploads its Android Key Attestation chain; KyIdentity verifies it and grades the device
-`none`, `tee` or `strongbox`. Pairing never fails because of attestation, but only attested
+An attested device's ID token also carries `attested: tee|strongbox|appattest`. At pairing,
+KyAuth Android uploads its Android Key Attestation chain; KyIdentity verifies it and grades the
+device `none`, `tee` or `strongbox`. KyAuth iOS uploads an App Attest object instead, graded
+`appattest` or `none` (below). Pairing never fails because of attestation, but only attested
 devices earn MFA-grade sign-on; `none` stays single factor. Configuration:
 
 - `KYIDENTITY_ATTESTATION_STATUS_URL`: Google's revocation status list (default Google's; empty
@@ -822,12 +823,28 @@ devices earn MFA-grade sign-on; `none` stays single factor. Configuration:
   default off): refuse, and daily downgrade, devices whose bootloader is unlocked. The boot state
   is recorded either way.
 
+iOS App Attest (`internal/appattest`, contract `KyAuth-iOS/docs/specs/2026-10-11-ios-app-attest.md`):
+graded only for `platform: "ios"` with an `appAttest {keyId, attestation}` field; Android chains
+are graded only for `platform: "android"`. The object must chain to the embedded, fingerprint-pinned
+Apple App Attestation Root CA at the current time, carry the nonce
+`SHA256(authData || SHA256("kyidentity-appattest-v1|" + credential + "|" + publicKey))`, match the
+`keyId`, a configured App ID, sign count 0 and the accepted AAGUID. This proves a genuine KyAuth
+build on a genuine Apple device, not a statement about the signing key itself, so it is a level
+of its own. A pass is `appattest` with boot state `unknown`; the daily sweep skips these devices
+(no serials, no boot state). Failures grade `none` with the reason in the log and audit row only.
+
+- `KYIDENTITY_APPATTEST_APP_IDS`: comma-separated `<TeamID>.<bundleID>` (KyAuth iOS is
+  `TATYN4X57D.org.kysecurity.authenticator`); empty (default) disables grading and logs it at startup.
+- `KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT`: `true` also accepts the development App Attest
+  environment (debug and sandbox builds). Default `false`; anything but `true`/`false` refuses startup.
+
 The roots and status list are refreshed whenever the list goes stale (a failed fetch retries within
 15 minutes; redirects are refused, and a newly published root is logged), and a daily sweep
 downgrades devices whose key was revoked.
 Audit actions: `device.attestation_downgraded`, `admin.attestation_configured`; `device.registered`
 records `attestedLevel`, `bootState` and `attestationReason`. Emulators ship software KeyMint and always grade `none`, so the `tee`/`strongbox` path has not
-been verified on hardware yet; pair a physical phone to confirm.
+been verified on hardware yet; pair a physical phone to confirm. Likewise the `appattest` path is
+tested only against a generated CA; the simulator has no App Attest.
 
 These are KyIdentity context classes, not NIST assurance levels. Only `hwk` from a verified
 attestation asserts a hardware-backed key. Recovery does not claim ordinary MFA. The standard method names
