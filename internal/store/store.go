@@ -1679,10 +1679,12 @@ func (s *Store) DeleteNativeDevice(deviceID, userID string) error {
 	return s.changeEnrollmentDevice(userID, `DELETE FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID)
 }
 
-// ClearNativeDevicePushToken forgets a push target the provider reported gone, unless a
-// refresh already replaced it.
-func (s *Store) ClearNativeDevicePushToken(deviceID, userID, staleToken string) error {
-	_, err := s.db.Exec(`UPDATE native_devices SET push_token = '', push_p256dh = NULL, push_auth = NULL WHERE id = ? AND user_id = ? AND push_token = ?`, deviceID, userID, staleToken)
+// ClearNativeDevicePushToken forgets the push target the provider reported gone, unless a
+// refresh already replaced any part of it (endpoint or keys).
+func (s *Store) ClearNativeDevicePushToken(stale NativeDevice) error {
+	_, err := s.db.Exec(`UPDATE native_devices SET push_token = '', push_p256dh = NULL, push_auth = NULL
+		WHERE id = ? AND user_id = ? AND push_token = ? AND COALESCE(push_p256dh, '') = ? AND COALESCE(push_auth, '') = ?`,
+		stale.ID, stale.UserID, stale.PushToken, stale.PushP256dh, stale.PushAuth)
 	return err
 }
 

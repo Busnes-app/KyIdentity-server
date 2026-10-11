@@ -64,6 +64,9 @@ func (s *UnifiedPushSender) SendPush(dev store.NativeDevice, ch MFAChallengePush
 		VAPIDPrivateKey: s.vapidPrivate,
 		TTL:             max(ttl, 1),
 		Urgency:         webpush.UrgencyHigh,
+		// Padded to a fixed 2 KiB rather than 4 KiB, so a distributor that re-encodes the
+		// body (FCM-backed ones base64 it) stays under its own 4 KiB limit.
+		RecordSize: 2048,
 	})
 	if err != nil {
 		// url.Error names the endpoint, which is a capability URL; keep it out of logs.
@@ -86,10 +89,17 @@ func (s *UnifiedPushSender) SendPush(dev store.NativeDevice, ch MFAChallengePush
 
 // loadOrCreateVAPIDKey returns the base64url private scalar and uncompressed public key.
 func loadOrCreateVAPIDKey(path string) (private, public string, err error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		raw, err = createVAPIDKey(path)
+	if err := createVAPIDKey(path); err != nil {
+		return "", "", err
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", "", err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return "", "", fmt.Errorf("permissions %v are too open; chmod 600 it", info.Mode().Perm())
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", "", err
 	}
@@ -105,35 +115,37 @@ func loadOrCreateVAPIDKey(path string) (private, public string, err error) {
 	return private, base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), nil
 }
 
-// createVAPIDKey writes a new key through a temp file and rename, so a run that dies
-// halfway never leaves a truncated key at path.
-func createVAPIDKey(path string) ([]byte, error) {
+// createVAPIDKey writes a key to path unless one exists. It goes through a temp file and a
+// hard link: a run that dies halfway never leaves a truncated key, and two concurrent first
+// starts cannot overwrite each other's key (the loser's link fails and it reads the winner's).
+func createVAPIDKey(path string) error {
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	key, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	data := []byte(base64.RawURLEncoding.EncodeToString(key.Bytes()) + "\n")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return nil, err
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".push-vapid-*") // mode 0600
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return nil, err
+	_, err = tmp.WriteString(base64.RawURLEncoding.EncodeToString(key.Bytes()) + "\n")
+	if err == nil {
+		err = tmp.Sync()
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return nil, err
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
 	}
-	if err := tmp.Close(); err != nil {
-		return nil, err
+	if err != nil {
+		return err
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return nil, err
+	if err := os.Link(tmp.Name(), path); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
 	}
-	return data, nil
+	return nil
 }

@@ -19,6 +19,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/attest"
@@ -470,25 +472,32 @@ func (e *Engine) dispatchPushChallenge(challenge *store.MFAChallenge, decoys []s
 		Purpose:     challenge.Purpose,
 		ExpiresAtMS: challenge.ExpiresAt.UnixMilli(),
 	}
-	dispatched := 0
-	// Logs name the device and transport only: a UnifiedPush endpoint is a capability URL.
+	// Concurrent, so an unreachable distributor costs the login one send timeout, not one per
+	// device. Logs name the device and transport only: a UnifiedPush endpoint is a capability URL.
+	var dispatched atomic.Int32
+	var wg sync.WaitGroup
 	for _, dev := range devices {
 		sender := e.senderFor(dev)
 		if !dev.IsMFAApprover || dev.PushToken == "" || sender == nil {
 			log.Printf("mfa push: skipping device %s transport %s approver=%v hasToken=%v hasSender=%v", dev.ID, dev.PushTransport, dev.IsMFAApprover, dev.PushToken != "", sender != nil)
 			continue
 		}
-		if err := sender.SendPush(dev, push); errors.Is(err, ErrStalePushToken) {
-			_ = e.store.ClearNativeDevicePushToken(dev.ID, dev.UserID, dev.PushToken)
-			log.Printf("mfa push: stale token cleared for device %s transport %s", dev.ID, dev.PushTransport)
-		} else if err != nil {
-			log.Printf("mfa push: send failed for device %s transport %s: %v", dev.ID, dev.PushTransport, err)
-		} else {
-			dispatched++
-			log.Printf("mfa push: sent challenge %s to device %s transport %s", challenge.ID, dev.ID, dev.PushTransport)
-		}
+		wg.Add(1)
+		go func(dev store.NativeDevice) {
+			defer wg.Done()
+			if err := sender.SendPush(dev, push); errors.Is(err, ErrStalePushToken) {
+				_ = e.store.ClearNativeDevicePushToken(dev)
+				log.Printf("mfa push: stale token cleared for device %s transport %s", dev.ID, dev.PushTransport)
+			} else if err != nil {
+				log.Printf("mfa push: send failed for device %s transport %s: %v", dev.ID, dev.PushTransport, err)
+			} else {
+				dispatched.Add(1)
+				log.Printf("mfa push: sent challenge %s to device %s transport %s", challenge.ID, dev.ID, dev.PushTransport)
+			}
+		}(dev)
 	}
-	if dispatched == 0 {
+	wg.Wait()
+	if dispatched.Load() == 0 {
 		log.Printf("mfa push: no pushes sent for challenge %s user %s across %d device(s)", challenge.ID, challenge.UserID, len(devices))
 	}
 }
