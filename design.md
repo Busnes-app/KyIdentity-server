@@ -134,9 +134,9 @@ KyIdentity natively manages mobile push devices and pairing tokens.
 1. The user logs into the KyIdentity User Dashboard and navigates to **Security & Devices**.
 2. The user clicks **Add Authenticator Device**. KyIdentity generates a 90-second single-use pairing token, displayed as both a scannable QR code and a 6-digit numeric PIN.
 3. In the KySecurity Authenticator app (or KyPost mobile app), the user scans the QR code or enters the PIN.
-4. The mobile app posts to `POST /api/notifications/native/register` with the pairing token, device ID, public key, and push push token.
+4. The mobile app posts to `POST /api/notifications/native/register` with the pairing token, device ID, public key, and push target: `pushToken`, plus `pushTransport` (`fcm`, the default, or `unifiedpush`). For `unifiedpush`, `pushToken` is the HTTPS endpoint (passes the outbound URL policy, at most 4096 bytes) and `pushP256dh` (65-byte uncompressed P-256 point) and `pushAuth` (16 bytes) are required, base64url with optional padding. For `fcm` both keys must be empty.
 5. KyIdentity validates the token, registers the device in `native_devices`, and activates it as an MFA approver.
-6. When FCM rotates the delivery token, the paired device sends `PUT /api/notifications/native/devices/{deviceId}/push-token` with `pushToken`, Unix-millisecond `issuedAt`, and an ASN.1 ECDSA P-256/SHA-256 signature. The signed UTF-8 message is `kysignon-push-token-v1|<issuer-origin>|<deviceId>|<issuedAt>|<lowercase-hex-SHA256-of-trimmed-token>`. This prefix is a frozen wire constant and is not changed by the product rename. Requests must be within five minutes of server time and newer than the device's last accepted refresh; success returns `204`, replay returns `409`, and the client must sign a current request after a stale-window failure.
+6. When its push target changes, the paired device sends `PUT /api/notifications/native/devices/{deviceId}/push-token` with `pushToken`, `pushTransport`, `pushP256dh`, `pushAuth` (validated as at registration), Unix-millisecond `issuedAt`, and an ASN.1 ECDSA P-256/SHA-256 signature. The signed UTF-8 message is `kyidentity-push-token-v2|<issuer-origin>|<deviceId>|<issuedAt>|<transport>|<lowercase-hex-SHA256-of-trimmed-token>|<pushP256dh>|<pushAuth>`, where transport is the effective one (`fcm` when omitted) and the keys are the strings sent (empty for `fcm`). Any field containing `|` is refused. v1 is not accepted. Vectors (origin `https://id.example.com`, device `d-456`, `issuedAt` `1791331200000`): `fcm` with token `fcm-token-1` signs `kyidentity-push-token-v2|https://id.example.com|d-456|1791331200000|fcm|3cfaa3f1d62d114805029366153fbb440a2d4e4b56406a04830579ac65db6a5c||`; the `unifiedpush` vector is in `internal/mfa/push_target_test.go`. Requests must be within five minutes of server time and newer than the device's last accepted refresh; success returns `204`, replay returns `409`, and the client must sign a current request after a stale-window failure.
 
 #### Push MFA Authentication
 
@@ -288,6 +288,9 @@ CREATE TABLE native_devices (
     device_identifier TEXT NOT NULL,
     public_key TEXT,
     push_token TEXT,
+    push_transport TEXT NOT NULL DEFAULT 'fcm', -- fcm | unifiedpush
+    push_p256dh TEXT,
+    push_auth TEXT,
     is_mfa_approver BOOLEAN NOT NULL DEFAULT 0,
     last_seen_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

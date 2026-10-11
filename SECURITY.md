@@ -89,6 +89,13 @@ See [Session Behavior](README.md#session-behavior) for full details. Key points:
 - Set `SERVER_BASE_URL` to an HTTPS URL so credentials travel over TLS.
 - Pairing secrets must remain on the server only. Multi-replica deployments share one secret via `PAIRING_SECRET`.
 
+### UnifiedPush
+
+- A device can register a UnifiedPush endpoint instead of an FCM token. KyIdentity then posts directly to the user's distributor (ntfy, NextPush, ...), and no relay or Google service is involved.
+- The payload is RFC 8291 encrypted to keys the device holds; KyIdentity never sends a UnifiedPush payload in plaintext and refuses a registration without keys. The distributor sees **when** a sign-in request happens, the endpoint, and your server's address and origin (the VAPID subject). Bodies are padded to a fixed size, so it does not learn their length or content.
+- The endpoint URL is chosen by the device, so KyIdentity treats it as untrusted: HTTPS only, no private or loopback addresses (checked at registration and again when connecting), no redirects. A self-hosted distributor on a private network needs `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`, which also lets any paired device make KyIdentity post to internal HTTPS addresses. It is off by default.
+- Endpoint URLs are capabilities and are never written to logs.
+
 ## Deployment Security
 
 Your deployment choices determine the actual security of KyPost. This section covers the configuration decisions that matter most.
@@ -254,7 +261,7 @@ Unencrypted:
 - **API calls:** All backend endpoints expect HTTPS (enforced by cookie marking and browser same-origin policy).
 - **CardDAV:** Sync clients should use HTTPS-only servers.
 - **Mobile pairing:** QR codes and pickup links carry bearer tokens in the query string. Use HTTPS for `SERVER_BASE_URL`.
-- **External services:** Push relay APIs use HTTPS only (`PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS).
+- **External services:** Push relay APIs use HTTPS only (`PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS). UnifiedPush endpoints must be HTTPS and payloads are RFC 8291 encrypted.
 
 ### Sensitive Data in Logs
 
