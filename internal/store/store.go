@@ -135,6 +135,9 @@ func (s *Store) migrate() error {
 		public_key TEXT,
 		push_token TEXT,
 		push_token_updated_at_ms INTEGER NOT NULL DEFAULT 0,
+		push_transport TEXT NOT NULL DEFAULT 'fcm' CHECK (push_transport IN ('fcm', 'unifiedpush')),
+		push_p256dh TEXT,
+		push_auth TEXT,
 		is_mfa_approver BOOLEAN NOT NULL DEFAULT 0,
 		can_sign_on BOOLEAN NOT NULL DEFAULT 0,
 		attested_level TEXT NOT NULL DEFAULT 'none',
@@ -353,6 +356,9 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if err := s.migrateNativeDeviceAttestation(); err != nil {
+		return err
+	}
+	if err := s.migrateNativeDevicePushTransport(); err != nil {
 		return err
 	}
 	if err := s.migrateSCIM(); err != nil {
@@ -593,6 +599,19 @@ func (s *Store) migrateNativeDeviceAttestation() error {
 		{"attested_at", `ALTER TABLE native_devices ADD COLUMN attested_at DATETIME`},
 		{"boot_state", `ALTER TABLE native_devices ADD COLUMN boot_state TEXT NOT NULL DEFAULT 'unknown'`},
 		{"attestation_serials", `ALTER TABLE native_devices ADD COLUMN attestation_serials TEXT NOT NULL DEFAULT '[]'`},
+	} {
+		if err := s.addColumnIfMissing("native_devices", m.col, m.alter); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) migrateNativeDevicePushTransport() error {
+	for _, m := range []struct{ col, alter string }{
+		{"push_transport", `ALTER TABLE native_devices ADD COLUMN push_transport TEXT NOT NULL DEFAULT 'fcm' CHECK (push_transport IN ('fcm', 'unifiedpush'))`},
+		{"push_p256dh", `ALTER TABLE native_devices ADD COLUMN push_p256dh TEXT`},
+		{"push_auth", `ALTER TABLE native_devices ADD COLUMN push_auth TEXT`},
 	} {
 		if err := s.addColumnIfMissing("native_devices", m.col, m.alter); err != nil {
 			return err
@@ -1412,7 +1431,7 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 	// RETURNING: on re-pairing the conflict keeps the stored row's id and created_at.
 	if err := tx.QueryRow(nativeDeviceUpsert+`
 		RETURNING id, created_at
-	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt).Scan(&dev.ID, &dev.CreatedAt); err != nil {
+	`, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.PushTransport, dev.PushP256dh, dev.PushAuth, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt).Scan(&dev.ID, &dev.CreatedAt); err != nil {
 		return false, err
 	}
 
@@ -1436,13 +1455,16 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 // nativeDeviceUpsert enrols a device, or re-pairs it in place. The grade is the request's own,
 // written with the key it graded, so a re-pair never inherits the previous key's grade.
 const nativeDeviceUpsert = `
-	INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials, last_seen_at, created_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO native_devices (id, user_id, device_name, device_identifier, platform, public_key, push_token, push_transport, push_p256dh, push_auth, is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials, last_seen_at, created_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(user_id, device_identifier) DO UPDATE SET
 		device_name = excluded.device_name,
 		platform = excluded.platform,
 		public_key = excluded.public_key,
 		push_token = excluded.push_token,
+		push_transport = excluded.push_transport,
+		push_p256dh = excluded.push_p256dh,
+		push_auth = excluded.push_auth,
 		is_mfa_approver = excluded.is_mfa_approver,
 		can_sign_on = excluded.can_sign_on,
 		attested_level = excluded.attested_level,
@@ -1458,6 +1480,9 @@ func (d *NativeDevice) prepareEnrollment(now time.Time) (any, string, error) {
 	d.LastSeenAt = &now
 	if d.Platform == "" {
 		d.Platform = "android"
+	}
+	if d.PushTransport == "" {
+		d.PushTransport = PushTransportFCM
 	}
 	if d.AttestedLevel == "" {
 		d.AttestedLevel = "none"
@@ -1503,7 +1528,7 @@ func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
 	if err != nil {
 		return err
 	}
-	return s.changeEnrollmentDevice(dev.UserID, nativeDeviceUpsert, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt)
+	return s.changeEnrollmentDevice(dev.UserID, nativeDeviceUpsert, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.PushTransport, dev.PushP256dh, dev.PushAuth, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt)
 }
 
 func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
@@ -1516,7 +1541,7 @@ func (s *Store) ListAttestedDevices() ([]NativeDevice, error) {
 }
 
 func (s *Store) listNativeDevices(clause string, args ...any) ([]NativeDevice, error) {
-	rows, err := s.db.Query(`SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token, is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials, last_seen_at, created_at FROM native_devices `+clause, args...)
+	rows, err := s.db.Query(`SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token, push_transport, COALESCE(push_p256dh, ''), COALESCE(push_auth, ''), is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials, last_seen_at, created_at FROM native_devices `+clause, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1528,7 +1553,7 @@ func (s *Store) listNativeDevices(clause string, args ...any) ([]NativeDevice, e
 		var pubKey, pushTok sql.NullString
 		var attestedAt sql.NullTime
 		var serials string
-		if err := rows.Scan(&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform, &pubKey, &pushTok, &dev.IsMFAApprover, &dev.CanSignOn, &dev.AttestedLevel, &attestedAt, &dev.BootState, &serials, &dev.LastSeenAt, &dev.CreatedAt); err != nil {
+		if err := rows.Scan(&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform, &pubKey, &pushTok, &dev.PushTransport, &dev.PushP256dh, &dev.PushAuth, &dev.IsMFAApprover, &dev.CanSignOn, &dev.AttestedLevel, &attestedAt, &dev.BootState, &serials, &dev.LastSeenAt, &dev.CreatedAt); err != nil {
 			return nil, err
 		}
 		if err := dev.setAttestation(attestedAt, serials); err != nil {
@@ -1568,11 +1593,11 @@ func (s *Store) GetNativeDevice(deviceID string) (*NativeDevice, error) {
 	var serials string
 	err := s.db.QueryRow(`
 		SELECT id, user_id, device_name, device_identifier, platform, public_key, push_token,
-		       push_token_updated_at_ms, is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials,
+		       push_token_updated_at_ms, push_transport, COALESCE(push_p256dh, ''), COALESCE(push_auth, ''), is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials,
 		       last_seen_at, created_at
 		FROM native_devices WHERE id = ?`, deviceID).Scan(
 		&dev.ID, &dev.UserID, &dev.DeviceName, &dev.DeviceIdentifier, &dev.Platform,
-		&pubKey, &pushTok, &dev.PushTokenUpdatedAtMS, &dev.IsMFAApprover, &dev.CanSignOn, &dev.AttestedLevel, &attestedAt, &dev.BootState, &serials, &dev.LastSeenAt, &dev.CreatedAt)
+		&pubKey, &pushTok, &dev.PushTokenUpdatedAtMS, &dev.PushTransport, &dev.PushP256dh, &dev.PushAuth, &dev.IsMFAApprover, &dev.CanSignOn, &dev.AttestedLevel, &attestedAt, &dev.BootState, &serials, &dev.LastSeenAt, &dev.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1592,8 +1617,8 @@ func (s *Store) GetNativeDevice(deviceID string) (*NativeDevice, error) {
 }
 
 // UpdateNativeDevicePushToken atomically rejects duplicate or older signed refreshes and
-// commits the security mutation with its audit record.
-func (s *Store) UpdateNativeDevicePushToken(deviceID, pushToken string, issuedAtMS int64, seenAt time.Time, audit *AuditEvent) (bool, error) {
+// commits the new push target with its audit record.
+func (s *Store) UpdateNativeDevicePushToken(deviceID, transport, pushToken, p256dh, auth string, issuedAtMS int64, seenAt time.Time, audit *AuditEvent) (bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return false, err
@@ -1602,9 +1627,9 @@ func (s *Store) UpdateNativeDevicePushToken(deviceID, pushToken string, issuedAt
 
 	res, err := tx.Exec(`
 		UPDATE native_devices
-		SET push_token = ?, push_token_updated_at_ms = ?, last_seen_at = ?
+		SET push_transport = ?, push_token = ?, push_p256dh = ?, push_auth = ?, push_token_updated_at_ms = ?, last_seen_at = ?
 		WHERE id = ? AND push_token_updated_at_ms < ?`,
-		pushToken, issuedAtMS, seenAt, deviceID, issuedAtMS)
+		transport, pushToken, p256dh, auth, issuedAtMS, seenAt, deviceID, issuedAtMS)
 	if err != nil {
 		return false, err
 	}
@@ -1654,8 +1679,12 @@ func (s *Store) DeleteNativeDevice(deviceID, userID string) error {
 	return s.changeEnrollmentDevice(userID, `DELETE FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID)
 }
 
-func (s *Store) ClearNativeDevicePushToken(deviceID, userID string) error {
-	_, err := s.db.Exec(`UPDATE native_devices SET push_token = '' WHERE id = ? AND user_id = ?`, deviceID, userID)
+// ClearNativeDevicePushToken forgets the push target the provider reported gone, unless a
+// refresh already replaced any part of it (endpoint or keys).
+func (s *Store) ClearNativeDevicePushToken(stale NativeDevice) error {
+	_, err := s.db.Exec(`UPDATE native_devices SET push_token = '', push_p256dh = NULL, push_auth = NULL
+		WHERE id = ? AND user_id = ? AND push_token = ? AND COALESCE(push_p256dh, '') = ? AND COALESCE(push_auth, '') = ?`,
+		stale.ID, stale.UserID, stale.PushToken, stale.PushP256dh, stale.PushAuth)
 	return err
 }
 

@@ -120,7 +120,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize push relay sender: %v", err)
 	}
-	mfaEngine.SetPushSender(relaySender)
+	if relaySender != nil { // a typed nil would reach SendPush
+		mfaEngine.SetPushSender(relaySender)
+	}
 	embedded, err := attest.LoadEmbeddedRoots()
 	if err != nil {
 		log.Fatalf("Failed to load attestation roots: %v", err)
@@ -146,6 +148,11 @@ func main() {
 		log.Fatalf("Invalid issuer URL for push approvals: %v", err)
 	}
 	mfaEngine.SetIssuerOrigin(pushOrigin)
+	unifiedPush, err := mfa.NewUnifiedPushSender(filepath.Join(cfg.DataDir, config.VAPIDKeyFile), pushOrigin)
+	if err != nil {
+		log.Fatalf("Failed to initialize UnifiedPush sender: %v", err)
+	}
+	mfaEngine.SetUnifiedPushSender(unifiedPush)
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
 	adminCount, err := dbStore.CountAdmins()

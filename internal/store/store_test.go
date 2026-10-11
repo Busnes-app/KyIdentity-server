@@ -704,3 +704,50 @@ func TestRecordIssuedTokenChecksAttestedLevel(t *testing.T) {
 		t.Fatalf("downgraded device: got %v, want ErrAppAccessDenied", err)
 	}
 }
+
+// A stale report about an old target must not wipe the one a refresh just stored.
+func TestClearPushTokenSparesARefreshedTarget(t *testing.T) {
+	s, u := newStoreWithUser(t, "user")
+	dev := &NativeDevice{ID: "phone", UserID: u.ID, DeviceName: "phone", DeviceIdentifier: "phone",
+		PushTransport: PushTransportUnifiedPush, PushToken: "https://push.example.net/old", PushP256dh: "k", PushAuth: "a"}
+	if err := s.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.UpdateNativeDevicePushToken(dev.ID, PushTransportUnifiedPush, "https://push.example.net/new", "k2", "a2", 1, time.Now().UTC(), nil); err != nil || !ok {
+		t.Fatalf("refresh = %v, %v", ok, err)
+	}
+	if err := s.ClearNativeDevicePushToken(NativeDevice{ID: dev.ID, UserID: u.ID, PushToken: "https://push.example.net/old", PushP256dh: "k", PushAuth: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNativeDevice(dev.ID)
+	if err != nil || got.PushToken != "https://push.example.net/new" || got.PushP256dh != "k2" || got.PushAuth != "a2" {
+		t.Fatalf("refreshed target was cleared: %+v, %v", got, err)
+	}
+	if err := s.ClearNativeDevicePushToken(NativeDevice{ID: dev.ID, UserID: u.ID, PushToken: "https://push.example.net/new", PushP256dh: "k2", PushAuth: "a2"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.GetNativeDevice(dev.ID)
+	if err != nil || got.PushToken != "" || got.PushP256dh != "" || got.PushAuth != "" || got.PushTransport != PushTransportUnifiedPush {
+		t.Fatalf("stale target kept: %+v, %v", got, err)
+	}
+}
+
+// A refresh that keeps the endpoint but rotates its keys is not undone by a report about the old keys.
+func TestClearPushTokenSparesRotatedKeys(t *testing.T) {
+	s, u := newStoreWithUser(t, "user")
+	dev := &NativeDevice{ID: "phone", UserID: u.ID, DeviceName: "phone", DeviceIdentifier: "phone",
+		PushTransport: PushTransportUnifiedPush, PushToken: "https://push.example.net/up", PushP256dh: "k", PushAuth: "a"}
+	if err := s.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.UpdateNativeDevicePushToken(dev.ID, PushTransportUnifiedPush, dev.PushToken, "k2", "a2", 1, time.Now().UTC(), nil); err != nil || !ok {
+		t.Fatalf("refresh = %v, %v", ok, err)
+	}
+	if err := s.ClearNativeDevicePushToken(*dev); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNativeDevice(dev.ID)
+	if err != nil || got.PushToken != dev.PushToken || got.PushP256dh != "k2" {
+		t.Fatalf("rotated keys were cleared: %+v, %v", got, err)
+	}
+}

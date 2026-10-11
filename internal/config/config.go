@@ -29,6 +29,9 @@ const MinBackupDepositInterval = 15 * time.Minute
 // display name. Existing KySignOn pairings and capsule filenames must remain usable.
 const DefaultAppName = "KySignOn"
 
+// VAPIDKeyFile is the UnifiedPush VAPID private key, under the data directory.
+const VAPIDKeyFile = "push-vapid-private.key"
+
 // DefaultBackupKeep is how many sealed capsules a local backup directory retains.
 const DefaultBackupKeep = 7
 
