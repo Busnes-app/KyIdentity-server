@@ -1,7 +1,7 @@
 # Multi-stage build for KyIdentity Server
 
 # Stage 1: Build React Frontend
-FROM node:26-alpine AS frontend-builder
+FROM node:26-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS frontend-builder
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npm run build
 
 # Stage 2: Build Go Binary with Embedded Frontend
-FROM golang:1.27.0-alpine AS backend-builder
+FROM golang:1.27.0-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS backend-builder
 WORKDIR /app
 RUN apk add --no-cache git ca-certificates tzdata
 COPY go.mod go.sum ./
@@ -19,7 +19,7 @@ COPY --from=frontend-builder /app/web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /kyidentity ./cmd/kyidentity
 
 # Stage 3: Minimal Production Image
-FROM alpine:3.24
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S kyidentity && adduser -S kyidentity -G kyidentity \
     && mkdir -p /data /css /fonts \

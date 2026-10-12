@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -120,5 +121,37 @@ func TestRepairingResetsAttestation(t *testing.T) {
 	stored, _ := dbStore.GetNativeDevice(second.ID)
 	if stored.AttestedLevel != "none" || stored.AttestedAt != nil {
 		t.Fatalf("re-pair must reset attestation: %+v", stored)
+	}
+}
+
+type stubAppAttestor struct{ err error }
+
+func (s stubAppAttestor) Verify(string, []byte, []byte) error { return s.err }
+
+func TestRegisterHandlerGradesIOSAppAttestWithoutEchoingReason(t *testing.T) {
+	server, dbStore, _, mfaEngine, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	user := newUser(t, dbStore, "user")
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{{nil, "appattest"}, {errors.New("secret-reason"), "none"}} {
+		mfaEngine.SetAppAttestor(stubAppAttestor{tc.err})
+		token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := registerBody(t, mfa.NativeDeviceRegisterRequest{
+			PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "ios-" + tc.want, Platform: "ios", PublicKey: testSPKI(t), PushToken: "apns",
+		})
+		// The wire field as KyAuth iOS sends it.
+		body = strings.TrimSuffix(body, "}") + `,"appAttest":{"keyId":"a2V5","attestation":"b2Jq"}}`
+		rec := postRegister(server, body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "secret-reason") || !strings.Contains(rec.Body.String(), `"attestedLevel":"`+tc.want+`"`) {
+			t.Fatalf("body %s", rec.Body.String())
+		}
 	}
 }

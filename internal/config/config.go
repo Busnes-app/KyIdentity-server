@@ -96,11 +96,18 @@ type Config struct {
 	AttestationStatusURL string
 	// KyAuthCertSHA256 lists accepted KyAuth signing-certificate digests (lowercase hex).
 	KyAuthCertSHA256 []string
+	// AppAttestAppIDs lists `<TeamID>.<bundleID>` values accepted for iOS App Attest; empty disables grading.
+	AppAttestAppIDs []string
+	// AppAttestAllowDevelopment also accepts the development App Attest environment.
+	AppAttestAllowDevelopment bool
 }
 
 var certDigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 var ubuntuAppIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*_[a-z0-9][a-z0-9+.-]*$`)
+
+// appIDRE is an Apple App ID: a ten-character Team ID, a dot, and a bundle ID.
+var appIDRE = regexp.MustCompile(`^[A-Z0-9]{10}\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$`)
 
 // Load loads configuration from environment variables. Anything malformed is an error:
 // a server that silently downgrades a misconfigured key is worse than one that will not start.
@@ -201,6 +208,11 @@ func Load() (*Config, error) {
 		}
 	}
 
+	appAttestAppIDs, appAttestAllowDevelopment, err := loadAppAttest()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		Port:                       port,
 		IssuerURL:                  issuerURL,
@@ -233,7 +245,31 @@ func Load() (*Config, error) {
 		AttestationExtraRoots:      attestationExtraRoots,
 		AttestationStatusURL:       attestationStatusURL,
 		KyAuthCertSHA256:           kyAuthCertSHA256,
+		AppAttestAppIDs:            appAttestAppIDs,
+		AppAttestAllowDevelopment:  appAttestAllowDevelopment,
 	}, nil
+}
+
+func loadAppAttest() ([]string, bool, error) {
+	var ids []string
+	if v := strings.TrimSpace(os.Getenv("KYIDENTITY_APPATTEST_APP_IDS")); v != "" {
+		for _, id := range strings.Split(v, ",") {
+			id = strings.TrimSpace(id)
+			if len(id) > 255 || !appIDRE.MatchString(id) {
+				return nil, false, fmt.Errorf("KYIDENTITY_APPATTEST_APP_IDS: %q is not <TeamID>.<bundleID>", id)
+			}
+			ids = append(ids, id)
+		}
+	}
+	var dev bool
+	switch v := strings.ToLower(strings.TrimSpace(os.Getenv("KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT"))); v {
+	case "", "false":
+	case "true":
+		dev = true
+	default:
+		return nil, false, fmt.Errorf("KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT: %q is not true or false", v)
+	}
+	return ids, dev, nil
 }
 
 func rejectLegacyEnvironment() error {

@@ -102,6 +102,12 @@ See [Session Behavior](README.md#session-behavior) for full details. Key points:
 - `ubuntupush` posts to the UBports push service (`KYIDENTITY_UBUNTU_PUSH_URL`, HTTPS only, through the same no-redirect, no-private-address client). The body carries the same RFC 8291 ciphertext as UnifiedPush, padded to a fixed size, plus a fixed notification text with no user, server or challenge details. UBports sees the token, the app id (server configuration, never device input), the ciphertext and the timing.
 - An `unknown-token` reply clears the device's push target, as a 404/410 does for UnifiedPush. Tokens are never logged.
 
+### iOS Device Attestation (App Attest)
+
+Android pairings are graded from a Keystore attestation chain that describes the signing key itself: hardware-resident, user authentication on every use. iOS has no attestation for arbitrary Secure Enclave keys. With `KYIDENTITY_APPATTEST_APP_IDS` set, an iOS pairing is graded `appattest` when Apple App Attest proves the request, including its public key, was built by a genuine, unmodified KyAuth on a genuine Apple device.
+
+**The grade rests on app integrity, not on key attestation.** It is MFA-grade because that genuine build always creates its signing key in the Secure Enclave with per-use user presence. A flaw in KyAuth iOS, or a compromised Apple device that defeats App Attest, would undermine it in a way an Android key attestation would not. Leave the setting empty to grade every iOS device `none`; pairing still works, with device-only (`pop`) sign-on.
+
 ## Deployment Security
 
 Your deployment choices determine the actual security of KyPost. This section covers the configuration decisions that matter most.

@@ -58,7 +58,7 @@ export interface NativeDevice {
   pushToken?: string;
   isMfaApprover: boolean;
   canSignOn: boolean;
-  attestedLevel: 'none' | 'tee' | 'strongbox';
+  attestedLevel: 'none' | 'tee' | 'strongbox' | 'appattest';
   bootState: string;
   lastSeenAt?: string;
   createdAt: string;
