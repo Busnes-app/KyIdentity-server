@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/url"
@@ -38,6 +39,7 @@ type Engine struct {
 	attestor      Attestor
 	appAttestor   AppAttestor
 	issuerOrigin  string
+	logger        *slog.Logger // nil: slog.Default()
 }
 
 // Attestor grades a device key attestation chain.

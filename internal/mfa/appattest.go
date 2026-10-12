@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"log"
+	"log/slog"
 
 	"github.com/Busnes-app/kyidentity-server/internal/appattest"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
@@ -49,7 +49,7 @@ func (e *Engine) gradeAppAttest(req *NativeDeviceRegisterRequest, device *store.
 	obj, err := base64.StdEncoding.DecodeString(req.AppAttest.Attestation)
 	if err != nil {
 		device.AttestationReason = string(appattest.ReasonDecode)
-		log.Printf("ios pairing for user %s graded none: attestation is not base64", device.UserID)
+		e.logGradedNone(device.UserID, device.AttestationReason, err)
 		return
 	}
 	sum := sha256.Sum256(AppAttestClientData(req))
@@ -65,5 +65,15 @@ func (e *Engine) gradeAppAttest(req *NativeDeviceRegisterRequest, device *store.
 	} else {
 		device.AttestationReason = "app attest verification failed"
 	}
-	log.Printf("ios pairing for user %s graded none: %v", device.UserID, err)
+	e.logGradedNone(device.UserID, device.AttestationReason, err)
+}
+
+// logGradedNone records a refused App Attest as one structured record: the actor, the fixed
+// reason kept in the audit row, and the diagnostic detail, as separate fields.
+func (e *Engine) logGradedNone(userID, reason string, detail error) {
+	logger := e.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("ios pairing graded none", "user", userID, "reason", reason, "detail", detail.Error())
 }

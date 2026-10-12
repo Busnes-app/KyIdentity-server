@@ -1,8 +1,11 @@
 package mfa
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -180,4 +183,46 @@ func TestRegisterIOSDevelopmentEvidenceRefusedWithClassifiedReason(t *testing.T)
 	if dev.AttestedLevel != "none" || dev.AttestationReason != string(appattest.ReasonAAGUID) {
 		t.Fatalf("level %q reason %q", dev.AttestedLevel, dev.AttestationReason)
 	}
+}
+
+func TestRefusedAppAttestLogsStructuredFields(t *testing.T) {
+	engine, _, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	ca := appattesttest.NewCA(t)
+	engine.SetAppAttestor(appattest.NewVerifierWithRoot(ca.Root, []string{testAppID}, false))
+	var buf bytes.Buffer
+	engine.logger = slog.New(slog.NewJSONHandler(&buf, nil))
+
+	register := func(ev func(*NativeDeviceRegisterRequest) *AppAttestEvidence) map[string]string {
+		t.Helper()
+		buf.Reset()
+		token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+		_, pub := signingKey(t)
+		req := &NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns"}
+		req.AppAttest = ev(req)
+		if _, err := engine.RegisterNativeDevice(req); err != nil {
+			t.Fatalf("pairing must still succeed: %v", err)
+		}
+		var rec map[string]string
+		if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+			t.Fatalf("log is not one JSON record: %q", buf.String())
+		}
+		return rec
+	}
+	check := func(rec map[string]string, reason appattest.Reason) {
+		t.Helper()
+		if rec["level"] != "WARN" || rec["msg"] != "ios pairing graded none" || rec["user"] != user.ID ||
+			rec["reason"] != string(reason) || rec["detail"] == "" || rec["detail"] == rec["reason"] {
+			t.Fatalf("record %v", rec)
+		}
+	}
+
+	check(register(func(req *NativeDeviceRegisterRequest) *AppAttestEvidence {
+		sum := sha256.Sum256(AppAttestClientData(req))
+		keyID, obj := ca.Attest(t, appattesttest.Options{AppID: testAppID, ClientDataHash: sum[:], AAGUID: []byte("appattestdevelop")})
+		return &AppAttestEvidence{KeyID: keyID, Attestation: base64.StdEncoding.EncodeToString(obj)}
+	}), appattest.ReasonAAGUID)
+	check(register(func(*NativeDeviceRegisterRequest) *AppAttestEvidence {
+		return &AppAttestEvidence{KeyID: "k", Attestation: "!!not base64!!"}
+	}), appattest.ReasonDecode)
 }
