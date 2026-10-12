@@ -210,3 +210,68 @@ func TestNativeDeviceRefreshSwitchesToUnifiedPush(t *testing.T) {
 		t.Fatalf("stored device = %+v", stored)
 	}
 }
+
+// A linux device refreshes to ubuntupush; fcm is refused for it, and ubuntupush for android.
+func TestNativeDeviceRefreshUbuntuPushIsLinuxOnly(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	user := newUser(t, db, "user")
+	receiver, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p256dh := base64.RawURLEncoding.EncodeToString(receiver.PublicKey().Bytes())
+	auth := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef"))
+	enrol := func(ident, platform string) (*store.NativeDevice, *ecdsa.PrivateKey) {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := &store.NativeDevice{
+			ID: uuid.New().String(), UserID: user.ID, DeviceName: ident, DeviceIdentifier: ident, Platform: platform,
+			PublicKey: base64.StdEncoding.EncodeToString(der), PushTransport: "unifiedpush",
+			PushToken: "https://push.example.net/up1", PushP256dh: p256dh, PushAuth: auth, IsMFAApprover: true,
+		}
+		if err := db.UpsertNativeDevice(d); err != nil {
+			t.Fatal(err)
+		}
+		return d, key
+	}
+	at := time.Now().UnixMilli()
+	call := func(d *store.NativeDevice, key *ecdsa.PrivateKey, r pushTokenRefreshRequest) int {
+		at++ // each refresh must be newer than the last
+		r.IssuedAt = at
+		r.Signature = signPushTarget(t, key, "http://localhost:5867", d.ID, r.IssuedAt, r)
+		body, _ := json.Marshal(r)
+		req := httptest.NewRequest(http.MethodPut, "/api/notifications/native/devices/"+d.ID+"/push-token", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		srv.httpServer.Handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	ubuntu := pushTokenRefreshRequest{PushTransport: "ubuntupush", PushToken: "NQq1Ox+9Ah/lOM=:tok", PushP256dh: p256dh, PushAuth: auth}
+
+	linux, linuxKey := enrol("pinephone", "linux")
+	if code := call(linux, linuxKey, ubuntu); code != http.StatusNoContent {
+		t.Fatalf("linux ubuntupush refresh = %d", code)
+	}
+	stored, err := db.GetNativeDevice(linux.ID)
+	if err != nil || stored.Platform != "linux" || stored.PushTransport != "ubuntupush" || stored.PushToken != ubuntu.PushToken {
+		t.Fatalf("stored = %+v, %v", stored, err)
+	}
+	if code := call(linux, linuxKey, pushTokenRefreshRequest{PushTransport: "fcm", PushToken: "fcm-token"}); code != http.StatusBadRequest {
+		t.Fatalf("linux fcm refresh = %d, want 400", code)
+	}
+	if stored, _ := db.GetNativeDevice(linux.ID); stored.PushTransport != "ubuntupush" {
+		t.Fatalf("refused refresh changed the target: %+v", stored)
+	}
+
+	android, androidKey := enrol("pixel", "android")
+	if code := call(android, androidKey, ubuntu); code != http.StatusBadRequest {
+		t.Fatalf("android ubuntupush refresh = %d, want 400", code)
+	}
+}

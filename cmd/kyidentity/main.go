@@ -153,6 +153,7 @@ func main() {
 		log.Fatalf("Failed to initialize UnifiedPush sender: %v", err)
 	}
 	mfaEngine.SetUnifiedPushSender(unifiedPush)
+	mfaEngine.SetUbuntuPushSender(mfa.NewUbuntuPushSender(cfg.UbuntuPushURL, cfg.UbuntuPushAppID))
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
 	adminCount, err := dbStore.CountAdmins()

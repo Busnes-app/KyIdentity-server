@@ -96,6 +96,12 @@ See [Session Behavior](README.md#session-behavior) for full details. Key points:
 - The endpoint URL is chosen by the device, so KyIdentity treats it as untrusted: HTTPS only, no private or loopback addresses (checked at registration and again when connecting), no redirects. A self-hosted distributor on a private network needs `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`, which also lets any paired device make KyIdentity post to internal HTTPS addresses. It is off by default.
 - Endpoint URLs are capabilities and are never written to logs.
 
+### Ubuntu Touch push
+
+- A Linux device (`platform: "linux"`) uses UnifiedPush or `ubuntupush`; FCM is refused for it, and `ubuntupush` is refused for every other platform.
+- `ubuntupush` posts to the UBports push service (`KYIDENTITY_UBUNTU_PUSH_URL`, HTTPS only, through the same no-redirect, no-private-address client). The body carries the same RFC 8291 ciphertext as UnifiedPush, padded to a fixed size, plus a fixed notification text with no user, server or challenge details. UBports sees the token, the app id (server configuration, never device input), the ciphertext and the timing.
+- An `unknown-token` reply clears the device's push target, as a 404/410 does for UnifiedPush. Tokens are never logged.
+
 ## Deployment Security
 
 Your deployment choices determine the actual security of KyPost. This section covers the configuration decisions that matter most.
@@ -261,7 +267,7 @@ Unencrypted:
 - **API calls:** All backend endpoints expect HTTPS (enforced by cookie marking and browser same-origin policy).
 - **CardDAV:** Sync clients should use HTTPS-only servers.
 - **Mobile pairing:** QR codes and pickup links carry bearer tokens in the query string. Use HTTPS for `SERVER_BASE_URL`.
-- **External services:** Push relay APIs use HTTPS only (`PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS). UnifiedPush endpoints must be HTTPS and payloads are RFC 8291 encrypted.
+- **External services:** Push relay APIs use HTTPS only (`PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS). UnifiedPush endpoints and `KYIDENTITY_UBUNTU_PUSH_URL` must be HTTPS and payloads are RFC 8291 encrypted.
 
 ### Sensitive Data in Logs
 

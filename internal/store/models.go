@@ -97,6 +97,7 @@ type AccountSyncEvent struct {
 const (
 	PushTransportFCM         = "fcm"
 	PushTransportUnifiedPush = "unifiedpush"
+	PushTransportUbuntuPush  = "ubuntupush"
 )
 
 type NativeDevice struct {

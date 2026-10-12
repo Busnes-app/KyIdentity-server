@@ -31,6 +31,8 @@ type pushServer struct {
 	*httptest.Server
 	mu      sync.Mutex
 	status  int
+	reply   string
+	target  string // method and request URI
 	body    []byte
 	headers http.Header
 }
@@ -44,9 +46,11 @@ func newPushServer(t *testing.T, status int) *pushServer {
 	ps.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		ps.mu.Lock()
-		ps.body, ps.headers = body, r.Header.Clone()
+		ps.body, ps.headers, ps.target = body, r.Header.Clone(), r.Method+" "+r.URL.RequestURI()
+		status, reply := ps.status, ps.reply
 		ps.mu.Unlock()
-		w.WriteHeader(ps.status)
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, reply)
 	}))
 	t.Cleanup(ps.Close)
 	return ps

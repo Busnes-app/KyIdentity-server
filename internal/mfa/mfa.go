@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ type Engine struct {
 	encryptionKey []byte
 	pushSender    PushSender
 	unifiedPush   PushSender
+	ubuntuPush    PushSender
 	attestor      Attestor
 	issuerOrigin  string
 }
@@ -87,9 +89,17 @@ func (e *Engine) SetUnifiedPushSender(sender PushSender) {
 	e.unifiedPush = sender
 }
 
+// SetUbuntuPushSender installs the sender for ubuntupush devices.
+func (e *Engine) SetUbuntuPushSender(sender PushSender) {
+	e.ubuntuPush = sender
+}
+
 func (e *Engine) senderFor(dev store.NativeDevice) PushSender {
-	if dev.PushTransport == store.PushTransportUnifiedPush {
+	switch dev.PushTransport {
+	case store.PushTransportUnifiedPush:
 		return e.unifiedPush
+	case store.PushTransportUbuntuPush:
+		return e.ubuntuPush
 	}
 	return e.pushSender
 }
@@ -276,7 +286,7 @@ type NativeDeviceRegisterRequest struct {
 	Platform         string `json:"platform,omitempty"`
 	PublicKey        string `json:"publicKey,omitempty"`
 	PushToken        string `json:"pushToken,omitempty"`
-	// PushTransport is fcm (default) or unifiedpush; unifiedpush needs the RFC 8291 keys.
+	// PushTransport is fcm (default), unifiedpush or ubuntupush; the last two need the RFC 8291 keys.
 	PushTransport string `json:"pushTransport,omitempty"`
 	PushP256dh    string `json:"pushP256dh,omitempty"`
 	PushAuth      string `json:"pushAuth,omitempty"`
@@ -299,6 +309,13 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	transport, err := ValidatePushTarget(req.PushTransport, strings.TrimSpace(req.PushToken), req.PushP256dh, req.PushAuth)
 	if err != nil {
 		return nil, err
+	}
+	platform, err := normalizeDevicePlatform(req.Platform)
+	if err != nil {
+		return nil, err
+	}
+	if !PlatformAllowsTransport(platform, transport) {
+		return nil, errInvalidPushTarget
 	}
 	if _, err := crypto.ParseP256PublicKey(req.PublicKey); err != nil {
 		return nil, fmt.Errorf("device public key is not a valid P-256 key: %w", err)
@@ -328,11 +345,6 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	if name == "" {
 		name = "KySecurity Authenticator Device"
 	}
-	platform, err := normalizeDevicePlatform(req.Platform)
-	if err != nil {
-		return nil, err
-	}
-
 	device := &store.NativeDevice{
 		ID:               uuid.New().String(),
 		UserID:           validToken.UserID,
@@ -389,11 +401,23 @@ func normalizeDevicePlatform(platform string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
 	case "", "android":
 		return "android", nil
-	case "ios", "macos":
+	case "ios", "macos", "linux":
 		return strings.ToLower(strings.TrimSpace(platform)), nil
 	default:
 		return "", errors.New("unsupported device platform")
 	}
+}
+
+// PlatformAllowsTransport reports whether a device platform may use a push transport.
+// Linux has no FCM, and the Lomiri push service exists only on Linux (Ubuntu Touch).
+func PlatformAllowsTransport(platform, transport string) bool {
+	switch transport {
+	case store.PushTransportFCM:
+		return platform != "linux"
+	case store.PushTransportUbuntuPush:
+		return platform == "linux"
+	}
+	return true
 }
 
 // randomMatchNumber returns a uniformly distributed number in [10, 99].
@@ -557,11 +581,14 @@ func IssuerOrigin(issuerURL string) (string, error) {
 // MaxPushTokenBytes caps a push token or UnifiedPush endpoint.
 const MaxPushTokenBytes = 4096
 
+// ubuntuPushToken is a Lomiri PushClient token.
+var ubuntuPushToken = regexp.MustCompile(`^[A-Za-z0-9+/=_.:-]{1,512}$`)
+
 var errInvalidPushTarget = errors.New("invalid push target")
 
 // ValidatePushTarget checks a device's push address and keys, and returns the effective
-// transport. A UnifiedPush endpoint is server-contacted, so it gets the outbound URL policy;
-// its RFC 8291 keys are required because payloads are never sent in plaintext.
+// transport. A UnifiedPush endpoint is server-contacted, so it gets the outbound URL policy.
+// UnifiedPush and ubuntupush require RFC 8291 keys: payloads are never sent in plaintext.
 func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, error) {
 	if pushToken == "" || len(pushToken) > MaxPushTokenBytes {
 		return "", errInvalidPushTarget
@@ -573,10 +600,14 @@ func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, erro
 		}
 		return store.PushTransportFCM, nil
 	case store.PushTransportUnifiedPush:
+		if u, err := url.Parse(pushToken); err != nil || u.Scheme != "https" || netguard.ValidateURL(pushToken, "push endpoint") != nil {
+			return "", errInvalidPushTarget
+		}
+	case store.PushTransportUbuntuPush:
+		if !ubuntuPushToken.MatchString(pushToken) {
+			return "", errInvalidPushTarget
+		}
 	default:
-		return "", errInvalidPushTarget
-	}
-	if u, err := url.Parse(pushToken); err != nil || u.Scheme != "https" || netguard.ValidateURL(pushToken, "push endpoint") != nil {
 		return "", errInvalidPushTarget
 	}
 	pub, err := decodeBase64URL(p256dh)
@@ -589,7 +620,7 @@ func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, erro
 	if secret, err := decodeBase64URL(auth); err != nil || len(secret) != 16 {
 		return "", errInvalidPushTarget
 	}
-	return store.PushTransportUnifiedPush, nil
+	return transport, nil
 }
 
 // decodeBase64URL accepts base64url with or without padding, and nothing else.

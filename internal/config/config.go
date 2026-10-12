@@ -71,6 +71,10 @@ type Config struct {
 	PushRelayKey          string
 	APNSRelayURL          string
 	APNSRelayKey          string
+	// UbuntuPushURL is the Lomiri push service notify endpoint; UbuntuPushAppID is KyAuth's
+	// click app id there. Configuration only, never device input.
+	UbuntuPushURL   string
+	UbuntuPushAppID string
 	// AppName is the service name KyRecovery knows this instance by.
 	AppName string
 	// BackupDepositInterval is the default backup schedule when the admin has not set one in
@@ -95,6 +99,8 @@ type Config struct {
 }
 
 var certDigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+var ubuntuAppIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*_[a-z0-9][a-z0-9+.-]*$`)
 
 // Load loads configuration from environment variables. Anything malformed is an error:
 // a server that silently downgrades a misconfigured key is worse than one that will not start.
@@ -158,6 +164,14 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	ubuntuPushURL := strings.TrimSpace(getEnv("KYIDENTITY_UBUNTU_PUSH_URL", "https://push.ubports.com/notify"))
+	if u, err := url.Parse(ubuntuPushURL); err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
+		return nil, errors.New("KYIDENTITY_UBUNTU_PUSH_URL must be an https URL")
+	}
+	ubuntuPushAppID := strings.TrimSpace(getEnv("KYIDENTITY_UBUNTU_PUSH_APPID", "kyauth.busnes_kyauth"))
+	if !ubuntuAppIDRE.MatchString(ubuntuPushAppID) {
+		return nil, fmt.Errorf("KYIDENTITY_UBUNTU_PUSH_APPID %q is not a package_app id", ubuntuPushAppID)
+	}
 	depositInterval, err := loadDepositInterval()
 	if err != nil {
 		return nil, err
@@ -209,6 +223,8 @@ func Load() (*Config, error) {
 		PushRelayKey:               strings.TrimSpace(os.Getenv("PUSH_RELAY_KEY")),
 		APNSRelayURL:               apnsRelayURL,
 		APNSRelayKey:               strings.TrimSpace(os.Getenv("APNS_RELAY_KEY")),
+		UbuntuPushURL:              ubuntuPushURL,
+		UbuntuPushAppID:            ubuntuPushAppID,
 		AppName:                    getEnv("KYIDENTITY_APP_NAME", DefaultAppName),
 		BackupDepositInterval:      depositInterval,
 		BackupDir:                  backupDir,

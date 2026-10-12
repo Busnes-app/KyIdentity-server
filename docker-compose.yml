@@ -87,6 +87,8 @@ services:
       PUSH_RELAY_KEY: ${PUSH_RELAY_KEY:-}
       APNS_RELAY_URL: ${APNS_RELAY_URL:-}
       APNS_RELAY_KEY: ${APNS_RELAY_KEY:-}
+      KYIDENTITY_UBUNTU_PUSH_URL: ${KYIDENTITY_UBUNTU_PUSH_URL:-https://push.ubports.com/notify}
+      KYIDENTITY_UBUNTU_PUSH_APPID: ${KYIDENTITY_UBUNTU_PUSH_APPID:-kyauth.busnes_kyauth}
       # Services on kypost-net address each other privately, so pairing callbacks there
       # are internal by design. Set to false if KyIdentity is reachable from the internet
       # and paired systems live on public hostnames.
