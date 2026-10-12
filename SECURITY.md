@@ -96,6 +96,12 @@ See [Session Behavior](README.md#session-behavior) for full details. Key points:
 - The endpoint URL is chosen by the device, so KyIdentity treats it as untrusted: HTTPS only, no private or loopback addresses (checked at registration and again when connecting), no redirects. A self-hosted distributor on a private network needs `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`, which also lets any paired device make KyIdentity post to internal HTTPS addresses. It is off by default.
 - Endpoint URLs are capabilities and are never written to logs.
 
+### iOS Device Attestation (App Attest)
+
+Android pairings are graded from a Keystore attestation chain that describes the signing key itself: hardware-resident, user authentication on every use. iOS has no attestation for arbitrary Secure Enclave keys. With `KYIDENTITY_APPATTEST_APP_IDS` set, an iOS pairing is graded `appattest` when Apple App Attest proves the request, including its public key, was built by a genuine, unmodified KyAuth on a genuine Apple device.
+
+**The grade rests on app integrity, not on key attestation.** It is MFA-grade because that genuine build always creates its signing key in the Secure Enclave with per-use user presence. A flaw in KyAuth iOS, or a compromised Apple device that defeats App Attest, would undermine it in a way an Android key attestation would not. Leave the setting empty to grade every iOS device `none`; pairing still works, with device-only (`pop`) sign-on.
+
 ## Deployment Security
 
 Your deployment choices determine the actual security of KyPost. This section covers the configuration decisions that matter most.

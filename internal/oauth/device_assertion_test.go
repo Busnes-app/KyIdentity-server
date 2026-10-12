@@ -907,6 +907,26 @@ func TestAttestedDeviceSatisfiesMandatoryMFA(t *testing.T) {
 	}
 }
 
+// App Attest grades on app integrity; the grant treats it as attested, and the token-time
+// device re-check binds it like any other level.
+func TestAppAttestDeviceSatisfiesMandatoryMFA(t *testing.T) {
+	f := newSignOnFixture(t)
+	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)
+	f.attest(t, "appattest")
+	resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	amr, _ := claims["amr"].([]any)
+	if len(amr) != 3 || amr[2] != "mfa" || claims["acr"] != "urn:kysignon:acr:mfa" || claims["attested"] != "appattest" {
+		t.Fatalf("claims %v", claims)
+	}
+	if n := f.issuedTokenCount(t); n != 1 {
+		t.Fatalf("issued tokens %d", n)
+	}
+}
+
 func TestUnattestedDeviceStillRefusedUnderMandatoryMFA(t *testing.T) {
 	f := newSignOnFixture(t)
 	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)

@@ -113,7 +113,7 @@ type NativeDevice struct {
 	PushAuth             string     `json:"-"`             // unifiedpush auth secret, base64url
 	IsMFAApprover        bool       `json:"isMfaApprover"`
 	CanSignOn            bool       `json:"canSignOn"`
-	AttestedLevel        string     `json:"attestedLevel"` // none | tee | strongbox
+	AttestedLevel        string     `json:"attestedLevel"` // none | tee | strongbox | appattest
 	AttestedAt           *time.Time `json:"attestedAt,omitempty"`
 	BootState            string     `json:"bootState"` // locked-verified | locked-selfsigned | unlocked | unknown
 	AttestationSerials   []string   `json:"-"`

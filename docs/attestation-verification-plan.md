@@ -129,6 +129,23 @@ report, not a note; file it before moving on.
     skipping, which closes the separate "KyIdentity passkey hardware backing is
     unverified" item in the KyAuth AGENTS.md.
 
+## 6. iOS App Attest
+
+Contract: `KyAuth-iOS/docs/specs/2026-10-11-ios-app-attest.md`. Server tests use a generated
+CA; the simulator has no App Attest, so these need a physical iPhone. Set
+`KYIDENTITY_APPATTEST_APP_IDS=TATYN4X57D.org.kysecurity.authenticator`.
+
+22. Pair a TestFlight or development build with `KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT`
+    unset. Expected: pairing succeeds, `none`, audit reason `aaguid not accepted`. Set it to
+    `true`, restart, re-pair. Expected: `appattest`, boot state `unknown`, empty reason.
+23. Capture one attestation object and its request (credential and `publicKey`) as
+    `internal/appattest/testdata/<phone>-<date>.json` with a test that expects a pass
+    against the embedded Apple root at a frozen time. This proves Go's x509 accepts
+    Apple's real chain and extensions.
+24. App Store build with the development flag off. Expected: `appattest`.
+25. Sign in to the consumer app under mandatory MFA. Expected: success, `attested` is
+    `appattest`, `amr` `["hwk","user","mfa"]`.
+
 ## Record
 
 | # | Result | Date | Build / phone / server | Notes |
@@ -154,3 +171,7 @@ report, not a note; file it before moving on.
 | 19 | | | | |
 | 20 | | | | |
 | 21 | | | | |
+| 22 | | | | |
+| 23 | | | | |
+| 24 | | | | |
+| 25 | | | | |

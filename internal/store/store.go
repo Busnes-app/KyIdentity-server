@@ -1501,7 +1501,7 @@ func (d *NativeDevice) prepareEnrollment(now time.Time) (any, string, error) {
 // attestationColumns validates a grade and encodes it for native_devices.
 func attestationColumns(level, bootState string, serials []string, at time.Time) (any, string, error) {
 	switch level {
-	case "none", "tee", "strongbox":
+	case "none", "tee", "strongbox", "appattest":
 	default:
 		return nil, "", fmt.Errorf("invalid attested level %q", level)
 	}

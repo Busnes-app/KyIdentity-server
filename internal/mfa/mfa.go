@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/url"
@@ -36,7 +37,9 @@ type Engine struct {
 	pushSender    PushSender
 	unifiedPush   PushSender
 	attestor      Attestor
+	appAttestor   AppAttestor
 	issuerOrigin  string
+	logger        *slog.Logger // nil: slog.Default()
 }
 
 // Attestor grades a device key attestation chain.
@@ -282,6 +285,8 @@ type NativeDeviceRegisterRequest struct {
 	PushAuth      string `json:"pushAuth,omitempty"`
 	// Attestation is the base64 DER Android key attestation chain, leaf first.
 	Attestation []string `json:"attestation,omitempty"`
+	// AppAttest is KyAuth iOS's App Attest evidence, graded only for platform "ios".
+	AppAttest *AppAttestEvidence `json:"appAttest,omitempty"`
 }
 
 // RegisterNativeDevice registers a device presented with a valid 90s pairing token, or a
@@ -365,10 +370,14 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	return device, nil
 }
 
-// gradeAttestation grades the request's attestation chain onto device. Grading never fails
-// a registration; a missing or bad chain is graded none.
+// gradeAttestation grades the request's attestation onto device: App Attest for iOS, the
+// Keystore chain for Android. Grading never fails a registration; missing or bad evidence is none.
 func (e *Engine) gradeAttestation(req *NativeDeviceRegisterRequest, device *store.NativeDevice) {
-	if len(req.Attestation) == 0 || e.attestor == nil {
+	if device.Platform == "ios" {
+		e.gradeAppAttest(req, device)
+		return
+	}
+	if device.Platform != "android" || len(req.Attestation) == 0 || e.attestor == nil {
 		return
 	}
 	chain := make([][]byte, 0, len(req.Attestation))

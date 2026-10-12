@@ -446,6 +446,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                   )}
                   {dev.attestedLevel === 'strongbox' && <span className="badge-type"><ShieldCheck size={12} /> Attested: StrongBox</span>}
                   {dev.attestedLevel === 'tee' && <span className="badge-type"><ShieldCheck size={12} /> Attested: TEE</span>}
+                  {dev.attestedLevel === 'appattest' && <span className="badge-type"><ShieldCheck size={12} /> Verified by App Attest</span>}
                   {dev.attestedLevel === 'none' && <span className="text-muted text-sm">Not attested. Pair KyAuth again to attest this phone.</span>}
                   {dev.bootState === 'unlocked' && <span className="text-muted text-sm">Bootloader unlocked.</span>}
                   <label className="text-sm">
