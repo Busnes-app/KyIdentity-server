@@ -83,11 +83,13 @@ func TestUbuntuPushSenderRequest(t *testing.T) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatal(err)
 	}
-	var appID, token, expireOn string
+	var appID, token, expireOn, replaceTag string
 	_ = json.Unmarshal(req["appid"], &appID)
 	_ = json.Unmarshal(req["token"], &token)
 	_ = json.Unmarshal(req["expire_on"], &expireOn)
-	if len(req) != 4 || appID != "kyauth.busnes_kyauth" || token != dev.PushToken || expireOn != "2026-10-11T12:00:30Z" {
+	_ = json.Unmarshal(req["replace_tag"], &replaceTag)
+	if len(req) != 5 || appID != "kyauth.busnes_kyauth" || token != dev.PushToken ||
+		expireOn != "2026-10-11T12:00:30Z" || replaceTag != "kyauth-mfa" {
 		t.Fatalf("request = %s", body)
 	}
 	data := req["data"]

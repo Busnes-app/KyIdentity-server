@@ -76,11 +76,12 @@ func (s *UbuntuPushSender) SendPush(dev store.NativeDevice, ch MFAChallengePush)
 		return fmt.Errorf("ubuntupush data is %d bytes, over %d", len(data), ubuntuPushMaxData)
 	}
 	body, err := json.Marshal(struct {
-		AppID    string          `json:"appid"`
-		Token    string          `json:"token"`
-		ExpireOn string          `json:"expire_on"`
-		Data     json.RawMessage `json:"data"`
-	}{s.appID, dev.PushToken, time.UnixMilli(ch.ExpiresAtMS).UTC().Format(time.RFC3339), data})
+		AppID      string          `json:"appid"`
+		Token      string          `json:"token"`
+		ExpireOn   string          `json:"expire_on"`
+		ReplaceTag string          `json:"replace_tag"` // a newer request replaces a pending one
+		Data       json.RawMessage `json:"data"`
+	}{s.appID, dev.PushToken, time.UnixMilli(ch.ExpiresAtMS).UTC().Format(time.RFC3339), "kyauth-mfa", data})
 	if err != nil {
 		return err
 	}
