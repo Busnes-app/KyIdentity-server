@@ -171,6 +171,10 @@ func (h *DeviceHandler) RefreshNativeDevicePushToken(w http.ResponseWriter, r *h
 		http.Error(w, `{"error":"device_authentication_failed"}`, http.StatusUnauthorized)
 		return
 	}
+	if !mfa.PlatformAllowsTransport(dev.Platform, transport) {
+		http.Error(w, `{"error":"invalid_request","error_description":"pushTransport is not available on this device platform"}`, http.StatusBadRequest)
+		return
+	}
 
 	pending := h.audit.Prepare("device.push_token_refreshed", dev.UserID, "", dev.ID, "device",
 		h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"pushTransport": transport})

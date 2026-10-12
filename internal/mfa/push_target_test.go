@@ -28,6 +28,12 @@ func TestPushTokenRefreshMessageGoldenVectors(t *testing.T) {
 			want:     "kyidentity-push-token-v2|https://id.example.com|d-456|1791331200000|unifiedpush|8148d101f0613cac03f05c9530160b99c97e54841c0858e6a07b6deb9ab7ee2f|" + vectorP256dh + "|" + vectorAuth,
 		},
 		{
+			name: "ubuntupush", transport: "ubuntupush", token: "NQq1Ox+9Ah/lOM=:ubports_kyauth.-1",
+			p256dh: vectorP256dh, auth: vectorAuth,
+			tokenSHA: "2fc9f793cda3f150612f317c41b146738a3eba4b1dc16a80b43c5ec229552875",
+			want:     "kyidentity-push-token-v2|https://id.example.com|d-456|1791331200000|ubuntupush|2fc9f793cda3f150612f317c41b146738a3eba4b1dc16a80b43c5ec229552875|" + vectorP256dh + "|" + vectorAuth,
+		},
+		{
 			name: "fcm", transport: "fcm", token: "fcm-token-1",
 			tokenSHA: "3cfaa3f1d62d114805029366153fbb440a2d4e4b56406a04830579ac65db6a5c",
 			want:     "kyidentity-push-token-v2|https://id.example.com|d-456|1791331200000|fcm|3cfaa3f1d62d114805029366153fbb440a2d4e4b56406a04830579ac65db6a5c||",
@@ -108,6 +114,15 @@ func TestRegistrationValidatesPushTarget(t *testing.T) {
 		{"auth with default transport", "", "fcm-token", "", auth},
 		{"unknown transport", "apns", "token", "", ""},
 		{"transport case", "UnifiedPush", endpoint, p256dh, auth},
+		{"ubuntupush token 513 bytes", "ubuntupush", strings.Repeat("a", 513), p256dh, auth},
+		{"ubuntupush token space", "ubuntupush", "abc def", p256dh, auth},
+		{"ubuntupush token pipe", "ubuntupush", "abc|def", p256dh, auth},
+		{"ubuntupush token newline", "ubuntupush", "abc\ndef", p256dh, auth},
+		{"ubuntupush token url", "ubuntupush", "https://push.example.net/x?y", p256dh, auth},
+		{"ubuntupush p256dh missing", "ubuntupush", "tok", "", auth},
+		{"ubuntupush p256dh off curve", "ubuntupush", "tok", b64(offCurve), auth},
+		{"ubuntupush auth missing", "ubuntupush", "tok", p256dh, ""},
+		{"ubuntupush auth 15 bytes", "ubuntupush", "tok", p256dh, b64([]byte("0123456789abcde"))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
@@ -124,6 +139,9 @@ func TestRegistrationValidatesPushTarget(t *testing.T) {
 		{"default fcm", "", "fcm-token", "", "", "fcm"},
 		{"fcm", "fcm", "fcm-token", "", "", "fcm"},
 		{"unifiedpush", "unifiedpush", endpoint, p256dh, auth, "unifiedpush"},
+		{"ubuntupush", "ubuntupush", "NQq1Ox+9Ah/lOM=:ubports_kyauth.-1", p256dh, auth, "ubuntupush"},
+		{"ubuntupush 512 bytes", "ubuntupush", strings.Repeat("A", 512), p256dh, auth, "ubuntupush"},
+		{"ubuntupush 1 byte", "ubuntupush", "A", p256dh, auth, "ubuntupush"},
 		{"padded keys", "unifiedpush", endpoint, base64.URLEncoding.EncodeToString(point), base64.URLEncoding.EncodeToString([]byte("0123456789abcdef")), "unifiedpush"},
 	} {
 		got, err := ValidatePushTarget(tc.transport, tc.token, tc.p256dh, tc.auth)

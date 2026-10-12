@@ -87,6 +87,8 @@ services:
       PUSH_RELAY_KEY: ${PUSH_RELAY_KEY:-}
       APNS_RELAY_URL: ${APNS_RELAY_URL:-}
       APNS_RELAY_KEY: ${APNS_RELAY_KEY:-}
+      KYIDENTITY_UBUNTU_PUSH_URL: ${KYIDENTITY_UBUNTU_PUSH_URL:-https://push.ubports.com/notify}
+      KYIDENTITY_UBUNTU_PUSH_APPID: ${KYIDENTITY_UBUNTU_PUSH_APPID:-kyauth.busnes_kyauth}
       # iOS App Attest grading at pairing: comma-separated <TeamID>.<bundleID>; empty disables.
       KYIDENTITY_APPATTEST_APP_IDS: ${KYIDENTITY_APPATTEST_APP_IDS:-}
       KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT: ${KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT:-false}

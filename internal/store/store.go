@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -126,29 +127,7 @@ func (s *Store) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_sync_events_status ON account_sync_events(status);
 
-	CREATE TABLE IF NOT EXISTS native_devices (
-		id TEXT PRIMARY KEY,
-		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-		device_name TEXT NOT NULL,
-		device_identifier TEXT NOT NULL,
-		platform TEXT NOT NULL DEFAULT 'android' CHECK (platform IN ('android', 'ios', 'macos')),
-		public_key TEXT,
-		push_token TEXT,
-		push_token_updated_at_ms INTEGER NOT NULL DEFAULT 0,
-		push_transport TEXT NOT NULL DEFAULT 'fcm' CHECK (push_transport IN ('fcm', 'unifiedpush')),
-		push_p256dh TEXT,
-		push_auth TEXT,
-		is_mfa_approver BOOLEAN NOT NULL DEFAULT 0,
-		can_sign_on BOOLEAN NOT NULL DEFAULT 0,
-		attested_level TEXT NOT NULL DEFAULT 'none',
-		attested_at DATETIME,
-		boot_state TEXT NOT NULL DEFAULT 'unknown',
-		attestation_serials TEXT NOT NULL DEFAULT '[]',
-		last_seen_at DATETIME,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(user_id, device_identifier)
-	);
-	CREATE INDEX IF NOT EXISTS idx_native_devices_user ON native_devices(user_id);
+	` + nativeDevicesSchema + `
 
 	CREATE TABLE IF NOT EXISTS device_pairing_tokens (
 		id TEXT PRIMARY KEY,
@@ -359,6 +338,9 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if err := s.migrateNativeDevicePushTransport(); err != nil {
+		return err
+	}
+	if err := s.migrateNativeDeviceCHECKs(); err != nil {
 		return err
 	}
 	if err := s.migrateSCIM(); err != nil {
@@ -618,6 +600,77 @@ func (s *Store) migrateNativeDevicePushTransport() error {
 		}
 	}
 	return nil
+}
+
+// nativeDevicesSchema is shared by the base schema and migrateNativeDeviceCHECKs.
+const nativeDevicesSchema = `
+	CREATE TABLE IF NOT EXISTS native_devices (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		device_name TEXT NOT NULL,
+		device_identifier TEXT NOT NULL,
+		platform TEXT NOT NULL DEFAULT 'android' CHECK (platform IN ('android', 'ios', 'macos', 'linux')),
+		public_key TEXT,
+		push_token TEXT,
+		push_token_updated_at_ms INTEGER NOT NULL DEFAULT 0,
+		push_transport TEXT NOT NULL DEFAULT 'fcm' CHECK (push_transport IN ('fcm', 'unifiedpush', 'ubuntupush')),
+		push_p256dh TEXT,
+		push_auth TEXT,
+		is_mfa_approver BOOLEAN NOT NULL DEFAULT 0,
+		can_sign_on BOOLEAN NOT NULL DEFAULT 0,
+		attested_level TEXT NOT NULL DEFAULT 'none',
+		attested_at DATETIME,
+		boot_state TEXT NOT NULL DEFAULT 'unknown',
+		attestation_serials TEXT NOT NULL DEFAULT '[]',
+		last_seen_at DATETIME,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(user_id, device_identifier)
+	);
+	CREATE INDEX IF NOT EXISTS idx_native_devices_user ON native_devices(user_id);
+`
+
+// nativeDeviceColumns is every native_devices column, in schema order.
+const nativeDeviceColumns = `id, user_id, device_name, device_identifier, platform, public_key, push_token, push_token_updated_at_ms, push_transport, push_p256dh, push_auth, is_mfa_approver, can_sign_on, attested_level, attested_at, boot_state, attestation_serials, last_seen_at, created_at`
+
+// migrateNativeDeviceCHECKs widens the platform and push_transport CHECKs (linux, ubuntupush).
+// SQLite cannot alter a CHECK, so the rows are copied out and the table is recreated under
+// its own name: no RENAME, so the views that read it (enrolled_factors) are untouched.
+func (s *Store) migrateNativeDeviceCHECKs() error {
+	var definition string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'native_devices'`).Scan(&definition); err != nil {
+		return err
+	}
+	if strings.Contains(definition, "'ubuntupush'") {
+		return nil
+	}
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	// Foreign keys are off on this connection only, as SQLite's table rebuild requires, so rows
+	// are copied exactly: an orphan left by an older, unenforced database cannot stop startup.
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn }) // never pool it unenforced
+		}
+	}()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TEMP TABLE native_devices_copy AS SELECT ` + nativeDeviceColumns + ` FROM native_devices;
+		DROP TABLE native_devices;` + nativeDevicesSchema + `
+		INSERT INTO native_devices (` + nativeDeviceColumns + `) SELECT ` + nativeDeviceColumns + ` FROM native_devices_copy;
+		DROP TABLE native_devices_copy;`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // addColumnIfMissing runs alter unless table already has column.

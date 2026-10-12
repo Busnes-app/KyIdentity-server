@@ -12,7 +12,7 @@ Built in Go with a focus on simplicity, minimal external dependencies, and nativ
 2. **OpenID Connect & OAuth 2.0 Provider**: RFC-compliant authorization code flow with PKCE (`S256`), dynamic JWKS key discovery (`/.well-known/jwks.json`), and RS256 token signing.
 3. **Multi-Factor Authentication (MFA)**:
    - **TOTP Authenticator Apps**: Standard RFC 6238 time-based one-time passwords with encrypted secrets at rest (AES-256-GCM).
-   - **Push Authentication with Number Matching**: 2-digit verification challenges with decoy numbers for mobile pairing. Delivered through the FCM/APNs relay or directly over UnifiedPush; the UnifiedPush distributor sees when a sign-in happens but not its content (see SECURITY.md).
+   - **Push Authentication with Number Matching**: 2-digit verification challenges with decoy numbers for mobile pairing. Delivered through the FCM/APNs relay, directly over UnifiedPush, or through the UBports push service to Linux (Ubuntu Touch) devices; UnifiedPush distributors and UBports see when a sign-in happens but not its content (see SECURITY.md).
    - **Passkeys (WebAuthn)**: ES256 platform and roaming authenticators as a second factor, verified with the standard library alone. Works with KyAuth's Android credential provider, and with iCloud Keychain, Windows Hello and hardware keys.
    - **Emergency Recovery Codes**: Cryptographically hashed single-use recovery codes.
 4. **90-Second Ephemeral Pairing**: Frictionless UI-based pairing with QR codes and short PINs for native mobile devices and downstream server applications.
@@ -89,6 +89,10 @@ BOOTSTRAP_ADMIN_PASS=YourSecurePassword123!
 # Optional: Cloudflare Worker native-push relays
 PUSH_RELAY_URL=https://kysecurity-mobile-push-fcm.<account>.workers.dev
 APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
+
+# Optional: Ubuntu Touch push (defaults shown; HTTPS only)
+# KYIDENTITY_UBUNTU_PUSH_URL=https://push.ubports.com/notify
+# KYIDENTITY_UBUNTU_PUSH_APPID=kyauth.busnes_kyauth
 ```
 
 ### 2. Start the Server
