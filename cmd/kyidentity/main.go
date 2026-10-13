@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -44,6 +45,11 @@ const appVersion = "1.0.0"
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "apply-setup":
+			if err := runSetup(os.Args[2:], os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "bootstrap-admin":
 			bootstrapCmd := flag.NewFlagSet("bootstrap-admin", flag.ExitOnError)
 			bootstrapUser := bootstrapCmd.String("username", "admin", "Admin username")
@@ -271,7 +277,7 @@ func main() {
 	)
 
 	go func() {
-		log.Printf("KyIdentity Server listening on :%s (Issuer: %s)", cfg.Port, cfg.IssuerURL)
+		log.Printf("KyIdentity Server listening on %s (Issuer: %s)", net.JoinHostPort(cfg.ListenHost, cfg.Port), cfg.IssuerURL)
 		if err := server.Start(); err != nil && err.Error() != "http: Server closed" {
 			log.Fatalf("Server error: %v", err)
 		}

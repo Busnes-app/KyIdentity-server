@@ -3,7 +3,7 @@ module github.com/Busnes-app/kyidentity-server
 go 1.26.9
 
 require (
-	github.com/Busnes-app/ky-primitives v0.9.0
+	github.com/Busnes-app/ky-primitives v0.10.0
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/fxamacker/cbor/v2 v2.9.6
 	github.com/google/uuid v1.6.0
