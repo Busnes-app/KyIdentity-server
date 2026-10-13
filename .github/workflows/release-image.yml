@@ -159,9 +159,10 @@ jobs:
             echo "move=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          published="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
-            | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          # A failed lookup must stop here: an empty list would make this release "highest".
+          tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+          published="$(printf '%s\n' "$tags" | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)"
           highest="$(printf '%s\n%s\n' "$published" "$VERSION" | sort -V | tail -n1)"
           echo "highest published release: $highest; this release: $VERSION"
           if [ "$highest" != "$VERSION" ]; then
