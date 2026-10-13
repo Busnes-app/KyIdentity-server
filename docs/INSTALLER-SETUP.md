@@ -180,8 +180,9 @@ hold is refused, never cleared.
 
 The native worker reads committed connectors without restarting. Its existing desired-state,
 retry and uncertain-delivery protections apply; initial work covers only users with effective
-access to the linked app and carries its app-specific roles. Assignment loss, account
-disablement and deletion send deactivation while preserving downstream data. This interface
+access to the linked app and carries its app-specific roles. Assignment loss or expiry,
+account disablement, account end date and deletion send deactivation while preserving
+downstream data. This interface
 configures delivery; it does not deploy a receiver or prove that receiver revokes access.
 
 ## Signed suite directory connectors

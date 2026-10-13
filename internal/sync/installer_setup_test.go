@@ -14,7 +14,7 @@ import (
 // Native setup feeds the existing worker: no direct inserts into connector,
 // mapping or desired-state tables from this cross-boundary fixture.
 func TestInstallerSCIMNativeDeliveryAndAccessLoss(t *testing.T) {
-	for _, cause := range []string{"unassign", "disable", "expiry", "delete"} {
+	for _, cause := range []string{"unassign", "disable", "expiry", "account-end", "delete"} {
 		t.Run(cause, func(t *testing.T) {
 			e, s, foreign, cleanup := setupTestSyncEngine(t)
 			defer cleanup()
@@ -74,6 +74,14 @@ func TestInstallerSCIMNativeDeliveryAndAccessLoss(t *testing.T) {
 			case "disable":
 				day.Status = "disabled"
 				err = s.UpdateUserWithSyncEvents(day, true, nil)
+			case "account-end":
+				end := time.Now().Add(1100 * time.Millisecond)
+				day.EndsAt = &end
+				err = s.UpdateUserWithSyncEvents(day, true, nil)
+				if err == nil {
+					time.Sleep(1200 * time.Millisecond)
+					_, err = s.RunDueExpiries(time.Now())
+				}
 			case "delete":
 				err = s.DeleteUserWithSyncEvents(day.ID, nil)
 			case "expiry":
