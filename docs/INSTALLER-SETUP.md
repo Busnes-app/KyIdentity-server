@@ -26,8 +26,9 @@ It generates separate 32-byte random values encoded as 43-character base64url fi
 `admin.password`, `everyday.password`, `client-<id>.secret` and, for signed suite connectors,
 `client-<id>.webhook`. Preparation returns no credentials. Credentials never enter
 arguments or workstation state; only the explicit private export below carries them on stdout.
-Generic SCIM `tokenFile` must reference a destination-issued protected file outside the
-preparation directory. Preparation validates that token and requires the existing product
+Generic SCIM `tokenFile` must reference a destination-issued protected file outside every
+preparation directory; stage and apply refuse any setup credential file, the encryption key
+and the database, because the worker sends the token to the connector. Preparation validates that token and requires the existing product
 encryption key before any writes when a connector is selected; neither is invented.
 
 The container-owned product data directory must exclude other writers. Its `installer`
@@ -37,7 +38,8 @@ publish immutable `intent.json`, generated credentials, `credentials.json` (bund
 credential digests), then commit the receipt digest to native installer ownership with
 a success audit, and publish `setup.json` last. The native receipt survives filesystem
 marker loss before account creation. An interrupted initial publication can resume its
-retained files. Once the credential receipt exists, a missing or changed credential is
+retained files; before `intent.json` exists, only leftover `.keyfile-*.tmp` files are
+cleared, and any other file still refuses. Once the credential receipt exists, a missing or changed credential is
 an error. Native preparation/application ownership prevents replacement even after
 all filesystem completion markers are removed. Different intent is refused; planned changes need deliberate
 native administration rather than deleting preparation files. Keep these files in backup.

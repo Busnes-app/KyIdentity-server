@@ -97,6 +97,45 @@ func readSetupFile(path string, limit int64) ([]byte, error) {
 	}
 	return b, nil
 }
+
+// scimTokenAllowed refuses setup credentials, preparation directories and product
+// secrets as a SCIM token: the worker would send that file to the connector URL.
+func scimTokenAllowed(path string, own []string) error {
+	path = filepath.Clean(path)
+	data, err := setupDataDirectory()
+	if err != nil {
+		return err
+	}
+	refused := append(append([]string{}, own...), setupDatabasePath(""))
+	roots := []string{data}
+	if real, err := filepath.EvalSymlinks(data); err == nil {
+		roots = append(roots, real)
+	}
+	for _, root := range roots {
+		if rel, err := filepath.Rel(filepath.Join(root, "installer"), path); err == nil && strings.Contains(rel, string(filepath.Separator)) && !strings.HasPrefix(rel, "..") {
+			return errors.New("SCIM token cannot use a preparation-owned directory")
+		}
+		refused = append(refused, filepath.Join(root, "encryption.key"))
+	}
+	for _, p := range refused {
+		if abs, err := filepath.Abs(p); err == nil && p != "" && abs == path {
+			return errors.New("SCIM tokens must be destination-issued protected files")
+		}
+	}
+	return nil
+}
+
+func setupCredentialFiles(b setupBundle) []string {
+	files := []string{b.Admin.PasswordFile, b.Everyday.PasswordFile}
+	for _, c := range b.Clients {
+		files = append(files, c.SecretFile)
+		if c.SuiteWebhook != nil {
+			files = append(files, c.SuiteWebhook.SigningSecretFile)
+		}
+	}
+	return files
+}
+
 func setupURI(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Fragment == "" && !strings.ContainsAny(s, "\r\n\t ")
@@ -231,6 +270,9 @@ func prepareSetup(raw []byte) (store.InstallerSetup, error) {
 		client.Groups = append([]string(nil), c.Groups...)
 		sort.Strings(client.Groups)
 		if c.SCIM != nil {
+			if err := scimTokenAllowed(c.SCIM.TokenFile, setupCredentialFiles(bundle)); err != nil {
+				return p, err
+			}
 			raw, err := readSetupFile(c.SCIM.TokenFile, 8193)
 			if err != nil {
 				return p, err
