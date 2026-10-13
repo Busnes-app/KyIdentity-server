@@ -192,13 +192,8 @@ func stageSetup(file, db string, raw []byte, check bool) (string, error) {
 	needsKey := false
 	for _, c := range b.Clients {
 		if c.SCIM != nil {
-			for _, path := range generated {
-				if c.SCIM.TokenFile == path {
-					return "", errors.New("SCIM tokens must be destination-issued protected files")
-				}
-			}
-			if c.SCIM.TokenFile == file || strings.HasPrefix(c.SCIM.TokenFile, scope+string(filepath.Separator)) {
-				return "", errors.New("SCIM token cannot use the preparation-owned directory")
+			if err := scimTokenAllowed(c.SCIM.TokenFile, append(append([]string{file}, generated...), setupCredentialFiles(b)...)); err != nil {
+				return "", err
 			}
 			token, err := readSetupFile(c.SCIM.TokenFile, 8193)
 			if err != nil {
@@ -257,10 +252,21 @@ func stageSetup(file, db string, raw []byte, check bool) (string, error) {
 		if err != nil {
 			return "", errors.New("cannot inspect unclaimed preparation directory")
 		}
-		entries, readErr := directory.ReadDir(1)
+		entries, readErr := directory.ReadDir(16)
 		closeErr := directory.Close()
-		if readErr != io.EOF || closeErr != nil || len(entries) != 0 {
+		if (readErr != nil && readErr != io.EOF) || closeErr != nil || len(entries) == 16 {
 			return "", errors.New("unclaimed preparation directory is not empty; files preserved")
+		}
+		// An interrupted intent publication leaves only keyfile's private temp files.
+		for _, e := range entries {
+			if stray, _ := filepath.Match(".keyfile-*.tmp", e.Name()); !stray || !e.Type().IsRegular() {
+				return "", errors.New("unclaimed preparation directory is not empty; files preserved")
+			}
+		}
+		for _, e := range entries {
+			if err := os.Remove(filepath.Join(scope, e.Name())); err != nil {
+				return "", errors.New("cannot clear interrupted preparation; files preserved")
+			}
 		}
 		if _, err := publishSetupFile(intent, canonical); err != nil {
 			return "", err
