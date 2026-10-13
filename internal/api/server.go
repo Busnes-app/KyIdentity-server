@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -68,7 +69,7 @@ func NewServer(
 	handler := limitRequestBody(mm.SecurityHeaders(mm.CSRFValidate(mux)))
 
 	srv.httpServer = &http.Server{
-		Addr:    ":" + cfg.Port,
+		Addr:    net.JoinHostPort(cfg.ListenHost, cfg.Port),
 		Handler: handler,
 		// Without these a single idle connection can be held open indefinitely.
 		ReadHeaderTimeout: 5 * time.Second,

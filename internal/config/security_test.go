@@ -279,3 +279,25 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+func TestListenHostBoundary(t *testing.T) {
+	for _, host := range []string{"", "127.0.0.1", "::1", "192.168.1.2"} {
+		t.Run("accepted:"+host, func(t *testing.T) {
+			t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+			t.Setenv("KYIDENTITY_LISTEN_HOST", host)
+			cfg, err := Load()
+			if err != nil || cfg.ListenHost != host {
+				t.Fatal("explicit listen host rejected", err)
+			}
+		})
+	}
+	for _, host := range []string{"localhost", "127.0.0.1:1234", "127.0.0.1 ", "::1%lo", "[::1]"} {
+		t.Run("refused:"+host, func(t *testing.T) {
+			t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+			t.Setenv("KYIDENTITY_LISTEN_HOST", host)
+			if _, err := Load(); err == nil {
+				t.Fatal("invalid listen host accepted")
+			}
+		})
+	}
+}

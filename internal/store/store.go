@@ -67,6 +67,11 @@ func (s *Store) migrate() error {
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
 
+ CREATE TABLE IF NOT EXISTS installer_setup_resources (
+  kind TEXT NOT NULL, name TEXT NOT NULL COLLATE NOCASE, setup_id TEXT NOT NULL,
+  object_id TEXT NOT NULL, contract TEXT NOT NULL, PRIMARY KEY(kind,name)
+ );
+
  CREATE TABLE IF NOT EXISTS directory_groups (
   id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,
   description TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL

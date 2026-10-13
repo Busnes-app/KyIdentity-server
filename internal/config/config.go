@@ -34,8 +34,9 @@ const DefaultBackupKeep = 7
 
 // Config represents runtime application configuration.
 type Config struct {
-	Port      string
-	IssuerURL string
+	Port       string
+	ListenHost string
+	IssuerURL  string
 	// RPID and Origin are the WebAuthn relying party identity, derived from IssuerURL at
 	// load so a malformed issuer fails startup rather than the first passkey ceremony.
 	RPID              string
@@ -108,6 +109,10 @@ func Load() (*Config, error) {
 	rsaKeyPath := getEnv("KYIDENTITY_RSA_KEY_PATH", filepath.Join(dataDir, "jwt_rs256.key"))
 
 	port := getEnv("KYIDENTITY_PORT", "5867")
+	listenHost := os.Getenv("KYIDENTITY_LISTEN_HOST")
+	if listenHost != "" && net.ParseIP(listenHost) == nil {
+		return nil, errors.New("KYIDENTITY_LISTEN_HOST must be a literal IP address")
+	}
 	issuerURL := strings.TrimRight(getEnv("KYIDENTITY_ISSUER_URL", "http://localhost:"+port), "/")
 	issuer, err := url.Parse(issuerURL)
 	if err != nil || issuer.Hostname() == "" || (issuer.Scheme != "https" && !issuerIsLocal(issuer)) {
@@ -186,6 +191,7 @@ func Load() (*Config, error) {
 
 	return &Config{
 		Port:                       port,
+		ListenHost:                 listenHost,
 		IssuerURL:                  issuerURL,
 		RPID:                       rpID,
 		Origin:                     rpOrigin,
