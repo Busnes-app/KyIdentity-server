@@ -111,6 +111,8 @@ export interface Passkey {
 
 export interface Application {
   id: string;
+  /** source:id. Client and custom ids are separate spaces, so id alone can collide. */
+  key: string;
   /** Where the card came from, which decides the endpoint that edits it. */
   source?: 'client' | 'custom';
   name: string;
@@ -119,6 +121,18 @@ export interface Application {
   description?: string;
   sortOrder?: number;
   enabled: boolean;
+}
+
+/** How one user arranges their own launcher. Cosmetic: it never grants or removes access. */
+export interface LauncherPrefs {
+  layout: 'tiles' | 'dock';
+  groups: { name: string; apps: string[] }[];
+  hidden: string[];
+}
+
+export interface Launcher {
+  applications: Application[];
+  preferences: LauncherPrefs | null;
 }
 
 export interface OAuthClient {

@@ -10,6 +10,7 @@ import {
   parseGroupPage,
   parseGroupUserPage,
   parseApplications,
+  parseLauncher,
   parseAuditPage,
   parseAuthStep,
   parseBeginLogin,
@@ -241,6 +242,36 @@ describe('parseApplications', () => {
     });
     expect(app.description).toBeUndefined();
     expect(app.source).toBeUndefined();
+  });
+
+  it('keeps the server key, and derives one for admin cards that carry none', () => {
+    const [client, admin] = parseApplications({
+      applications: [
+        { id: 'x', key: 'client:x', name: 'X', url: 'https://x.test', source: 'client' },
+        { id: 'a1', name: 'Wiki', url: 'https://w.test' },
+      ],
+    });
+    expect(client.key).toBe('client:x');
+    expect(admin.key).toBe('custom:a1');
+  });
+});
+
+describe('parseLauncher', () => {
+  it('reads saved preferences alongside the apps', () => {
+    const l = parseLauncher({
+      applications: [{ id: 'x', key: 'client:x', name: 'X', url: 'https://x.test' }],
+      preferences: { layout: 'dock', groups: [{ name: 'Daily', apps: ['client:x'] }], hidden: null },
+    });
+    expect(l.applications).toHaveLength(1);
+    expect(l.preferences).toEqual({ layout: 'dock', groups: [{ name: 'Daily', apps: ['client:x'] }], hidden: [] });
+  });
+
+  it('treats missing preferences as never customised', () => {
+    expect(parseLauncher({ applications: [], preferences: null }).preferences).toBeNull();
+  });
+
+  it('refuses a layout it does not know', () => {
+    expect(() => parseLauncher({ applications: [], preferences: { layout: 'grid', groups: [], hidden: [] } })).toThrow();
   });
 
   it('drops a source it does not recognise instead of trusting it', () => {

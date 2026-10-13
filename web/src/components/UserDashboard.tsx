@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { User, Application } from '../types';
+import { User, Application, Launcher, LauncherPrefs } from '../types';
 import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
-import { parseApplications } from '../parsers';
+import { parseApplications, parseLauncher } from '../parsers';
 import { AccessRequests } from './AccessRequests';
-import { faviconUrl } from '../favicon';
-import { Image, Upload, ExternalLink, ArrowUpRight, Plus, Pencil } from 'lucide-react';
-import { LAUNCHER_ICONS, launcherIcon } from '../launcherIcons';
+import { Image, Upload, ArrowUpRight, Plus, Pencil } from 'lucide-react';
+import { LAUNCHER_ICONS } from '../launcherIcons';
+import { AppIcon, LauncherView, uploadedIconUrl } from './Launcher';
+import { LauncherCustomize } from './LauncherCustomize';
+import { arrange, normalize, unhide } from '../launcherLayout';
 
 interface UserDashboardProps {
   user: User;
@@ -25,33 +27,120 @@ interface CardDraft {
 
 const blankDraft: CardDraft = { id: '', name: '', url: '', description: '', iconName: 'favicon' };
 
-/** Uploaded icons are named "icon:<id>" and served by the API; built-ins are drawn inline. */
-function uploadedIconUrl(iconName: string): string | undefined {
-  const id = iconName.startsWith('icon:') ? iconName.slice(5) : '';
-  return /^[0-9a-f-]{36}$/.test(id) ? `/api/icons/${id}` : undefined;
-}
+const SECOND_FACTORS = ['push', 'webauthn', 'totp'];
 
-const METHOD_LABELS: Record<string, string> = {
-  push: 'Phone approval',
-  webauthn: 'Passkey',
-  totp: 'Six-digit codes',
+export const UserDashboard: React.FC<UserDashboardProps> = (props) =>
+  props.manage ? <ManageCards user={props.user} /> : <Applications {...props} />;
+
+/** The everyday launcher, arranged the way this user chose. */
+const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices }) => {
+  const [launcher, setLauncher] = useState<Launcher | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () =>
+    apiJson('/api/user/applications', parseLauncher)
+      .then(setLauncher)
+      .catch((err) => setError(errorMessage(err, 'Could not load your applications')));
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const save = async (prefs: LauncherPrefs) => {
+    setError(null);
+    try {
+      await apiRequest('/api/user/launcher-preferences', { method: 'PUT', body: JSON.stringify(prefs) });
+      setLauncher((l) => l && { ...l, preferences: prefs });
+      setEditing(false);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not save your launcher'));
+    }
+  };
+
+  const reset = async () => {
+    setError(null);
+    try {
+      await apiRequest('/api/user/launcher-preferences', { method: 'DELETE' });
+      setEditing(false);
+      await load();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not reset your launcher'));
+    }
+  };
+
+  const apps = launcher?.applications ?? [];
+  const prefs = launcher?.preferences ?? null;
+  const noSecondFactor = !(user.mfaMethods ?? []).some((m) => SECOND_FACTORS.includes(m));
+  const errorBox = error && <p className="alert-box error" role="alert">{error}</p>;
+
+  if (editing) {
+    return (
+      <div>
+        {errorBox}
+        <LauncherCustomize
+          apps={apps}
+          initial={normalize(apps, prefs)}
+          onCancel={() => setEditing(false)}
+          onSave={save}
+          onReset={reset}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <h1 className="page-title">Applications</h1>
+        <div className="launcher-who">
+          <span>
+            Signed in as <b>{user.username}</b> · {user.role === 'admin' ? 'Administrator' : 'User'}
+          </span>
+          {apps.length > 0 && (
+            <button type="button" className="secondary-btn sm" onClick={() => setEditing(true)}>
+              Customize
+            </button>
+          )}
+        </div>
+      </div>
+      {noSecondFactor && (
+        <p className="alert-box warn">
+          Your account has no second factor.{' '}
+          <button type="button" className="text-btn" onClick={onNavigateToDevices}>
+            Set one up
+          </button>
+        </p>
+      )}
+      {errorBox}
+      {launcher && apps.length === 0 && (
+        <p className="app-empty">
+          {user.role === 'admin'
+            ? 'No applications are available to you. Manage assignments under App connections.'
+            : 'No applications are available to you. Ask an administrator for access.'}
+        </p>
+      )}
+      <LauncherView arranged={arrange(apps, prefs)} onUnhide={(key) => save(unhide(normalize(apps, prefs), key))} />
+      <AccessRequests />
+    </div>
+  );
 };
 
-export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices, manage = false }) => {
+/** Every custom launcher card, independent of the admin's own access. */
+const ManageCards: React.FC<{ user: User }> = ({ user }) => {
   const [notice, setNotice] = useState<string | null>(null);
   const [apps, setApps] = useState<Application[]>([]);
-  const [failedFavicons, setFailedFavicons] = useState<string[]>([]);
   const [draft, setDraft] = useState<CardDraft | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const fetchApps = () =>
-    apiJson(manage ? '/api/admin/applications' : '/api/user/applications', parseApplications)
+    apiJson('/api/admin/applications', parseApplications)
       .then(setApps)
       .catch(() => setApps([]));
 
   useEffect(() => {
     fetchApps();
-  }, [manage]);
+  }, []);
 
   // The picker is a scrolling grid; open it on the card's current icon rather than the top.
   useEffect(() => {
@@ -94,7 +183,6 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onNavigateTo
       }
       if (!draft.id) setNotice('Application created. Assign access under Administration → App connections.');
       setDraft(null);
-      setFailedFavicons([]);
       fetchApps();
     } catch (err) {
       alert(errorMessage(err, 'Failed to save application'));
@@ -122,32 +210,15 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onNavigateTo
     }
   };
 
-  const methods = (user.mfaMethods ?? []).filter((m) => m in METHOD_LABELS);
   const isAdmin = user.role === 'admin';
-  const suite = apps.filter((app) => app.source === 'client');
-  const links = apps.filter((app) => app.source !== 'client');
 
   const appList = (list: Application[]) => (
     <ul className="app-list">
       {list.map((app) => {
-        const IconComp = launcherIcon(app.iconName) ?? ExternalLink;
-        const favicon = app.iconName === 'favicon' ? faviconUrl(app.url) : uploadedIconUrl(app.iconName);
         return (
-          <li key={app.id}>
+          <li key={app.key}>
             <a href={app.url} target="_blank" rel="noopener noreferrer" className="app-row">
-              <span className="app-icon">
-                {favicon && !failedFavicons.includes(app.id) ? (
-                  <img
-                    className="app-favicon"
-                    src={favicon}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    onError={() => setFailedFavicons((ids) => [...ids, app.id])}
-                  />
-                ) : (
-                  <IconComp size={20} />
-                )}
-              </span>
+              <AppIcon key={app.iconName} app={app} />
               <span className="app-text">
                 <b>{app.name}</b>
                 {app.description && <span>{app.description}</span>}
@@ -173,7 +244,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onNavigateTo
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">{manage ? 'Manage launcher cards' : 'Applications'}</h1>
+        <h1 className="page-title">Manage launcher cards</h1>
         {isAdmin && (
           <button className="secondary-btn sm" onClick={() => setDraft({ ...blankDraft })}>
             <Plus size={14} /> Add application
@@ -182,49 +253,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onNavigateTo
       </div>
 
       {notice && <p className="alert-box success" role="status">{notice}</p>}
-      {!manage && <div className="identity">
-        <div>
-          <span className="text-muted">Signed in as</span>
-          <div className="identity-name">{user.username}</div>
-          <div className="identity-facts">
-            <span>{user.displayName || user.username}</span>
-            <span>{user.email}</span>
-            <span>{isAdmin ? 'Administrator' : 'User'}</span>
-          </div>
-        </div>
-        <button type="button" className="identity-mfa" onClick={onNavigateToDevices}>
-          <span className="text-muted">Second factor</span>
-          {methods.length > 0 ? (
-            <ul>
-              {methods.map((m) => (
-                <li key={m}>{METHOD_LABELS[m]}</li>
-              ))}
-            </ul>
-          ) : (
-            <b>None. Set one up.</b>
-          )}
-        </button>
-      </div>}
-
-      {apps.length === 0 && (
-        <p className="app-empty">
-          {manage ? 'No launcher cards yet. Add an application link.' : isAdmin ? 'No applications are available to you. Manage assignments under App connections.' : 'No applications are available to you. Ask an administrator for access.'}
-        </p>
-      )}
-
-      {suite.length > 0 && (
-        <>
-          <h2 className="section-title">Suite</h2>
-          {appList(suite)}
-        </>
-      )}
-      {links.length > 0 && (
-        <>
-          <h2 className="section-title">Other links</h2>
-          {appList(links)}
-        </>
-      )}
-      {!manage && <AccessRequests />}
+      {apps.length === 0 && <p className="app-empty">No launcher cards yet. Add an application link.</p>}
+      {apps.length > 0 && appList(apps)}
 
       {draft && (
         <div className="modal-backdrop" onMouseDown={() => setDraft(null)}>

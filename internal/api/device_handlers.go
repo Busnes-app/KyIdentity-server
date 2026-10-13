@@ -464,7 +464,8 @@ func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request)
 	for _, app := range customApps {
 		if app.Enabled && allowed["custom:"+app.ID] {
 			app.Source = "custom"
-			appMap[app.ID] = app
+			app.Key = "custom:" + app.ID
+			appMap[app.Key] = app
 		}
 	}
 
@@ -476,10 +477,6 @@ func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request)
 		if !client.Enabled || !allowed["client:"+client.ID] {
 			continue
 		}
-		if _, exists := appMap[client.ID]; exists {
-			continue
-		}
-
 		launchURL := strings.TrimSpace(client.LaunchURL)
 		if launchURL == "" {
 			var uris []string
@@ -510,8 +507,9 @@ func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request)
 			iconName = "favicon"
 		}
 
-		appMap[client.ID] = store.Application{
+		appMap["client:"+client.ID] = store.Application{
 			Source:      "client",
+			Key:         "client:" + client.ID,
 			ID:          client.ID,
 			Name:        client.ClientName,
 			URL:         launchURL,
@@ -534,6 +532,42 @@ func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request)
 		return result[i].Name < result[j].Name
 	})
 
+	prefs, err := h.store.GetLauncherPrefs(GetUserFromContext(r.Context()).ID)
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"applications": result})
+	_ = json.NewEncoder(w).Encode(map[string]any{"applications": result, "preferences": prefs})
+}
+
+// PutLauncherPrefs saves how the caller arranges their own launcher. It changes no access,
+// so it needs no step-up and leaves no audit entry.
+func (h *DeviceHandler) PutLauncherPrefs(w http.ResponseWriter, r *http.Request) {
+	var prefs store.LauncherPrefs
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&prefs); err != nil {
+		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+		return
+	}
+	err := h.store.SetLauncherPrefs(GetUserFromContext(r.Context()).ID, prefs)
+	if errors.Is(err, store.ErrInvalidLauncherPrefs) {
+		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *DeviceHandler) DeleteLauncherPrefs(w http.ResponseWriter, r *http.Request) {
+	if err := h.store.DeleteLauncherPrefs(GetUserFromContext(r.Context()).ID); err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
