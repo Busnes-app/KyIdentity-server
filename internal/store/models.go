@@ -253,7 +253,9 @@ type Application struct {
 	// Source is derived when the launcher is assembled, not stored: "custom" for a row in
 	// this table, "client" for a card synthesised from a registered OAuth client. The
 	// dashboard needs it to know which endpoint edits the card.
-	Source      string    `json:"source,omitempty"`
+	Source string `json:"source,omitempty"`
+	// Key is Source:ID. Client and custom ids are separate spaces, so ID alone can collide.
+	Key         string    `json:"key,omitempty"`
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	URL         string    `json:"url"`

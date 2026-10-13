@@ -293,6 +293,14 @@ reject stale settings. Mutations require operation-bound step-up and atomic audi
 Launcher-only access controls visibility, not authorization at the destination website.
 Provisioning follows effective access; see Outbound provisioning, Provisioning scope.
 
+Each user arranges their own **Applications** page under **Customize**. They can make,
+name and order groups, hide apps, and choose **Tiles** or **Dock + list**, where the first
+group is shown as large icons. The layout is stored per account
+(`PUT`/`DELETE /api/user/launcher-preferences`), and `GET /api/user/applications` returns
+it as `preferences`. It only arranges apps the user can already reach. Hiding an app does
+not remove access, and a hidden app stays one click away at the bottom of the page. Apps
+granted after the last save appear in a **New** group.
+
 OAuth authorization and token exchange both enforce current access. Losing effective
 access revokes online tokens and invalidates authorization codes in the same transaction.
 Token registration rechecks access and the originating code atomically, including during
