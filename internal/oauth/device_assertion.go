@@ -285,7 +285,8 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 		return nil, who, errNoOpenIDScope
 	}
 	// An attested key is hardware-bound and user-verified per use: two factors. Otherwise single factor.
-	attested := dev.AttestedLevel == "tee" || dev.AttestedLevel == "strongbox"
+	// appattest rests on app integrity: a genuine KyAuth iOS makes that key in the Secure Enclave.
+	attested := dev.AttestedLevel == "tee" || dev.AttestedLevel == "strongbox" || dev.AttestedLevel == "appattest"
 	// The per-use authentication happened when the phone signed, not at exchange.
 	authAt := iat.UTC()
 	if authAt.After(now) {

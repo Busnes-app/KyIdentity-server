@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
@@ -57,9 +59,10 @@ func TestRelaySenderRegistersAndPersistsKey(t *testing.T) {
 		t.Fatalf("unexpected persisted key: %q", key)
 	}
 
+	expires := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
 	err = sender.SendPush(store.NativeDevice{
 		ID: "dev1", UserID: "u1", Platform: "android", PushToken: "token",
-	}, MFAChallengePush{ChallengeID: "challenge"})
+	}, MFAChallengePush{ChallengeID: "challenge", Purpose: "login", ExpiresAtMS: expires.UnixMilli()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +87,9 @@ func TestRelaySenderRegistersAndPersistsKey(t *testing.T) {
 		if strings.Contains(fmt.Sprint(data[field]), "42") {
 			t.Fatalf("data.%s leaked match digits: %v", field, data[field])
 		}
+	}
+	if data["purpose"] != "login" || data["expiresAtEpochMs"] != strconv.FormatInt(expires.UnixMilli(), 10) {
+		t.Fatalf("purpose/expiry = %v / %v", data["purpose"], data["expiresAtEpochMs"])
 	}
 	if data["challengeId"] != "challenge" {
 		t.Fatalf("challengeId = %v, want challenge", data["challengeId"])

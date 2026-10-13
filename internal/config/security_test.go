@@ -301,3 +301,29 @@ func TestListenHostBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestUbuntuPushConfiguration(t *testing.T) {
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UbuntuPushURL != "https://push.ubports.com/notify" || cfg.UbuntuPushAppID != "kyauth.busnes_kyauth" {
+		t.Fatalf("defaults = %q %q", cfg.UbuntuPushURL, cfg.UbuntuPushAppID)
+	}
+	for name, kv := range map[string]map[string]string{
+		"http url":       {"KYIDENTITY_UBUNTU_PUSH_URL": "http://push.example.test/notify"},
+		"no host":        {"KYIDENTITY_UBUNTU_PUSH_URL": "https:///notify"},
+		"credentials":    {"KYIDENTITY_UBUNTU_PUSH_URL": "https://u:p@push.example.test/notify"},
+		"appid no app":   {"KYIDENTITY_UBUNTU_PUSH_APPID": "kyauth.busnes"},
+		"appid upper":    {"KYIDENTITY_UBUNTU_PUSH_APPID": "KyAuth.busnes_kyauth"},
+		"appid two apps": {"KYIDENTITY_UBUNTU_PUSH_APPID": "a_b_c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			withEnv(t, kv)
+			if _, err := Load(); err == nil {
+				t.Fatalf("accepted %v", kv)
+			}
+		})
+	}
+}

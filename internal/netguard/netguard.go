@@ -65,10 +65,34 @@ func Client(timeout time.Duration) *http.Client {
 }
 
 func isNonPublic(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() ||
-		ip.IsInterfaceLocalMulticast()
+		ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+	for _, n := range reservedRanges {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
+
+// reservedRanges are special-purpose blocks net.IP's predicates miss: carrier-grade NAT (also
+// every Tailscale address), "this" network, IETF assignments, benchmarking, class E, the NAT64
+// well-known prefix (which embeds any IPv4, metadata included) and deprecated site-local.
+// Same list as ky-primitives recoveryclient.
+var reservedRanges = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, cidr := range []string{"100.64.0.0/10", "0.0.0.0/8", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4", "64:ff9b::/96", "fec0::/10"} {
+		_, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, n)
+	}
+	return out
+}()
 
 // ValidateURL rejects anything the server should not be made to send data to. field names
 // the offending input so the error points the operator at the right field.

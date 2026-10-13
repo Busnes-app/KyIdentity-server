@@ -21,6 +21,7 @@ const (
 	encKeyRelPath    = "data/encryption.key"
 	secretKeyRelPath = "data/secret.key"
 	recoveryPubPath  = "data/recovery.pub"
+	vapidKeyRelPath  = "data/" + config.VAPIDKeyFile
 	configRelPath    = "config/kyidentity.json"
 )
 
@@ -37,6 +38,9 @@ func Members(cfg *config.Config) []string {
 	m := []string{dbRelPath, keyRelPath, encKeyRelPath, secretKeyRelPath}
 	if _, err := os.Stat(RecoveryKeyPath(cfg.DataDir)); err == nil {
 		m = append(m, recoveryPubPath)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, config.VAPIDKeyFile)); err == nil {
+		m = append(m, vapidKeyRelPath)
 	}
 	return append(m, configRelPath)
 }
@@ -111,6 +115,14 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 	// comes back paired rather than steering the operator into a re-pair.
 	if pub, err := os.ReadFile(RecoveryKeyPath(cfg.DataDir)); err == nil {
 		files = append(files, recoveryclient.File{Path: recoveryPubPath, Data: pub, Mode: 0600})
+	}
+
+	// The UnifiedPush VAPID key, so a restore keeps the server's push identity. Created at first
+	// start; a capsule from before UnifiedPush has none and the restored server makes a new one.
+	if vapid, err := os.ReadFile(filepath.Join(cfg.DataDir, config.VAPIDKeyFile)); err == nil {
+		files = append(files, recoveryclient.File{Path: vapidKeyRelPath, Data: vapid, Mode: 0600})
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("failed to read VAPID key: %w", err)
 	}
 
 	cfgJSON, err := json.MarshalIndent(map[string]any{

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,6 +122,28 @@ func registerRelayKey(relayURL, label string) (string, error) {
 	return parsed.Key, nil
 }
 
+const (
+	pushTitle = "Sign-in request"
+	pushBody  = "Open KySecurity Authenticator to review."
+)
+
+// challengeData is the push payload every transport carries. The browser displays the
+// number and the authenticator asks the user to enter it, so neither the answer nor decoys
+// belong here.
+func challengeData(dev store.NativeDevice, ch MFAChallengePush) map[string]string {
+	return map[string]string{
+		"type":             "mfa_challenge",
+		"title":            pushTitle,
+		"body":             pushBody,
+		"challengeId":      ch.ChallengeID,
+		"deviceId":         dev.ID,
+		"deviceUserId":     dev.UserID,
+		"purpose":          ch.Purpose,
+		"expiresAtEpochMs": strconv.FormatInt(ch.ExpiresAtMS, 10),
+		"devicePlatform":   dev.Platform,
+	}
+}
+
 func (s *RelaySender) SendPush(dev store.NativeDevice, ch MFAChallengePush) error {
 	endpoint, err := s.endpointFor(dev.Platform)
 	if err != nil {
@@ -129,24 +152,12 @@ func (s *RelaySender) SendPush(dev store.NativeDevice, ch MFAChallengePush) erro
 	if endpoint.url == "" {
 		return nil
 	}
-	// The browser displays the number. The authenticator asks the user to enter
-	// it, so neither the answer nor decoys belong in a push payload.
-	title := "Sign-in request"
-	messageBody := "Open KySecurity Authenticator to review."
 	body, _ := json.Marshal(map[string]any{
 		"token":    dev.PushToken,
-		"title":    title,
-		"body":     messageBody,
+		"title":    pushTitle,
+		"body":     pushBody,
 		"platform": dev.Platform,
-		"data": map[string]string{
-			"type":           "mfa_challenge",
-			"title":          title,
-			"body":           messageBody,
-			"challengeId":    ch.ChallengeID,
-			"deviceId":       dev.ID,
-			"deviceUserId":   dev.UserID,
-			"devicePlatform": dev.Platform,
-		},
+		"data":     challengeData(dev, ch),
 	})
 	req, err := http.NewRequest(http.MethodPost, endpoint.url+"/send", bytes.NewReader(body))
 	if err != nil {

@@ -38,6 +38,7 @@ func setupTestMFAEngine(t *testing.T) (*Engine, *store.Store, *store.User, func(
 
 	encKey, _ := crypto.GenerateRandomBytes(32)
 	engine := NewEngine(dbStore, encKey)
+	engine.SetIssuerOrigin(testOrigin)
 
 	user := &store.User{
 		ID:           uuid.New().String(),
@@ -172,9 +173,16 @@ type testDevice struct {
 	priv *ecdsa.PrivateKey
 }
 
-func (d *testDevice) sign(t *testing.T, challengeID string, approve bool, digits string) string {
+const testOrigin = "https://id.example.com"
+
+func (d *testDevice) sign(t *testing.T, ch *store.MFAChallenge, approve bool, digits string) string {
 	t.Helper()
-	digest := sha256.Sum256(PushResponseMessage(challengeID, approve, digits))
+	msg, err := PushResponseMessage(PushBinding{Origin: testOrigin, UserID: ch.UserID, DeviceID: d.id, ChallengeID: ch.ID,
+		Purpose: ch.Purpose, ExpiresAtMS: ch.ExpiresAt.UnixMilli()}, approve, digits)
+	if err != nil {
+		t.Fatalf("PushResponseMessage failed: %v", err)
+	}
+	digest := sha256.Sum256(msg)
 	sig, err := ecdsa.SignASN1(rand.Reader, d.priv, digest[:])
 	if err != nil {
 		t.Fatalf("SignASN1 failed: %v", err)
@@ -215,7 +223,7 @@ func TestPushChallengeNumberMatching(t *testing.T) {
 
 	device := pairSigningDevice(t, dbStore, user.ID, "phone-1")
 
-	challenge, err := engine.CreatePushChallenge(user.ID)
+	challenge, err := engine.CreatePushChallenge(user.ID, "login")
 	if err != nil {
 		t.Fatalf("CreatePushChallenge failed: %v", err)
 	}
@@ -232,7 +240,7 @@ func TestPushChallengeNumberMatching(t *testing.T) {
 	}
 
 	// Wrong match number, correctly signed: denied.
-	ok, _, err := engine.RespondPushChallenge(challenge.ID, "99", true, device.sign(t, challenge.ID, true, "99"))
+	ok, _, err := engine.RespondPushChallenge(challenge.ID, device.id, "99", true, device.sign(t, challenge, true, "99"))
 	if err != nil || ok {
 		t.Fatalf("expected incorrect number response to fail, got ok=%v err=%v", ok, err)
 	}
@@ -241,11 +249,11 @@ func TestPushChallengeNumberMatching(t *testing.T) {
 	}
 
 	// Correct match number, correctly signed: approved.
-	ch2, err := engine.CreatePushChallenge(user.ID)
+	ch2, err := engine.CreatePushChallenge(user.ID, "login")
 	if err != nil {
 		t.Fatalf("CreatePushChallenge failed: %v", err)
 	}
-	ok, deviceID, err := engine.RespondPushChallenge(ch2.ID, ch2.MatchDigits, true, device.sign(t, ch2.ID, true, ch2.MatchDigits))
+	ok, deviceID, err := engine.RespondPushChallenge(ch2.ID, device.id, ch2.MatchDigits, true, device.sign(t, ch2, true, ch2.MatchDigits))
 	if err != nil || !ok {
 		t.Fatalf("expected correct number response to succeed, got ok=%v err=%v", ok, err)
 	}
@@ -264,8 +272,8 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 	device := pairSigningDevice(t, dbStore, user.ID, "phone-1")
 
 	t.Run("unsigned response is rejected", func(t *testing.T) {
-		ch, _ := engine.CreatePushChallenge(user.ID)
-		if ok, _, err := engine.RespondPushChallenge(ch.ID, ch.MatchDigits, true, ""); ok || err == nil {
+		ch, _ := engine.CreatePushChallenge(user.ID, "login")
+		if ok, _, err := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, ""); ok || err == nil {
 			t.Fatalf("expected unsigned response to be rejected, got ok=%v err=%v", ok, err)
 		}
 		if status, _, _ := engine.CheckPushChallenge(ch.ID); status != "pending" {
@@ -274,11 +282,11 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 	})
 
 	t.Run("signature from an unpaired key is rejected", func(t *testing.T) {
-		ch, _ := engine.CreatePushChallenge(user.ID)
-		attacker := &testDevice{}
+		ch, _ := engine.CreatePushChallenge(user.ID, "login")
+		attacker := &testDevice{id: device.id}
 		attacker.priv, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
-		if ok, _, err := engine.RespondPushChallenge(ch.ID, ch.MatchDigits, true, attacker.sign(t, ch.ID, true, ch.MatchDigits)); ok || err == nil {
+		if ok, _, err := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, attacker.sign(t, ch, true, ch.MatchDigits)); ok || err == nil {
 			t.Fatalf("expected foreign signature to be rejected, got ok=%v err=%v", ok, err)
 		}
 		if status, _, _ := engine.CheckPushChallenge(ch.ID); status != "pending" {
@@ -287,20 +295,20 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 	})
 
 	t.Run("signature bound to another challenge is rejected", func(t *testing.T) {
-		chA, _ := engine.CreatePushChallenge(user.ID)
-		chB, _ := engine.CreatePushChallenge(user.ID)
+		chA, _ := engine.CreatePushChallenge(user.ID, "login")
+		chB, _ := engine.CreatePushChallenge(user.ID, "login")
 
 		// A valid signature for challenge A, replayed against challenge B.
-		replay := device.sign(t, chA.ID, true, chB.MatchDigits)
-		if ok, _, err := engine.RespondPushChallenge(chB.ID, chB.MatchDigits, true, replay); ok || err == nil {
+		replay := device.sign(t, chA, true, chB.MatchDigits)
+		if ok, _, err := engine.RespondPushChallenge(chB.ID, device.id, chB.MatchDigits, true, replay); ok || err == nil {
 			t.Fatalf("expected cross-challenge replay to be rejected, got ok=%v err=%v", ok, err)
 		}
 	})
 
 	t.Run("flipping approve invalidates the signature", func(t *testing.T) {
-		ch, _ := engine.CreatePushChallenge(user.ID)
-		denial := device.sign(t, ch.ID, false, ch.MatchDigits)
-		if ok, _, err := engine.RespondPushChallenge(ch.ID, ch.MatchDigits, true, denial); ok || err == nil {
+		ch, _ := engine.CreatePushChallenge(user.ID, "login")
+		denial := device.sign(t, ch, false, ch.MatchDigits)
+		if ok, _, err := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, denial); ok || err == nil {
 			t.Fatalf("expected an approval carrying a denial signature to be rejected, got ok=%v err=%v", ok, err)
 		}
 	})
@@ -314,8 +322,8 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 			t.Fatalf("CreateUser failed: %v", err)
 		}
 
-		ch, _ := engine.CreatePushChallenge(other.ID)
-		_, _, err := engine.RespondPushChallenge(ch.ID, ch.MatchDigits, true, device.sign(t, ch.ID, true, ch.MatchDigits))
+		ch, _ := engine.CreatePushChallenge(other.ID, "login")
+		_, _, err := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, device.sign(t, ch, true, ch.MatchDigits))
 		if !errors.Is(err, ErrUnsignedDevice) {
 			t.Fatalf("expected ErrUnsignedDevice, got %v", err)
 		}
@@ -327,11 +335,11 @@ func TestPushChallengeApprovesExactlyOnce(t *testing.T) {
 	defer cleanup()
 
 	device := pairSigningDevice(t, dbStore, user.ID, "phone-1")
-	ch, err := engine.CreatePushChallenge(user.ID)
+	ch, err := engine.CreatePushChallenge(user.ID, "login")
 	if err != nil {
 		t.Fatalf("CreatePushChallenge failed: %v", err)
 	}
-	sig := device.sign(t, ch.ID, true, ch.MatchDigits)
+	sig := device.sign(t, ch, true, ch.MatchDigits)
 
 	const racers = 50
 	var wg sync.WaitGroup
@@ -340,7 +348,7 @@ func TestPushChallengeApprovesExactlyOnce(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ok, _, _ := engine.RespondPushChallenge(ch.ID, ch.MatchDigits, true, sig)
+			ok, _, _ := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, sig)
 			results[idx] = ok
 		}(i)
 	}
@@ -397,7 +405,7 @@ func TestPushChallengeDigitsAreDistinctAndInRange(t *testing.T) {
 	defer cleanup()
 
 	for i := 0; i < 200; i++ {
-		ch, err := engine.CreatePushChallenge(user.ID)
+		ch, err := engine.CreatePushChallenge(user.ID, "login")
 		if err != nil {
 			t.Fatalf("CreatePushChallenge failed: %v", err)
 		}
@@ -630,5 +638,43 @@ func TestRegisterNativeDeviceGradeStaysWithItsKey(t *testing.T) {
 		t.Fatalf("attested key lost its grade: %s", stored.AttestedLevel)
 	case stored.PublicKey != pub1 && stored.PublicKey != pub2:
 		t.Fatal("stored key is neither registration's")
+	}
+}
+
+func TestCreatePushChallengePurposeAndExpiry(t *testing.T) {
+	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+
+	ch, err := engine.CreatePushChallenge(user.ID, "step_up")
+	if err != nil {
+		t.Fatalf("CreatePushChallenge failed: %v", err)
+	}
+	if ch.Purpose != "step_up" || ch.ExpiresAt.Nanosecond() != 0 {
+		t.Fatalf("purpose=%q nanos=%d", ch.Purpose, ch.ExpiresAt.Nanosecond())
+	}
+	stored, err := dbStore.GetMFAChallenge(ch.ID)
+	if err != nil || stored.Purpose != "step_up" || !stored.ExpiresAt.Equal(ch.ExpiresAt) {
+		t.Fatalf("stored = %+v, %v", stored, err)
+	}
+	if _, err := engine.CreatePushChallenge(user.ID, "session"); err == nil {
+		t.Fatal("accepted unknown purpose")
+	}
+}
+
+func TestRespondRefusedWithoutIssuerOrigin(t *testing.T) {
+	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	device := pairSigningDevice(t, dbStore, user.ID, "phone-1")
+	ch, err := engine.CreatePushChallenge(user.ID, "login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.SetIssuerOrigin("")
+	ok, _, err := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, device.sign(t, ch, true, ch.MatchDigits))
+	if ok || err == nil {
+		t.Fatalf("response accepted without an issuer origin: ok=%v err=%v", ok, err)
+	}
+	if status, _, _ := engine.CheckPushChallenge(ch.ID); status != "pending" {
+		t.Fatalf("challenge status = %s, want pending", status)
 	}
 }

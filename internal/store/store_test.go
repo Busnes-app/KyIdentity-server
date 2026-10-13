@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
@@ -702,5 +703,124 @@ func TestRecordIssuedTokenChecksAttestedLevel(t *testing.T) {
 	}
 	if err := s.RecordIssuedToken(tok("t2")); !errors.Is(err, ErrAppAccessDenied) {
 		t.Fatalf("downgraded device: got %v, want ErrAppAccessDenied", err)
+	}
+}
+
+// A stale report about an old target must not wipe the one a refresh just stored.
+func TestClearPushTokenSparesARefreshedTarget(t *testing.T) {
+	s, u := newStoreWithUser(t, "user")
+	dev := &NativeDevice{ID: "phone", UserID: u.ID, DeviceName: "phone", DeviceIdentifier: "phone",
+		PushTransport: PushTransportUnifiedPush, PushToken: "https://push.example.net/old", PushP256dh: "k", PushAuth: "a"}
+	if err := s.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.UpdateNativeDevicePushToken(dev.ID, PushTransportUnifiedPush, "https://push.example.net/new", "k2", "a2", 1, time.Now().UTC(), nil); err != nil || !ok {
+		t.Fatalf("refresh = %v, %v", ok, err)
+	}
+	if err := s.ClearNativeDevicePushToken(NativeDevice{ID: dev.ID, UserID: u.ID, PushToken: "https://push.example.net/old", PushP256dh: "k", PushAuth: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNativeDevice(dev.ID)
+	if err != nil || got.PushToken != "https://push.example.net/new" || got.PushP256dh != "k2" || got.PushAuth != "a2" {
+		t.Fatalf("refreshed target was cleared: %+v, %v", got, err)
+	}
+	if err := s.ClearNativeDevicePushToken(NativeDevice{ID: dev.ID, UserID: u.ID, PushToken: "https://push.example.net/new", PushP256dh: "k2", PushAuth: "a2"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.GetNativeDevice(dev.ID)
+	if err != nil || got.PushToken != "" || got.PushP256dh != "" || got.PushAuth != "" || got.PushTransport != PushTransportUnifiedPush {
+		t.Fatalf("stale target kept: %+v, %v", got, err)
+	}
+}
+
+// A refresh that keeps the endpoint but rotates its keys is not undone by a report about the old keys.
+func TestClearPushTokenSparesRotatedKeys(t *testing.T) {
+	s, u := newStoreWithUser(t, "user")
+	dev := &NativeDevice{ID: "phone", UserID: u.ID, DeviceName: "phone", DeviceIdentifier: "phone",
+		PushTransport: PushTransportUnifiedPush, PushToken: "https://push.example.net/up", PushP256dh: "k", PushAuth: "a"}
+	if err := s.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.UpdateNativeDevicePushToken(dev.ID, PushTransportUnifiedPush, dev.PushToken, "k2", "a2", 1, time.Now().UTC(), nil); err != nil || !ok {
+		t.Fatalf("refresh = %v, %v", ok, err)
+	}
+	if err := s.ClearNativeDevicePushToken(*dev); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNativeDevice(dev.ID)
+	if err != nil || got.PushToken != dev.PushToken || got.PushP256dh != "k2" {
+		t.Fatalf("rotated keys were cleared: %+v, %v", got, err)
+	}
+}
+
+// A database from before linux devices has the narrow CHECKs and a view over native_devices.
+// The migration widens them and keeps every row, column and the view.
+func TestNativeDeviceCHECKsWidenForLinux(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-linux.db")
+	s, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := createTestUser(t, s)
+	old := strings.NewReplacer(", 'linux')", ")", ", 'ubuntupush')", ")").Replace(nativeDevicesSchema)
+	if _, err := s.db.Exec(`CREATE TEMP TABLE c AS SELECT * FROM native_devices; DROP TABLE native_devices;` + old + `INSERT INTO native_devices SELECT * FROM c; DROP TABLE c;`); err != nil {
+		t.Fatal(err)
+	}
+	dev := &NativeDevice{ID: "phone", UserID: u.ID, DeviceName: "phone", DeviceIdentifier: "phone", PublicKey: "pk",
+		PushTransport: PushTransportUnifiedPush, PushToken: "https://push.example.net/up", PushP256dh: "k", PushAuth: "a", IsMFAApprover: true, CanSignOn: true}
+	if err := s.UpsertNativeDevice(dev); err != nil {
+		t.Fatal(err)
+	}
+	linux := &NativeDevice{ID: "pine", UserID: u.ID, DeviceName: "pine", DeviceIdentifier: "pine", Platform: "linux",
+		PushTransport: PushTransportUbuntuPush, PushToken: "tok", PushP256dh: "k", PushAuth: "a"}
+	if err := s.UpsertNativeDevice(linux); err == nil {
+		t.Fatal("the narrowed fixture accepted a linux device")
+	}
+	if _, err := s.db.Exec(`UPDATE native_devices SET push_token_updated_at_ms = 7 WHERE id = 'phone'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 { // the second open finds nothing to do
+		s, err = New(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetNativeDevice("phone")
+		if err != nil || got.PushToken != dev.PushToken || got.PushP256dh != "k" || got.PushAuth != "a" || got.PushTokenUpdatedAtMS != 7 ||
+			!got.IsMFAApprover || !got.CanSignOn || got.PublicKey != "pk" || got.Platform != "android" {
+			t.Fatalf("migrated row = %+v, %v", got, err)
+		}
+		var factors int
+		if err := s.db.QueryRow(`SELECT count(*) FROM enrolled_factors WHERE user_id = ?`, u.ID).Scan(&factors); err != nil || factors != 1 {
+			t.Fatalf("enrolled_factors = %d, %v", factors, err)
+		}
+		if err := s.UpsertNativeDevice(linux); err != nil {
+			t.Fatalf("linux device refused after migration: %v", err)
+		}
+		if _, err := s.db.Exec(`UPDATE native_devices SET platform = 'windows' WHERE id = 'pine'`); err == nil {
+			t.Fatal("platform CHECK lost")
+		}
+		// The rebuild turns foreign keys off on its connection; no pooled connection keeps that.
+		var held []*sql.Conn
+		for range 5 { // more than the idle pool
+			c, err := s.db.Conn(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			held = append(held, c)
+			var fk int
+			if err := c.QueryRowContext(context.Background(), `PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
+				t.Fatalf("pooled connection foreign_keys = %d, %v", fk, err)
+			}
+		}
+		for _, c := range held {
+			_ = c.Close()
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

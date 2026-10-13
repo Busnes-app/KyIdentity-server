@@ -627,18 +627,16 @@ entire point. A server that could dictate the SAS could substitute keys undetect
 }
 ```
 
-**Signature specification** — v1 wrote `"signature": "..."`, three dots standing between an attacker
-and every user's vault. The shipped M1 format is:
+**Signature specification** — the first draft wrote `"signature": "..."`, three dots standing between an attacker
+and every user's vault. The shipped format is `kyidentity-push-v2` (v1 is removed, no fallback):
 
 ```
-message = "kysignon-push-v1" || "|" || challengeId || "|" || ("approve"|"deny") || "|" || selectedDigits
+message = "kyidentity-push-v2" || "|" || origin || "|" || userId || "|" || deviceId || "|" || challengeId || "|" || purpose || "|" || expiresAtMs || "|" || ("approve"|"deny") || "|" || selectedDigits
 sig     = ECDSA-P256-SHA256(device_private_key, message)          // ASN.1 DER, base64
 ```
 
-M4 introduces `kysignon-push-v2`, appending `encryptedClientShare` and `purpose`. These prefixes
-are frozen wire constants and are not changed by the product rename. The version
-prefix domain-separates the two, so a v1 signature can never be replayed as a v2 approval that
-releases key material. See `mfa.PushResponseMessage`.
+M4 extends `kyidentity-push-v2` by appending `encryptedClientShare`. The prefix is a frozen wire
+constant. See `mfa.PushResponseMessage`.
 
 Server: verify against the `public_key` of the challenge owner's enrolled approver devices, reject
 on failure with an audit event. An unsigned or wrongly-signed response is never processed.

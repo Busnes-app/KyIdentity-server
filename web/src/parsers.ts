@@ -159,7 +159,7 @@ export function parseDevice(value: unknown): NativeDevice {
     isMfaApprover: bool(o, 'isMfaApprover'),
     canSignOn: bool(o, 'canSignOn'),
     // Display-only: an unrecognised grade reads as unattested, never as trusted.
-    attestedLevel: o.attestedLevel === 'tee' || o.attestedLevel === 'strongbox' ? o.attestedLevel : 'none',
+    attestedLevel: o.attestedLevel === 'tee' || o.attestedLevel === 'strongbox' || o.attestedLevel === 'appattest' ? o.attestedLevel : 'none',
     bootState: optStr(o, 'bootState') ?? 'unknown',
     lastSeenAt: optStr(o, 'lastSeenAt'),
     createdAt: optStr(o, 'createdAt') ?? '',

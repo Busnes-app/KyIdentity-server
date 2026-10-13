@@ -155,7 +155,7 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		c := &store.StepUpChallenge{TokenHash: grant.TokenHash, UserID: user.ID, SessionID: sess.ID, Operation: req.Operation, Method: req.Method, PrimaryAuthenticatedAt: primaryAt, ExpiresAt: expires}
 		response := map[string]any{"kind": "challenge", "challengeToken": raw, "method": req.Method, "expiresAt": expires}
 		if req.Method == "push" {
-			challenge, err := h.mfaEngine.CreatePushChallenge(user.ID)
+			challenge, err := h.mfaEngine.CreatePushChallenge(user.ID, "step_up")
 			if err != nil {
 				stepUpInternalError(w)
 				return

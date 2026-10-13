@@ -93,6 +93,13 @@ type AccountSyncEvent struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
+// Push transports a device can register.
+const (
+	PushTransportFCM         = "fcm"
+	PushTransportUnifiedPush = "unifiedpush"
+	PushTransportUbuntuPush  = "ubuntupush"
+)
+
 type NativeDevice struct {
 	ID                   string     `json:"id"`
 	UserID               string     `json:"userId"`
@@ -102,9 +109,12 @@ type NativeDevice struct {
 	PublicKey            string     `json:"publicKey,omitempty"`
 	PushToken            string     `json:"pushToken,omitempty"`
 	PushTokenUpdatedAtMS int64      `json:"-"`
+	PushTransport        string     `json:"pushTransport"` // fcm | unifiedpush
+	PushP256dh           string     `json:"-"`             // unifiedpush receiver key, base64url
+	PushAuth             string     `json:"-"`             // unifiedpush auth secret, base64url
 	IsMFAApprover        bool       `json:"isMfaApprover"`
 	CanSignOn            bool       `json:"canSignOn"`
-	AttestedLevel        string     `json:"attestedLevel"` // none | tee | strongbox
+	AttestedLevel        string     `json:"attestedLevel"` // none | tee | strongbox | appattest
 	AttestedAt           *time.Time `json:"attestedAt,omitempty"`
 	BootState            string     `json:"bootState"` // locked-verified | locked-selfsigned | unlocked | unknown
 	AttestationSerials   []string   `json:"-"`
@@ -140,7 +150,8 @@ type MFAChallenge struct {
 	MethodType      string     `json:"methodType"`
 	MatchDigits     string     `json:"matchDigits"`
 	DecoyDigitsJSON string     `json:"decoyDigitsJson"`
-	Status          string     `json:"status"` // "pending", "approved", "denied", "expired"
+	Status          string     `json:"status"`  // "pending", "approved", "denied", "expired"
+	Purpose         string     `json:"purpose"` // "login" or "step_up"
 	ExpiresAt       time.Time  `json:"expiresAt"`
 	CreatedAt       time.Time  `json:"createdAt"`
 }

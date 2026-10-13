@@ -51,3 +51,33 @@ func TestKyAuthCertDigestsValidated(t *testing.T) {
 		t.Fatal("short digest accepted")
 	}
 }
+
+func TestAppAttestConfig(t *testing.T) {
+	attestEnv(t)
+	for _, k := range []string{"KYIDENTITY_APPATTEST_APP_IDS", "KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT"} {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	cfg, err := Load()
+	if err != nil || len(cfg.AppAttestAppIDs) != 0 || cfg.AppAttestAllowDevelopment {
+		t.Fatalf("defaults: %v %+v", err, cfg)
+	}
+	t.Setenv("KYIDENTITY_APPATTEST_APP_IDS", "TATYN4X57D.org.kysecurity.authenticator, ABCDE12345.com.example.app-beta")
+	t.Setenv("KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT", "TRUE")
+	cfg, err = Load()
+	if err != nil || len(cfg.AppAttestAppIDs) != 2 || cfg.AppAttestAppIDs[0] != "TATYN4X57D.org.kysecurity.authenticator" || !cfg.AppAttestAllowDevelopment {
+		t.Fatalf("set: %v %+v", err, cfg)
+	}
+	t.Setenv("KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT", "")
+	for _, bad := range []string{"org.kysecurity.authenticator", "tatyn4x57d.org.kysecurity.authenticator", "TATYN4X57D.", "TATYN4X57D.org..app", "TATYN4X57D.org.app,", "TATYN4X57.org.app", "TATYN4X57D.org/app"} {
+		t.Setenv("KYIDENTITY_APPATTEST_APP_IDS", bad)
+		if _, err := Load(); err == nil {
+			t.Fatalf("app id %q accepted", bad)
+		}
+	}
+	t.Setenv("KYIDENTITY_APPATTEST_APP_IDS", "")
+	t.Setenv("KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT", "yes")
+	if _, err := Load(); err == nil {
+		t.Fatal("non-boolean development flag accepted")
+	}
+}

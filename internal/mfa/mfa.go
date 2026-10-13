@@ -1,6 +1,7 @@
 package mfa
 
 import (
+	"crypto/ecdh"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
@@ -13,14 +14,20 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"math/big"
+	"net"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/netguard"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
@@ -29,7 +36,12 @@ type Engine struct {
 	store         *store.Store
 	encryptionKey []byte
 	pushSender    PushSender
+	unifiedPush   PushSender
+	ubuntuPush    PushSender
 	attestor      Attestor
+	appAttestor   AppAttestor
+	issuerOrigin  string
+	logger        *slog.Logger // nil: slog.Default()
 }
 
 // Attestor grades a device key attestation chain.
@@ -39,6 +51,9 @@ type Attestor interface {
 
 // SetAttestor installs the chain verifier; nil grades every registration none.
 func (e *Engine) SetAttestor(a Attestor) { e.attestor = a }
+
+// SetIssuerOrigin sets the origin push approvals are bound to; empty refuses every response.
+func (e *Engine) SetIssuerOrigin(o string) { e.issuerOrigin = o }
 
 // ExpectedChallenge is the attestation challenge KyAuth binds to the credential it redeems.
 func ExpectedChallenge(req *NativeDeviceRegisterRequest) []byte {
@@ -63,10 +78,33 @@ type PushSender interface {
 
 type MFAChallengePush struct {
 	ChallengeID string
+	Purpose     string
+	ExpiresAtMS int64
 }
 
+// SetPushSender installs the FCM/APNs relay sender.
 func (e *Engine) SetPushSender(sender PushSender) {
 	e.pushSender = sender
+}
+
+// SetUnifiedPushSender installs the sender for unifiedpush devices.
+func (e *Engine) SetUnifiedPushSender(sender PushSender) {
+	e.unifiedPush = sender
+}
+
+// SetUbuntuPushSender installs the sender for ubuntupush devices.
+func (e *Engine) SetUbuntuPushSender(sender PushSender) {
+	e.ubuntuPush = sender
+}
+
+func (e *Engine) senderFor(dev store.NativeDevice) PushSender {
+	switch dev.PushTransport {
+	case store.PushTransportUnifiedPush:
+		return e.unifiedPush
+	case store.PushTransportUbuntuPush:
+		return e.ubuntuPush
+	}
+	return e.pushSender
 }
 
 // GenerateTOTPSecret generates a random 20-byte base32 TOTP secret and returns an otpauth URL.
@@ -251,8 +289,14 @@ type NativeDeviceRegisterRequest struct {
 	Platform         string `json:"platform,omitempty"`
 	PublicKey        string `json:"publicKey,omitempty"`
 	PushToken        string `json:"pushToken,omitempty"`
+	// PushTransport is fcm (default), unifiedpush or ubuntupush; the last two need the RFC 8291 keys.
+	PushTransport string `json:"pushTransport,omitempty"`
+	PushP256dh    string `json:"pushP256dh,omitempty"`
+	PushAuth      string `json:"pushAuth,omitempty"`
 	// Attestation is the base64 DER Android key attestation chain, leaf first.
 	Attestation []string `json:"attestation,omitempty"`
+	// AppAttest is KyAuth iOS's App Attest evidence, graded only for platform "ios".
+	AppAttest *AppAttestEvidence `json:"appAttest,omitempty"`
 }
 
 // RegisterNativeDevice registers a device presented with a valid 90s pairing token, or a
@@ -267,12 +311,22 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	if strings.TrimSpace(req.PushToken) == "" {
 		return nil, errors.New("a push token is required to pair an authenticator")
 	}
+	transport, err := ValidatePushTarget(req.PushTransport, strings.TrimSpace(req.PushToken), req.PushP256dh, req.PushAuth)
+	if err != nil {
+		return nil, err
+	}
+	platform, err := normalizeDevicePlatform(req.Platform)
+	if err != nil {
+		return nil, err
+	}
+	if !PlatformAllowsTransport(platform, transport) {
+		return nil, errInvalidPushTarget
+	}
 	if _, err := crypto.ParseP256PublicKey(req.PublicKey); err != nil {
 		return nil, fmt.Errorf("device public key is not a valid P-256 key: %w", err)
 	}
 
 	var validToken *store.DevicePairingToken
-	var err error
 
 	switch {
 	case req.PairingToken != "":
@@ -296,11 +350,6 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	if name == "" {
 		name = "KySecurity Authenticator Device"
 	}
-	platform, err := normalizeDevicePlatform(req.Platform)
-	if err != nil {
-		return nil, err
-	}
-
 	device := &store.NativeDevice{
 		ID:               uuid.New().String(),
 		UserID:           validToken.UserID,
@@ -309,6 +358,9 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 		Platform:         platform,
 		PublicKey:        req.PublicKey,
 		PushToken:        strings.TrimSpace(req.PushToken),
+		PushTransport:    transport,
+		PushP256dh:       req.PushP256dh,
+		PushAuth:         req.PushAuth,
 		IsMFAApprover:    true, // Enrolled devices are default approvers
 		CanSignOn:        validToken.SignOn,
 	}
@@ -330,10 +382,14 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	return device, nil
 }
 
-// gradeAttestation grades the request's attestation chain onto device. Grading never fails
-// a registration; a missing or bad chain is graded none.
+// gradeAttestation grades the request's attestation onto device: App Attest for iOS, the
+// Keystore chain for Android. Grading never fails a registration; missing or bad evidence is none.
 func (e *Engine) gradeAttestation(req *NativeDeviceRegisterRequest, device *store.NativeDevice) {
-	if len(req.Attestation) == 0 || e.attestor == nil {
+	if device.Platform == "ios" {
+		e.gradeAppAttest(req, device)
+		return
+	}
+	if device.Platform != "android" || len(req.Attestation) == 0 || e.attestor == nil {
 		return
 	}
 	chain := make([][]byte, 0, len(req.Attestation))
@@ -354,11 +410,23 @@ func normalizeDevicePlatform(platform string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
 	case "", "android":
 		return "android", nil
-	case "ios", "macos":
+	case "ios", "macos", "linux":
 		return strings.ToLower(strings.TrimSpace(platform)), nil
 	default:
 		return "", errors.New("unsupported device platform")
 	}
+}
+
+// PlatformAllowsTransport reports whether a device platform may use a push transport.
+// Linux has no FCM, and the Lomiri push service exists only on Linux (Ubuntu Touch).
+func PlatformAllowsTransport(platform, transport string) bool {
+	switch transport {
+	case store.PushTransportFCM:
+		return platform != "linux"
+	case store.PushTransportUbuntuPush:
+		return platform == "linux"
+	}
+	return true
 }
 
 // randomMatchNumber returns a uniformly distributed number in [10, 99].
@@ -371,7 +439,10 @@ func randomMatchNumber() (int, error) {
 }
 
 // CreatePushChallenge creates a push challenge with a 2-digit match and 3 decoys.
-func (e *Engine) CreatePushChallenge(userID string) (*store.MFAChallenge, error) {
+func (e *Engine) CreatePushChallenge(userID, purpose string) (*store.MFAChallenge, error) {
+	if purpose != "login" && purpose != "step_up" {
+		return nil, errors.New("unknown push purpose")
+	}
 	matchNum, err := randomMatchNumber()
 	if err != nil {
 		return nil, err
@@ -409,7 +480,9 @@ func (e *Engine) CreatePushChallenge(userID string) (*store.MFAChallenge, error)
 		MatchDigits:     matchDigits,
 		DecoyDigitsJSON: string(decoysJSON),
 		Status:          "pending",
-		ExpiresAt:       time.Now().UTC().Add(5 * time.Minute),
+		Purpose:         purpose,
+		// Whole seconds: the signed message carries milliseconds, so storage must not hold more.
+		ExpiresAt: time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second),
 	}
 
 	if err := e.store.CreateMFAChallenge(challenge); err != nil {
@@ -422,10 +495,6 @@ func (e *Engine) CreatePushChallenge(userID string) (*store.MFAChallenge, error)
 }
 
 func (e *Engine) dispatchPushChallenge(challenge *store.MFAChallenge, decoys []string) {
-	if e.pushSender == nil {
-		log.Printf("mfa push relay: no sender configured for challenge %s user %s", challenge.ID, challenge.UserID)
-		return
-	}
 	devices, err := e.store.ListUserNativeDevices(challenge.UserID)
 	if err != nil {
 		log.Printf("mfa push relay: failed to list devices for challenge %s user %s: %v", challenge.ID, challenge.UserID, err)
@@ -433,25 +502,36 @@ func (e *Engine) dispatchPushChallenge(challenge *store.MFAChallenge, decoys []s
 	}
 	push := MFAChallengePush{
 		ChallengeID: challenge.ID,
+		Purpose:     challenge.Purpose,
+		ExpiresAtMS: challenge.ExpiresAt.UnixMilli(),
 	}
-	dispatched := 0
+	// Concurrent, so an unreachable distributor costs the login one send timeout, not one per
+	// device. Logs name the device and transport only: a UnifiedPush endpoint is a capability URL.
+	var dispatched atomic.Int32
+	var wg sync.WaitGroup
 	for _, dev := range devices {
-		if !dev.IsMFAApprover || dev.PushToken == "" {
-			log.Printf("mfa push relay: skipping device %s platform %s approver=%v hasToken=%v", dev.ID, dev.Platform, dev.IsMFAApprover, dev.PushToken != "")
+		sender := e.senderFor(dev)
+		if !dev.IsMFAApprover || dev.PushToken == "" || sender == nil {
+			log.Printf("mfa push: skipping device %s transport %s approver=%v hasToken=%v hasSender=%v", dev.ID, dev.PushTransport, dev.IsMFAApprover, dev.PushToken != "", sender != nil)
 			continue
 		}
-		if err := e.pushSender.SendPush(dev, push); errors.Is(err, ErrStalePushToken) {
-			_ = e.store.ClearNativeDevicePushToken(dev.ID, dev.UserID)
-			log.Printf("mfa push relay: stale token cleared for device %s platform %s", dev.ID, dev.Platform)
-		} else if err != nil {
-			log.Printf("mfa push relay: send failed for device %s platform %s: %v", dev.ID, dev.Platform, err)
-		} else {
-			dispatched++
-			log.Printf("mfa push relay: sent challenge %s to device %s platform %s", challenge.ID, dev.ID, dev.Platform)
-		}
+		wg.Add(1)
+		go func(dev store.NativeDevice) {
+			defer wg.Done()
+			if err := sender.SendPush(dev, push); errors.Is(err, ErrStalePushToken) {
+				_ = e.store.ClearNativeDevicePushToken(dev)
+				log.Printf("mfa push: stale token cleared for device %s transport %s", dev.ID, dev.PushTransport)
+			} else if err != nil {
+				log.Printf("mfa push: send failed for device %s transport %s: %v", dev.ID, dev.PushTransport, err)
+			} else {
+				dispatched.Add(1)
+				log.Printf("mfa push: sent challenge %s to device %s transport %s", challenge.ID, dev.ID, dev.PushTransport)
+			}
+		}(dev)
 	}
-	if dispatched == 0 {
-		log.Printf("mfa push relay: no pushes sent for challenge %s user %s across %d device(s)", challenge.ID, challenge.UserID, len(devices))
+	wg.Wait()
+	if dispatched.Load() == 0 {
+		log.Printf("mfa push: no pushes sent for challenge %s user %s across %d device(s)", challenge.ID, challenge.UserID, len(devices))
 	}
 }
 
@@ -459,58 +539,168 @@ func (e *Engine) dispatchPushChallenge(challenge *store.MFAChallenge, decoys []s
 // response can be authenticated. The user must re-pair an authenticator.
 var ErrUnsignedDevice = errors.New("no paired device is enrolled for response signing")
 
-// PushResponseMessage builds the exact byte string a device must sign to answer a challenge.
-// The version prefix domain-separates this from future payloads that carry key material.
-func PushResponseMessage(challengeID string, approve bool, selectedDigits string) []byte {
+// PushBinding is everything a push approval states: which server, account, device, challenge,
+// purpose and deadline the user saw. Every value comes from the server's own records.
+type PushBinding struct {
+	Origin, UserID, DeviceID, ChallengeID, Purpose string
+	ExpiresAtMS                                    int64
+}
+
+// PushResponseMessage builds the exact byte string a device signs to answer a challenge.
+func PushResponseMessage(b PushBinding, approve bool, selectedDigits string) ([]byte, error) {
+	if b.Purpose != "login" && b.Purpose != "step_up" {
+		return nil, errors.New("unknown push purpose")
+	}
+	for _, f := range []string{b.Origin, b.UserID, b.DeviceID, b.ChallengeID} {
+		if f == "" || strings.Contains(f, "|") {
+			return nil, errors.New("invalid push binding field")
+		}
+	}
+	if strings.Contains(selectedDigits, "|") {
+		return nil, errors.New("invalid digits")
+	}
 	verb := "deny"
 	if approve {
 		verb = "approve"
 	}
-	return []byte(strings.Join([]string{"kysignon-push-v1", challengeID, verb, selectedDigits}, "|"))
-}
-
-// PushTokenRefreshMessage is the exact domain-separated payload an enrolled device signs
-// when FCM rotates its delivery address. The token digest keeps the canonical message small.
-func PushTokenRefreshMessage(issuerOrigin, deviceID, pushToken string, issuedAtMS int64) []byte {
 	return []byte(strings.Join([]string{
-		"kysignon-push-token-v1",
-		issuerOrigin,
-		deviceID,
-		strconv.FormatInt(issuedAtMS, 10),
-		crypto.HashSHA256(pushToken),
-	}, "|"))
+		"kyidentity-push-v2", b.Origin, b.UserID, b.DeviceID, b.ChallengeID, b.Purpose,
+		strconv.FormatInt(b.ExpiresAtMS, 10), verb, selectedDigits,
+	}, "|")), nil
 }
 
-// verifyDeviceSignature finds the paired approver device whose key signed this response.
-// A response that no enrolled device signed is not a response.
-func (e *Engine) verifyDeviceSignature(userID string, message []byte, signature string) (*store.NativeDevice, error) {
-	devices, err := e.store.ListUserNativeDevices(userID)
+// IssuerOrigin normalizes an issuer URL to scheme://host[:port], dropping the default port.
+func IssuerOrigin(issuerURL string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(issuerURL))
+	if err != nil || u.Scheme == "" || u.Hostname() == "" {
+		return "", errors.New("issuer URL has no origin")
+	}
+	scheme, host, port := strings.ToLower(u.Scheme), strings.ToLower(u.Hostname()), u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host, nil
+}
+
+// MaxPushTokenBytes caps a push token or UnifiedPush endpoint.
+const MaxPushTokenBytes = 4096
+
+// ubuntuPushToken is a Lomiri PushClient token.
+var ubuntuPushToken = regexp.MustCompile(`^[A-Za-z0-9+/=_.:-]{1,512}$`)
+
+var errInvalidPushTarget = errors.New("invalid push target")
+
+// ValidatePushTarget checks a device's push address and keys, and returns the effective
+// transport. A UnifiedPush endpoint is server-contacted, so it gets the outbound URL policy.
+// UnifiedPush and ubuntupush require RFC 8291 keys: payloads are never sent in plaintext.
+func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, error) {
+	if pushToken == "" || len(pushToken) > MaxPushTokenBytes {
+		return "", errInvalidPushTarget
+	}
+	switch transport {
+	case "", store.PushTransportFCM:
+		if p256dh != "" || auth != "" {
+			return "", errInvalidPushTarget
+		}
+		return store.PushTransportFCM, nil
+	case store.PushTransportUnifiedPush:
+		if u, err := url.Parse(pushToken); err != nil || u.Scheme != "https" || netguard.ValidateURL(pushToken, "push endpoint") != nil {
+			return "", errInvalidPushTarget
+		}
+	case store.PushTransportUbuntuPush:
+		if !ubuntuPushToken.MatchString(pushToken) {
+			return "", errInvalidPushTarget
+		}
+	default:
+		return "", errInvalidPushTarget
+	}
+	pub, err := decodeBase64URL(p256dh)
+	if err != nil {
+		return "", errInvalidPushTarget
+	}
+	if _, err := ecdh.P256().NewPublicKey(pub); err != nil { // uncompressed and on the curve
+		return "", errInvalidPushTarget
+	}
+	if secret, err := decodeBase64URL(auth); err != nil || len(secret) != 16 {
+		return "", errInvalidPushTarget
+	}
+	return transport, nil
+}
+
+// decodeBase64URL accepts base64url with or without padding, and nothing else.
+func decodeBase64URL(s string) ([]byte, error) {
+	if strings.ContainsAny(s, "\r\n") {
+		return nil, errInvalidPushTarget
+	}
+	if strings.HasSuffix(s, "=") {
+		return base64.URLEncoding.DecodeString(s)
+	}
+	return base64.RawURLEncoding.DecodeString(s)
+}
+
+// PushTokenRefreshMessage builds the exact string a device signs to replace its push target.
+// p256dh and auth are the strings the device sent, empty for fcm.
+func PushTokenRefreshMessage(origin, deviceID string, issuedAtMS int64, transport, pushToken, p256dh, auth string) ([]byte, error) {
+	for _, f := range []string{origin, deviceID, transport} {
+		if f == "" {
+			return nil, errInvalidPushTarget
+		}
+	}
+	for _, f := range []string{origin, deviceID, transport, p256dh, auth} {
+		if strings.Contains(f, "|") {
+			return nil, errInvalidPushTarget
+		}
+	}
+	return []byte(strings.Join([]string{
+		"kyidentity-push-token-v2", origin, deviceID, strconv.FormatInt(issuedAtMS, 10),
+		transport, crypto.HashSHA256(pushToken), p256dh, auth,
+	}, "|")), nil
+}
+
+// verifyDeviceSignature checks the response against the one device it names. Every failure
+// after the enrollment check is the same error, so a caller learns nothing about which part failed.
+func (e *Engine) verifyDeviceSignature(ch *store.MFAChallenge, deviceID string, approve bool, selectedDigits, signature string) (*store.NativeDevice, error) {
+	devices, err := e.store.ListUserNativeDevices(ch.UserID)
 	if err != nil {
 		return nil, err
 	}
-
 	enrolled := false
-	for i := range devices {
-		dev := &devices[i]
-		if !dev.IsMFAApprover || dev.PublicKey == "" {
-			continue
-		}
-		enrolled = true
-		if crypto.VerifyECDSAP256(dev.PublicKey, message, signature) {
-			return dev, nil
+	for _, d := range devices {
+		if d.IsMFAApprover && d.PublicKey != "" {
+			enrolled = true
+			break
 		}
 	}
-
 	if !enrolled {
 		return nil, ErrUnsignedDevice
 	}
-	return nil, errors.New("signature does not match any paired device")
+	errBad := errors.New("signature does not match any paired device")
+	dev, err := e.store.GetNativeDevice(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	if dev == nil || dev.UserID != ch.UserID || !dev.IsMFAApprover || dev.PublicKey == "" {
+		return nil, errBad
+	}
+	msg, err := PushResponseMessage(PushBinding{
+		Origin: e.issuerOrigin, UserID: ch.UserID, DeviceID: dev.ID, ChallengeID: ch.ID,
+		Purpose: ch.Purpose, ExpiresAtMS: ch.ExpiresAt.UnixMilli(),
+	}, approve, selectedDigits)
+	if err != nil || !crypto.VerifyECDSAP256(dev.PublicKey, msg, signature) {
+		return nil, errBad
+	}
+	return dev, nil
 }
 
 // RespondPushChallenge processes a signed response from a paired mobile authenticator.
 // The signature is the authentication for this endpoint: it is verified before the
 // challenge is touched, and an unsigned response is always rejected.
-func (e *Engine) RespondPushChallenge(challengeID, selectedDigits string, approve bool, signature string) (approved bool, deviceID string, err error) {
+func (e *Engine) RespondPushChallenge(challengeID, namedDeviceID, selectedDigits string, approve bool, signature string) (approved bool, deviceID string, err error) {
 	ch, err := e.store.GetMFAChallenge(challengeID)
 	if err != nil {
 		return false, "", err
@@ -526,7 +716,7 @@ func (e *Engine) RespondPushChallenge(challengeID, selectedDigits string, approv
 		return false, "", errors.New("challenge expired")
 	}
 
-	device, err := e.verifyDeviceSignature(ch.UserID, PushResponseMessage(challengeID, approve, selectedDigits), signature)
+	device, err := e.verifyDeviceSignature(ch, namedDeviceID, approve, selectedDigits, signature)
 	if err != nil {
 		return false, "", err
 	}

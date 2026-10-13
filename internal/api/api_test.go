@@ -60,6 +60,7 @@ func setupTestServer(t *testing.T) (*Server, *store.Store, *sync.Engine, *mfa.En
 	auditLogger := audit.NewLogger(dbStore)
 	syncEngine := sync.NewEngine(dbStore, encKey)
 	mfaEngine := mfa.NewEngine(dbStore, encKey)
+	mfaEngine.SetIssuerOrigin(testIssuerOrigin)
 	oauthEngine := oauth.NewEngine(dbStore, km, cfg.IssuerURL)
 
 	server := NewServer(
@@ -461,6 +462,7 @@ func setupTestServerWith(t *testing.T, opts ...func(*config.Config)) (*Server, *
 	auditLogger := audit.NewLogger(dbStore)
 	syncEngine := sync.NewEngine(dbStore, encKey)
 	mfaEngine := mfa.NewEngine(dbStore, encKey)
+	mfaEngine.SetIssuerOrigin(testIssuerOrigin)
 	oauthEngine := oauth.NewEngine(dbStore, km, cfg.IssuerURL)
 
 	server := NewServer(cfg, dbStore, km, syncEngine, mfaEngine, oauthEngine, auditLogger, nil)

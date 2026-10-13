@@ -643,6 +643,7 @@ describe('parseDevice', () => {
     expect(d.attestedLevel).toBe('strongbox');
     expect(d.bootState).toBe('locked-verified');
     expect(parseDevice({ ...dev, attestedLevel: 'tee' }).attestedLevel).toBe('tee');
+    expect(parseDevice({ ...dev, attestedLevel: 'appattest' }).attestedLevel).toBe('appattest');
     expect(parseDevice(dev).attestedLevel).toBe('none');
     expect(parseDevice(dev).bootState).toBe('unknown');
     expect(parseDevice({ ...dev, attestedLevel: 'platinum' }).attestedLevel).toBe('none');

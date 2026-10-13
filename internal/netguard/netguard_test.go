@@ -2,6 +2,7 @@ package netguard
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,5 +86,19 @@ func TestGuardedClientRefusesRedirects(t *testing.T) {
 	}
 	if reached {
 		t.Error("the guarded client followed a redirect to a second host")
+	}
+}
+
+// Carrier-grade NAT is every Tailscale address; NAT64 embeds any IPv4 (metadata included).
+func TestReservedRangesAreNonPublic(t *testing.T) {
+	for _, ip := range []string{"100.64.0.1", "100.100.100.100", "64:ff9b::a9fe:a9fe", "198.18.0.1", "0.1.2.3", "192.0.0.8", "240.0.0.1", "fec0::1"} {
+		if !isNonPublic(net.ParseIP(ip)) {
+			t.Errorf("%s treated as public", ip)
+		}
+	}
+	for _, ip := range []string{"1.1.1.1", "100.128.0.1", "2606:4700::1111"} {
+		if isNonPublic(net.ParseIP(ip)) {
+			t.Errorf("%s treated as non-public", ip)
+		}
 	}
 }

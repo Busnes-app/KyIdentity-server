@@ -134,9 +134,9 @@ KyIdentity natively manages mobile push devices and pairing tokens.
 1. The user logs into the KyIdentity User Dashboard and navigates to **Security & Devices**.
 2. The user clicks **Add Authenticator Device**. KyIdentity generates a 90-second single-use pairing token, displayed as both a scannable QR code and a 6-digit numeric PIN.
 3. In the KySecurity Authenticator app (or KyPost mobile app), the user scans the QR code or enters the PIN.
-4. The mobile app posts to `POST /api/notifications/native/register` with the pairing token, device ID, public key, and push push token.
+4. The mobile app posts to `POST /api/notifications/native/register` with the pairing token, device ID, public key, and push target: `pushToken`, plus `pushTransport` (`fcm`, the default, `unifiedpush` or `ubuntupush`) and `platform` (`android`, the default, `ios`, `macos` or `linux`). A `linux` device may use only `unifiedpush` or `ubuntupush`, and `ubuntupush` only `linux`. For `ubuntupush`, `pushToken` is the Lomiri PushClient token, 1-512 bytes of `[A-Za-z0-9+/=_.:-]`, with the same required keys as `unifiedpush`. For `unifiedpush`, `pushToken` is the HTTPS endpoint (passes the outbound URL policy, at most 4096 bytes) and `pushP256dh` (65-byte uncompressed P-256 point) and `pushAuth` (16 bytes) are required, base64url with optional padding. For `fcm` both keys must be empty.
 5. KyIdentity validates the token, registers the device in `native_devices`, and activates it as an MFA approver.
-6. When FCM rotates the delivery token, the paired device sends `PUT /api/notifications/native/devices/{deviceId}/push-token` with `pushToken`, Unix-millisecond `issuedAt`, and an ASN.1 ECDSA P-256/SHA-256 signature. The signed UTF-8 message is `kysignon-push-token-v1|<issuer-origin>|<deviceId>|<issuedAt>|<lowercase-hex-SHA256-of-trimmed-token>`. This prefix is a frozen wire constant and is not changed by the product rename. Requests must be within five minutes of server time and newer than the device's last accepted refresh; success returns `204`, replay returns `409`, and the client must sign a current request after a stale-window failure.
+6. When its push target changes, the paired device sends `PUT /api/notifications/native/devices/{deviceId}/push-token` with `pushToken`, `pushTransport`, `pushP256dh`, `pushAuth` (validated as at registration, including the platform rule against the stored platform), Unix-millisecond `issuedAt`, and an ASN.1 ECDSA P-256/SHA-256 signature. The signed UTF-8 message is `kyidentity-push-token-v2|<issuer-origin>|<deviceId>|<issuedAt>|<transport>|<lowercase-hex-SHA256-of-trimmed-token>|<pushP256dh>|<pushAuth>`, where transport is the effective one (`fcm` when omitted) and the keys are the strings sent (empty for `fcm`). Any field containing `|` is refused. v1 is not accepted. Vectors (origin `https://id.example.com`, device `d-456`, `issuedAt` `1791331200000`): `fcm` with token `fcm-token-1` signs `kyidentity-push-token-v2|https://id.example.com|d-456|1791331200000|fcm|3cfaa3f1d62d114805029366153fbb440a2d4e4b56406a04830579ac65db6a5c||`; the `unifiedpush` and `ubuntupush` vectors are in `internal/mfa/push_target_test.go`. Requests must be within five minutes of server time and newer than the device's last accepted refresh; success returns `204`, replay returns `409`, and the client must sign a current request after a stale-window failure.
 
 #### Push MFA Authentication
 
@@ -145,11 +145,35 @@ KyIdentity natively manages mobile push devices and pairing tokens.
    - `challengeId` (UUID)
    - `matchDigits` (random 2-digit number, e.g., `42`)
    - `decoyDigits` (array of alternative numbers)
-   - Expiration (5 minutes)
-3. KyIdentity dispatches the push challenge to the user's paired device via push relay (or places it in `GET /api/notifications/native/pull` for pull-mode clients).
+   - `purpose` (`login` or `step_up`)
+   - Expiration (5 minutes, whole seconds)
+3. KyIdentity dispatches the push challenge (data: `challengeId`, `deviceId`, `deviceUserId`, `devicePlatform`, `purpose`, `expiresAtEpochMs` as a decimal string; never digits) to the user's paired device via push relay (or places it in `GET /api/notifications/native/pull` for pull-mode clients).
 4. The browser displays the prompt: *"Select 42 on your authenticator device"* and begins polling `POST /api/auth/mfa/push/poll`.
 5. The user opens the notification on their mobile device and taps the matching number `42`.
-6. The mobile app sends `POST /api/mfa/push/respond` with the signed response.
+6. The mobile app sends `POST /api/mfa/push/respond` with `challengeId`, `deviceId`, `selectedDigits`, `approve` and `signature`. Only the named device's key is tried (it must belong to the challenge's user, be an MFA approver and hold a key); any other failure is the same generic error. The signature is ECDSA-P256-SHA256 (ASN.1 DER, base64) over, UTF-8 and `|`-joined with no trailing separator:
+
+   ```
+   kyidentity-push-v2|{origin}|{userId}|{deviceId}|{challengeId}|{purpose}|{expiresAtMs}|{verb}|{digits}
+   ```
+
+   `origin` comes from `KYIDENTITY_ISSUER_URL`, never the request: scheme and host lowercased, default port (443/80) dropped, path, query and userinfo dropped. `verb` is `approve` or `deny`; `digits` is empty on deny. Any field containing `|`, or an empty origin, user, device or challenge ID, is refused. v1 is not accepted.
+
+   | Issuer URL | Origin |
+   |---|---|
+   | `https://ID.Example.com/` | `https://id.example.com` |
+   | `https://id.example.com:443` | `https://id.example.com` |
+   | `https://id.example.com:8443/kyidentity` | `https://id.example.com:8443` |
+   | `http://127.0.0.1:8080` | `http://127.0.0.1:8080` |
+   | `https://[::1]` | `https://[::1]` |
+   | `https://[::1]:443` | `https://[::1]` |
+   | `https://[::1]:8443/x` | `https://[::1]:8443` |
+
+   Golden vectors (asserted in `internal/mfa/push_message_test.go`):
+
+   ```
+   kyidentity-push-v2|https://id.example.com|u-123|d-456|c-789|login|1791331200000|approve|42
+   kyidentity-push-v2|https://id.example.com|u-123|d-456|c-789|step_up|1791331200000|deny|
+   ```
 7. Upon successful match, the polling browser receives confirmation and calls `POST /api/auth/mfa/push/finish` to complete authentication and receive the authorization code or session cookie.
 
 ### 5.3 OIDC Login Flow for KySecurity Suite Applications
@@ -264,6 +288,9 @@ CREATE TABLE native_devices (
     device_identifier TEXT NOT NULL,
     public_key TEXT,
     push_token TEXT,
+    push_transport TEXT NOT NULL DEFAULT 'fcm', -- fcm | unifiedpush | ubuntupush
+    push_p256dh TEXT,
+    push_auth TEXT,
     is_mfa_approver BOOLEAN NOT NULL DEFAULT 0,
     last_seen_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

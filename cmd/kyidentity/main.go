@@ -20,6 +20,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 
 	"github.com/Busnes-app/kyidentity-server/internal/api"
+	"github.com/Busnes-app/kyidentity-server/internal/appattest"
 	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
@@ -126,7 +127,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize push relay sender: %v", err)
 	}
-	mfaEngine.SetPushSender(relaySender)
+	if relaySender != nil { // a typed nil would reach SendPush
+		mfaEngine.SetPushSender(relaySender)
+	}
 	embedded, err := attest.LoadEmbeddedRoots()
 	if err != nil {
 		log.Fatalf("Failed to load attestation roots: %v", err)
@@ -147,6 +150,26 @@ func main() {
 		digests = append(digests, b)
 	}
 	mfaEngine.SetAttestor(attest.NewVerifier(attestRoots, attestStatus, "org.kysecurity.authenticator", digests, requireLockedBootloader(dbStore.AttestationSettings, log.Printf)))
+	if len(cfg.AppAttestAppIDs) == 0 {
+		log.Print("iOS App Attest grading disabled: KYIDENTITY_APPATTEST_APP_IDS is empty")
+	} else {
+		appAttest, err := appattest.NewVerifier(cfg.AppAttestAppIDs, cfg.AppAttestAllowDevelopment)
+		if err != nil {
+			log.Fatalf("Failed to load the App Attest root: %v", err)
+		}
+		mfaEngine.SetAppAttestor(appAttest)
+	}
+	pushOrigin, err := mfa.IssuerOrigin(cfg.IssuerURL)
+	if err != nil {
+		log.Fatalf("Invalid issuer URL for push approvals: %v", err)
+	}
+	mfaEngine.SetIssuerOrigin(pushOrigin)
+	unifiedPush, err := mfa.NewUnifiedPushSender(filepath.Join(cfg.DataDir, config.VAPIDKeyFile), pushOrigin)
+	if err != nil {
+		log.Fatalf("Failed to initialize UnifiedPush sender: %v", err)
+	}
+	mfaEngine.SetUnifiedPushSender(unifiedPush)
+	mfaEngine.SetUbuntuPushSender(mfa.NewUbuntuPushSender(cfg.UbuntuPushURL, cfg.UbuntuPushAppID))
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
 	adminCount, err := dbStore.CountAdmins()

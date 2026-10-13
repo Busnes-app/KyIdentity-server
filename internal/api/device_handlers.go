@@ -111,6 +111,7 @@ func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Requ
 		"attestedLevel":     dev.AttestedLevel,
 		"bootState":         dev.BootState,
 		"attestationReason": dev.AttestationReason,
+		"pushTransport":     dev.PushTransport,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -121,29 +122,30 @@ func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-const (
-	maxPushTokenBytes  = 4096
-	pushTokenClockSkew = 5 * time.Minute
-)
+const pushTokenClockSkew = 5 * time.Minute
 
 type pushTokenRefreshRequest struct {
-	PushToken string `json:"pushToken"`
-	IssuedAt  int64  `json:"issuedAt"`
-	Signature string `json:"signature"`
+	PushToken     string `json:"pushToken"`
+	PushTransport string `json:"pushTransport"`
+	PushP256dh    string `json:"pushP256dh"`
+	PushAuth      string `json:"pushAuth"`
+	IssuedAt      int64  `json:"issuedAt"`
+	Signature     string `json:"signature"`
 }
 
-// RefreshNativeDevicePushToken lets an already-paired device replace a rotated FCM token.
-// Its enrolled P-256 key is the credential; an FCM token is only a delivery address.
+// RefreshNativeDevicePushToken lets an already-paired device replace its push target.
+// Its enrolled P-256 key is the credential; a push token or endpoint is only a delivery address.
 func (h *DeviceHandler) RefreshNativeDevicePushToken(w http.ResponseWriter, r *http.Request) {
 	deviceID := r.PathValue("id")
 	var req pushTokenRefreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16*1024)).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid_request","error_description":"Malformed JSON body"}`, http.StatusBadRequest)
 		return
 	}
 	req.PushToken = strings.TrimSpace(req.PushToken)
-	if req.PushToken == "" || len(req.PushToken) > maxPushTokenBytes || req.IssuedAt <= 0 {
-		http.Error(w, `{"error":"invalid_request","error_description":"A valid pushToken and issuedAt are required"}`, http.StatusBadRequest)
+	transport, err := mfa.ValidatePushTarget(req.PushTransport, req.PushToken, req.PushP256dh, req.PushAuth)
+	if err != nil || req.IssuedAt <= 0 {
+		http.Error(w, `{"error":"invalid_request","error_description":"A valid push target and issuedAt are required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -159,19 +161,24 @@ func (h *DeviceHandler) RefreshNativeDevicePushToken(w http.ResponseWriter, r *h
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	issuerOrigin := strings.TrimRight(h.issuerURL, "/")
-	if parsed, err := url.Parse(h.issuerURL); err == nil && parsed.Scheme != "" && parsed.Host != "" {
-		issuerOrigin = parsed.Scheme + "://" + parsed.Host
+	origin, err := mfa.IssuerOrigin(h.issuerURL)
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
 	}
-	message := mfa.PushTokenRefreshMessage(issuerOrigin, deviceID, req.PushToken, req.IssuedAt)
-	if dev == nil || dev.PublicKey == "" || !crypto.VerifyECDSAP256(dev.PublicKey, message, req.Signature) {
+	message, err := mfa.PushTokenRefreshMessage(origin, deviceID, req.IssuedAt, transport, req.PushToken, req.PushP256dh, req.PushAuth)
+	if err != nil || dev == nil || dev.PublicKey == "" || !crypto.VerifyECDSAP256(dev.PublicKey, message, req.Signature) {
 		http.Error(w, `{"error":"device_authentication_failed"}`, http.StatusUnauthorized)
+		return
+	}
+	if !mfa.PlatformAllowsTransport(dev.Platform, transport) {
+		http.Error(w, `{"error":"invalid_request","error_description":"pushTransport is not available on this device platform"}`, http.StatusBadRequest)
 		return
 	}
 
 	pending := h.audit.Prepare("device.push_token_refreshed", dev.UserID, "", dev.ID, "device",
-		h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	updated, err := h.store.UpdateNativeDevicePushToken(dev.ID, req.PushToken, req.IssuedAt, now, pending.Row)
+		h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"pushTransport": transport})
+	updated, err := h.store.UpdateNativeDevicePushToken(dev.ID, transport, req.PushToken, req.PushP256dh, req.PushAuth, req.IssuedAt, now, pending.Row)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
