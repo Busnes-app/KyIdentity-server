@@ -190,6 +190,7 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 - CI audits and typechecks both push Workers and runs their shared and provider behavior tests.
 - CI builds the production image, probes `/readyz`, and verifies public HTTP issuers fail closed.
 - On a push to `master` that passes every job, `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/kyidentity-server:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `kyidentity-server:local`) so every compose command, recovery docs included, uses the local build.
+- Publishing a GitHub release `vX.Y.Z` runs `release-image.yml`. It refuses a malformed tag, a tag that disagrees with both `appVersion` constants and `web/package.json`, and any commit on which a ci.yml job in its `REQUIRED` list (`go`, `web`, `relay` and `docker`) did not pass. It then builds `:X.Y.Z` with provenance and SBOM, attests and verifies it (identity `release-image.yml@refs/tags/vX.Y.Z`), and moves `:stable` to that digest only for the highest non-prerelease. It never moves `:latest`; `master` CI owns that. A job added to ci.yml must be added to `REQUIRED` too.
 
 # DOX framework
 

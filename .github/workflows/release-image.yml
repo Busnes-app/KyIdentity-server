@@ -1,0 +1,193 @@
+name: publish release image
+
+# A published release vX.Y.Z publishes the immutable :X.Y.Z image, attests and
+# verifies it, then moves :stable. :<sha> and :latest belong to ci.yml.
+on:
+  release:
+    types: [published]
+
+# Serialised so two releases cannot race to move :stable. Never cancelled: a run
+# that pushed :X.Y.Z must finish attesting it.
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      checks: read
+    env:
+      IMAGE_NAME: ghcr.io/busnes-app/kyidentity-server
+    steps:
+      # Red, not skipped: a skipped job is green and leaves a release with no image.
+      - name: Validate release version
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::release tag must be v<major>.<minor>.<patch>, got: $TAG" >&2
+            exit 1
+          fi
+          echo "value=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      # Both appVersion constants are written into every capsule manifest; the web
+      # bundle's version is checked so the artifact has one answer to "which version".
+      - name: Require the tag and every version source to agree
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          fail=""
+          check() {
+            echo "$1: ${2:-<unparsed>}"
+            [ "$2" = "$VERSION" ] || fail="$fail $1(${2:-unparsed})"
+          }
+          appversion() { sed -n 's/^const appVersion = "\(.*\)"$/\1/p' "$1"; }
+          check cmd/kyidentity/main.go "$(appversion cmd/kyidentity/main.go)"
+          check internal/api/backup_handlers.go "$(appversion internal/api/backup_handlers.go)"
+          check web/package.json "$(jq -r .version web/package.json)"
+          if [ -n "$fail" ]; then
+            echo "::error::release $VERSION disagrees with:$fail" >&2
+            echo "Bump every version source in the commit you tag." >&2
+            exit 1
+          fi
+
+      # Provenance says where an image came from, not that it works. Check the
+      # commit actually checked out (for an annotated tag GITHUB_SHA can name the
+      # tag object), and require every ci.yml job by name: a cancelled or skipped
+      # job must not read as a pass. filter=latest lets a re-run supersede its
+      # original; only GitHub Actions' own check runs count.
+      - name: Require CI to have passed for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # One ci.yml job name per line, as the check runs report them.
+          REQUIRED: |
+            go
+            web
+            relay
+            docker
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          echo "tagged commit: $sha"
+          runs="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs?filter=latest&per_page=100" \
+            --jq '.check_runs[] | select(.app.slug == "github-actions") | "\(.name)\t\(.status)\t\(.conclusion // "none")"')"
+          printf 'check runs for this commit:\n%s\n' "${runs:-<none>}"
+
+          missing=""
+          while IFS= read -r job; do
+            [ -n "$job" ] || continue
+            rows="$(printf '%s\n' "$runs" | awk -F'\t' -v j="$job" '$1 == j { print $2 "/" $3 }')"
+            if [ -z "$rows" ]; then
+              missing="$missing [$job](absent)"
+            elif bad="$(printf '%s\n' "$rows" | grep -v '^completed/success$')"; then
+              missing="$missing [$job]($(printf '%s' "$bad" | tr '\n' ','))"
+            fi
+          done <<< "$REQUIRED"
+
+          if [ -n "$missing" ]; then
+            echo "::error::refusing to publish $sha: CI did not pass for it:$missing" >&2
+            echo "Let ci.yml finish green on this commit (push to master or open a PR) before releasing." >&2
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      # Only the immutable tag here. :stable moves after the attestation verifies,
+      # so a failed attest never leaves :stable on an unattested image.
+      - name: Build and publish the immutable version tag
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.value }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Publish GitHub image attestation
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      # Verified the way an operator would, pinned to this workflow at this tag.
+      - name: Verify the attestation before promoting
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://$IMAGE_NAME@$DIGEST" --repo "$GITHUB_REPOSITORY" \
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release-image.yml@refs/tags/$TAG"
+
+      # :stable only moves forward, and never to a prerelease: publishing a patch
+      # for an old line must not downgrade everyone following :stable.
+      - name: Decide whether this release may move stable
+        id: promote
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.value }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = "true" ]; then
+            echo "::notice::$VERSION is a prerelease; :stable stays where it is"
+            echo "move=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          published="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          highest="$(printf '%s\n%s\n' "$published" "$VERSION" | sort -V | tail -n1)"
+          echo "highest published release: $highest; this release: $VERSION"
+          if [ "$highest" != "$VERSION" ]; then
+            echo "::notice::$VERSION is older than $highest; :stable stays where it is"
+            echo "move=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # By digest, as a carbon copy (--prefer-index=false), then asserted and
+      # verified on the tag operators actually pull.
+      - name: Promote the verified digest to stable
+        if: steps.promote.outputs.move == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --prefer-index=false --tag "$IMAGE_NAME:stable" "$IMAGE_NAME@$DIGEST"
+          stable="$(docker buildx imagetools inspect "$IMAGE_NAME:stable" --format '{{.Manifest.Digest}}')"
+          if [ "$stable" != "$DIGEST" ]; then
+            echo "::error:::stable resolves to $stable, attested digest is $DIGEST" >&2
+            exit 1
+          fi
+          gh attestation verify "oci://$IMAGE_NAME:stable" --repo "$GITHUB_REPOSITORY" \
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release-image.yml@refs/tags/$TAG"
+          echo "Published \`$IMAGE_NAME@$DIGEST\` as \`:$VERSION\` and \`:stable\`" >> "$GITHUB_STEP_SUMMARY"
