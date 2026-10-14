@@ -12,10 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/netguard"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -115,9 +115,8 @@ func loadOrCreateVAPIDKey(path string) (private, public string, err error) {
 	return private, base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), nil
 }
 
-// createVAPIDKey writes a key to path unless one exists. It goes through a temp file and a
-// hard link: a run that dies halfway never leaves a truncated key, and two concurrent first
-// starts cannot overwrite each other's key (the loser's link fails and it reads the winner's).
+// createVAPIDKey writes a key to path unless one exists; a concurrent first start that
+// wins leaves its key, which the caller then reads.
 func createVAPIDKey(path string) error {
 	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
 		return err
@@ -126,26 +125,9 @@ func createVAPIDKey(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+	err = crypto.CreateKeyFile(path, []byte(base64.RawURLEncoding.EncodeToString(key.Bytes())+"\n"))
+	if errors.Is(err, fs.ErrExist) {
+		return nil
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".push-vapid-*") // mode 0600
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	_, err = tmp.WriteString(base64.RawURLEncoding.EncodeToString(key.Bytes()) + "\n")
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	if err := os.Link(tmp.Name(), path); err != nil && !errors.Is(err, fs.ErrExist) {
-		return err
-	}
-	return nil
+	return err
 }

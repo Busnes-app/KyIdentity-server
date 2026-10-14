@@ -309,7 +309,9 @@ func LoadOrCreateRSAKey(keyPath string) (*JWTKeyManager, error) {
 		})
 		// A key that cannot be persisted is regenerated on every restart, silently
 		// invalidating every token the suite has issued. Refuse to run that way.
-		if err := os.WriteFile(keyPath, pemData, 0600); err != nil {
+		if err := CreateKeyFile(keyPath, pemData); errors.Is(err, os.ErrExist) {
+			return LoadOrCreateRSAKey(keyPath) // a concurrent first start won; use its key
+		} else if err != nil {
 			return nil, fmt.Errorf("failed to persist signing key to %s: %w", keyPath, err)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/webauthn"
 )
 
@@ -417,7 +418,9 @@ func loadOrGenerateKeyFile(path string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("random source failed while generating %s: %w", path, err)
 	}
-	if err := os.WriteFile(path, key, 0600); err != nil {
+	if err := crypto.CreateKeyFile(path, key); errors.Is(err, os.ErrExist) {
+		return loadOrGenerateKeyFile(path) // a concurrent first start won; use its key
+	} else if err != nil {
 		return nil, fmt.Errorf("failed to persist generated key to %s: %w", path, err)
 	}
 	return key, nil

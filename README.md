@@ -179,16 +179,22 @@ You can verify the status of the server at any time:
 
 ## Command Line Utilities
 
-Create the first admin account directly within the running container:
+Create the first admin account directly within the running container. The password is the
+first line of stdin, never an argument (argv is world-readable and lands in shell history);
+`-password` is refused. An empty line generates one and prints it once.
 ```bash
-docker compose exec kyidentity-server /usr/local/bin/kyidentity bootstrap-admin --username admin --password "NewPassword123!"
+docker compose exec kyidentity-server /usr/local/bin/kyidentity bootstrap-admin -username admin -email admin@example.com
 ```
 
-`bootstrap-admin` only creates a missing account. It will not overwrite the password of an
-account that already exists — change those from the admin UI, so the action is audited.
+`bootstrap-admin` only creates a missing account, as an active administrator, and records
+`admin.user_created` in the audit log in the same transaction. `-email` defaults to
+`<username>@local.kysecurity`. If the name already belongs to an active administrator it
+changes nothing; if it belongs to anyone else (an ordinary or disabled account) it fails
+rather than promote or re-enable them. Change existing passwords from the admin UI, so the
+action is audited.
 
-Restoring from a `.kycap` backup is `kyidentity restore`, with k custodian shares typed on
-stdin. The full procedure, including putting the result back into service and proving it,
+Restoring from a `.kycap` backup is `kyidentity restore`, with the capsule's digest from
+KyRecovery's deposit record as `-expect-digest` and k custodian shares typed on stdin. The full procedure, including putting the result back into service and proving it,
 is [docs/RESTORE.md](docs/RESTORE.md).
 
 ---
@@ -546,7 +552,8 @@ server did. Running the migrations again changes nothing, which is checked by co
 the schema of a twice-upgraded database with a fresh one.
 
 Restoring is two commands and one deliberate consequence. `kyidentity restore -capsule
-<file> -to <dir>` unpacks a capsule (custodian shares on stdin, never argv) and marks
+<file> -to <dir> -expect-digest <sha256>` checks the capsule against the digest KyRecovery
+recorded at deposit, unpacks it (custodian shares on stdin, never argv) and marks
 the directory as restored. The next start reads that marker once and invalidates what
 the capsule carried: sessions, issued tokens, authorization codes and interactions,
 MFA and step-up challenges and grants, invitation and reset links, device pairing
@@ -915,8 +922,12 @@ when set. Files there are named `<KYIDENTITY_APP_NAME>-<capsule-id>.kycap`; the 
 directory is never listed or deleted. The schedule is set on
 the same screen; `KYIDENTITY_BACKUP_DEPOSIT_INTERVAL` (default 24h, 15m floor, `0` disables)
 is only the default until an admin picks one. Custodian cards come from the KyRecovery
-ceremony, and a restore is `kyidentity restore -capsule <file.kycap> -to <dir>` with k shares
-typed on stdin. A server with no key pinned can run drills but cannot make a capsule.
+ceremony, and a restore is `kyidentity restore -capsule <file.kycap> -to <dir> -expect-digest
+<sha256>` with k shares typed on stdin. The digest is required because the recovery key is
+public: anyone who can write `KYIDENTITY_BACKUP_DIR` can seal a capsule the shares open, and
+only the digest from KyRecovery's deposit record (or printed by `export-capsule`) tells this
+server's capsules apart. A local-only deployment should keep those digests off the server.
+A server with no key pinned can run drills but cannot make a capsule.
 
 **KyRecovery must be reached over HTTPS, and by default at a public address.** TLS is not
 for the capsule, which is sealed anyway; it protects the recovery public key that arrives at
