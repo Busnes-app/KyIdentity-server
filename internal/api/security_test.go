@@ -334,6 +334,30 @@ func TestSensitiveRoutesAreNoStoreAndCSPForbidsInlineScript(t *testing.T) {
 	}
 }
 
+// Fonts and styles ship with the binary; nothing third-party may restyle the sign-in page.
+func TestCSPServesStylesAndFontsFromSelfOnly(t *testing.T) {
+	srv, _, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
+	seen := 0
+	for _, directive := range strings.Split(rec.Header().Get("Content-Security-Policy"), ";") {
+		f := strings.Fields(directive)
+		if len(f) == 0 || (f[0] != "style-src" && f[0] != "font-src") {
+			continue
+		}
+		seen++
+		for _, src := range f[1:] {
+			if src != "'self'" && src != "'unsafe-inline'" && src != "data:" {
+				t.Errorf("%s admits %s", f[0], src)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("want style-src and font-src, found %d of them", seen)
+	}
+}
+
 func TestRegisteredURLsRejectUnsafeSchemes(t *testing.T) {
 	for _, raw := range []string{"javascript:alert(1)", "http://example.test/callback", "https://user@example.test/callback#fragment"} {
 		if err := validateExternalURL(raw); err == nil {

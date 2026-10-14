@@ -4,6 +4,7 @@ import { parseOffboarding } from '../parsers';
 import { LogoutDeliveries } from './SessionList';
 import { RefreshCw } from 'lucide-react';
 import type { Offboarding, OffboardingTarget } from '../types';
+import { Modal } from './Modal';
 
 const observedLabel: Record<OffboardingTarget['observed'], string> = {
   '': 'Not listed yet', present_active: 'Still active at target', present_inactive: 'Inactive at target', absent: 'Absent at target', unsupported: 'Verification unsupported',
@@ -54,64 +55,58 @@ export const OffboardingView: React.FC<{ userId: string; username: string; onClo
   const badge = !off ? '' : off.active ? 'Not offboarded' : off.verified ? 'Complete' : off.acknowledged ? 'Acknowledged' : 'Pending';
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-card">
-        <div className="modal-header">
-          <h3>Offboarding {username}</h3>
-          <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
-        </div>
-        <div className="modal-body">
-          {error && <div className="form-error">{error}</div>}
-          {off && (
-            <>
-              <p>
-                <span className={`status-badge ${off.active ? 'disabled' : off.acknowledged ? 'active' : 'warn'}`}>{badge}</span>{' '}
-                {summary}{off.deleted ? ' The directory account is deleted; remote mappings are kept for retries.' : ''}
-              </p>
-              <div className="device-list">
-                {off.targets.length === 0 ? (
-                  <div className="empty-box"><p>No paired product holds this account.</p></div>
-                ) : (
-                  off.targets.map((t) => {
-                    const b = targetBadge(t);
-                    const ev = t.lastEvent;
-                    return (
-                      <div key={t.systemId} className="device-card">
-                        <div className="device-info">
-                          <span className="device-name">
-                            {t.systemName}
-                            <span className={`status-badge ${b.cls}`}> {b.text}</span>
-                            {t.systemStatus === 'disabled' && <span className="status-badge disabled"> Connector disabled</span>}
-                          </span>
-                          <span className="device-id-mono">
-                            {ev ? `${ev.type} ${ev.status} · ${ev.attempts} attempt${ev.attempts === 1 ? '' : 's'} · ${when(ev.updatedAt)}` : 'nothing sent yet'}
-                            {ev?.status === 'pending' && ev.nextAttemptAt ? ` · next ${when(ev.nextAttemptAt)}` : ''}
-                            {ev?.error ? ` · ${ev.error}` : ''}
-                            {` · ${observedLabel[t.observed]}${t.observedAt ? ` ${when(t.observedAt)}` : ''}`}
-                          </span>
-                        </div>
-                        {t.recorded && !t.acknowledged && !t.blocked && (
-                          <button className="icon-btn" onClick={() => retry(`/api/admin/systems/${encodeURIComponent(t.systemId)}/provisioning/${userId}/retry`, 'Failed to retry delivery')} title="Retry now" aria-label={`Retry delivery to ${t.systemName}`}>
-                            <RefreshCw size={16} />
-                          </button>
-                        )}
+    <Modal title={`Offboarding ${username}`} onClose={onClose}>
+      <div className="modal-body">
+        {error && <div className="form-error" role="alert">{error}</div>}
+        {off && (
+          <>
+            <p>
+              <span className={`status-badge ${off.active ? 'disabled' : off.acknowledged ? 'active' : 'warn'}`}>{badge}</span>{' '}
+              {summary}{off.deleted ? ' The directory account is deleted; remote mappings are kept for retries.' : ''}
+            </p>
+            <div className="device-list">
+              {off.targets.length === 0 ? (
+                <div className="empty-box"><p>No paired product holds this account.</p></div>
+              ) : (
+                off.targets.map((t) => {
+                  const b = targetBadge(t);
+                  const ev = t.lastEvent;
+                  return (
+                    <div key={t.systemId} className="device-card">
+                      <div className="device-info">
+                        <span className="device-name">
+                          {t.systemName}
+                          <span className={`status-badge ${b.cls}`}> {b.text}</span>
+                          {t.systemStatus === 'disabled' && <span className="status-badge disabled"> Connector disabled</span>}
+                        </span>
+                        <span className="device-id-mono">
+                          {ev ? `${ev.type} ${ev.status} · ${ev.attempts} attempt${ev.attempts === 1 ? '' : 's'} · ${when(ev.updatedAt)}` : 'nothing sent yet'}
+                          {ev?.status === 'pending' && ev.nextAttemptAt ? ` · next ${when(ev.nextAttemptAt)}` : ''}
+                          {ev?.error ? ` · ${ev.error}` : ''}
+                          {` · ${observedLabel[t.observed]}${t.observedAt ? ` ${when(t.observedAt)}` : ''}`}
+                        </span>
                       </div>
-                    );
-                  })
-                )}
-              </div>
-              <div className="section-header">
-                <div className="section-title-wrap"><h3>Sign-out notifications</h3></div>
-              </div>
-              <LogoutDeliveries logouts={off.logouts} onRetryLogout={(d) => retry(`/api/admin/users/${userId}/logouts/${d.id}/retry`, 'Failed to retry sign-out notification')} />
-            </>
-          )}
-        </div>
-        <div className="modal-footer">
-          <button type="button" className="secondary-btn" onClick={load}>Refresh</button>
-          <button type="button" className="primary-btn" onClick={onClose}>Close</button>
-        </div>
+                      {t.recorded && !t.acknowledged && !t.blocked && (
+                        <button className="icon-btn" onClick={() => retry(`/api/admin/systems/${encodeURIComponent(t.systemId)}/provisioning/${userId}/retry`, 'Failed to retry delivery')} title="Retry now" aria-label={`Retry delivery to ${t.systemName}`}>
+                          <RefreshCw size={16} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <div className="section-header">
+              <div className="section-title-wrap"><h3>Sign-out notifications</h3></div>
+            </div>
+            <LogoutDeliveries logouts={off.logouts} onRetryLogout={(d) => retry(`/api/admin/users/${userId}/logouts/${d.id}/retry`, 'Failed to retry sign-out notification')} />
+          </>
+        )}
       </div>
-    </div>
+      <div className="modal-footer">
+        <button type="button" className="secondary-btn" onClick={load}>Refresh</button>
+        <button type="button" className="primary-btn" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
   );
 };

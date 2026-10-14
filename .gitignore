@@ -13,9 +13,15 @@ data/
 *.key
 first-run-password.txt
 wrangler.toml
+# A second deployment's config, e.g. wrangler.kyauth.toml; wrangler.toml.example stays tracked.
+wrangler.*.toml
 
 # Node
 web/node_modules/
+*.tsbuildinfo
+
+# Editors
+.idea/
 
 # Logs & OS
 *.log

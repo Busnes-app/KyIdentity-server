@@ -3,6 +3,7 @@ import { apiJson, apiRequest, errorMessage } from '../api';
 import { parseSCIMConnectors, parseSCIMToken, parseSCIMConnector } from '../parsers';
 import type { SCIMConnector, SCIMToken } from '../types';
 import { isCancelled, useStepUp } from './StepUpPrompt';
+import { Modal } from './Modal';
 
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : 'never');
 
@@ -119,15 +120,14 @@ export function AdminSCIM() {
         ))}
       </div>
       {issued && (
-        <div className="modal-backdrop"><div className="modal-card">
-          <div className="modal-header"><h3>{issued.token.scope === 'write' ? 'Write' : 'Read'} token for {issued.connector.name}</h3><button className="close-btn" onClick={() => setIssued(null)} aria-label="Close">×</button></div>
+        <Modal title={`${issued.token.scope === 'write' ? 'Write' : 'Read'} token for ${issued.connector.name}`} onClose={() => setIssued(null)}>
           <div className="modal-body">
             <p>Paste this into the upstream directory as its Bearer token. It is shown once and stored only as a hash; issue another if it is lost.</p>
             <div className="form-group"><input className="form-input font-mono" readOnly value={issued.token.token} onFocus={e => e.currentTarget.select()} aria-label="Connector token" /></div>
             <p className="text-muted">SCIM base URL: <code>{endpoint}</code></p>
           </div>
           <div className="modal-footer"><button type="button" className="secondary-btn" onClick={() => navigator.clipboard?.writeText(issued.token.token)}>Copy</button><button type="button" className="primary-btn" onClick={() => setIssued(null)}>Close</button></div>
-        </div></div>
+        </Modal>
       )}
       {stepUpPrompt}
     </div>

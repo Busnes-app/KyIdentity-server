@@ -3,6 +3,7 @@ import { apiJson, errorMessage } from '../api';
 import { parseAppRecordPage, parseDelegations } from '../parsers';
 import type { AppRecord, Delegations, User } from '../types';
 import { isCancelled, useStepUp } from './StepUpPrompt';
+import { Modal } from './Modal';
 
 function recordName(a: AppRecord) { return a.launcherName || a.clientName || a.systemName || a.id; }
 
@@ -12,7 +13,7 @@ function recordName(a: AppRecord) { return a.launcherName || a.clientName || a.s
  */
 export function DelegationEditor({ user, onClose }: { user: User; onClose: () => void }) {
   const [d, setD] = useState<Delegations>({ helpdesk: false, auditor: false, appOwner: [] });
-  const [apps, setApps] = useState<AppRecord[]>([]);
+  const [apps, setApps] = useState<AppRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { requestGrant, stepUpPrompt } = useStepUp();
@@ -20,7 +21,7 @@ export function DelegationEditor({ user, onClose }: { user: User; onClose: () =>
 
   useEffect(() => {
     apiJson(path, parseDelegations).then(setD).catch(err => setError(errorMessage(err, 'Could not load delegations')));
-    apiJson('/api/admin/app-registry?limit=100', parseAppRecordPage).then(p => setApps(p.items)).catch(() => setApps([]));
+    apiJson('/api/admin/app-registry?limit=100', parseAppRecordPage).then(p => setApps(p.items)).catch(err => setError(errorMessage(err, 'Could not load app connections')));
   }, [path]);
 
   const save = async () => {
@@ -33,25 +34,22 @@ export function DelegationEditor({ user, onClose }: { user: User; onClose: () =>
   };
   const toggleApp = (id: string, on: boolean) => setD({ ...d, appOwner: on ? [...d.appOwner, id] : d.appOwner.filter(a => a !== id) });
 
-  return <div className="modal-backdrop">
-    {stepUpPrompt}
-    <div className="modal-card">
-      <div className="modal-header"><h3>Delegation for {user.username}</h3><button className="close-btn" onClick={onClose} aria-label="Close">×</button></div>
-      <div className="modal-body">
-        {error && <div className="alert-box error sm" role="alert">{error}</div>}
-        {user.role === 'admin' ? <p className="text-muted">Administrators hold every permission; delegation applies to ordinary users.</p> : <>
-          <div className="form-group"><label><input type="checkbox" checked={d.helpdesk} disabled={busy} onChange={e => setD({ ...d, helpdesk: e.target.checked })} /> Helpdesk: reset MFA, revoke sessions and issue links for ordinary users, never for administrators</label></div>
-          <div className="form-group"><label><input type="checkbox" checked={d.auditor} disabled={busy} onChange={e => setD({ ...d, auditor: e.target.checked })} /> Auditor: read every administration page, change nothing</label></div>
-          <div className="form-group"><span className="form-label">App owner: manage grants and role mappings of these apps only</span>
-            {apps.length === 0 && <p className="text-muted">No app connections yet.</p>}
-            {apps.map(a => <div key={a.id}><label><input type="checkbox" checked={d.appOwner.includes(a.id)} disabled={busy} onChange={e => toggleApp(a.id, e.target.checked)} /> {recordName(a)}</label></div>)}
-          </div>
-        </>}
-      </div>
-      <div className="modal-footer">
-        <button type="button" className="secondary-btn" disabled={busy} onClick={onClose}>Cancel</button>
-        {user.role !== 'admin' && <button type="button" className="primary-btn" disabled={busy} onClick={save}>Save</button>}
-      </div>
+  return <Modal title={`Delegation for ${user.username}`} onClose={onClose}>
+  {stepUpPrompt}
+    <div className="modal-body">
+      {error && <div className="alert-box error sm" role="alert">{error}</div>}
+      {user.role === 'admin' ? <p className="text-muted">Administrators hold every permission; delegation applies to ordinary users.</p> : <>
+        <div className="form-group"><label><input type="checkbox" checked={d.helpdesk} disabled={busy} onChange={e => setD({ ...d, helpdesk: e.target.checked })} /> Helpdesk: reset MFA, revoke sessions and issue links for ordinary users, never for administrators</label></div>
+        <div className="form-group"><label><input type="checkbox" checked={d.auditor} disabled={busy} onChange={e => setD({ ...d, auditor: e.target.checked })} /> Auditor: read every administration page, change nothing</label></div>
+        <div className="form-group"><span className="form-label">App owner: manage grants and role mappings of these apps only</span>
+          {apps?.length === 0 && <p className="text-muted">No app connections yet.</p>}
+          {apps?.map(a => <div key={a.id}><label><input type="checkbox" checked={d.appOwner.includes(a.id)} disabled={busy} onChange={e => toggleApp(a.id, e.target.checked)} /> {recordName(a)}</label></div>)}
+        </div>
+      </>}
     </div>
-  </div>;
+    <div className="modal-footer">
+      <button type="button" className="secondary-btn" disabled={busy} onClick={onClose}>Cancel</button>
+      {user.role !== 'admin' && <button type="button" className="primary-btn" disabled={busy} onClick={save}>Save</button>}
+      </div>
+  </Modal>;
 }

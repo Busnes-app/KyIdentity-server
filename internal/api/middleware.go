@@ -205,10 +205,10 @@ func (m *MiddlewareManager) SecurityHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 
-		// Content Security Policy allowing local assets, Google/local fonts, and inline styles for UI
+		// Content Security Policy allowing local assets, local fonts, and inline styles for UI
 		// Custom launcher favicons load directly in the browser. Keeping this to HTTPS images
 		// avoids making the server an SSRF proxy or permitting active external content.
-		csp := "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+		csp := "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
 		w.Header().Set("Content-Security-Policy", csp)
 
 		next.ServeHTTP(w, r)
