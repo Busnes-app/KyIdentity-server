@@ -267,7 +267,9 @@ The APNs worker translates this to the APS payload:
 {
   "aps": {
     "alert": { "title": "Sign-in approval", "body": "Approve the request in KySecurity." },
-    "sound": "default"
+    "sound": "default",
+    "mutable-content": 1,
+    "category": "MFA_CHALLENGE"
   },
   "type": "mfa_challenge",
   "challengeId": "..."
