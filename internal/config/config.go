@@ -63,10 +63,10 @@ type Config struct {
 	SessionTTL time.Duration
 	// SessionIdleTTL requires a fresh login after inactivity.
 	SessionIdleTTL time.Duration
-	// AllowPrivateCallbacks permits paired systems to register loopback or private-range
-	// webhook callbacks. Needed for single-host deployments where every service shares a
-	// container network; it widens an attacker-chosen callback into a request forgery
-	// primitive aimed at the internal network, so it is off by default.
+	// AllowPrivateCallbacks permits operator-supplied URLs on private LAN ranges (never
+	// loopback, link-local or metadata). Needed for single-host deployments where every
+	// service shares a container network; it widens an attacker-chosen callback into a
+	// request forgery primitive aimed at the internal network, so it is off by default.
 	AllowPrivateCallbacks bool
 	PushRelayURL          string
 	PushRelayKey          string

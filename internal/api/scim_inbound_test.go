@@ -158,6 +158,57 @@ func TestInboundSCIMUserLifecycle(t *testing.T) {
 	}
 }
 
+// A connector cannot re-address or rename an account promoted to administrator locally, by
+// PUT or PATCH; an ordinary account it owns stays fully updatable.
+func TestInboundSCIMCannotTakeOverAPromotedAdmin(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	_, token := connectorWithToken(t, srv, db, admin, "write")
+	create := func(ext, name string) string {
+		rec := scimCall(t, srv, token, "POST", "/scim/v2/Users", `{"externalId":"`+ext+`","userName":"`+name+`","emails":[{"value":"`+name+`@up.test","primary":true}],"active":true}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", name, rec.Code, rec.Body.String())
+		}
+		id, _ := scimUser(t, rec.Body.Bytes())["id"].(string)
+		return id
+	}
+	promoted := mustUser(t, db, create("ext-a", "dana"))
+	promoted.Role = "admin"
+	if err := db.UpdateUser(promoted); err != nil {
+		t.Fatal(err)
+	}
+	plain := create("ext-b", "erin")
+
+	for _, attempt := range []struct{ method, body string }{
+		{"PATCH", `{"Operations":[{"op":"replace","path":"emails","value":[{"value":"attacker@evil.test","primary":true}]}]}`},
+		{"PATCH", `{"Operations":[{"op":"replace","path":"userName","value":"dana2"}]}`},
+		{"PUT", `{"externalId":"ext-a","userName":"dana","emails":[{"value":"attacker@evil.test","primary":true}],"active":true}`},
+		{"PUT", `{"externalId":"ext-a","userName":"dana2","emails":[{"value":"dana@up.test","primary":true}],"active":true}`},
+	} {
+		got := scimCall(t, srv, token, attempt.method, "/scim/v2/Users/"+promoted.ID, attempt.body)
+		if got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), "mutability") {
+			t.Fatalf("%s %s: %d %s", attempt.method, attempt.body, got.Code, got.Body.String())
+		}
+		if u := mustUser(t, db, promoted.ID); u.Email != "dana@up.test" || u.Username != "dana" || u.Role != "admin" {
+			t.Fatalf("admin changed by %s: %+v", attempt.method, u)
+		}
+	}
+	if !auditContains(t, db, "privileged_identity") {
+		t.Fatal("refusal not audited")
+	}
+
+	if got := scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+plain, `{"Operations":[{"op":"replace","path":"userName","value":"erin2"}]}`); got.Code != http.StatusOK {
+		t.Fatalf("ordinary patch: %d %s", got.Code, got.Body.String())
+	}
+	if got := scimCall(t, srv, token, "PUT", "/scim/v2/Users/"+plain, `{"externalId":"ext-b","userName":"erin2","emails":[{"value":"erin2@up.test","primary":true}],"active":true}`); got.Code != http.StatusOK {
+		t.Fatalf("ordinary put: %d %s", got.Code, got.Body.String())
+	}
+	if u := mustUser(t, db, plain); u.Username != "erin2" || u.Email != "erin2@up.test" {
+		t.Fatalf("ordinary account not updated: %+v", u)
+	}
+}
+
 func mustUser(t *testing.T, db *store.Store, id string) *store.User {
 	t.Helper()
 	u, err := db.GetUserByID(id)

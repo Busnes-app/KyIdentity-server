@@ -65,8 +65,8 @@ func TestGuardedClientRefusesToDialPrivateAddresses(t *testing.T) {
 // A redirect would let a destination that passed validation bounce the request to one that
 // would not have.
 func TestGuardedClientRefusesRedirects(t *testing.T) {
-	AllowPrivate = true // let the test reach its own loopback servers
-	defer func() { AllowPrivate = false }()
+	AllowPrivate, AllowLoopback = true, true // let the test reach its own loopback servers
+	defer func() { AllowPrivate, AllowLoopback = false, false }()
 
 	var reached bool
 	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,13 +92,79 @@ func TestGuardedClientRefusesRedirects(t *testing.T) {
 // Carrier-grade NAT is every Tailscale address; NAT64 embeds any IPv4 (metadata included).
 func TestReservedRangesAreNonPublic(t *testing.T) {
 	for _, ip := range []string{"100.64.0.1", "100.100.100.100", "64:ff9b::a9fe:a9fe", "198.18.0.1", "0.1.2.3", "192.0.0.8", "240.0.0.1", "fec0::1"} {
-		if !isNonPublic(net.ParseIP(ip)) {
+		if !refused(net.ParseIP(ip), false) {
 			t.Errorf("%s treated as public", ip)
 		}
 	}
 	for _, ip := range []string{"1.1.1.1", "100.128.0.1", "2606:4700::1111"} {
-		if isNonPublic(net.ParseIP(ip)) {
+		if refused(net.ParseIP(ip), false) {
 			t.Errorf("%s treated as non-public", ip)
 		}
+	}
+}
+
+// AllowPrivate opens LAN ranges only: loopback, link-local and metadata stay refused.
+func TestAllowPrivateOpensOnlyLANRanges(t *testing.T) {
+	AllowPrivate = true
+	defer func() { AllowPrivate = false }()
+	for _, raw := range []string{
+		"http://127.0.0.1/", "http://[::1]/", "http://169.254.169.254/latest/meta-data/",
+		"http://[fe80::1]/", "http://0.0.0.0/", "http://[::]/", "http://100.100.100.200/",
+		"http://[fd00:ec2::254]/", "http://[64:ff9b::a9fe:a9fe]/", "http://224.0.0.1/",
+	} {
+		if err := ValidateURL(raw, "url"); err == nil {
+			t.Errorf("%s accepted with AllowPrivate", raw)
+		}
+	}
+	for _, raw := range []string{"http://10.89.0.2/", "https://192.168.1.1/", "https://172.16.0.5/", "https://100.64.0.1/", "https://[fd12::1]/"} {
+		if err := ValidateURL(raw, "url"); err != nil {
+			t.Errorf("%s rejected with AllowPrivate: %v", raw, err)
+		}
+		if err := ValidateDeviceURL(raw, "url"); err == nil {
+			t.Errorf("%s accepted as a device URL", raw)
+		}
+	}
+	AllowPrivate = false
+	if err := ValidateURL("https://10.89.0.2/", "url"); err == nil {
+		t.Error("10.89.0.2 accepted without AllowPrivate")
+	}
+}
+
+// The dialer is the real enforcement point, so the same policy has to hold there.
+func TestDialerPolicy(t *testing.T) {
+	AllowPrivate = true
+	defer func() { AllowPrivate = false }()
+	for _, tc := range []struct {
+		addr          string
+		device, allow bool
+	}{
+		{"127.0.0.1:443", false, false},
+		{"169.254.169.254:80", false, false},
+		{"[fe80::1]:443", false, false},
+		{"10.0.0.1:443", true, false},
+		{"10.0.0.1:443", false, true},
+	} {
+		err := dialer(time.Second, tc.device).Control("tcp", tc.addr, nil)
+		if tc.allow != (err == nil) {
+			t.Errorf("%s device=%v: err = %v", tc.addr, tc.device, err)
+		}
+	}
+	AllowPrivate = false
+	if dialer(time.Second, false).Control("tcp", "10.0.0.1:443", nil) == nil {
+		t.Error("10.0.0.1 allowed without AllowPrivate")
+	}
+}
+
+// A device URL never reaches a private address at dial time, whatever AllowPrivate says.
+func TestDeviceClientRefusesPrivateDialWithAllowPrivate(t *testing.T) {
+	AllowPrivate = true
+	defer func() { AllowPrivate = false }()
+	resp, err := DeviceClient(2 * time.Second).Get("https://10.255.255.1/")
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("device client dialed a private address")
+	}
+	if !strings.Contains(err.Error(), "non-public") {
+		t.Errorf("expected a non-public refusal, got %v", err)
 	}
 }

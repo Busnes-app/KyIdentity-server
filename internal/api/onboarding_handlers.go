@@ -204,6 +204,13 @@ func (h *OnboardingHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 		generic()
 		return
 	}
+	// Only a proven address may receive a reset: an unverified one may belong to whoever
+	// typed it in, or to an upstream that renamed the account.
+	if u.EmailVerifiedAt == nil {
+		h.audit.Record("auth.password_reset_requested", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "email_unverified"})
+		generic()
+		return
+	}
 	settings, err := mail.Load(h.store, h.encryptionKey)
 	if err != nil || settings == nil {
 		h.audit.Record("auth.password_reset_requested", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "mail_not_configured"})

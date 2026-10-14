@@ -117,8 +117,8 @@ func queuedLogout(t *testing.T, e *Engine, db *store.Store, backchannel string) 
 }
 
 func TestBackchannelDeliveryPostsASignedLogoutTokenAndRecordsTheOutcome(t *testing.T) {
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = false })
+	netguard.AllowPrivate, netguard.AllowLoopback = true, true
+	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = false, false })
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	rcv := &receiver{status: http.StatusOK}
@@ -145,8 +145,8 @@ func TestBackchannelDeliveryPostsASignedLogoutTokenAndRecordsTheOutcome(t *testi
 }
 
 func TestBackchannelDeliveryRetriesServerErrorsWithAFreshToken(t *testing.T) {
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = false })
+	netguard.AllowPrivate, netguard.AllowLoopback = true, true
+	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = false, false })
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	rcv := &receiver{status: http.StatusServiceUnavailable}
@@ -180,8 +180,8 @@ func TestBackchannelDeliveryRetriesServerErrorsWithAFreshToken(t *testing.T) {
 }
 
 func TestBackchannelDeliveryNeverFollowsRedirects(t *testing.T) {
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = false })
+	netguard.AllowPrivate, netguard.AllowLoopback = true, true
+	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = false, false })
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	var followed int32
@@ -210,8 +210,8 @@ func TestBackchannelDeliveryNeverFollowsRedirects(t *testing.T) {
 // A receiver that accepts the connection and never answers holds one worker, not the
 // queue: the healthy app queued behind two of its rows is still told promptly.
 func TestATarpittedReceiverDoesNotBlockOtherApps(t *testing.T) {
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = false })
+	netguard.AllowPrivate, netguard.AllowLoopback = true, true
+	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = false, false })
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	release := make(chan struct{})

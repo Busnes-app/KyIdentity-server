@@ -18,6 +18,10 @@ import (
 
 var ErrUserConflict = errors.New("username, email or external id already in use")
 
+// ErrPrivilegedIdentity refuses an upstream rename or re-address of an administrator or
+// delegated account: whoever controls the address controls its password reset.
+var ErrPrivilegedIdentity = errors.New("the username and email of a privileged account are not upstream-managed")
+
 type SCIMConnector struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -365,6 +369,17 @@ func (s *Store) UpdateUpstreamUser(u *User, audit *AuditEvent) error {
 		}
 		if current.ExternalID != u.ExternalID {
 			return errors.New("external id is immutable")
+		}
+		if !strings.EqualFold(current.Username, u.Username) || !strings.EqualFold(current.Email, u.Email) {
+			privileged := current.Role == "admin"
+			if !privileged {
+				if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM admin_delegations WHERE user_id=?)`, u.ID).Scan(&privileged); err != nil {
+					return err
+				}
+			}
+			if privileged {
+				return ErrPrivilegedIdentity
+			}
 		}
 		if err := rejectCrossIdentityTx(tx, u.ID, u.Username, u.Email); err != nil {
 			return err

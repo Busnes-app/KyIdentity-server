@@ -39,9 +39,9 @@ type pushServer struct {
 
 func newPushServer(t *testing.T, status int) *pushServer {
 	t.Helper()
-	allow := netguard.AllowPrivate
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = allow })
+	allow := netguard.AllowLoopback
+	netguard.AllowLoopback = true
+	t.Cleanup(func() { netguard.AllowLoopback = allow })
 	ps := &pushServer{status: status}
 	ps.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -209,11 +209,13 @@ func TestUnifiedPushSenderResponses(t *testing.T) {
 	}
 }
 
-// The sender dials through netguard, and its errors never carry the capability URL.
+// The sender dials through the device guard, which AllowPrivate does not open, and its
+// errors never carry the capability URL.
 func TestUnifiedPushSenderRefusesPrivateDialWithoutLeakingEndpoint(t *testing.T) {
 	ps := newPushServer(t, http.StatusCreated)
 	s := newTestUnifiedPushSender(t, ps)
-	netguard.AllowPrivate = false
+	netguard.AllowLoopback, netguard.AllowPrivate = false, true
+	t.Cleanup(func() { netguard.AllowPrivate = false })
 	rk := newReceiver(t)
 	dev := store.NativeDevice{ID: "d", PushToken: ps.URL + "/secret-topic", PushP256dh: rk.p256dh, PushAuth: rk.a64}
 	err := s.SendPush(dev, MFAChallengePush{ChallengeID: "c", Purpose: "login", ExpiresAtMS: time.Now().Add(time.Minute).UnixMilli()})

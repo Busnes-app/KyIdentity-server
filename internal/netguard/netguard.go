@@ -15,26 +15,26 @@ import (
 	"time"
 )
 
-// AllowPrivate permits outbound requests to loopback and private ranges. Deployments where
-// every service shares a container network need this; it is off by default because an
-// operator-supplied URL is otherwise a request forgery primitive aimed at the internal
-// network, including the cloud metadata endpoint.
+// AllowPrivate opens private LAN ranges (RFC 1918, ULA, carrier-grade NAT) to operator-supplied
+// URLs, for deployments where every service shares a container network. Loopback, link-local,
+// metadata and reserved addresses stay refused regardless, and device-supplied URLs never get it.
 var AllowPrivate = false
+
+// AllowLoopback lets tests reach their own httptest servers. No configuration sets it.
+var AllowLoopback = false
 
 // ErrRedirect is returned instead of following a redirect. A redirect would let a validated
 // destination bounce the payload to an internal address that failed validation.
 var ErrRedirect = errors.New("redirects are not followed for server-initiated requests")
 
-// Dialer refuses to connect to loopback, private, link-local, or otherwise non-public
+// dialer refuses to connect to loopback, private, link-local, or otherwise non-public
 // addresses. This is the enforcement point that survives DNS rebinding: validation at
-// configuration time proves nothing about resolution at request time.
-func Dialer(timeout time.Duration) *net.Dialer {
+// configuration time proves nothing about resolution at request time. device drops
+// AllowPrivate, for URLs a device chose rather than the operator.
+func dialer(timeout time.Duration, device bool) *net.Dialer {
 	return &net.Dialer{
 		Timeout: timeout,
 		Control: func(network, address string, c syscall.RawConn) error {
-			if AllowPrivate {
-				return nil
-			}
 			host, _, err := net.SplitHostPort(address)
 			if err != nil {
 				return err
@@ -43,7 +43,7 @@ func Dialer(timeout time.Duration) *net.Dialer {
 			if ip == nil {
 				return fmt.Errorf("refusing to dial unparseable address %q", address)
 			}
-			if isNonPublic(ip) {
+			if refused(ip, AllowPrivate && !device) {
 				return fmt.Errorf("refusing to connect to the non-public address %s", ip)
 			}
 			return nil
@@ -51,26 +51,41 @@ func Dialer(timeout time.Duration) *net.Dialer {
 	}
 }
 
-// Client returns an HTTP client that refuses redirects and refuses to dial non-public
-// addresses.
-func Client(timeout time.Duration) *http.Client {
+// Client returns an HTTP client for operator-supplied URLs that refuses redirects and refuses
+// to dial non-public addresses.
+func Client(timeout time.Duration) *http.Client { return client(timeout, false) }
+
+// DeviceClient is Client for device-supplied URLs: private ranges are refused even when
+// AllowPrivate is set.
+func DeviceClient(timeout time.Duration) *http.Client { return client(timeout, true) }
+
+func client(timeout time.Duration, device bool) *http.Client {
 	return &http.Client{
 		Timeout:       timeout,
 		CheckRedirect: func(r *http.Request, via []*http.Request) error { return ErrRedirect },
 		Transport: &http.Transport{
-			DialContext:         Dialer(timeout).DialContext,
+			DialContext:         dialer(timeout, device).DialContext,
 			TLSHandshakeTimeout: 5 * time.Second,
 		},
 	}
 }
 
-func isNonPublic(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() ||
-		ip.IsInterfaceLocalMulticast() {
+// refused reports whether ip must not be dialed. allowPrivate opens only privateRanges.
+func refused(ip net.IP, allowPrivate bool) bool {
+	switch {
+	case ip.IsLoopback():
+		return !AllowLoopback
+	case ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
+		ip.IsMulticast() || ip.IsInterfaceLocalMulticast() || inAny(ip, reservedRanges):
 		return true
+	case ip.IsPrivate() || inAny(ip, privateRanges):
+		return !allowPrivate
 	}
-	for _, n := range reservedRanges {
+	return false
+}
+
+func inAny(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
 		if n.Contains(ip) {
 			return true
 		}
@@ -78,13 +93,19 @@ func isNonPublic(ip net.IP) bool {
 	return false
 }
 
-// reservedRanges are special-purpose blocks net.IP's predicates miss: carrier-grade NAT (also
-// every Tailscale address), "this" network, IETF assignments, benchmarking, class E, the NAT64
-// well-known prefix (which embeds any IPv4, metadata included) and deprecated site-local.
-// Same list as ky-primitives recoveryclient.
-var reservedRanges = func() []*net.IPNet {
+// privateRanges are the LAN ranges net.IP.IsPrivate misses: carrier-grade NAT (every
+// Tailscale address) and deprecated site-local.
+var privateRanges = cidrs("100.64.0.0/10", "fec0::/10")
+
+// reservedRanges are never dialed: "this" network, IETF assignments, benchmarking, class E,
+// NAT64 prefixes (which embed any IPv4, metadata included), and cloud metadata services that
+// sit inside a private range (Alibaba in CGNAT, AWS IPv6 in ULA).
+var reservedRanges = cidrs("0.0.0.0/8", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4",
+	"64:ff9b::/96", "64:ff9b:1::/48", "100.100.100.200/32", "fd00:ec2::254/128")
+
+func cidrs(list ...string) []*net.IPNet {
 	var out []*net.IPNet
-	for _, cidr := range []string{"100.64.0.0/10", "0.0.0.0/8", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4", "64:ff9b::/96", "fec0::/10"} {
+	for _, cidr := range list {
 		_, n, err := net.ParseCIDR(cidr)
 		if err != nil {
 			panic(err)
@@ -92,11 +113,17 @@ var reservedRanges = func() []*net.IPNet {
 		out = append(out, n)
 	}
 	return out
-}()
+}
 
 // ValidateURL rejects anything the server should not be made to send data to. field names
 // the offending input so the error points the operator at the right field.
-func ValidateURL(raw, field string) error {
+func ValidateURL(raw, field string) error { return validate(raw, field, false) }
+
+// ValidateDeviceURL is ValidateURL for device-supplied URLs: https only, no private ranges.
+func ValidateDeviceURL(raw, field string) error { return validate(raw, field, true) }
+
+func validate(raw, field string, device bool) error {
+	allowPrivate := AllowPrivate && !device
 	if strings.TrimSpace(raw) == "" {
 		return fmt.Errorf("%s is required", field)
 	}
@@ -104,7 +131,7 @@ func ValidateURL(raw, field string) error {
 	if err != nil {
 		return fmt.Errorf("%s is not a valid URL: %w", field, err)
 	}
-	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && AllowPrivate) {
+	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && allowPrivate) {
 		return fmt.Errorf("%s must use https", field)
 	}
 	host := parsed.Hostname()
@@ -117,16 +144,16 @@ func ValidateURL(raw, field string) error {
 	if parsed.Fragment != "" || strings.Contains(raw, "#") {
 		return fmt.Errorf("%s must not contain a fragment", field)
 	}
-	if AllowPrivate {
-		return nil
-	}
 
 	// A literal internal address is rejected outright. Hostnames are not resolved here:
 	// resolution now proves nothing about resolution at request time, so the real
 	// enforcement lives in the dialer.
-	if ip := net.ParseIP(host); ip != nil && isNonPublic(ip) {
-		return fmt.Errorf("%s points at the non-public address %s; "+
-			"set KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true if that is intended", field, ip)
+	if ip := net.ParseIP(host); ip != nil && refused(ip, allowPrivate) {
+		if !device && !refused(ip, true) {
+			return fmt.Errorf("%s points at the private address %s; "+
+				"set KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true if that is intended", field, ip)
+		}
+		return fmt.Errorf("%s points at the non-public address %s", field, ip)
 	}
 	return nil
 }

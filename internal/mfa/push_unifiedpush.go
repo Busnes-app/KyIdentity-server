@@ -38,7 +38,7 @@ func NewUnifiedPushSender(keyFile, subscriber string) (*UnifiedPushSender, error
 		return nil, fmt.Errorf("vapid key %s: %w", keyFile, err)
 	}
 	return &UnifiedPushSender{
-		client:       netguard.Client(5 * time.Second),
+		client:       netguard.DeviceClient(5 * time.Second),
 		subscriber:   subscriber,
 		vapidPublic:  public,
 		vapidPrivate: private,
