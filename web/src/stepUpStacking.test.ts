@@ -11,8 +11,7 @@ import { describe, expect, it } from 'vitest';
 const components = new URL('./components/', import.meta.url);
 const source = (name: string) => readFileSync(new URL(name, components), 'utf8');
 
-// ponytail: DeviceSettings.tsx is migrated in a separate change; drop it from here then.
-const unmigrated = new Set(['Modal.tsx', 'DeviceSettings.tsx']);
+const unmigrated = new Set(['Modal.tsx']);
 
 describe('modal stacking', () => {
   it('opens modals in the top layer', () => {

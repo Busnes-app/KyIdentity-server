@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { NativeDevice, Passkey, SessionInventory, User } from '../types';
 import { apiJson, apiRequest, errorMessage, isStepUpRequired } from '../api';
 import {
@@ -14,6 +14,7 @@ import {
 import { createPasskey, isPasskeySupported } from '../webauthn';
 import QRCode from 'qrcode';
 import { useStepUp, isCancelled } from './StepUpPrompt';
+import { Modal } from './Modal';
 import { SessionList } from './SessionList';
 import {
   Smartphone,
@@ -30,6 +31,9 @@ import {
 
 /** Which account-security change the step-up prompt is currently gating. */
 type PendingAction = 'totp' | 'recovery-codes' | 'passkey-enroll' | 'passkey-delete';
+
+const drawQR = (canvas: HTMLCanvasElement, text: string) =>
+  void QRCode.toCanvas(canvas, text, { width: 200, margin: 1, color: { dark: '#0d0f14', light: '#4deeea' } });
 
 interface DeviceSettingsProps {
   user: User;
@@ -55,14 +59,18 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
   const [pairExpiresAt, setPairExpiresAt] = useState<number | null>(null);
   const [pairStartedAt, setPairStartedAt] = useState<number | null>(null);
   const [countdown, setCountdown] = useState(90);
-  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [pairQr, setPairQr] = useState('');
 
   // TOTP Setup State
   const [showTotpModal, setShowTotpModal] = useState(false);
   const [totpSecret, setTotpSecret] = useState('');
+  const [totpUri, setTotpUri] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [totpError, setTotpError] = useState<string | null>(null);
-  const totpCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Modal mounts its children only once open, so draw when the canvas arrives, not on fetch.
+  const pairCanvas = useCallback((canvas: HTMLCanvasElement | null) => { if (canvas && pairQr) drawQR(canvas, pairQr); }, [pairQr]);
+  const totpCanvas = useCallback((canvas: HTMLCanvasElement | null) => { if (canvas && totpUri) drawQR(canvas, totpUri); }, [totpUri]);
 
   // Recovery Codes Modal
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
@@ -136,6 +144,8 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
   const closePairModal = () => {
     setShowPairModal(false);
     setPairStartedAt(null);
+    setPairPin('');
+    setPairQr('');
     fetchDevices();
   };
 
@@ -211,14 +221,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
       const exp = new Date(data.expiresAt).getTime();
       setPairExpiresAt(exp);
       setCountdown(Math.floor((exp - Date.now()) / 1000));
-
-      if (qrCanvasRef.current && data.qrPayload) {
-        QRCode.toCanvas(qrCanvasRef.current, data.qrPayload, {
-          width: 200,
-          margin: 1,
-          color: { dark: '#0d0f14', light: '#4deeea' },
-        });
-      }
+      setPairQr(data.qrPayload);
     } catch (err) {
       if (!isCancelled(err)) alert(errorMessage(err, 'Failed to generate pairing token'));
       closePairModal();
@@ -252,9 +255,17 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
   // The grant is held only for as long as this flow runs, and is spent by the enable step.
   const [totpGrant, setTotpGrant] = useState('');
 
+  const closeTotpModal = () => {
+    setShowTotpModal(false);
+    setTotpGrant('');
+  };
+
   const startTOTPSetup = async (grant: string) => {
     setShowTotpModal(true);
     setTotpError(null);
+    setTotpSecret('');
+    setTotpUri('');
+    setTotpCode('');
     setTotpGrant(grant);
     try {
       const data = await apiJson('/api/user/mfa/totp/setup', parseTOTPSetup, {
@@ -262,14 +273,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
         stepUpToken: grant,
       });
       setTotpSecret(data.secret);
-
-      if (totpCanvasRef.current) {
-        QRCode.toCanvas(totpCanvasRef.current, data.uri, {
-          width: 200,
-          margin: 1,
-          color: { dark: '#0d0f14', light: '#4deeea' },
-        });
-      }
+      setTotpUri(data.uri);
     } catch (err) {
       setTotpError(errorMessage(err, 'Failed to initialize TOTP'));
     }
@@ -285,15 +289,13 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
         body: JSON.stringify({ secret: totpSecret, code: totpCode }),
         stepUpToken: totpGrant,
       });
-      setShowTotpModal(false);
-      setTotpGrant('');
+      closeTotpModal();
       setRecoveryCodes(codes);
       setShowRecoveryModal(true);
       onUserUpdate();
     } catch (err) {
       if (isStepUpRequired(err)) {
-        setShowTotpModal(false);
-        setTotpGrant('');
+        closeTotpModal();
         requestStepUp('totp');
         return;
       }
@@ -309,6 +311,8 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
       });
       setRecoveryCodes(codes);
       setShowRecoveryModal(true);
+      // Clears the legacy-codes notice.
+      onUserUpdate();
     } catch (err) {
       if (isStepUpRequired(err)) {
         requestStepUp('recovery-codes');
@@ -591,6 +595,12 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
             <span>Generate new codes</span>
           </button>
         </div>
+        {user.recoveryCodesNeedRegeneration && (
+          <div className="alert-box warn" role="status">
+            <ShieldAlert size={16} />
+            <span>Your recovery codes use an older format. They still work, but select <strong>Generate new codes</strong> to replace them, then store the new set.</span>
+          </div>
+        )}
       </div>
 
       <div className="settings-section">
@@ -623,146 +633,121 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
         <SessionList sessions={inventory.sessions} apps={inventory.apps} logouts={inventory.logouts} onRevokeSession={(sess) => handleRevokeSession(sess.id, sess.current)} />
       </div>
 
-      {/* Device Pairing Modal (90s Ephemeral Key / QR) */}
-      {stepUpPrompt}
-
       {showPairModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>Pair KySecurity Authenticator</h3>
-              <button className="close-btn" onClick={closePairModal}>
-                ×
-              </button>
+        <Modal title="Pair KySecurity Authenticator" onClose={closePairModal}>
+          <div className="modal-body text-center">
+            <p className="modal-desc">
+              Open the <strong>KySecurity Authenticator</strong> app on your mobile device and scan the QR code or enter the pairing PIN.
+            </p>
+            <p className="modal-desc">
+              This adds a different device without removing the paired devices listed above. Pairing the same device identifier updates that device.
+            </p>
+
+            <div className="qr-container">
+              <canvas ref={pairCanvas} />
             </div>
-            <div className="modal-body text-center">
-              <p className="modal-desc">
-                Open the <strong>KySecurity Authenticator</strong> app on your mobile device and scan the QR code or enter the pairing PIN.
-              </p>
-              <p className="modal-desc">
-                This adds a different device without removing the paired devices listed above. Pairing the same device identifier updates that device.
-              </p>
 
-              <div className="qr-container">
-                <canvas ref={qrCanvasRef} />
-              </div>
-
-              <div className="pin-box">
-                <span className="pin-label">PAIRING PIN</span>
-                <span className="pin-digits">{pairPin || '••••••'}</span>
-              </div>
-
-              <div className="timer-bar-wrap">
-                <div className="timer-info">
-                  <Clock size={14} className="icon-cyan" />
-                  <span>Valid for {countdown}s</span>
-                </div>
-                <div className="timer-progress-bg">
-                  <div
-                    className="timer-progress-fill"
-                    style={{ width: `${(countdown / 90) * 100}%` }}
-                  />
-                </div>
-              </div>
+            <div className="pin-box">
+              <span className="pin-label">PAIRING PIN</span>
+              <span className="pin-digits">{pairPin || '••••••'}</span>
             </div>
-            <div className="modal-footer">
-              <button className="secondary-btn" onClick={closePairModal}>
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* TOTP Setup Modal */}
-      {showTotpModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>Configure TOTP Authenticator</h3>
-              <button className="close-btn" onClick={() => setShowTotpModal(false)}>
-                ×
-              </button>
-            </div>
-            <form onSubmit={handleEnableTOTP} className="modal-body">
-              <p className="modal-desc">
-                Scan this QR code in your authenticator app, then enter the generated 6-digit verification code below. This replaces the account's current TOTP credential, if any.
-              </p>
-
-              <div className="qr-container">
-                <canvas ref={totpCanvasRef} />
+            <div className="timer-bar-wrap">
+              <div className="timer-info">
+                <Clock size={14} className="icon-cyan" />
+                <span>Valid for {countdown}s</span>
               </div>
-
-              <div className="secret-key-display">
-                <span className="secret-label">Secret:</span>
-                <code className="secret-code">{totpSecret}</code>
-              </div>
-
-              {totpError && <div className="alert-box error sm">{totpError}</div>}
-
-              <div className="form-group mt-3">
-                <label className="form-label">6-Digit Verification Code</label>
-                <input
-                  type="text"
-                  className="form-input text-center text-mono text-large"
-                  placeholder="000000"
-                  maxLength={6}
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value)}
-                  autoFocus
-                  required
+              <div className="timer-progress-bg">
+                <div
+                  className="timer-progress-fill"
+                  style={{ width: `${(countdown / 90) * 100}%` }}
                 />
               </div>
-
-              <div className="modal-footer">
-                <button type="button" className="secondary-btn" onClick={() => setShowTotpModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="primary-btn" disabled={totpCode.length < 6}>
-                  Verify & Enable
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
-        </div>
+          <div className="modal-footer">
+            <button type="button" className="secondary-btn" onClick={closePairModal}>
+              Done
+            </button>
+          </div>
+        </Modal>
       )}
 
-      {/* Recovery Codes Modal */}
-      {showRecoveryModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>Backup Recovery Codes</h3>
-              <button className="close-btn" onClick={() => setShowRecoveryModal(false)}>
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="alert-box warn">
-                <ShieldAlert size={16} />
-                <span>Save these backup codes securely. Each code can be used exactly once.</span>
-              </div>
+      {showTotpModal && (
+        <Modal title="Configure TOTP Authenticator" onClose={closeTotpModal}>
+          <form onSubmit={handleEnableTOTP} className="modal-body">
+            <p className="modal-desc">
+              Scan this QR code in your authenticator app, then enter the generated 6-digit verification code below. This replaces the account's current TOTP credential, if any.
+            </p>
 
-              <div className="recovery-codes-grid">
-                {recoveryCodes.map((c, i) => (
-                  <div key={i} className="recovery-code-item">
-                    <code>{c}</code>
-                  </div>
-                ))}
-              </div>
+            <div className="qr-container">
+              <canvas ref={totpCanvas} />
             </div>
+
+            <div className="secret-key-display">
+              <span className="secret-label">Secret:</span>
+              <code className="secret-code">{totpSecret}</code>
+            </div>
+
+            {totpError && <div className="alert-box error sm" role="alert">{totpError}</div>}
+
+            <div className="form-group mt-3">
+              <label className="form-label" htmlFor="totp-code">6-Digit Verification Code</label>
+              <input
+                id="totp-code"
+                type="text"
+                className="form-input text-center text-mono text-large"
+                placeholder="000000"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value)}
+                autoFocus
+                required
+              />
+            </div>
+
             <div className="modal-footer">
-              <button className="secondary-btn" onClick={copyRecoveryCodes}>
-                {copied ? <Check size={14} /> : <Copy size={14} />}
-                <span>{copied ? 'Copied' : 'Copy All'}</span>
+              <button type="button" className="secondary-btn" onClick={closeTotpModal}>
+                Cancel
               </button>
-              <button className="primary-btn" onClick={() => setShowRecoveryModal(false)}>
-                I Have Saved Them
+              <button type="submit" className="primary-btn" disabled={totpCode.length < 6}>
+                Verify & Enable
               </button>
             </div>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
+
+      {showRecoveryModal && (
+        <Modal title="Backup Recovery Codes" onClose={() => setShowRecoveryModal(false)}>
+          <div className="modal-body">
+            <div className="alert-box warn">
+              <ShieldAlert size={16} />
+              <span>Save these backup codes securely. Each code can be used exactly once.</span>
+            </div>
+
+            <div className="recovery-codes-grid">
+              {recoveryCodes.map((c, i) => (
+                <div key={i} className="recovery-code-item">
+                  <code>{c}</code>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="secondary-btn" onClick={copyRecoveryCodes}>
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              <span>{copied ? 'Copied' : 'Copy All'}</span>
+            </button>
+            <button type="button" className="primary-btn" onClick={() => setShowRecoveryModal(false)}>
+              I Have Saved Them
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {stepUpPrompt}
     </div>
   );
 };

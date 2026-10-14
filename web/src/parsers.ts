@@ -134,6 +134,7 @@ export function parseUser(value: unknown): User {
     locallyDisabled: o.locallyDisabled === true,
     mfaMethods: strArray(o.mfaMethods),
     createdAt: optStr(o, 'createdAt'),
+    recoveryCodesNeedRegeneration: o.recoveryCodesNeedRegeneration === true,
   };
 }
 
