@@ -248,6 +248,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"GET", "/api/admin/systems/{id}/deliveries", permRead, false, http.HandlerFunc(adminH.ListSyncDeliveries)},
 		{"POST", "/api/admin/systems/{id}/deliveries/{token}/read-back", permAdmin, false, http.HandlerFunc(adminH.ReadBackSyncDelivery)},
 		{"POST", "/api/admin/systems/{id}/deliveries/{token}/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeSyncDelivery)},
+		{"POST", "/api/admin/systems/{id}/deliveries/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeSyncDeliveries)},
 		{"GET", "/api/admin/systems/{id}/provisioning", permRead, false, http.HandlerFunc(adminH.ListProvisioningState)},
 		{"POST", "/api/admin/systems/{id}/provisioning/{userId}/retry", permAdmin, false, http.HandlerFunc(adminH.RetryProvisioning)},
 		{"GET", "/api/admin/systems/{id}/reconcile", permRead, false, http.HandlerFunc(adminH.ListReconcileJobs)},

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/scim"
@@ -347,12 +348,43 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 	if err != nil || len(events) == 0 {
 		return err
 	}
-
-	// Cache systems and their decrypted secrets for this pass.
-	systems := map[string]*store.PairedSystem{}
-	secrets := map[string]string{}
-
+	// A claim holds at most one event per connector/user, so connectors run concurrently
+	// while each keeps claim order. One slow target then costs only its own slot.
+	var order []string
+	bySystem := map[string][]store.AccountSyncEvent{}
 	for _, ev := range events {
+		if bySystem[ev.SystemID] == nil {
+			order = append(order, ev.SystemID)
+		}
+		bySystem[ev.SystemID] = append(bySystem[ev.SystemID], ev)
+	}
+	errs := make([]error, len(order))
+	slots := make(chan struct{}, dispatchConcurrency)
+	var wg stdsync.WaitGroup
+	for i, id := range order {
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			errs[i] = e.dispatchSystem(ctx, bySystem[id])
+		})
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+// dispatchConcurrency bounds connectors delivered at once in one pass.
+const dispatchConcurrency = 4
+
+// dispatchSystem delivers one connector's claimed events in order. A store failure
+// stops this connector only; its unsent claims expire with their leases.
+func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncEvent) error {
+	var sys *store.PairedSystem
+	var secret string
+	loaded, haveSecret := false, false
+	for _, ev := range events {
+		if ctx.Err() != nil {
+			return nil
+		}
 		begun, err := e.store.BeginSyncDelivery(ev, deliveryLease)
 		if err != nil {
 			return err
@@ -361,18 +393,17 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 			continue
 		}
 
-		sys, ok := systems[ev.SystemID]
-		if !ok {
+		if !loaded {
 			sys, err = e.store.GetPairedSystemByID(ev.SystemID)
 			if err != nil {
 				_ = e.store.FinishSyncDelivery(ev, "pending", "", ev.Attempts, ev.NextAttempt)
 				return err
 			}
-			systems[ev.SystemID] = sys
+			loaded = true
 			if sys != nil {
-				if secret, serr := e.SigningSecret(sys); serr == nil {
-					secrets[ev.SystemID] = secret
-				}
+				var serr error
+				secret, serr = e.SigningSecret(sys)
+				haveSecret = serr == nil
 			}
 		}
 
@@ -390,8 +421,7 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 			}
 			continue
 		}
-		secret, ok := secrets[ev.SystemID]
-		if !ok {
+		if !haveSecret {
 			next := time.Now().UTC().Add(retryDelay(ev.Attempts))
 			if err := e.store.FinishSyncDelivery(ev, "pending", "signing secret unavailable", ev.Attempts+1, &next); err != nil {
 				return err
@@ -446,6 +476,10 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 					return err
 				}
 				continue
+			}
+			if ctx.Err() != nil {
+				// Shutdown before the request was written spends no attempt.
+				return e.store.FinishSyncDelivery(ev, "pending", "", ev.Attempts, ev.NextAttempt)
 			}
 			attempts := ev.Attempts + 1
 			if attempts >= 5 {

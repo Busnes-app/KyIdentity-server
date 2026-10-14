@@ -165,7 +165,7 @@ const upstreamGroupColumns = `g.id,g.name,g.description,g.source_connector_id,g.
 
 // GetUpstreamGroup returns the group and its members only if this connector owns it.
 func (s *Store) GetUpstreamGroup(connectorID, id string) (*UpstreamGroup, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.rdb.Begin()
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +208,7 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 	if count > 200 {
 		count = 200
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.rdb.Begin()
 	if err != nil {
 		return nil, 0, err
 	}

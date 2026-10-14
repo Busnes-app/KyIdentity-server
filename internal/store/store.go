@@ -18,6 +18,9 @@ import (
 
 type Store struct {
 	db *sql.DB
+	// rdb serves read-only snapshot transactions, which must not take the
+	// IMMEDIATE write lock db's transactions begin with.
+	rdb *sql.DB
 }
 
 var ErrLastActiveAdmin = errors.New("cannot remove the last active administrator")
@@ -41,16 +44,30 @@ func New(dbPath string) (*Store, error) {
 	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(time.Hour)
 
-	s := &Store{db: db}
+	s := &Store{db: db, rdb: db}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("schema creation failed: %w", err)
 	}
-
+	// A second :memory: connection would be a different, empty database.
+	if dbPath != ":memory:" {
+		rdb, err := sql.Open("sqlite", fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=query_only(1)", dbPath))
+		if err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("failed to open sqlite read pool: %w", err)
+		}
+		rdb.SetMaxOpenConns(runtime.NumCPU() + 4)
+		rdb.SetMaxIdleConns(4)
+		rdb.SetConnMaxLifetime(time.Hour)
+		s.rdb = rdb
+	}
 	return s, nil
 }
 
 func (s *Store) Close() error {
+	if s.rdb != s.db {
+		_ = s.rdb.Close()
+	}
 	return s.db.Close()
 }
 
@@ -1256,6 +1273,11 @@ func (s *Store) DeletePairedSystem(systemID string, audit *AuditEvent) (bool, er
 	}
 	if n == 0 {
 		return false, nil
+	}
+	// Its attempts go with the delete_sync_delivery_system trigger; queued events
+	// could never be delivered and would otherwise be revived on every reconcile.
+	if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE system_id = ?`, systemID); err != nil {
+		return false, err
 	}
 	if err := recordAuditTx(tx, audit); err != nil {
 		return false, err

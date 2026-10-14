@@ -273,7 +273,7 @@ type AppAccessGroup struct {
 }
 
 func (s *Store) ListAppAccessGroups(id, query string, limit, offset int) ([]AppAccessGroup, int, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.rdb.Begin()
 	if err != nil {
 		return nil, 0, err
 	}
