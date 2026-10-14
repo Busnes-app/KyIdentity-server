@@ -209,6 +209,20 @@ func TestNativeDeviceRefreshSwitchesToUnifiedPush(t *testing.T) {
 	if stored.PushTransport != "fcm" || stored.PushToken != "fcm-token-2" || stored.PushP256dh != "" || stored.PushAuth != "" {
 		t.Fatalf("stored device = %+v", stored)
 	}
+
+	// The relay with keys (KyAuth iOS) keeps them, so its pushes stay sealed.
+	sealed := pushTokenRefreshRequest{PushTransport: "fcm", PushToken: "fcm-token-3", PushP256dh: target.PushP256dh, PushAuth: target.PushAuth, IssuedAt: at + 3}
+	sealed.Signature = signPushTarget(t, key, "http://localhost:5867", device.ID, at+3, sealed)
+	if code := call(sealed); code != http.StatusNoContent {
+		t.Fatalf("refresh to fcm with keys = %d", code)
+	}
+	stored, err = db.GetNativeDevice(device.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.PushTransport != "fcm" || stored.PushToken != "fcm-token-3" || stored.PushP256dh != sealed.PushP256dh || stored.PushAuth != sealed.PushAuth {
+		t.Fatalf("stored device = %+v", stored)
+	}
 }
 
 // A linux device refreshes to ubuntupush; fcm is refused for it, and ubuntupush for android.

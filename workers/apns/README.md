@@ -267,7 +267,9 @@ The APNs worker translates this to the APS payload:
 {
   "aps": {
     "alert": { "title": "Sign-in approval", "body": "Approve the request in KySecurity." },
-    "sound": "default"
+    "sound": "default",
+    "mutable-content": 1,
+    "category": "MFA_CHALLENGE"
   },
   "type": "mfa_challenge",
   "challengeId": "..."
@@ -275,6 +277,8 @@ The APNs worker translates this to the APS payload:
 ```
 
 Both platforms handle the full payload identically client-side.
+
+A device that registered `pushP256dh`/`pushAuth` (KyAuth iOS) gets `data` sealed instead: `{"type": "mfa_challenge", "kyauth": "<968-character base64url RFC 8291 body>"}`. The Worker passes it through unchanged; the title and body are KyIdentity's fixed text, so the relay and APNs see no user, device or challenge identifier. `mutable-content: 1` hands the alert to KyAuth's notification service extension, which replaces the text with its own fixed strings. Keep the value cap (`MAX_DATA_VALUE_LENGTH`, 1024) at or above 968: the Worker truncates longer values, and a truncated body cannot be opened.
 
 ## Provider Token Lifecycle
 

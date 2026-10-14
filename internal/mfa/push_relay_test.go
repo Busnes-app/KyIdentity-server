@@ -1,8 +1,11 @@
 package mfa
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -134,5 +137,70 @@ func TestRelaySenderRequiresOKBodyOnSuccess(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "req-bad") {
 		t.Fatalf("error did not include relay request id: %v", err)
+	}
+}
+
+// A device with keys gets the challenge sealed: the relay sees the fixed alert, the type and
+// one fixed-size ciphertext, and no identifier.
+func TestRelaySenderSealsChallengeForDeviceKeys(t *testing.T) {
+	var raw []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	}))
+	defer srv.Close()
+	sender, err := NewRelaySender(RelayConfig{}, RelayConfig{URL: srv.URL, Key: "key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rk := newReceiver(t)
+	dev := store.NativeDevice{
+		ID: "3f9d6a1e-7c2b-4e58-9a0d-5b1c8e2f4a67", UserID: "c81e728d-9d4c-4f63-8b2a-0e5d7f9a1b3c",
+		Platform: "ios", PushToken: strings.Repeat("ab", 32), PushP256dh: rk.p256dh, PushAuth: rk.a64,
+	}
+	ch := MFAChallengePush{ChallengeID: "e4da3b7f-bbce-4345-8d1f-6c2a9e0b7d58", Purpose: "step_up", ExpiresAtMS: time.Now().Add(5 * time.Minute).UnixMilli()}
+	if err := sender.SendPush(dev, ch); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{dev.ID, dev.UserID, ch.ChallengeID, "step_up"} {
+		if strings.Contains(string(raw), id) {
+			t.Fatalf("relay request carries %q: %s", id, raw)
+		}
+	}
+	var sent struct {
+		Title, Body string
+		Data        map[string]string
+	}
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Title != pushTitle || sent.Body != pushBody || len(sent.Data) != 2 || sent.Data["type"] != "mfa_challenge" {
+		t.Fatalf("relay request = %s", raw)
+	}
+	if n := len(sent.Data["kyauth"]); n != 968 {
+		t.Fatalf("kyauth is %d characters, want the fixed 968 (relay cap 1024)", n)
+	}
+	sealed, err := base64.RawURLEncoding.DecodeString(sent.Data["kyauth"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(decryptRFC8291(t, rk, sealed), &got); err != nil {
+		t.Fatal(err)
+	}
+	if want := challengeData(dev, ch); !maps.Equal(got, want) {
+		t.Fatalf("decrypted %v, want %v", got, want)
+	}
+}
+
+func TestRelaySenderRefusesBadDeviceKeys(t *testing.T) {
+	sender, err := NewRelaySender(RelayConfig{}, RelayConfig{URL: "https://relay.invalid", Key: "key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sender.SendPush(store.NativeDevice{ID: "d", Platform: "ios", PushToken: "t", PushP256dh: "AAAA", PushAuth: "AAAA"},
+		MFAChallengePush{ChallengeID: "c", Purpose: "login"})
+	if err == nil || !strings.Contains(err.Error(), "encrypt") {
+		t.Fatalf("err = %v, want an encryption failure before any send", err)
 	}
 }

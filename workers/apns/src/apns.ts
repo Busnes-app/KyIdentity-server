@@ -130,6 +130,30 @@ export function isStaleResponse(status: number, _response: string): boolean {
 }
 
 /**
+ * The APS payload (matching FCM's structure for consistency).
+ */
+export function apnsPayload(message: PushMessage): Record<string, unknown> {
+  const data = message.data ?? {};
+  return {
+    aps: {
+      alert: {
+        title: message.title,
+        body: message.body,
+      },
+      sound: "default",
+      // Runs KyAuth iOS's notification service extension, which replaces the
+      // alert with its own fixed text. Without it the alert above shows as is.
+      "mutable-content": 1,
+      // The category binds the client's registered approval actions; do not
+      // assign a mail-specific fallback category to KySecurity notifications.
+      ...(data.type === "mfa_challenge" ? { category: "MFA_CHALLENGE" } : {}),
+    },
+    // Spread the data fields into top-level custom keys (matching fcm.ts pattern)
+    ...data,
+  };
+}
+
+/**
  * Send a single push via APNs HTTP/2. Body shape mirrors FCM's for consistency.
  */
 export async function sendApnsMessage(
@@ -160,22 +184,7 @@ export async function sendApnsMessage(
   const host = config.environment === "production" ? APNS_PRODUCTION_HOST : APNS_SANDBOX_HOST;
   const url = `https://${host}/3/device/${token}`;
 
-  // Build the APS payload (matching FCM's structure for consistency)
-  const data = message.data ?? {};
-  const payload = {
-    aps: {
-      alert: {
-        title: message.title,
-        body: message.body,
-      },
-      sound: "default",
-      // The category binds the client's registered approval actions; do not
-      // assign a mail-specific fallback category to KySecurity notifications.
-      ...(data.type === "mfa_challenge" ? { category: "MFA_CHALLENGE" } : {}),
-    },
-    // Spread the data fields into top-level custom keys (matching fcm.ts pattern)
-    ...data,
-  };
+  const payload = apnsPayload(message);
 
   try {
     const resp = await fetch(url, {
