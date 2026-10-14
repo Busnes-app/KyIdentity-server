@@ -358,43 +358,47 @@ func (s *Store) ListUpstreamUsers(connectorID, attribute, value string, startInd
 	return out, total, rows.Err()
 }
 
-// UpdateUpstreamUser writes the upstream's view of an owned account: profile fields and
-// its active flag. Local decisions (role, override, password, pending) are folded in
-// from the row as it is at write time, under the same lock, so a local disable landing
-// between the upstream's read and write is never lost. The external id never changes.
-func (s *Store) UpdateUpstreamUser(u *User, audit *AuditEvent) error {
-	err := s.updateUser(u, false, audit, func(tx *sql.Tx, current *User) error {
-		if current.SourceConnectorID == "" || current.SourceConnectorID != u.SourceConnectorID {
-			return ErrNotFound
+// UpdateUpstreamUser applies an upstream write to an owned account. edit changes a copy
+// of the row read under the write lock, so it sees every concurrent write and may refuse
+// a stale If-Match. Only the profile fields and the active flag are the upstream's: role,
+// override, password and pending stay as the row has them, the external id never
+// changes, and status is re-derived.
+func (s *Store) UpdateUpstreamUser(connectorID, id string, audit *AuditEvent, edit func(u *User) error) (*User, error) {
+	stored, err := s.updateUser(id, audit, func(tx *sql.Tx, u *User) (bool, error) {
+		current := *u
+		if current.SourceConnectorID == "" || current.SourceConnectorID != connectorID {
+			return false, ErrNotFound
 		}
-		if current.ExternalID != u.ExternalID {
-			return errors.New("external id is immutable")
+		if err := edit(u); err != nil {
+			return false, err
+		}
+		if u.ExternalID != current.ExternalID {
+			return false, errors.New("external id is immutable")
 		}
 		if !strings.EqualFold(current.Username, u.Username) || !strings.EqualFold(current.Email, u.Email) {
 			privileged := current.Role == "admin"
 			if !privileged {
 				if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM admin_delegations WHERE user_id=?)`, u.ID).Scan(&privileged); err != nil {
-					return err
+					return false, err
 				}
 			}
 			if privileged {
-				return ErrPrivilegedIdentity
+				return false, ErrPrivilegedIdentity
 			}
 		}
 		if err := rejectCrossIdentityTx(tx, u.ID, u.Username, u.Email); err != nil {
-			return err
+			return false, err
 		}
-		u.Role, u.LocallyDisabled, u.PasswordHash, u.Pending = current.Role, current.LocallyDisabled, current.PasswordHash, current.Pending
-		u.ApplySourceState()
-		return nil
+		u.SourceConnectorID, u.Role, u.LocallyDisabled, u.PasswordHash, u.Pending, u.EndsAt = current.SourceConnectorID, current.Role, current.LocallyDisabled, current.PasswordHash, current.Pending, current.EndsAt
+		return false, nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 	if isUniqueViolation(err) {
-		return ErrUserConflict
+		return nil, ErrUserConflict
 	}
-	return err
+	return stored, err
 }
 
 // DeleteSCIMConnector removes the connector and its tokens. Its accounts become local:
@@ -422,12 +426,14 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 			return err
 		}
 		if disableUsers {
-			var total, ownedAdmins int
-			if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(source_connector_id=?),0) FROM users WHERE `+activeAdminSQL, id).Scan(&total, &ownedAdmins); err != nil {
+			var ownedAdmins bool
+			if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE source_connector_id=? AND `+activeAdminSQL+`)`, id).Scan(&ownedAdmins); err != nil {
 				return err
 			}
-			if ownedAdmins > 0 && ownedAdmins >= total {
-				return ErrLastActiveAdmin
+			if ownedAdmins {
+				if err := requirePermanentAdminTx(tx, `source_connector_id IS NOT ?`, id); err != nil {
+					return err
+				}
 			}
 		}
 		for _, u := range owned {

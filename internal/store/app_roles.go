@@ -146,6 +146,9 @@ func (s *Store) ListAppRoles(appID string) ([]AppRole, error) {
 		roles = append(roles, *r)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	out := make([]AppRole, 0, len(roles))
 	for _, r := range roles {
 		if r.Users, err = principalsTx(tx, roleUsersSQL, r.ID); err != nil {

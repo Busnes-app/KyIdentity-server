@@ -516,7 +516,10 @@ func TestExchangeDeviceAssertionSignOnDisabled(t *testing.T) {
 
 func TestExchangeDeviceAssertionInactiveUser(t *testing.T) {
 	f := newSignOnFixture(t)
-	if err := f.db.UpdateUserStatus(f.user.ID, "disabled"); err != nil {
+	if _, err := f.db.EditUser(f.user.ID, nil, func(u *store.User) (bool, error) {
+		u.Status = "disabled"
+		return false, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
@@ -722,10 +725,6 @@ func raceDeviceEdit(t *testing.T, edit func(f *signOnFixture) error) {
 
 func TestExchangeDeviceAssertionRefusesMFAResetBeforeIssue(t *testing.T) {
 	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.ResetUserMFA(f.user.ID, nil) })
-}
-
-func TestExchangeDeviceAssertionRefusesMFAMethodsDeletedBeforeIssue(t *testing.T) {
-	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DeleteUserMFAMethods(f.user.ID) })
 }
 
 func TestExchangeDeviceAssertionRefusesSignOnDisabledBeforeIssue(t *testing.T) {

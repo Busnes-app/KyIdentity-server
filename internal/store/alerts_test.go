@@ -33,7 +33,7 @@ func alertAdmin(t *testing.T, s *Store, name string) *User {
 	t.Helper()
 	u := createTestUserNamed(t, s, name)
 	u.Role = "admin"
-	if err := s.UpdateUser(u); err != nil {
+	if err := s.UpdateUserWithSyncEvents(u, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	return u
@@ -468,7 +468,7 @@ func TestAlertSettingsRecipientsMustBeAllowedToRead(t *testing.T) {
 	defer cleanup()
 	admin := createTestUserNamed(t, s, "root")
 	admin.Role = "admin"
-	if err := s.UpdateUser(admin); err != nil {
+	if err := s.UpdateUserWithSyncEvents(admin, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	auditor := createTestUserNamed(t, s, "auditor")
@@ -496,12 +496,12 @@ func TestAlertDeliveriesRetryAndRecheckRecipients(t *testing.T) {
 	defer cleanup()
 	admin := createTestUserNamed(t, s, "root")
 	admin.Role = "admin"
-	if err := s.UpdateUser(admin); err != nil {
+	if err := s.UpdateUserWithSyncEvents(admin, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	later := createTestUserNamed(t, s, "later")
 	later.Role = "admin"
-	if err := s.UpdateUser(later); err != nil {
+	if err := s.UpdateUserWithSyncEvents(later, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAlertSettings(AlertSettings{LoginFailureThreshold: 10, LoginFailureWindowSeconds: 600, Recipients: []string{admin.ID, later.ID}}, nil); err != nil {
@@ -516,7 +516,7 @@ func TestAlertDeliveriesRetryAndRecheckRecipients(t *testing.T) {
 	}
 	// Recipients are re-checked when the mail is sent, not only when configured.
 	later.Role = "user"
-	if err := s.UpdateUser(later); err != nil {
+	if err := s.UpdateUserWithSyncEvents(later, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -563,7 +563,7 @@ func TestAlertDeliveryGivesUpVisibly(t *testing.T) {
 	defer cleanup()
 	admin := createTestUserNamed(t, s, "root")
 	admin.Role = "admin"
-	if err := s.UpdateUser(admin); err != nil {
+	if err := s.UpdateUserWithSyncEvents(admin, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAlertSettings(AlertSettings{LoginFailureThreshold: 10, LoginFailureWindowSeconds: 600, Recipients: []string{admin.ID}}, nil); err != nil {
@@ -593,7 +593,7 @@ func TestOutageResolutionIsMailed(t *testing.T) {
 	defer cleanup()
 	admin := createTestUserNamed(t, s, "root")
 	admin.Role = "admin"
-	if err := s.UpdateUser(admin); err != nil {
+	if err := s.UpdateUserWithSyncEvents(admin, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAlertSettings(AlertSettings{LoginFailureThreshold: 10, LoginFailureWindowSeconds: 600, Recipients: []string{admin.ID}}, nil); err != nil {

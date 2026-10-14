@@ -418,7 +418,7 @@ func TestReconcileDriftComparesBoundedText(t *testing.T) {
 	app := provisioningFixture(t, s, "target")
 	u := createTestUserNamed(t, s, "long")
 	u.DisplayName = strings.Repeat("é", 200)
-	if err := s.UpdateUser(u); err != nil {
+	if err := s.UpdateUserWithSyncEvents(u, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {

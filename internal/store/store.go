@@ -527,6 +527,9 @@ func (s *Store) migratePairedSystemsMetadata() error {
 			hasIcon = true
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	if !hasDesc {
 		if _, err := s.db.Exec(`ALTER TABLE paired_systems ADD COLUMN description TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
@@ -870,52 +873,57 @@ func (s *Store) ListUsers() ([]User, error) {
 		}
 		users = append(users, *u)
 	}
-	return users, nil
+	return users, rows.Err()
 }
 
-func (s *Store) UpdateUser(u *User) error {
-	query := `UPDATE users SET display_name = ?, email = ?, role = ?, status = ?, updated_at = ? WHERE id = ?`
-	u.UpdatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, u.DisplayName, u.Email, u.Role, u.Status, u.UpdatedAt, u.ID)
-	return enrollmentMutationError(err)
-}
-
-// UpdateUserWithSyncEvents preserves the active-admin invariant and writes its outbox event
-// in the same transaction as the account change.
+// UpdateUserWithSyncEvents writes every local field of u (profile unless source-owned,
+// password, pending, role, status, override, end date) over the row. It suits a caller
+// holding the whole intended state; a request that changes some fields uses EditUser.
 func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *AuditEvent) error {
-	return s.updateUser(u, revokeAccess, audit, nil)
+	stored, err := s.updateUser(u.ID, audit, func(_ *sql.Tx, next *User) (bool, error) {
+		if next.SourceConnectorID == "" {
+			next.Username, next.DisplayName, next.Email = u.Username, u.DisplayName, u.Email
+		}
+		next.PasswordHash, next.Pending, next.Role, next.Status, next.LocallyDisabled, next.EndsAt = u.PasswordHash, u.Pending, u.Role, u.Status, u.LocallyDisabled, u.EndsAt
+		return revokeAccess, nil
+	})
+	if err == nil {
+		*u = *stored
+	}
+	return err
 }
 
-// updateUser is the one account-update transaction. prepare, when given, runs after the
-// current row is read under the write lock and before anything is written, so a caller
-// can refuse the change or fold local state into u without a lost update.
-func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepare func(tx *sql.Tx, current *User) error) error {
+// EditUser applies one request's changes to the row as read under the write lock, so a
+// field the request does not touch keeps whatever a concurrent write left there. edit
+// may refuse; it reports whether the change must revoke the account's access.
+func (s *Store) EditUser(id string, audit *AuditEvent, edit func(u *User) (revokeAccess bool, err error)) (*User, error) {
+	return s.updateUser(id, audit, func(_ *sql.Tx, u *User) (bool, error) { return edit(u) })
+}
+
+// updateUser is the one account-update transaction. edit changes a copy of the row read
+// under the write lock, before anything is written, so no caller writes a stale field.
+// A source-owned row's status is then re-derived from its source state.
+func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u *User) (revokeAccess bool, err error)) (*User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
-	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, u.ID))
+	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if current == nil {
-		return sql.ErrNoRows
+		return nil, sql.ErrNoRows
 	}
-	if prepare != nil {
-		if err := prepare(tx, current); err != nil {
-			return err
-		}
-		u.EndsAt = current.EndsAt
-	} else {
-		// A local caller never owns the upstream's fields: take them from the row as it is
-		// now, so an upstream write landing since the caller's read is not undone.
-		u.SourceConnectorID, u.ExternalID, u.SourceActive = current.SourceConnectorID, current.ExternalID, current.SourceActive
-		if current.SourceConnectorID != "" {
-			u.Username, u.DisplayName, u.Email = current.Username, current.DisplayName, current.Email
-		}
-		u.ApplySourceState()
+	next := *current
+	u := &next
+	revokeAccess, err := edit(tx, u)
+	if err != nil {
+		return nil, err
 	}
+	u.ID = current.ID
+	u.ApplySourceState()
 	oldRole, oldStatus, oldEmail := current.Role, current.Status, current.Email
 	// A newly set end date is a schedule: it must lie ahead, and scheduling the last
 	// administrator's end is refused like removing them would be. An end date the row
@@ -923,79 +931,57 @@ func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepar
 	schedulingEnd := u.EndsAt != nil && (current.EndsAt == nil || !u.EndsAt.Equal(*current.EndsAt))
 	if schedulingEnd {
 		if err := checkExpiry(u.EndsAt, time.Now().UTC()); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active" || schedulingEnd) {
-		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
-			return err
-		}
-		if admins <= 1 {
-			return ErrLastActiveAdmin
+		if err := requirePermanentAdminTx(tx, `id<>?`, u.ID); err != nil {
+			return nil, err
 		}
 	}
 	now := time.Now().UTC()
-	u.UpdatedAt = now
 	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
-		return enrollmentMutationError(err)
+		return nil, enrollmentMutationError(err)
 	}
 	if !strings.EqualFold(oldEmail, u.Email) {
 		// A new address is unproven, and a link mailed to the old one must not act on it.
 		if _, err := tx.Exec(`UPDATE users SET email_verified_at = NULL WHERE id = ?`, u.ID); err != nil {
-			return err
+			return nil, err
 		}
 		if err := expireAccountTokensTx(tx, now, `user_id=?`, u.ID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	stored, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, u.ID))
-	if err != nil || stored == nil {
-		return err
+	if err != nil {
+		return nil, err
 	}
 	switch {
 	case oldStatus == "active" && stored.Status == "disabled":
 		if err := offboardUserTx(tx, stored, false, now); err != nil {
-			return err
+			return nil, err
 		}
 	case revokeAccess:
 		if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := queueUserUpdateTx(tx, stored, now); err != nil {
-		return err
+		return nil, err
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
-		return err
+		return nil, err
 	}
 	if err := recordAuditTx(tx, audit); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
-}
-
-func (s *Store) UpdateUserPassword(userID, passwordHash string) error {
-	query := `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.Exec(query, passwordHash, time.Now().UTC(), userID)
-	return err
-}
-
-func (s *Store) UpdateUserStatus(userID, status string) error {
-	query := `UPDATE users SET status = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.Exec(query, status, time.Now().UTC(), userID)
-	return err
+	return stored, tx.Commit()
 }
 
 func (s *Store) CountAdmins() (int, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&count)
 	return count, err
-}
-
-func (s *Store) DeleteUser(userID string) error {
-	_, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, userID)
-	return err
 }
 
 // DeleteUserWithSyncEvents atomically offboards a user and removes the directory row.
@@ -1016,12 +1002,8 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 		return sql.ErrNoRows
 	}
 	if u.Role == "admin" && u.Status == "active" {
-		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
+		if err := requirePermanentAdminTx(tx, `id<>?`, userID); err != nil {
 			return err
-		}
-		if admins <= 1 {
-			return ErrLastActiveAdmin
 		}
 	}
 	now := time.Now().UTC()
@@ -1227,7 +1209,7 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 		}
 		systems = append(systems, ps)
 	}
-	return systems, nil
+	return systems, rows.Err()
 }
 
 func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
@@ -1246,7 +1228,7 @@ func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
 		}
 		systems = append(systems, ps)
 	}
-	return systems, nil
+	return systems, rows.Err()
 }
 
 func (s *Store) UpdatePairedSystemStatus(systemID, status string) error {
@@ -1904,42 +1886,7 @@ func (s *Store) ListUserMFAMethods(userID string) ([]MFAMethod, error) {
 		}
 		methods = append(methods, m)
 	}
-	return methods, nil
-}
-
-func (s *Store) DeleteUserMFAMethods(userID string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.Exec(`UPDATE users SET id=id WHERE id=?`, userID); err != nil {
-		return err
-	}
-	wasCompliant, err := compliantEnrollmentTx(tx, userID)
-	if err != nil {
-		return err
-	}
-
-	if _, err := tx.Exec(`DELETE FROM mfa_methods WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0, can_sign_on = 0 WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE device_pairing_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL`, time.Now().UTC(), userID); err != nil {
-		return err
-	}
-	if err = preserveCompliantEnrollmentTx(tx, userID, wasCompliant); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return methods, rows.Err()
 }
 
 // MFA Challenges
@@ -2279,7 +2226,7 @@ func (s *Store) GetValidRecoveryCodes(userID string) ([]RecoveryCode, error) {
 		}
 		codes = append(codes, c)
 	}
-	return codes, nil
+	return codes, rows.Err()
 }
 
 // RecoveryCodeHMACPrefix marks a keyed recovery-code hash. Unprefixed rows are legacy
@@ -2360,7 +2307,7 @@ func (s *Store) ListOAuthClients() ([]OAuthClient, error) {
 		}
 		clients = append(clients, c)
 	}
-	return clients, nil
+	return clients, rows.Err()
 }
 
 func (s *Store) UpdateOAuthClient(c *OAuthClient) error {
@@ -2622,7 +2569,7 @@ func (s *Store) ListApplications() ([]Application, error) {
 		}
 		apps = append(apps, app)
 	}
-	return apps, nil
+	return apps, rows.Err()
 }
 
 func (s *Store) UpdateApplication(app *Application) error {

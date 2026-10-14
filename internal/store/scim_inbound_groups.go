@@ -231,6 +231,9 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 		groups = append(groups, *g)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
 	out := make([]UpstreamGroup, 0, len(groups))
 	for _, g := range groups {
 		members, err := groupMembersTx(tx, g.ID)
@@ -242,26 +245,33 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 	return out, total, tx.Commit()
 }
 
-// ReplaceUpstreamGroup writes the upstream's full view of an owned group: its name and
-// its exact member set. The whole change applies or none of it does; the external id
-// never changes and every member must be an account this connector owns. expect, when
-// set, is the version the caller read (If-Match): a group changed since then is refused.
-// A rename of a group carrying a required MFA policy fails closed like any other change
-// to such a group, since no local administrator is behind an upstream write.
-func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []string, expect *time.Time, audit *AuditEvent) error {
-	members = uniqueStrings(members)
+// ReplaceUpstreamGroup writes the upstream's view of an owned group: its name and its
+// exact member set. edit changes a copy of the group and its members as read under the
+// write lock, so a PATCH delta lands on the current membership and an If-Match check
+// sees the current version. The whole change applies or none of it does; the external
+// id never changes and every member must be an account this connector owns. A rename of
+// a group carrying a required MFA policy fails closed like any other change to such a
+// group, since no local administrator is behind an upstream write.
+func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, edit func(g *UpstreamGroup) error) error {
 	now := time.Now().UTC()
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		current, err := scanUpstreamGroup(tx.QueryRow(`SELECT `+upstreamGroupColumns+` FROM directory_groups g WHERE g.id=? AND g.source_connector_id=?`, g.ID, connectorID))
+		current, err := scanUpstreamGroup(tx.QueryRow(`SELECT `+upstreamGroupColumns+` FROM directory_groups g WHERE g.id=? AND g.source_connector_id=?`, id, connectorID))
 		if err != nil {
 			return err
 		}
 		if current == nil {
 			return ErrGroupTargetMissing
 		}
-		if expect != nil && !current.UpdatedAt.Equal(*expect) {
-			return ErrGroupVersionStale
+		have, err := groupMembersTx(tx, id)
+		if err != nil {
+			return err
 		}
+		next := &UpstreamGroup{Group: *current, Members: append([]string(nil), have...)}
+		if err := edit(next); err != nil {
+			return err
+		}
+		g, members := &next.Group, uniqueStrings(next.Members)
+		g.ID = current.ID
 		if g.Name != current.Name {
 			var required bool
 			if err := tx.QueryRow(`SELECT required FROM enrollment_policies WHERE group_id=?`, g.ID).Scan(&required); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -286,26 +296,22 @@ func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []str
 		if _, err := tx.Exec(`UPDATE directory_groups SET name=?, external_id=?, updated_at=? WHERE id=?`, g.Name, nullIfEmpty(g.ExternalID), now, g.ID); err != nil {
 			return groupWriteError(err)
 		}
-		have, err := groupMembersTx(tx, g.ID)
-		if err != nil {
-			return err
-		}
 		want := map[string]bool{}
-		for _, id := range members {
-			want[id] = true
+		for _, uid := range members {
+			want[uid] = true
 		}
 		changed := false
-		for _, id := range have {
-			if !want[id] {
-				if _, _, err := applyGroupMembershipTx(tx, g.ID, id, false, nil, ""); err != nil {
+		for _, uid := range have {
+			if !want[uid] {
+				if _, _, err := applyGroupMembershipTx(tx, g.ID, uid, false, nil, ""); err != nil {
 					return err
 				}
 				changed = true
 			}
-			delete(want, id)
+			delete(want, uid)
 		}
-		for id := range want {
-			if _, _, err := applyGroupMembershipTx(tx, g.ID, id, true, nil, ""); err != nil {
+		for uid := range want {
+			if _, _, err := applyGroupMembershipTx(tx, g.ID, uid, true, nil, ""); err != nil {
 				return err
 			}
 			changed = true
@@ -315,7 +321,6 @@ func (s *Store) ReplaceUpstreamGroup(connectorID string, g *Group, members []str
 				return err
 			}
 		}
-		g.UpdatedAt = now
 		return nil
 	})
 }

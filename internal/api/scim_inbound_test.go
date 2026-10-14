@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,7 +178,7 @@ func TestInboundSCIMCannotTakeOverAPromotedAdmin(t *testing.T) {
 	}
 	promoted := mustUser(t, db, create("ext-a", "dana"))
 	promoted.Role = "admin"
-	if err := db.UpdateUser(promoted); err != nil {
+	if err := db.UpdateUserWithSyncEvents(promoted, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	plain := create("ext-b", "erin")
@@ -393,5 +396,77 @@ func TestDisconnectingAConnectorNeedsAChoiceForItsAccounts(t *testing.T) {
 	}
 	if n := countAudit(t, db, "admin.scim_connector_deleted"); n != 1 {
 		t.Fatalf("audit rows = %d", n)
+	}
+}
+
+// together runs every f at once and waits for all of them.
+func together(fs ...func()) {
+	var start, done sync.WaitGroup
+	start.Add(1)
+	done.Add(len(fs))
+	for _, f := range fs {
+		go func() {
+			defer done.Done()
+			start.Wait()
+			f()
+		}()
+	}
+	start.Done()
+	done.Wait()
+}
+
+// PATCH operations apply to the row under the write lock: a displayName PATCH racing an
+// offboarding PATCH never carries a stale active=true back over it.
+func TestInboundSCIMConcurrentPatchesKeepBothChanges(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	connectorID, token := connectorWithToken(t, srv, db, admin, "write")
+	id := provisionedUpstreamUser(t, srv, db, token, "ext-1", "alice")
+	for i := range 25 {
+		name := fmt.Sprintf("Alice %d", i)
+		var off, renamed *httptest.ResponseRecorder
+		together(
+			func() {
+				off = scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+id, `{"Operations":[{"op":"replace","path":"active","value":false}]}`)
+			},
+			func() {
+				renamed = scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+id, `{"Operations":[{"op":"replace","path":"displayName","value":"`+name+`"}]}`)
+			},
+		)
+		if off.Code != http.StatusOK || renamed.Code != http.StatusOK {
+			t.Fatalf("round %d: %d %s / %d %s", i, off.Code, off.Body.String(), renamed.Code, renamed.Body.String())
+		}
+		if u := mustUser(t, db, id); u.SourceActive || u.DisplayName != name {
+			t.Fatalf("round %d lost an update: active=%v name=%q", i, u.SourceActive, u.DisplayName)
+		}
+		if _, err := db.UpdateUpstreamUser(connectorID, id, nil, func(u *store.User) error { u.SourceActive = true; return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// If-Match is compared with the row under the write lock: of two writes carrying the
+// same, then-current version, exactly one lands and the other gets 412.
+func TestInboundSCIMIfMatchIsCheckedUnderTheLock(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	_, token := connectorWithToken(t, srv, db, admin, "write")
+	id := provisionedUpstreamUser(t, srv, db, token, "ext-1", "alice")
+	for i := range 12 {
+		etag := scimCall(t, srv, token, "GET", "/scim/v2/Users/"+id, "").Header().Get("ETag")
+		recs := make([]*httptest.ResponseRecorder, 2)
+		patch := func(n int) func() {
+			return func() {
+				recs[n] = scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+id, fmt.Sprintf(`{"Operations":[{"op":"replace","path":"displayName","value":"Writer %d"}]}`, n), "If-Match", etag)
+			}
+		}
+		together(patch(0), patch(1))
+		codes := []int{recs[0].Code, recs[1].Code}
+		slices.Sort(codes)
+		if codes[0] != http.StatusOK || codes[1] != http.StatusPreconditionFailed {
+			t.Fatalf("round %d: codes %v, want one 200 and one 412", i, codes)
+		}
 	}
 }

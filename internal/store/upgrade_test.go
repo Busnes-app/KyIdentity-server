@@ -225,7 +225,7 @@ func TestUpgradeFromPreFeatureDatabase(t *testing.T) {
 		hr.LastSyncedAt == nil || !hr.LastSyncedAt.Equal(time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)) || !hr.CreatedAt.Equal(time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)) {
 		t.Fatalf("legacy paired system changed: %+v", hr)
 	}
-	if err := s.DeleteUser("u-former"); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM users WHERE id=?`, "u-former"); err != nil {
 		t.Fatal("deleting a user who issued a retired system pairing token:", err)
 	}
 

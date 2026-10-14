@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -150,51 +151,17 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.store.GetUserByID(userID)
-	if err != nil || user == nil {
-		http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
-		return
-	}
-
 	req.DisplayName, req.Email = strings.TrimSpace(req.DisplayName), strings.TrimSpace(req.Email)
-	if user.SourceConnectorID != "" && ((req.DisplayName != "" && req.DisplayName != user.DisplayName) || (req.Email != "" && !strings.EqualFold(req.Email, user.Email))) {
-		http.Error(w, `{"error":"source_owned","error_description":"Name and email of this account are managed by its SCIM connector"}`, http.StatusBadRequest)
-		return
+	var endsAt *time.Time
+	var endsAtErr error
+	if req.EndsAt != nil {
+		endsAt, endsAtErr = parseInstant(*req.EndsAt)
 	}
-	if req.DisplayName != "" {
-		user.DisplayName = req.DisplayName
-	}
-	if req.Email != "" {
-		user.Email = req.Email
-	}
-	wasAdmin, wasRole := user.Role == "admin", user.Role
-	if req.Role == "user" || req.Role == "admin" {
-		user.Role = req.Role
-	}
-	endsAtBefore := user.EndsAt
-	if req.EndsAt != nil && !sameInstant(*req.EndsAt, user.EndsAt) {
-		// The store is the rule; this is the early answer for a changed value.
-		endsAt, err := parseInstant(*req.EndsAt)
-		if err != nil {
-			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
-			return
-		}
-		user.EndsAt = endsAt
-	}
-	wasActive := user.Status == "active"
-	if req.Status == "active" || req.Status == "disabled" {
-		user.Status = req.Status
-		if user.SourceConnectorID != "" {
-			// A local disable is an override the upstream cannot lift; enabling lifts it
-			// but only takes effect if the upstream also wants the account active.
-			user.LocallyDisabled = req.Status == "disabled"
-			user.ApplySourceState()
-		}
-	}
-
-	passwordChanged := req.Password != ""
+	// Hashing is slow, so it happens before the write lock is taken.
+	var passHash string
 	if req.Password != "" {
-		passHash, err := auth.HashPassword(req.Password)
+		var err error
+		passHash, err = auth.HashPassword(req.Password)
 		if argonBusy(w, err) {
 			return
 		}
@@ -202,44 +169,89 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
 			return
 		}
-		user.PasswordHash = passHash
-		// An administrator setting the password is the manual activation path.
-		user.Pending = false
-	}
-	if user.Pending && user.Status == "active" {
-		http.Error(w, `{"error":"account_pending","error_description":"A pending account activates through its link or by setting a password"}`, http.StatusBadRequest)
-		return
 	}
 
-	// Demotion is a revocation. An issued ID token carries "role":"admin" as a signed claim,
-	// so a relying party keeps granting administrator access for the life of that token
-	// unless the tokens behind it are revoked along with the row.
-	demoted := wasAdmin && user.Role != "admin"
-	revokeAccess := passwordChanged || (wasActive && user.Status == "disabled") || demoted
-
-	updated := h.audit.Prepare("admin.user_updated", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"username":      user.Username,
-		"role":          user.Role,
-		"status":        user.Status,
-		"endsAt":        user.EndsAt,
-		"endsAtBefore":  endsAtBefore,
-		"demoted":       demoted,
-		"roleChanged":   user.Role != wasRole,
-		"accessRevoked": revokeAccess,
+	// The edit runs on the row as read under the write lock and sets only what this
+	// request names, so a concurrent password reset or role change is never reverted.
+	updated := h.audit.Prepare("admin.user_updated", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	user, err := h.store.EditUser(userID, updated.Row, func(user *store.User) (bool, error) {
+		if user.SourceConnectorID != "" && ((req.DisplayName != "" && req.DisplayName != user.DisplayName) || (req.Email != "" && !strings.EqualFold(req.Email, user.Email))) {
+			return false, errSourceOwned
+		}
+		if req.DisplayName != "" {
+			user.DisplayName = req.DisplayName
+		}
+		if req.Email != "" {
+			user.Email = req.Email
+		}
+		wasAdmin, wasRole := user.Role == "admin", user.Role
+		if req.Role == "user" || req.Role == "admin" {
+			user.Role = req.Role
+		}
+		endsAtBefore := user.EndsAt
+		if req.EndsAt != nil && !sameInstant(*req.EndsAt, user.EndsAt) {
+			// Only a changed value must be a future instant; echoing the current one is fine.
+			if endsAtErr != nil {
+				return false, endsAtErr
+			}
+			user.EndsAt = endsAt
+		}
+		wasActive := user.Status == "active"
+		if req.Status == "active" || req.Status == "disabled" {
+			user.Status = req.Status
+			if user.SourceConnectorID != "" {
+				// A local disable is an override the upstream cannot lift; enabling lifts it
+				// but only takes effect if the upstream also wants the account active.
+				user.LocallyDisabled = req.Status == "disabled"
+				user.ApplySourceState()
+			}
+		}
+		if passHash != "" {
+			user.PasswordHash = passHash
+			// An administrator setting the password is the manual activation path.
+			user.Pending = false
+		}
+		if user.Pending && user.Status == "active" {
+			return false, errAccountPending
+		}
+		// Demotion is a revocation. An issued ID token carries "role":"admin" as a signed
+		// claim, so a relying party keeps granting administrator access for the life of
+		// that token unless the tokens behind it are revoked along with the row.
+		demoted := wasAdmin && user.Role != "admin"
+		revokeAccess := passHash != "" || (wasActive && user.Status == "disabled") || demoted
+		details, _ := json.Marshal(map[string]any{
+			"username":      user.Username,
+			"role":          user.Role,
+			"status":        user.Status,
+			"endsAt":        user.EndsAt,
+			"endsAtBefore":  endsAtBefore,
+			"demoted":       demoted,
+			"roleChanged":   user.Role != wasRole,
+			"accessRevoked": revokeAccess,
+		})
+		updated.Row.DetailsJSON = string(details)
+		return revokeAccess, nil
 	})
-	if err := h.syncEngine.UpdateUserAndQueueSyncEvents(user, revokeAccess, updated.Row); err != nil {
-		if errors.Is(err, store.ErrEnrollmentPolicy) {
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
+		case errors.Is(err, errSourceOwned):
+			http.Error(w, `{"error":"source_owned","error_description":"Name and email of this account are managed by its SCIM connector"}`, http.StatusBadRequest)
+		case errors.Is(err, errAccountPending):
+			http.Error(w, `{"error":"account_pending","error_description":"A pending account activates through its link or by setting a password"}`, http.StatusBadRequest)
+		case errors.Is(err, store.ErrEnrollmentPolicy):
 			enrollmentError(w, err)
-		} else if errors.Is(err, store.ErrLastActiveAdmin) {
+		case errors.Is(err, store.ErrLastActiveAdmin):
 			http.Error(w, `{"error":"cannot_remove_last_admin"}`, http.StatusBadRequest)
-		} else if errors.Is(err, store.ErrExpiryInPast) {
+		case errors.Is(err, store.ErrExpiryInPast):
 			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
-		} else {
+		default:
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		}
 		return
 	}
-	if passwordChanged {
+	if passHash != "" {
 		if err := h.store.ClearFailedLogins(user.ID); err != nil {
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 			return
@@ -254,6 +266,11 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		"user":    user,
 	})
 }
+
+var (
+	errSourceOwned    = errors.New("name and email are managed by the account's connector")
+	errAccountPending = errors.New("a pending account cannot be activated directly")
+)
 
 // ResetUserMFA clears MFA methods/devices, revokes active sessions, and dispatches sync event.
 func (h *AdminHandler) ResetUserMFA(w http.ResponseWriter, r *http.Request) {
