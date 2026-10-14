@@ -66,6 +66,14 @@ describe('parseUser', () => {
     expect(() => parseMe({ error: 'unauthorized' })).toThrow();
   });
 
+  // Anything but a literal true leaves the notice off; a malformed flag must not nag.
+  it('reads the legacy recovery codes flag only when it is true', () => {
+    expect(parseMe({ ...user, recoveryCodesNeedRegeneration: true }).recoveryCodesNeedRegeneration).toBe(true);
+    expect(parseMe({ ...user, recoveryCodesNeedRegeneration: false }).recoveryCodesNeedRegeneration).toBe(false);
+    expect(parseMe({ ...user, recoveryCodesNeedRegeneration: 'true' }).recoveryCodesNeedRegeneration).toBe(false);
+    expect(parseMe(user).recoveryCodesNeedRegeneration).toBe(false);
+  });
+
   it('carries an account end date through and leaves it absent when unset', () => {
     expect(parseMe({ ...user, endsAt: '2026-06-01T07:30:00Z' }).endsAt).toBe('2026-06-01T07:30:00Z');
     expect(parseMe(user).endsAt).toBeUndefined();

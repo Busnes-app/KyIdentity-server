@@ -30,6 +30,8 @@ export interface User {
   locallyDisabled?: boolean;
   mfaMethods?: string[];
   createdAt?: string;
+  /** Unused recovery codes predate keyed hashing; regenerating replaces them. */
+  recoveryCodesNeedRegeneration?: boolean;
 }
 
 export interface PairedSystem {
