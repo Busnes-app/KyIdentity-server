@@ -66,6 +66,14 @@ func (l *Logger) Record(action, actorID, actorUsername, targetID, targetType, ip
 	return storeErr
 }
 
+// Observe records an event no mutation commits with: a denial, a failure, a sign-in. Losing
+// it must not change the caller's answer, so a storage failure is logged and not returned.
+func (l *Logger) Observe(action, actorID, actorUsername, targetID, targetType, ip, userAgent, outcome string, details map[string]any) {
+	if err := l.Record(action, actorID, actorUsername, targetID, targetType, ip, userAgent, outcome, details); err != nil {
+		log.Printf("audit %s not persisted: %v", action, err)
+	}
+}
+
 // noteResult tracks whether durable audit writes are succeeding, so readiness can report a
 // server that is still serving logins while quietly keeping no record of them.
 func (l *Logger) noteResult(now time.Time, err error) {

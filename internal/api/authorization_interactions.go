@@ -62,7 +62,7 @@ func (h *OAuthHandler) beginInteraction(w http.ResponseWriter, r *http.Request, 
 		}
 		return
 	}
-	h.audit.Record("oauth.interaction", i.UserID, "", q.Get("client_id"), "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"reason": "interaction_started"})
+	h.audit.Observe("oauth.interaction", i.UserID, "", q.Get("client_id"), "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"reason": "interaction_started"})
 	http.Redirect(w, r, "/login?interaction="+raw, http.StatusFound)
 }
 

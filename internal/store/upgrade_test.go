@@ -194,7 +194,7 @@ func TestUpgradeFromPreFeatureDatabase(t *testing.T) {
 	}
 	// An app added after the upgrade starts closed, so the broad mode is a statement
 	// about what already existed, not the new default.
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "c-new", ClientName: "New", ClientType: "public", RedirectURIsJSON: `["https://new.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "c-new", ClientName: "New", ClientType: "public", RedirectURIsJSON: `["https://new.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.QueryRow(`SELECT access_mode FROM app_registry WHERE client_id='c-new'`).Scan(&mode); err != nil || mode != "assigned_only" {
@@ -214,7 +214,7 @@ func TestUpgradeFromPreFeatureDatabase(t *testing.T) {
 
 	// KySignOn-era leftovers are gone, so pairing a system and deleting the user who
 	// once issued a system pairing token both work; the paired system keeps its fields.
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "sys-new", Name: "New", SystemType: "scim", CallbackURL: "https://new.test/scim/v2", HMACSecretEncrypted: "sealed-new", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "sys-new", Name: "New", SystemType: "scim", CallbackURL: "https://new.test/scim/v2", HMACSecretEncrypted: "sealed-new", Status: "active"}, nil); err != nil {
 		t.Fatal("pairing a system after the upgrade:", err)
 	}
 	hr, err := s.GetPairedSystemByID("sys-hr")

@@ -17,7 +17,7 @@ import (
 func TestRecoveryEvidenceAdminExportAndSignature(t *testing.T) {
 	srv, db, engine, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
-	sys, secret, err := engine.CreateSystem(&sync.CreateSystemRequest{Name: "mail", SystemType: "kypost", CallbackURL: "https://mail.example.test/api/sync/events"})
+	sys, secret, err := engine.CreateSystem(&sync.CreateSystemRequest{Name: "mail", SystemType: "kypost", CallbackURL: "https://mail.example.test/api/sync/events"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestRecoveryEvidenceAdminExportAndSignature(t *testing.T) {
 func TestRecoveryEvidenceValidationAndUnavailableAuthority(t *testing.T) {
 	srv, db, engine, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
-	sys, _, err := engine.CreateSystem(&sync.CreateSystemRequest{Name: "mail", SystemType: "kypost", CallbackURL: "https://mail.example.test/api/sync/events"})
+	sys, _, err := engine.CreateSystem(&sync.CreateSystemRequest{Name: "mail", SystemType: "kypost", CallbackURL: "https://mail.example.test/api/sync/events"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

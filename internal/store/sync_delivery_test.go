@@ -15,7 +15,7 @@ func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 	}
 	defer func() { s.Close() }()
 	u := createTestUser(t, s)
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "target", Name: "Target", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "target", Name: "Target", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	enqueue := func(id, user string) {
@@ -151,7 +151,7 @@ func TestDeletedSystemEventsAreRemovedAndNeverRevived(t *testing.T) {
 	}
 	defer func() { s.Close() }()
 	for _, id := range []string{"gone", "kept"} {
-		if err := s.CreatePairedSystem(&PairedSystem{ID: id, Name: id, SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}); err != nil {
+		if err := s.CreatePairedSystem(&PairedSystem{ID: id, Name: id, SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.CreateAccountSyncEvent(&AccountSyncEvent{ID: id + "-deleted", SystemID: id, UserID: "u1", EventType: "user.deleted", PayloadJSON: `{}`, Status: "failed", Attempts: 5}); err != nil {
@@ -218,7 +218,7 @@ func TestResumeSyncDeliveriesReleasesOnlyExpiredAttempts(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	for _, id := range []string{"target", "other"} {
-		if err := s.CreatePairedSystem(&PairedSystem{ID: id, Name: id, SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}); err != nil {
+		if err := s.CreatePairedSystem(&PairedSystem{ID: id, Name: id, SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -289,7 +289,7 @@ func TestResumeSyncDeliveriesReleasesOnlyExpiredAttempts(t *testing.T) {
 func TestReadOnlyListingsDoNotWaitForWriter(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "target", Name: "target", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "target", Name: "target", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	writer, err := s.db.Begin()

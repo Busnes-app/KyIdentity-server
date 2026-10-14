@@ -61,18 +61,20 @@ func (h *AdminHandler) UploadIcon(w http.ResponseWriter, r *http.Request) {
 
 	contentType, err := iconContentType(data, r.Header.Get("Content-Type"))
 	if err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
 	icon := &store.LauncherIcon{ID: uuid.New().String(), ContentType: contentType, Data: data}
-	if err := h.store.CreateLauncherIcon(icon); err != nil {
+	uploaded := h.audit.Prepare("admin.icon_uploaded", admin.ID, admin.Username, icon.ID, "icon", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
+		"contentType": contentType, "bytes": len(data),
+	})
+	if err := h.store.CreateLauncherIcon(icon, uploaded.Row); err != nil {
+		log.Printf("icon upload failed: %v", err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	h.audit.Record("admin.icon_uploaded", admin.ID, admin.Username, icon.ID, "icon", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"contentType": contentType, "bytes": len(data),
-	})
+	uploaded.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"iconName": "icon:" + icon.ID})

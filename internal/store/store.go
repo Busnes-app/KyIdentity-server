@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -835,6 +836,9 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 	now := time.Now().UTC()
 	u.CreatedAt, u.UpdatedAt = now, now
 	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt); err != nil {
+		if isUniqueViolation(err) {
+			return ErrUserConflict
+		}
 		return err
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
@@ -874,23 +878,6 @@ func (s *Store) ListUsers() ([]User, error) {
 		users = append(users, *u)
 	}
 	return users, rows.Err()
-}
-
-// UpdateUserWithSyncEvents writes every local field of u (profile unless source-owned,
-// password, pending, role, status, override, end date) over the row. It suits a caller
-// holding the whole intended state; a request that changes some fields uses EditUser.
-func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *AuditEvent) error {
-	stored, err := s.updateUser(u.ID, audit, func(_ *sql.Tx, next *User) (bool, error) {
-		if next.SourceConnectorID == "" {
-			next.Username, next.DisplayName, next.Email = u.Username, u.DisplayName, u.Email
-		}
-		next.PasswordHash, next.Pending, next.Role, next.Status, next.LocallyDisabled, next.EndsAt = u.PasswordHash, u.Pending, u.Role, u.Status, u.LocallyDisabled, u.EndsAt
-		return revokeAccess, nil
-	})
-	if err == nil {
-		*u = *stored
-	}
-	return err
 }
 
 // EditUser applies one request's changes to the row as read under the write lock, so a
@@ -1176,11 +1163,13 @@ func (s *Store) ClearFailedLogins(userID string) error {
 }
 
 // System Pairing & Sync Management
-func (s *Store) CreatePairedSystem(ps *PairedSystem) error {
+func (s *Store) CreatePairedSystem(ps *PairedSystem, audit *AuditEvent) error {
 	query := `INSERT INTO paired_systems (id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	ps.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, ps.ID, ps.Name, ps.SystemType, ps.Description, ps.IconURL, ps.CallbackURL, ps.HMACSecretEncrypted, ps.Status, ps.CreatedAt)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, ps.ID, ps.Name, ps.SystemType, ps.Description, ps.IconURL, ps.CallbackURL, ps.HMACSecretEncrypted, ps.Status, ps.CreatedAt)
+		return err
+	})
 }
 
 func (s *Store) GetPairedSystemByID(id string) (*PairedSystem, error) {
@@ -1212,31 +1201,6 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 	return systems, rows.Err()
 }
 
-func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours, provisioning_hold FROM paired_systems WHERE status != 'disabled' ORDER BY created_at ASC`
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var systems []PairedSystem
-	for rows.Next() {
-		var ps PairedSystem
-		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours, &ps.ProvisioningHold); err != nil {
-			return nil, err
-		}
-		systems = append(systems, ps)
-	}
-	return systems, rows.Err()
-}
-
-func (s *Store) UpdatePairedSystemStatus(systemID, status string) error {
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE paired_systems SET status = ?, last_synced_at = ? WHERE id = ?`, status, now, systemID)
-	return err
-}
-
 // DeletePairedSystem unpairs a downstream system and records the removal in the same
 // transaction, reporting whether a row actually went away.
 func (s *Store) DeletePairedSystem(systemID string, audit *AuditEvent) (bool, error) {
@@ -1265,16 +1229,6 @@ func (s *Store) DeletePairedSystem(systemID string, audit *AuditEvent) (bool, er
 		return false, err
 	}
 	return true, tx.Commit()
-}
-
-// Account Sync Events
-func (s *Store) CreateAccountSyncEvent(event *AccountSyncEvent) error {
-	query := `INSERT INTO account_sync_events (id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	now := time.Now().UTC()
-	event.CreatedAt = now
-	event.UpdatedAt = now
-	_, err := s.db.Exec(query, event.ID, event.UserID, event.SystemID, event.EventType, event.PayloadJSON, event.Attempts, event.Status, event.CreatedAt, event.UpdatedAt, event.Revision)
-	return err
 }
 
 const syncEventColumns = `id, user_id, system_id, event_type, payload_json, attempts, status, last_error, next_attempt_at, created_at, updated_at, claim_token, revision`
@@ -1407,11 +1361,13 @@ func (s *Store) DeleteDeliveredSyncEvents(olderThan time.Time) error {
 }
 
 // Native Device & MFA Methods
-func (s *Store) CreateDevicePairingToken(token *DevicePairingToken) error {
+func (s *Store) CreateDevicePairingToken(token *DevicePairingToken, audit *AuditEvent) error {
 	query := `INSERT INTO device_pairing_tokens (id, user_id, token_hash, pin_hash, sign_on, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
 	token.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, token.ID, token.UserID, token.TokenHash, token.PINHash, token.SignOn, token.ExpiresAt, token.CreatedAt)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, token.ID, token.UserID, token.TokenHash, token.PINHash, token.SignOn, token.ExpiresAt, token.CreatedAt)
+		return err
+	})
 }
 
 const devicePairingTokenColumns = `id, user_id, token_hash, pin_hash, sign_on, expires_at, used_at, created_at`
@@ -1510,8 +1466,9 @@ func (s *Store) ConsumeDevicePairingToken(tokenID string) (bool, error) {
 }
 
 // RegisterNativeDeviceWithPairingToken atomically spends a live pairing token and
-// enrols the device as a push MFA approver.
-func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *NativeDevice, method *MFAMethod) (bool, error) {
+// enrols the device as a push MFA approver. audit, when set, builds the audit row from the
+// stored device (a re-pair keeps the stored id) and commits it with the enrolment.
+func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *NativeDevice, method *MFAMethod, audit func(*NativeDevice) *AuditEvent) (bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return false, err
@@ -1561,6 +1518,11 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 
 	if err = preserveCompliantEnrollmentTx(tx, dev.UserID, wasCompliant); err != nil {
 		return false, err
+	}
+	if audit != nil {
+		if err := recordAuditTx(tx, audit(dev)); err != nil {
+			return false, err
+		}
 	}
 	return true, tx.Commit()
 }
@@ -2235,16 +2197,26 @@ const RecoveryCodeHMACPrefix = "hmac:"
 
 // ConsumeRecoveryCode atomically spends the code matching the keyed hash or, for a legacy
 // row, the bare SHA-256 (hex never carries the prefix). A separate lookup and update lets
-// concurrent logins redeem the same code.
-func (s *Store) ConsumeRecoveryCode(userID, keyedHash, legacyHash string) (bool, error) {
+// concurrent logins redeem the same code. A spent code commits with its audit row.
+func (s *Store) ConsumeRecoveryCode(userID, keyedHash, legacyHash string, audit *AuditEvent) (bool, error) {
 	now := time.Now().UTC()
-	res, err := s.db.Exec(`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash IN (?, ?) AND used_at IS NULL`, now, userID, keyedHash, legacyHash)
-	if err != nil {
-		return false, err
+	err := s.auditedTx(audit, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash IN (?, ?) AND used_at IS NULL`, now, userID, keyedHash, legacyHash)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			return cmp.Or(err, errNoRecoveryCode)
+		}
+		return nil
+	})
+	if errors.Is(err, errNoRecoveryCode) {
+		return false, nil
 	}
-	n, err := res.RowsAffected()
-	return n == 1, err
+	return err == nil, err
 }
+
+var errNoRecoveryCode = errors.New("no unused recovery code matched")
 
 // HasLegacyRecoveryCodes reports unused recovery codes stored as bare SHA-256, which the
 // user should regenerate.
@@ -2255,14 +2227,16 @@ func (s *Store) HasLegacyRecoveryCodes(userID string) (bool, error) {
 }
 
 // OAuth Clients
-func (s *Store) CreateOAuthClient(c *OAuthClient) error {
+func (s *Store) CreateOAuthClient(c *OAuthClient, audit *AuditEvent) error {
 	query := `INSERT INTO oauth_clients (id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	c.CreatedAt = time.Now().UTC()
 	if c.PostLogoutRedirectURIsJSON == "" {
 		c.PostLogoutRedirectURIsJSON = "[]"
 	}
-	_, err := s.db.Exec(query, c.ID, c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.CreatedAt, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, c.ID, c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.CreatedAt, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI)
+		return err
+	})
 }
 
 func (s *Store) GetOAuthClientByID(id string) (*OAuthClient, error) {
@@ -2528,11 +2502,13 @@ func (s *Store) DeleteExpiredIssuedTokens() error {
 }
 
 // Applications (Launcher)
-func (s *Store) CreateApplication(app *Application) error {
+func (s *Store) CreateApplication(app *Application, audit *AuditEvent) error {
 	query := `INSERT INTO applications (id, name, url, icon_name, description, sort_order, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	app.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, app.ID, app.Name, app.URL, app.IconName, app.Description, app.SortOrder, app.Enabled, app.CreatedAt)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, app.ID, app.Name, app.URL, app.IconName, app.Description, app.SortOrder, app.Enabled, app.CreatedAt)
+		return err
+	})
 }
 
 func (s *Store) GetApplicationByID(id string) (*Application, error) {
@@ -2572,17 +2548,21 @@ func (s *Store) ListApplications() ([]Application, error) {
 	return apps, rows.Err()
 }
 
-func (s *Store) UpdateApplication(app *Application) error {
+func (s *Store) UpdateApplication(app *Application, audit *AuditEvent) error {
 	query := `UPDATE applications SET name = ?, url = ?, icon_name = ?, description = ?, sort_order = ?, enabled = ? WHERE id = ?`
-	_, err := s.db.Exec(query, app.Name, app.URL, app.IconName, app.Description, app.SortOrder, app.Enabled, app.ID)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, app.Name, app.URL, app.IconName, app.Description, app.SortOrder, app.Enabled, app.ID)
+		return err
+	})
 }
 
-func (s *Store) CreateLauncherIcon(icon *LauncherIcon) error {
+func (s *Store) CreateLauncherIcon(icon *LauncherIcon, audit *AuditEvent) error {
 	icon.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO launcher_icons (id, content_type, data, created_at) VALUES (?, ?, ?, ?)`,
-		icon.ID, icon.ContentType, icon.Data, icon.CreatedAt)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO launcher_icons (id, content_type, data, created_at) VALUES (?, ?, ?, ?)`,
+			icon.ID, icon.ContentType, icon.Data, icon.CreatedAt)
+		return err
+	})
 }
 
 func (s *Store) GetLauncherIcon(id string) (*LauncherIcon, error) {
@@ -2693,21 +2673,55 @@ func (s *Store) DeleteAuditEventsOlderThan(cutoff time.Time) error {
 // "unset" from "empty" branch on it; a setting deliberately set to "" is not ErrNotFound.
 var ErrNotFound = errors.New("store: not found")
 
-func (s *Store) GetSetting(key string) (string, error) {
-	var val string
-	err := s.db.QueryRow(`SELECT value FROM system_settings WHERE key = ?`, key).Scan(&val)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrNotFound
-		}
-		return "", err
-	}
-	return val, nil
-}
+// InputError is a refusal of the caller's input. Its text is fixed by the code that refuses,
+// so it is safe to show the caller; any other error is internal and never leaves the server.
+type InputError string
+
+func (e InputError) Error() string { return string(e) }
+
+func (s *Store) GetSetting(key string) (string, error) { return getSetting(s.db, key) }
 
 // SetSetting upserts a key-value pair in system_settings.
-func (s *Store) SetSetting(key, value string) error {
-	_, err := s.db.Exec(`
+func (s *Store) SetSetting(key, value string) error { return setSetting(s.db, key, value) }
+
+// DeleteSetting removes a key; a key that was never written is not an error.
+func (s *Store) DeleteSetting(key string) error { return deleteSetting(s.db, key) }
+
+// Settings is system_settings, read and written directly or inside EditSettings.
+type Settings interface {
+	GetSetting(key string) (string, error)
+	SetSetting(key, value string) error
+	DeleteSetting(key string) error
+}
+
+// EditSettings runs fn over system_settings in one transaction with its audit row, so a
+// multi-key change and the record of who made it commit together or not at all.
+func (s *Store) EditSettings(audit *AuditEvent, fn func(Settings) error) error {
+	return s.auditedTx(audit, func(tx *sql.Tx) error { return fn(settingsTx{tx}) })
+}
+
+type settingsTx struct{ tx *sql.Tx }
+
+func (t settingsTx) GetSetting(key string) (string, error) { return getSetting(t.tx, key) }
+func (t settingsTx) SetSetting(key, value string) error    { return setSetting(t.tx, key, value) }
+func (t settingsTx) DeleteSetting(key string) error        { return deleteSetting(t.tx, key) }
+
+type settingsQuerier interface {
+	execer
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func getSetting(q settingsQuerier, key string) (string, error) {
+	var val string
+	err := q.QueryRow(`SELECT value FROM system_settings WHERE key = ?`, key).Scan(&val)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return val, err
+}
+
+func setSetting(q settingsQuerier, key, value string) error {
+	_, err := q.Exec(`
 		INSERT INTO system_settings (key, value, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(key) DO UPDATE SET
@@ -2717,9 +2731,8 @@ func (s *Store) SetSetting(key, value string) error {
 	return err
 }
 
-// DeleteSetting removes a key; a key that was never written is not an error.
-func (s *Store) DeleteSetting(key string) error {
-	_, err := s.db.Exec(`DELETE FROM system_settings WHERE key = ?`, key)
+func deleteSetting(q settingsQuerier, key string) error {
+	_, err := q.Exec(`DELETE FROM system_settings WHERE key = ?`, key)
 	return err
 }
 
@@ -2786,17 +2799,11 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 
 // RevokeUserAccess deletes browser sessions, revokes issued access tokens and pending
 // codes/interactions, expires unused device pairing tokens, and burns unused step-up
-// tokens, in one transaction.
-func (s *Store) RevokeUserAccess(userID string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := revokeUserAccessTx(tx, userID, time.Now().UTC()); err != nil {
-		return err
-	}
-	return tx.Commit()
+// tokens, in one transaction with its audit row.
+func (s *Store) RevokeUserAccess(userID string, audit *AuditEvent) error {
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		return revokeUserAccessTx(tx, userID, time.Now().UTC())
+	})
 }
 
 func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {

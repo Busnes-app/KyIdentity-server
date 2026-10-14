@@ -56,7 +56,7 @@ func deliverAll(t *testing.T, s *Store) []AccountSyncEvent {
 
 func provisioningFixture(t *testing.T, s *Store, systemID string) (appID string) {
 	t.Helper()
-	if err := s.CreatePairedSystem(&PairedSystem{ID: systemID, Name: systemID, SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: systemID, Name: systemID, SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.QueryRow(`SELECT id FROM app_registry WHERE system_id=?`, systemID).Scan(&appID); err != nil {
@@ -190,7 +190,7 @@ func TestResyncNeverProvisionsUnassignedUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
-	if err := s.ResyncSystem("target"); err != nil {
+	if err := s.ResyncSystem("target", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", assigned.ID); len(got) != 1 || got[0] != (queued{"user.created", 2, true}) {
@@ -199,7 +199,7 @@ func TestResyncNeverProvisionsUnassignedUsers(t *testing.T) {
 	if got := pendingFor(t, s, "target", other.ID); len(got) != 0 {
 		t.Fatal("resync provisioned an unassigned user", got)
 	}
-	if err := s.ResyncSystem("missing"); err == nil {
+	if err := s.ResyncSystem("missing", nil); err == nil {
 		t.Fatal("resync of unknown system")
 	}
 }

@@ -60,10 +60,6 @@ func (e *Engine) CreateUserAndQueueSyncEvents(user *store.User, audit *store.Aud
 	return e.store.CreateUserWithSyncEvents(user, audit)
 }
 
-func (e *Engine) UpdateUserAndQueueSyncEvents(user *store.User, revokeAccess bool, audit *store.AuditEvent) error {
-	return e.store.UpdateUserWithSyncEvents(user, revokeAccess, audit)
-}
-
 // ResetUserMFAAndRevoke atomically strips every factor, revokes everything those factors
 // were protecting, and notifies every connector holding the account.
 func (e *Engine) ResetUserMFAAndRevoke(userID string, audit *store.AuditEvent) error {
@@ -266,32 +262,33 @@ type CreateSystemRequest struct {
 }
 
 // CreateSystem stores a supplied SCIM token or generates a suite webhook signing secret.
-func (e *Engine) CreateSystem(req *CreateSystemRequest) (*store.PairedSystem, string, error) {
+// audit, when set, builds the audit row for the new connector; it commits with it.
+func (e *Engine) CreateSystem(req *CreateSystemRequest, audit func(*store.PairedSystem) *store.AuditEvent) (*store.PairedSystem, string, error) {
 	if req.Name == "" {
 		req.Name = req.SystemType
 	}
 	if req.Name == "" {
-		return nil, "", errors.New("name is required")
+		return nil, "", store.InputError("name is required")
 	}
 	if req.SystemType == "" {
 		req.SystemType = "scim"
 	}
 	if err := ValidateCallbackURL(req.CallbackURL); err != nil {
-		return nil, "", err
+		return nil, "", store.InputError(err.Error())
 	}
 
 	if !supportedSystemType(req.SystemType) {
-		return nil, "", errors.New("select scim or suite_webhook explicitly for a custom service")
+		return nil, "", store.InputError("select scim or suite_webhook explicitly for a custom service")
 	}
 	token := req.BearerToken
 	var err error
 	if req.SystemType == "scim" {
 		if err = validateSCIMConfig(req.CallbackURL, token); err != nil {
-			return nil, "", err
+			return nil, "", store.InputError(err.Error())
 		}
 	} else {
 		if token != "" {
-			return nil, "", errors.New("suite webhooks use a generated signing secret")
+			return nil, "", store.InputError("suite webhooks use a generated signing secret")
 		}
 		token, err = crypto.GenerateRandomHex(32)
 		if err != nil {
@@ -315,7 +312,11 @@ func (e *Engine) CreateSystem(req *CreateSystemRequest) (*store.PairedSystem, st
 		HMACSecretEncrypted: encrypted,
 		Status:              "active",
 	}
-	if err := e.store.CreatePairedSystem(ps); err != nil {
+	var row *store.AuditEvent
+	if audit != nil {
+		row = audit(ps)
+	}
+	if err := e.store.CreatePairedSystem(ps, row); err != nil {
 		return nil, "", err
 	}
 	if req.SystemType == "scim" {
@@ -592,8 +593,8 @@ func (e *Engine) deliver(ctx context.Context, sys *store.PairedSystem, secret, e
 }
 
 // ResyncAllAccounts re-sends every in-scope account and group to one paired system.
-func (e *Engine) ResyncAllAccounts(systemID string) error {
-	return e.store.ResyncSystem(systemID)
+func (e *Engine) ResyncAllAccounts(systemID string, audit *store.AuditEvent) error {
+	return e.store.ResyncSystem(systemID, audit)
 }
 
 // StartWorker runs the background sync dispatcher. The slower reconcile tick catches

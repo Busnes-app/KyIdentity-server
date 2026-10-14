@@ -18,7 +18,7 @@ func TestAuthenticationEvidenceMigration(t *testing.T) {
 	if err := s.CreateSession(&Session{ID: "session", UserID: user.ID, SessionTokenHash: "hash", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "app", ClientName: "app", ClientType: "public", RedirectURIsJSON: "[]", AllowedScopesJSON: "[]", Enabled: true}); err != nil {
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "app", ClientName: "app", ClientType: "public", RedirectURIsJSON: "[]", AllowedScopesJSON: "[]", Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE app_registry SET access_mode='all_active_users' WHERE client_id='app'`); err != nil {

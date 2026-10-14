@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Busnes-app/ky-primitives/syncauth"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
@@ -22,7 +24,7 @@ import (
 // wire-format tests can exercise delivery without configuring assignments.
 func queueForAll(t *testing.T, e *Engine, userID, eventType string, payload any) {
 	t.Helper()
-	systems, err := e.store.ListActivePairedSystems()
+	systems, err := e.store.ListAllPairedSystems()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,10 +33,38 @@ func queueForAll(t *testing.T, e *Engine, userID, eventType string, payload any)
 		t.Fatal(err)
 	}
 	for _, sys := range systems {
-		if err := e.store.CreateAccountSyncEvent(&store.AccountSyncEvent{ID: uuid.NewString(), UserID: userID, SystemID: sys.ID, EventType: eventType, PayloadJSON: string(body), Status: "pending", Revision: 1}); err != nil {
-			t.Fatal(err)
+		if sys.Status == "disabled" {
+			continue
 		}
+		insertSyncEvent(t, e.store, store.AccountSyncEvent{ID: uuid.NewString(), UserID: userID, SystemID: sys.ID, EventType: eventType, PayloadJSON: string(body), Status: "pending", Revision: 1})
 	}
+}
+
+// syncTestDBs maps a fixture's store to its file, so a test can write rows no production
+// path writes on its own: a bare outbox event, a disabled connector.
+var syncTestDBs = map[*store.Store]string{}
+
+func execRaw(t *testing.T, s *store.Store, query string, args ...any) {
+	t.Helper()
+	path, ok := syncTestDBs[s]
+	if !ok {
+		t.Fatal("store was not built by a sync test fixture")
+	}
+	raw, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(query, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertSyncEvent(t *testing.T, s *store.Store, ev store.AccountSyncEvent) {
+	t.Helper()
+	now := time.Now().UTC()
+	execRaw(t, s, `INSERT INTO account_sync_events (id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ev.ID, ev.UserID, ev.SystemID, ev.EventType, ev.PayloadJSON, ev.Attempts, ev.Status, now, now, ev.Revision)
 }
 
 // grantAllUsers puts every active user in the connector's provisioning scope.
@@ -66,6 +96,7 @@ func setupTestSyncEngine(t *testing.T) (*Engine, *store.Store, *store.User, func
 	if err != nil {
 		t.Fatalf("store.New failed: %v", err)
 	}
+	syncTestDBs[dbStore] = dbPath
 
 	adminUser := &store.User{
 		ID:           uuid.New().String(),
@@ -109,7 +140,7 @@ func TestDirectSCIMSystemCreationAndRecovery(t *testing.T) {
 		CallbackURL: "https://kypost.local/scim/v2",
 	}
 
-	ps, token, err := engine.CreateSystem(req)
+	ps, token, err := engine.CreateSystem(req, nil)
 	if err != nil {
 		t.Fatalf("CreateSystem failed: %v", err)
 	}
@@ -142,11 +173,11 @@ func TestDirectSCIMSystemCreationAndRecovery(t *testing.T) {
 func TestConnectorTokenSwappedBetweenSystemsDoesNotOpen(t *testing.T) {
 	engine, dbStore, _, cleanup := setupTestSyncEngine(t)
 	defer cleanup()
-	a, _, err := engine.CreateSystem(&CreateSystemRequest{Name: "A", SystemType: "scim", CallbackURL: "https://a.example.test/scim/v2", BearerToken: "token-for-a-0123456789abcdef"})
+	a, _, err := engine.CreateSystem(&CreateSystemRequest{Name: "A", SystemType: "scim", CallbackURL: "https://a.example.test/scim/v2", BearerToken: "token-for-a-0123456789abcdef"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _, err := engine.CreateSystem(&CreateSystemRequest{Name: "B", SystemType: "scim", CallbackURL: "https://b.example.test/scim/v2", BearerToken: "token-for-b-0123456789abcdef"})
+	b, _, err := engine.CreateSystem(&CreateSystemRequest{Name: "B", SystemType: "scim", CallbackURL: "https://b.example.test/scim/v2", BearerToken: "token-for-b-0123456789abcdef"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +237,7 @@ func TestAccountSyncWebhookDispatch(t *testing.T) {
 		HMACSecretEncrypted: mustEncrypt(t, engine, psID, sharedSecret),
 		Status:              "active",
 	}
-	if err := dbStore.CreatePairedSystem(ps); err != nil {
+	if err := dbStore.CreatePairedSystem(ps, nil); err != nil {
 		t.Fatalf("CreatePairedSystem failed: %v", err)
 	}
 
@@ -274,7 +305,7 @@ func TestAccountSyncSCIMPayloadAndHeaders(t *testing.T) {
 		HMACSecretEncrypted: mustEncrypt(t, engine, psID, sharedSecret),
 		Status:              "active",
 	}
-	if err := dbStore.CreatePairedSystem(ps); err != nil {
+	if err := dbStore.CreatePairedSystem(ps, nil); err != nil {
 		t.Fatalf("CreatePairedSystem failed: %v", err)
 	}
 

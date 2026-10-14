@@ -472,7 +472,7 @@ func (s *Server) requireStepUp(next http.Handler) http.Handler {
 			if user != nil {
 				actorID, actorName = user.ID, user.Username
 			}
-			s.audit.Record("admin.step_up_required", actorID, actorName, r.URL.Path, "endpoint",
+			s.audit.Observe("admin.step_up_required", actorID, actorName, r.URL.Path, "endpoint",
 				s.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"method": r.Method})
 			writeStepUpError(w, err)
 			return

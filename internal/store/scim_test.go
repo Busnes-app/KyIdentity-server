@@ -15,7 +15,7 @@ func TestSCIMMappingDurability(t *testing.T) {
 	}
 	u := createTestUser(t, s)
 	for _, id := range []string{"a", "b"} {
-		if err = s.CreatePairedSystem(&PairedSystem{ID: id, Name: id, SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}); err != nil {
+		if err = s.CreatePairedSystem(&PairedSystem{ID: id, Name: id, SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -67,7 +67,7 @@ func TestSCIMConfigurationAuditRollback(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	sys := &PairedSystem{ID: "legacy", Name: "legacy", SystemType: "custom", CallbackURL: "https://example.com/scim", HMACSecretEncrypted: "original", Status: "active"}
-	if err := s.CreatePairedSystem(sys); err != nil {
+	if err := s.CreatePairedSystem(sys, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Force audit persistence to fail and prove the credential/protocol write rolls back.
@@ -95,7 +95,7 @@ func TestPausedConnectorsDoNotStarveDispatch(t *testing.T) {
 		{ID: "disabled", Name: "disabled", SystemType: "scim", Status: "disabled"},
 		{ID: "live", Name: "live", SystemType: "scim", Status: "active"},
 	} {
-		if err := s.CreatePairedSystem(&sys); err != nil {
+		if err := s.CreatePairedSystem(&sys, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

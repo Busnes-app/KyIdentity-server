@@ -82,7 +82,7 @@ func TestRunDueExpiriesRevokesAndDeprovisions(t *testing.T) {
 	appID := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
 	other := createTestUserNamed(t, s, "other")
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	clientApps, _, _ := s.ListAppRecords("client", 1, 0)
@@ -275,7 +275,7 @@ func TestEndedAdministratorDoesNotCount(t *testing.T) {
 func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	apps, _, _ := s.ListAppRecords("client", 1, 0)

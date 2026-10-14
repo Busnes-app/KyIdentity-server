@@ -49,7 +49,7 @@ func restoreFixture(t *testing.T) (*Store, func()) {
 	s, cleanup := setupTestStore(t)
 	u := createTestUserNamed(t, s, "staff")
 	for _, c := range []struct{ id, name string }{{"client-1", "App"}, {"client-2", "Other"}} {
-		if err := s.CreateOAuthClient(&OAuthClient{ID: c.id, ClientName: c.name, ClientType: "public", RedirectURIsJSON: `["https://app.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true, BackchannelLogoutURI: "https://app.test/logout"}); err != nil {
+		if err := s.CreateOAuthClient(&OAuthClient{ID: c.id, ClientName: c.name, ClientType: "public", RedirectURIsJSON: `["https://app.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true, BackchannelLogoutURI: "https://app.test/logout"}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

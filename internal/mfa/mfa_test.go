@@ -145,13 +145,13 @@ func TestRecoveryCodesGenerationAndSingleUse(t *testing.T) {
 	firstCode := codes[0]
 
 	// 1. Consume first code
-	valid, err := engine.VerifyAndConsumeRecoveryCode(user.ID, firstCode)
+	valid, err := engine.VerifyAndConsumeRecoveryCode(user.ID, firstCode, nil)
 	if err != nil || !valid {
 		t.Fatalf("first recovery code verification failed: %v", err)
 	}
 
 	// 2. Replay of same code must fail
-	valid, err = engine.VerifyAndConsumeRecoveryCode(user.ID, firstCode)
+	valid, err = engine.VerifyAndConsumeRecoveryCode(user.ID, firstCode, nil)
 	if err != nil || valid {
 		t.Fatal("expected already consumed recovery code to fail")
 	}
@@ -162,7 +162,7 @@ func TestDevicePairingAndRegistration(t *testing.T) {
 	defer cleanup()
 
 	// 1. Generate 90s device pairing PIN/token
-	token, pin, expiresAt, err := engine.GenerateDevicePairingToken(user.ID, true)
+	token, pin, expiresAt, err := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	if err != nil {
 		t.Fatalf("GenerateDevicePairingToken failed: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestDevicePairingAndRegistration(t *testing.T) {
 		PushToken:        "fcm-mock-token-12345",
 	}
 
-	dev, err := engine.RegisterNativeDevice(regReq)
+	dev, err := engine.RegisterNativeDevice(regReq, nil)
 	if err != nil {
 		t.Fatalf("RegisterNativeDevice failed: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestDevicePairingAndRegistration(t *testing.T) {
 	}
 
 	// 4. Token replay must fail
-	_, err = engine.RegisterNativeDevice(regReq)
+	_, err = engine.RegisterNativeDevice(regReq, nil)
 	if err == nil {
 		t.Fatal("expected device pairing PIN replay to fail")
 	}
@@ -480,7 +480,7 @@ func TestPairingTokenSignOnFlagReachesDevice(t *testing.T) {
 	defer cleanup()
 
 	for _, signOn := range []bool{false, true} {
-		token, _, _, err := engine.GenerateDevicePairingToken(user.ID, signOn)
+		token, _, _, err := engine.GenerateDevicePairingToken(user.ID, signOn, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -491,7 +491,7 @@ func TestPairingTokenSignOnFlagReachesDevice(t *testing.T) {
 			DeviceIdentifier: fmt.Sprintf("ident-%v", signOn),
 			PublicKey:        devicePub,
 			PushToken:        "fcm-token",
-		})
+		}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -505,7 +505,7 @@ func TestPINPairingSignOnFlagReachesDevice(t *testing.T) {
 	engine, _, user, cleanup := setupTestMFAEngine(t)
 	defer cleanup()
 
-	_, pin, _, err := engine.GenerateDevicePairingToken(user.ID, false)
+	_, pin, _, err := engine.GenerateDevicePairingToken(user.ID, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +517,7 @@ func TestPINPairingSignOnFlagReachesDevice(t *testing.T) {
 		DeviceIdentifier: "ident-pin",
 		PublicKey:        devicePub,
 		PushToken:        "fcm-token",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,11 +531,11 @@ func TestRePairingReturnsStoredDevice(t *testing.T) {
 	defer cleanup()
 
 	pair := func(signOn bool, pub string) *store.NativeDevice {
-		token, _, _, err := engine.GenerateDevicePairingToken(user.ID, signOn)
+		token, _, _, err := engine.GenerateDevicePairingToken(user.ID, signOn, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "phone", DeviceIdentifier: "same-ident", PublicKey: pub, PushToken: "fcm"})
+		dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "phone", DeviceIdentifier: "same-ident", PublicKey: pub, PushToken: "fcm"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -592,11 +592,11 @@ func (f *fakeAttestor) Verify(chain [][]byte, want attest.Expectation) attest.Re
 func TestRegisterNativeDeviceRecordsAttestation(t *testing.T) {
 	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
 	defer cleanup()
-	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	fa := &fakeAttestor{want: ExpectedChallenge(&NativeDeviceRegisterRequest{PairingToken: token}), result: attest.Result{Level: "strongbox", BootState: "locked-verified", Serials: []string{"1", "2"}}}
 	engine.SetAttestor(fa)
 	_, pub := signingKey(t)
-	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}})
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -612,11 +612,11 @@ func TestRegisterNativeDeviceRecordsAttestation(t *testing.T) {
 func TestRegisterNativeDeviceWithoutAttestationIsNone(t *testing.T) {
 	engine, _, user, cleanup := setupTestMFAEngine(t)
 	defer cleanup()
-	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	fa := &fakeAttestor{}
 	engine.SetAttestor(fa)
 	_, pub := signingKey(t)
-	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm"})
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm"}, nil)
 	if err != nil || dev.AttestedLevel != "none" || fa.calls != 0 {
 		t.Fatalf("%v %+v calls=%d", err, dev, fa.calls)
 	}
@@ -625,11 +625,11 @@ func TestRegisterNativeDeviceWithoutAttestationIsNone(t *testing.T) {
 func TestRegisterNativeDeviceBadChainStillPairs(t *testing.T) {
 	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
 	defer cleanup()
-	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	fa := &fakeAttestor{want: ExpectedChallenge(&NativeDeviceRegisterRequest{PairingToken: token}), result: attest.Result{Level: "none", Reason: "no chain", BootState: "unknown"}}
 	engine.SetAttestor(fa)
 	_, pub := signingKey(t)
-	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm", Attestation: []string{"!!not base64!!"}})
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm", Attestation: []string{"!!not base64!!"}}, nil)
 	if err != nil || dev.AttestedLevel != "none" || dev.AttestationReason != "no chain" {
 		t.Fatalf("%v %+v", err, dev)
 	}
@@ -655,19 +655,19 @@ func (a *interleavingAttestor) Verify([][]byte, attest.Expectation) attest.Resul
 func TestRegisterNativeDeviceGradeStaysWithItsKey(t *testing.T) {
 	engine, dbStore, user, cleanup := setupTestMFAEngine(t)
 	defer cleanup()
-	first, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
-	second, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	first, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
+	second, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	_, pub1 := signingKey(t)
 	_, pub2 := signingKey(t)
 	engine.SetAttestor(&interleavingAttestor{
 		result: attest.Result{Level: "strongbox", BootState: "locked-verified", Serials: []string{"1"}},
 		during: func() {
-			if _, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: second, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub2, PushToken: "fcm"}); err != nil {
+			if _, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: second, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub2, PushToken: "fcm"}, nil); err != nil {
 				t.Fatal(err)
 			}
 		},
 	})
-	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: first, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub1, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}})
+	dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: first, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub1, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

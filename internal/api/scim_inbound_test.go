@@ -177,8 +177,7 @@ func TestInboundSCIMCannotTakeOverAPromotedAdmin(t *testing.T) {
 		return id
 	}
 	promoted := mustUser(t, db, create("ext-a", "dana"))
-	promoted.Role = "admin"
-	if err := db.UpdateUserWithSyncEvents(promoted, false, nil); err != nil {
+	if _, err := db.EditUser(promoted.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	plain := create("ext-b", "erin")

@@ -255,13 +255,15 @@ func (e *Engine) recoveryCodeHash(userID, normalized string) string {
 
 // VerifyAndConsumeRecoveryCode validates and consumes a recovery code. Codes issued before
 // keyed hashing still redeem until the user regenerates (store.HasLegacyRecoveryCodes).
-func (e *Engine) VerifyAndConsumeRecoveryCode(userID, code string) (bool, error) {
+// A spent code commits with audit.
+func (e *Engine) VerifyAndConsumeRecoveryCode(userID, code string, audit *store.AuditEvent) (bool, error) {
 	normalized := normalizeRecoveryCode(code)
-	return e.store.ConsumeRecoveryCode(userID, e.recoveryCodeHash(userID, normalized), crypto.HashSHA256(normalized))
+	return e.store.ConsumeRecoveryCode(userID, e.recoveryCodeHash(userID, normalized), crypto.HashSHA256(normalized), audit)
 }
 
-// GenerateDevicePairingToken generates a 90s ephemeral PIN & token for registering a native mobile device.
-func (e *Engine) GenerateDevicePairingToken(userID string, signOn bool) (token string, pin string, expiresAt time.Time, err error) {
+// GenerateDevicePairingToken generates a 90s ephemeral PIN & token for registering a native
+// mobile device, committing audit with the token.
+func (e *Engine) GenerateDevicePairingToken(userID string, signOn bool, audit *store.AuditEvent) (token string, pin string, expiresAt time.Time, err error) {
 	rawToken, err := crypto.GenerateRandomHex(24)
 	if err != nil {
 		return "", "", time.Time{}, err
@@ -283,7 +285,7 @@ func (e *Engine) GenerateDevicePairingToken(userID string, signOn bool) (token s
 		ExpiresAt: expiresAt,
 	}
 
-	if err := e.store.CreateDevicePairingToken(item); err != nil {
+	if err := e.store.CreateDevicePairingToken(item, audit); err != nil {
 		return "", "", time.Time{}, err
 	}
 
@@ -314,12 +316,13 @@ type NativeDeviceRegisterRequest struct {
 //
 // A device must present a usable P-256 public key. Pairing one without a key enrols push
 // MFA that no response can ever satisfy, which locks the user out of every later login.
-func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.NativeDevice, error) {
+// audit builds the audit row from the stored device; it commits with the enrolment.
+func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest, audit func(*store.NativeDevice) *store.AuditEvent) (*store.NativeDevice, error) {
 	if req.PublicKey == "" {
-		return nil, errors.New("a device public key is required to pair an authenticator")
+		return nil, store.InputError("a device public key is required to pair an authenticator")
 	}
 	if strings.TrimSpace(req.PushToken) == "" {
-		return nil, errors.New("a push token is required to pair an authenticator")
+		return nil, store.InputError("a push token is required to pair an authenticator")
 	}
 	transport, err := ValidatePushTarget(req.PushTransport, strings.TrimSpace(req.PushToken), req.PushP256dh, req.PushAuth)
 	if err != nil {
@@ -333,7 +336,7 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 		return nil, errInvalidPushTarget
 	}
 	if _, err := crypto.ParseP256PublicKey(req.PublicKey); err != nil {
-		return nil, fmt.Errorf("device public key is not a valid P-256 key: %w", err)
+		return nil, store.InputError("device public key is not a valid P-256 key")
 	}
 
 	var validToken *store.DevicePairingToken
@@ -344,16 +347,16 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	case req.PINCode != "" && req.UserID != "":
 		validToken, err = e.store.MatchDevicePairingPIN(req.UserID, crypto.HashSHA256(req.PINCode))
 	case req.PINCode != "":
-		return nil, errors.New("a userId is required when pairing with a PIN")
+		return nil, store.InputError("a userId is required when pairing with a PIN")
 	default:
-		return nil, errors.New("pairingToken or pinCode is required")
+		return nil, store.InputError("pairingToken or pinCode is required")
 	}
 
 	if err != nil {
 		return nil, err
 	}
 	if validToken == nil {
-		return nil, errors.New("invalid or expired pairing token")
+		return nil, store.InputError("invalid or expired pairing token")
 	}
 
 	name := req.DeviceName
@@ -382,12 +385,12 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 		UserID:     validToken.UserID,
 		MethodType: "push",
 		IsPrimary:  false,
-	})
+	}, audit)
 	if err != nil {
 		return nil, err
 	}
 	if !enrolled {
-		return nil, errors.New("pairing token has already been redeemed or expired")
+		return nil, store.InputError("pairing token has already been redeemed or expired")
 	}
 	return device, nil
 }
@@ -423,7 +426,7 @@ func normalizeDevicePlatform(platform string) (string, error) {
 	case "ios", "macos", "linux":
 		return strings.ToLower(strings.TrimSpace(platform)), nil
 	default:
-		return "", errors.New("unsupported device platform")
+		return "", store.InputError("unsupported device platform")
 	}
 }
 
@@ -616,7 +619,7 @@ const MaxPushTokenBytes = 4096
 // ubuntuPushToken is a Lomiri PushClient token.
 var ubuntuPushToken = regexp.MustCompile(`^[A-Za-z0-9+/=_.:-]{1,512}$`)
 
-var errInvalidPushTarget = errors.New("invalid push target")
+var errInvalidPushTarget error = store.InputError("invalid push target")
 
 // ValidatePushTarget checks a device's push address and keys, and returns the effective
 // transport. A UnifiedPush endpoint is device-chosen and server-contacted, so it gets the strict

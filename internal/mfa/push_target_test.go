@@ -130,7 +130,7 @@ func TestRegistrationValidatesPushTarget(t *testing.T) {
 			_, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 				PairingToken: "unused", DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub,
 				PushToken: tc.token, PushTransport: tc.transport, PushP256dh: tc.p256dh, PushAuth: tc.auth,
-			})
+			}, nil)
 			if !errors.Is(err, errInvalidPushTarget) {
 				t.Fatalf("err = %v, want invalid push target", err)
 			}

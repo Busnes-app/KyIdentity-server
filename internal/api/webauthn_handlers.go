@@ -187,7 +187,7 @@ func (h *WebAuthnHandler) FinishRegistration(w http.ResponseWriter, r *http.Requ
 		RPID:              h.rpID,
 	})
 	if err != nil {
-		h.audit.Record("mfa.passkey_enrol", user.ID, user.Username, user.ID, "user",
+		h.audit.Observe("mfa.passkey_enrol", user.ID, user.Username, user.ID, "user",
 			h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "verification_failed"})
 		http.Error(w, `{"error":"invalid_credential","error_description":"Passkey registration could not be verified"}`, http.StatusBadRequest)
 		return
@@ -380,7 +380,7 @@ func (h *WebAuthnHandler) FinishLogin(w http.ResponseWriter, r *http.Request, au
 		return
 	}
 
-	h.audit.Record("auth.mfa_passkey", user.ID, user.Username, user.ID, "user",
+	h.audit.Observe("auth.mfa_passkey", user.ID, user.Username, user.ID, "user",
 		h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"userVerified": ad.UserVerified()})
 	auth.createSessionAndRespond(w, r, user, store.AuthenticationEvidence{PrimaryAuthenticatedAt: token.PrimaryAuthenticatedAt, FactorAuthenticatedAt: &factorAt, FactorMethod: "webauthn"}, token.InteractionHash)
 }

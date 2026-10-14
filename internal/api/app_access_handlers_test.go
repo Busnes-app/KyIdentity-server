@@ -20,7 +20,7 @@ func TestAppAssignmentOAuthAndLauncherEnforcement(t *testing.T) {
 	user := newUser(t, db, "user")
 	adminCookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 	cookie := newSession(t, db, user, time.Now().UTC().Add(time.Hour))
-	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "assigned-app", ClientName: "Restricted app", ClientType: "public", RedirectURIsJSON: `["https://app.example/cb"]`, AllowedScopesJSON: `["openid"]`, LaunchURL: "https://app.example", Enabled: true}); err != nil {
+	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "assigned-app", ClientName: "Restricted app", ClientType: "public", RedirectURIsJSON: `["https://app.example/cb"]`, AllowedScopesJSON: `["openid"]`, LaunchURL: "https://app.example", Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, _, err := db.ListAppRecords("assigned-app", 25, 0)

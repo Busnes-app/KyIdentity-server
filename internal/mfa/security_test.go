@@ -78,13 +78,13 @@ func TestDeviceWithoutPublicKeyIsRejected(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "no-key", DeviceIdentifier: "dev-1",
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("a device with no public key was paired and made an MFA approver")
 	}
 
@@ -98,14 +98,14 @@ func TestDeviceWithMalformedPublicKeyIsRejected(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "junk-key", DeviceIdentifier: "dev-2",
 		PublicKey: "not-a-real-key", PushToken: "fcm-token",
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("a device with an unparseable public key was paired")
 	}
 }
@@ -116,14 +116,14 @@ func TestDeviceWithoutPushTokenIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "no-push-token", DeviceIdentifier: "dev-no-push",
 		PublicKey: pub,
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("a device with no push token was paired")
 	}
 	if methods, _ := db.ListUserMFAMethods(u.ID); len(methods) != 0 {
@@ -137,13 +137,13 @@ func TestDeviceWithValidKeyPairsAndCanApprove(t *testing.T) {
 	u := mfaUser(t, db)
 
 	key, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "phone", DeviceIdentifier: "dev-3", PublicKey: pub, PushToken: "fcm-token",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("a device with a valid P-256 key was rejected: %v", err)
 	}
 
@@ -181,10 +181,10 @@ func TestRegeneratingRecoveryCodesRevokesTheOldSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, first[0]); ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, first[0], nil); ok {
 		t.Error("a recovery code from the previous set still works after regeneration")
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, second[0]); !ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, second[0], nil); !ok {
 		t.Error("a freshly generated recovery code did not work")
 	}
 	if codes, _ := db.GetValidRecoveryCodes(u.ID); len(codes) != 7 {
@@ -201,10 +201,10 @@ func TestRecoveryCodeIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0]); !ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0], nil); !ok {
 		t.Fatal("first use of a recovery code failed")
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0]); ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0], nil); ok {
 		t.Error("a recovery code was accepted twice")
 	}
 }
@@ -219,7 +219,7 @@ func TestRecoveryCodeIsSingleUseUnderConcurrency(t *testing.T) {
 	}
 	results := make(chan bool, 2)
 	for range 2 {
-		go func() { ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0]); results <- ok }()
+		go func() { ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0], nil); results <- ok }()
 	}
 	if (<-results) == (<-results) {
 		t.Fatal("concurrent redemption did not produce exactly one success")
@@ -259,11 +259,11 @@ func TestPairingPINIsHashedAndScopedToItsUser(t *testing.T) {
 	alice := mfaUser(t, db)
 	bob := mfaUser(t, db)
 
-	_, alicePIN, _, err := e.GenerateDevicePairingToken(alice.ID, true)
+	_, alicePIN, _, err := e.GenerateDevicePairingToken(alice.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, bobPIN, _, err := e.GenerateDevicePairingToken(bob.ID, true); err != nil {
+	if _, bobPIN, _, err := e.GenerateDevicePairingToken(bob.ID, true, nil); err != nil {
 		t.Fatal(err)
 	} else if bobPIN == alicePIN {
 		t.Skip("PIN collision between the two users, rerun")
@@ -343,7 +343,7 @@ func TestExpiredPairingTokenIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestExpiredPairingTokenIsRejected(t *testing.T) {
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "late", DeviceIdentifier: "dev-late", PublicKey: pub, PushToken: "fcm-token",
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("an expired pairing token was accepted")
 	}
 }
@@ -363,7 +363,7 @@ func TestMFAResetExpiresPendingDevicePairingTokens(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestMFAResetExpiresPendingDevicePairingTokens(t *testing.T) {
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "after-reset", DeviceIdentifier: "dev-reset", PublicKey: pub, PushToken: "fcm-token",
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("a pending pairing token was accepted after MFA reset")
 	}
 	if devices, _ := db.ListUserNativeDevices(u.ID); len(devices) != 0 {
@@ -385,7 +385,7 @@ func TestPairingTokenCannotBeConsumedAfterExpiry(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,14 +414,14 @@ func TestPushChallengeDispatchesToRegisteredRelayToken(t *testing.T) {
 	u := mfaUser(t, e.store)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "iphone", DeviceIdentifier: "dev-ios", Platform: "ios",
 		PublicKey: pub, PushToken: "apns-token",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -444,14 +444,14 @@ func TestStaleRelayTokenIsClearedWithoutDeletingDevice(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "phone", DeviceIdentifier: "dev-stale",
 		PublicKey: pub, PushToken: "dead-token",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -480,14 +480,14 @@ func TestUnsupportedDevicePlatformIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "bad", DeviceIdentifier: "dev-bad",
 		Platform: "windows-phone", PublicKey: pub, PushToken: "token",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("unsupported device platform was accepted")
 	}
@@ -521,10 +521,10 @@ func TestRecoveryCodesAreKeyedHashes(t *testing.T) {
 		t.Fatalf("fresh codes reported legacy: %v %v", legacy, err)
 	}
 	otherKey, _ := crypto.GenerateRandomBytes(32)
-	if ok, _ := NewEngine(db, otherKey).VerifyAndConsumeRecoveryCode(u.ID, codes[0]); ok {
+	if ok, _ := NewEngine(db, otherKey).VerifyAndConsumeRecoveryCode(u.ID, codes[0], nil); ok {
 		t.Fatal("a recovery code verified without the server key")
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, strings.ToLower(codes[0])); !ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, strings.ToLower(codes[0]), nil); !ok {
 		t.Fatal("a keyed recovery code did not verify")
 	}
 }
@@ -545,10 +545,10 @@ func TestLegacyRecoveryCodesRedeemUntilRegenerated(t *testing.T) {
 	if flagged, err := db.HasLegacyRecoveryCodes(u.ID); err != nil || !flagged {
 		t.Fatalf("legacy row not flagged: %v %v", flagged, err)
 	}
-	if ok, err := e.VerifyAndConsumeRecoveryCode(u.ID, "abcd-2345"); err != nil || !ok {
+	if ok, err := e.VerifyAndConsumeRecoveryCode(u.ID, "abcd-2345", nil); err != nil || !ok {
 		t.Fatalf("legacy code refused: %v %v", ok, err)
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, "ABCD-2345"); ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, "ABCD-2345", nil); ok {
 		t.Fatal("legacy code redeemed twice")
 	}
 	if flagged, _ := db.HasLegacyRecoveryCodes(u.ID); flagged {
@@ -559,7 +559,7 @@ func TestLegacyRecoveryCodesRedeemUntilRegenerated(t *testing.T) {
 	if _, err := e.GenerateRecoveryCodes(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, "WXYZ-6789"); ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, "WXYZ-6789", nil); ok {
 		t.Fatal("legacy code survived regeneration")
 	}
 	if flagged, _ := db.HasLegacyRecoveryCodes(u.ID); flagged {

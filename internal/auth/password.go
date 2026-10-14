@@ -67,13 +67,18 @@ func Saturate() (release func()) {
 	}
 }
 
+// PolicyError is a password the policy refuses; its text is safe to show the user.
+type PolicyError string
+
+func (e PolicyError) Error() string { return string(e) }
+
 // HashPassword generates an Argon2id hash with standard encoded representation.
 func HashPassword(password string) (string, error) {
 	if len(password) < 12 {
-		return "", errors.New("password must be at least 12 characters")
+		return "", PolicyError("password must be at least 12 characters")
 	}
 	if len(password) > MaxPasswordLength {
-		return "", fmt.Errorf("password must be at most %d characters", MaxPasswordLength)
+		return "", PolicyError(fmt.Sprintf("password must be at most %d characters", MaxPasswordLength))
 	}
 
 	salt := make([]byte, DefaultParams.SaltLength)

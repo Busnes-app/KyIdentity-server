@@ -40,7 +40,7 @@ func TestReconcileJobListsAndRepairsGenericSCIM(t *testing.T) {
 	srv := httptest.NewTLSServer(remote)
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestReconcileJobDoesNotBlockDelivery(t *testing.T) {
 	srv := httptest.NewTLSServer(remote)
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestReconcileJobUnsupportedForSuiteWebhook(t *testing.T) {
 	defer cleanup()
 	srv, _ := newSuiteReceiver(t, 0)
 	defer srv.Close()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "suite", SystemType: "suite_webhook", CallbackURL: srv.URL})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "suite", SystemType: "suite_webhook", CallbackURL: srv.URL}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestReconcileJobRejectsOverlongRemoteIDs(t *testing.T) {
 	srv := httptest.NewTLSServer(remote)
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

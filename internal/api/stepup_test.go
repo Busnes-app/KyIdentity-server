@@ -181,7 +181,7 @@ func TestRevokeUserAccessBurnsStepUpGrants(t *testing.T) {
 	defer cleanup()
 
 	token := f.grant(t, "POST /api/user/recovery-codes")
-	if err := f.store.RevokeUserAccess(f.user.ID); err != nil {
+	if err := f.store.RevokeUserAccess(f.user.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	spent, err := f.store.ConsumeStepUpToken(crypto.HashSHA256(token), f.user.ID, f.session.ID, "POST /api/user/recovery-codes")
@@ -217,7 +217,7 @@ func TestAdminRevocationIsTransactional(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := f.store.RevokeUserAccess(f.user.ID); err != nil {
+	if err := f.store.RevokeUserAccess(f.user.ID, nil); err != nil {
 		t.Fatalf("RevokeUserAccess: %v", err)
 	}
 

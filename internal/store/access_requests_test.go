@@ -73,7 +73,7 @@ func TestAccessRequestsExposeOnlyRequestableApps(t *testing.T) {
 	// The cap counts pending requests across apps.
 	for i := 0; i < maxPendingRequests; i++ {
 		id := "app-" + string(rune('a'+i))
-		if err := s.CreateOAuthClient(&OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://x/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+		if err := s.CreateOAuthClient(&OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://x/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 			t.Fatal(err)
 		}
 		rows, _, _ := s.ListAppRecords(id, 1, 0)
