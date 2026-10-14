@@ -276,6 +276,8 @@ The APNs worker translates this to the APS payload:
 
 Both platforms handle the full payload identically client-side.
 
+A device that registered `pushP256dh`/`pushAuth` (KyAuth iOS) gets `data` sealed instead: `{"type": "mfa_challenge", "kyauth": "<968-character base64url RFC 8291 body>"}`. The Worker passes it through unchanged; the title and body are KyIdentity's fixed text, so the relay and APNs see no user, device or challenge identifier. `mutable-content: 1` hands the alert to KyAuth's notification service extension, which replaces the text with its own fixed strings. Keep the value cap (`MAX_DATA_VALUE_LENGTH`, 1024) at or above 968: the Worker truncates longer values, and a truncated body cannot be opened.
+
 ## Provider Token Lifecycle
 
 The APNs provider token (signed JWT from the `.p8` key) is cached for ~29 minutes (Apple accepts tokens valid for ~60 min). The Worker automatically refreshes it before expiry. If a token becomes invalid (key revoked, new Key ID issued), the Worker detects the failure and clears the cache, forcing regeneration on the next send.
