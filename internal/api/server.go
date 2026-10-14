@@ -138,7 +138,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /api/auth/password/reset", s.middleware.RateLimit("account_link", 10, 0.2)(onboardH.Redeem("reset")))
 	mux.Handle("POST /api/auth/password/forgot", s.middleware.RateLimit("password_forgot", 5, 0.05)(http.HandlerFunc(onboardH.Forgot)))
 	mux.Handle("POST /api/auth/mfa/totp/verify", s.middleware.RateLimit("mfa", 10, 0.2)(http.HandlerFunc(authH.VerifyTOTP)))
-	mux.Handle("POST /api/auth/mfa/recovery/verify", s.middleware.RateLimit("mfa", 5, 0.1)(http.HandlerFunc(authH.VerifyRecoveryCode)))
+	mux.Handle("POST /api/auth/mfa/recovery/verify", s.middleware.RateLimit("mfa_recovery", 5, 0.1)(http.HandlerFunc(authH.VerifyRecoveryCode)))
 	mux.Handle("POST /api/auth/mfa/push/poll", s.middleware.RateLimit("push_poll", 120, 2.0)(http.HandlerFunc(authH.PollPushChallenge)))
 	mux.Handle("POST /api/auth/mfa/push/finish", s.middleware.RateLimit("mfa", 10, 0.2)(http.HandlerFunc(authH.FinishPushLogin)))
 	mux.Handle("POST /api/mfa/push/respond", s.middleware.RateLimit("push_respond", 15, 0.5)(http.HandlerFunc(authH.RespondPush)))

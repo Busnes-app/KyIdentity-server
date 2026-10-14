@@ -101,6 +101,9 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		user.Pending, user.Status = true, "disabled"
 	} else {
 		passHash, err := auth.HashPassword(req.Password)
+		if argonBusy(w, err) {
+			return
+		}
 		if err != nil {
 			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
 			return
@@ -192,6 +195,9 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	passwordChanged := req.Password != ""
 	if req.Password != "" {
 		passHash, err := auth.HashPassword(req.Password)
+		if argonBusy(w, err) {
+			return
+		}
 		if err != nil {
 			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
 			return

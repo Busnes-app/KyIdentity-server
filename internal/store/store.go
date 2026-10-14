@@ -1937,14 +1937,14 @@ func (s *Store) GetValidMFAToken(tokenHash string, maxAttempts int) (*MFAToken, 
 	return t, nil
 }
 
-// RecordMFAFailure counts a wrong second-factor guess against the token and returns the
-// new total. Without this one token funds unlimited guesses for its whole lifetime.
-func (s *Store) RecordMFAFailure(tokenID string) (int, error) {
-	if _, err := s.db.Exec(`UPDATE mfa_tokens SET attempts = attempts + 1 WHERE id = ?`, tokenID); err != nil {
-		return 0, err
-	}
+// ReserveMFAAttempt spends one of the token's attempts before its proof is checked and
+// returns the new total, or 0 when none is left. Reserving in one statement keeps
+// concurrent guesses within maxAttempts.
+func (s *Store) ReserveMFAAttempt(tokenID string, maxAttempts int) (int, error) {
 	var attempts int
-	err := s.db.QueryRow(`SELECT attempts FROM mfa_tokens WHERE id = ?`, tokenID).Scan(&attempts)
+	err := s.db.QueryRow(`UPDATE mfa_tokens SET attempts = attempts + 1
+		WHERE id = ? AND used_at IS NULL AND expires_at > ? AND attempts < ? RETURNING attempts`,
+		tokenID, time.Now().UTC(), maxAttempts).Scan(&attempts)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}

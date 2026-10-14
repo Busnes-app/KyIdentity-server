@@ -300,15 +300,14 @@ func (h *WebAuthnHandler) FinishLogin(w http.ResponseWriter, r *http.Request, au
 		return
 	}
 
-	// From here on, every rejection counts against token.ID: this is the one handler that
-	// mints a session, so nothing past a resolved token gets free attempts. Status code and
-	// body are chosen per call site; the counting and audit write always happen.
+	// Every request past a resolved token spends one of its attempts, and every rejection
+	// counts against the account: this handler mints a session, so nothing gets free tries.
+	attempts, ok := auth.reserveMFAAttempt(w, token)
+	if !ok {
+		return
+	}
 	failed := func(status int, body, reason string) {
-		attempts, _ := h.mfaEngine.RegisterMFAFailure(token.ID)
-		h.audit.Record("auth.mfa_passkey", user.ID, user.Username, user.ID, "user",
-			h.middleware.ClientIP(r), r.UserAgent(), "failure",
-			map[string]any{"reason": reason, "attempts": attempts})
-		http.Error(w, body, status)
+		auth.mfaFailure(w, r, user, "auth.mfa_passkey", map[string]any{"reason": reason, "attempts": attempts}, status, body)
 	}
 
 	authData, err1 := base64.RawURLEncoding.DecodeString(req.AuthenticatorData)
@@ -383,7 +382,6 @@ func (h *WebAuthnHandler) FinishLogin(w http.ResponseWriter, r *http.Request, au
 
 	h.audit.Record("auth.mfa_passkey", user.ID, user.Username, user.ID, "user",
 		h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"userVerified": ad.UserVerified()})
-	_ = h.store.ClearFailedLogins(user.ID)
 	auth.createSessionAndRespond(w, r, user, store.AuthenticationEvidence{PrimaryAuthenticatedAt: token.PrimaryAuthenticatedAt, FactorAuthenticatedAt: &factorAt, FactorMethod: "webauthn"}, token.InteractionHash)
 }
 

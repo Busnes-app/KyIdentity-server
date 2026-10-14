@@ -146,6 +146,9 @@ func (h *OnboardingHandler) Redeem(kind string) http.HandlerFunc {
 			return
 		}
 		hash, err := auth.HashPassword(req.Password)
+		if argonBusy(w, err) {
+			return
+		}
 		if err != nil {
 			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
 			return
@@ -239,12 +242,18 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	ok, err := auth.VerifyPassword(req.CurrentPassword, user.PasswordHash)
+	if argonBusy(w, err) {
+		return
+	}
 	if err != nil || !ok {
 		h.audit.Record("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "invalid_password"})
 		http.Error(w, `{"error":"invalid_credentials","error_description":"Current password is incorrect"}`, http.StatusUnauthorized)
 		return
 	}
 	hash, err := auth.HashPassword(req.NewPassword)
+	if argonBusy(w, err) {
+		return
+	}
 	if err != nil {
 		http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
 		return

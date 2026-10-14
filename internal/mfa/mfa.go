@@ -797,9 +797,17 @@ func (e *Engine) IssueMFATokenForInteraction(userID, challengeID string, primary
 // Without it, one token allows unlimited guesses for its whole five-minute lifetime.
 const MaxMFAAttempts = 5
 
-// RegisterMFAFailure counts a wrong second-factor guess against the token.
-func (e *Engine) RegisterMFAFailure(tokenID string) (int, error) {
-	return e.store.RecordMFAFailure(tokenID)
+// ErrMFAAttemptsExhausted means the token has no attempt left to spend.
+var ErrMFAAttemptsExhausted = errors.New("mfa token has no attempts left")
+
+// ReserveMFAAttempt spends one attempt before the proof is checked, so parallel guesses
+// on one token cannot exceed MaxMFAAttempts. It returns the attempts used so far.
+func (e *Engine) ReserveMFAAttempt(tokenID string) (int, error) {
+	n, err := e.store.ReserveMFAAttempt(tokenID, MaxMFAAttempts)
+	if err == nil && n == 0 {
+		err = ErrMFAAttemptsExhausted
+	}
+	return n, err
 }
 
 // ValidateMFAToken resolves a raw token to its stored record without consuming it.

@@ -96,11 +96,19 @@ func (f *stepUpFixture) do(t *testing.T, method, path, stepUp string) *httptest.
 // all the double-submit check requires of a caller that holds no session.
 func anonPost(t *testing.T, srv *Server, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
+	return anonPostFrom(t, srv, "192.0.2.1", path, body)
+}
+
+// anonPostFrom is anonPost from a chosen peer address, so a test can stay clear of the
+// per-IP rate limits it is not exercising.
+func anonPostFrom(t *testing.T, srv *Server, ip, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+	req.RemoteAddr = ip + ":1234"
 	req.Header.Set("Content-Type", "application/json")
 	csrf := "test-csrf-" + uuid.New().String()
 	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
@@ -411,7 +419,7 @@ func TestPasskeyMalformedCeremonyCountsAsFailure(t *testing.T) {
 
 	// The budget is now exhausted. A further request against the same token must fail at
 	// token resolution (401), not at field parsing (400) — proof the malformed attempts
-	// above were each counted via RegisterMFAFailure.
+	// above each spent an attempt via ReserveMFAAttempt.
 	rec := anonPost(t, f.srv, "/api/auth/mfa/webauthn/verify", malformed)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("verify after exhausting the attempt budget returned %d, want 401 (token invalid): %s", rec.Code, rec.Body.String())
