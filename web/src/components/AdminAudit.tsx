@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { AuditEvent } from '../types';
-import { apiJson } from '../api';
+import { apiJson, errorMessage } from '../api';
 import { parseAuditPage } from '../parsers';
 import { instantFromLocal, localZone } from '../instant';
 import {
@@ -18,6 +18,21 @@ import {
   Play,
 } from 'lucide-react';
 
+export type AuditFilter = { actor: string; target: string; action: string; outcome: string; from: string; to: string };
+const emptyFilter: AuditFilter = { actor: '', target: '', action: '', outcome: '', from: '', to: '' };
+
+/** The query string for a filter; empty when nothing narrows the log. */
+export function auditQuery(filter: AuditFilter): string {
+  const q = new URLSearchParams();
+  if (filter.actor.trim()) q.set('actor', filter.actor.trim());
+  if (filter.target.trim()) q.set('target', filter.target.trim());
+  if (filter.action.trim()) q.set('action', filter.action.trim());
+  if (filter.outcome) q.set('outcome', filter.outcome);
+  const from = instantFromLocal(filter.from); if (from) q.set('from', from);
+  const to = instantFromLocal(filter.to); if (to) q.set('to', to);
+  return q.toString();
+}
+
 export const AdminAudit: React.FC = () => {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [total, setTotal] = useState(0);
@@ -25,54 +40,64 @@ export const AdminAudit: React.FC = () => {
   const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // When the shown page last loaded; null after a failed foreground load.
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(10); // seconds
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState({ actor: '', target: '', action: '', outcome: '', from: '', to: '' });
-  const filterQuery = () => {
-    const q = new URLSearchParams();
-    if (filter.actor.trim()) q.set('actor', filter.actor.trim());
-    if (filter.target.trim()) q.set('target', filter.target.trim());
-    if (filter.action.trim()) q.set('action', filter.action.trim());
-    if (filter.outcome) q.set('outcome', filter.outcome);
-    const from = instantFromLocal(filter.from); if (from) q.set('from', from);
-    const to = instantFromLocal(filter.to); if (to) q.set('to', to);
-    return q.toString();
-  };
+  const [filter, setFilter] = useState(emptyFilter);
+  // Typing settles for 300ms before the filter is applied and the page resets.
+  const [applied, setApplied] = useState(filter);
+  useEffect(() => {
+    if (filter === applied) return;
+    const timer = window.setTimeout(() => { setApplied(filter); setPage(1); }, 300);
+    return () => clearTimeout(timer);
+  }, [filter, applied]);
+  const query = auditQuery(applied);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<number | null>(null);
+  const inFlight = useRef<AbortController | null>(null);
+  useEffect(() => () => inFlight.current?.abort(), []);
 
-  const fetchEvents = useCallback(
-    async (targetPage = page, targetLimit = pageSize, isBackground = false) => {
-      if (isBackground) {
-        setIsRefreshing(true);
-      } else {
-        setLoading(true);
+  // A load supersedes whatever is in flight; a poll never interrupts one.
+  const fetchEvents = useCallback(async (isBackground: boolean) => {
+    if (isBackground && inFlight.current) return;
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
+    if (isBackground) setIsRefreshing(true); else setLoading(true);
+
+    try {
+      const result = await apiJson(`/api/admin/audit-events?page=${page}&limit=${pageSize}&${query}`, parseAuditPage,
+        { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setEvents(result.events);
+      setTotal(result.total);
+      setError(null);
+      setLoadedAt(new Date());
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setError(errorMessage(err, 'Could not load audit events'));
+      // A failed poll keeps the page on screen; a failed load must not pass off old rows.
+      if (!isBackground) {
+        setEvents([]);
+        setTotal(0);
+        setLoadedAt(null);
       }
-
-      try {
-        const page = await apiJson(
-          `/api/admin/audit-events?page=${targetPage}&limit=${targetLimit}&${filterQuery()}`,
-          parseAuditPage
-        );
-        setEvents(page.events);
-        setTotal(page.total);
-      } catch {
-        // A failed background poll leaves the current page on screen.
-      } finally {
+    } finally {
+      if (inFlight.current === controller) {
+        inFlight.current = null;
         setLoading(false);
         setIsRefreshing(false);
       }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [page, pageSize, filter]
-  );
+    }
+  }, [page, pageSize, query]);
 
-  // Initial load or page/size change
   useEffect(() => {
-    fetchEvents(page, pageSize, false);
-  }, [page, pageSize, fetchEvents]);
+    fetchEvents(false);
+  }, [fetchEvents]);
 
   // Auto-refresh interval
   useEffect(() => {
@@ -84,7 +109,7 @@ export const AdminAudit: React.FC = () => {
     if (autoRefresh && refreshInterval > 0) {
       timerRef.current = window.setInterval(() => {
         if (document.visibilityState === 'visible') {
-          fetchEvents(page, pageSize, true);
+          fetchEvents(true);
         }
       }, refreshInterval * 1000);
     }
@@ -94,13 +119,13 @@ export const AdminAudit: React.FC = () => {
         clearInterval(timerRef.current);
       }
     };
-  }, [autoRefresh, refreshInterval, page, pageSize, fetchEvents]);
+  }, [autoRefresh, refreshInterval, fetchEvents]);
 
   // Catch up immediately on tab resume
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && autoRefresh) {
-        fetchEvents(page, pageSize, true);
+        fetchEvents(true);
       }
     };
 
@@ -108,7 +133,7 @@ export const AdminAudit: React.FC = () => {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [autoRefresh, page, pageSize, fetchEvents]);
+  }, [autoRefresh, fetchEvents]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -184,7 +209,7 @@ export const AdminAudit: React.FC = () => {
 
           <button
             className="secondary-btn sm"
-            onClick={() => fetchEvents(page, pageSize, false)}
+            onClick={() => fetchEvents(false)}
             disabled={loading || isRefreshing}
             title="Refresh now"
           >
@@ -197,21 +222,33 @@ export const AdminAudit: React.FC = () => {
       <section className="settings-section">
         <div className="section-header"><div className="section-title-wrap"><h2>Filter</h2></div>
           <div className="action-buttons-wrap">
-            <a className="secondary-btn sm" href={`/api/admin/audit-events/export?format=csv&${filterQuery()}`} download>Export CSV</a>
-            <a className="secondary-btn sm" href={`/api/admin/audit-events/export?format=jsonl&${filterQuery()}`} download>Export JSONL</a>
+            <a className="secondary-btn sm" href={`/api/admin/audit-events/export?format=csv&${query}`} download>Export CSV</a>
+            <a className="secondary-btn sm" href={`/api/admin/audit-events/export?format=jsonl&${query}`} download>Export JSONL</a>
           </div></div>
         <p className="text-muted text-sm">Exports carry the same filter as this page, at most 50,000 rows, with credential-shaped details redacted; each export is itself audited.</p>
         <div className="form-row">
-          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-actor">Actor (id or username)</label><input id="audit-actor" className="form-input" maxLength={200} value={filter.actor} onChange={e => { setFilter({ ...filter, actor: e.target.value }); setPage(1); }} /></div>
-          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-target">Target id</label><input id="audit-target" className="form-input" maxLength={200} value={filter.target} onChange={e => { setFilter({ ...filter, target: e.target.value }); setPage(1); }} /></div>
-          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-action">Action (prefix, e.g. oauth.)</label><input id="audit-action" className="form-input font-mono" maxLength={200} value={filter.action} onChange={e => { setFilter({ ...filter, action: e.target.value }); setPage(1); }} /></div>
-          <div className="form-group"><label className="form-label" htmlFor="audit-outcome">Outcome</label><select id="audit-outcome" className="form-select" value={filter.outcome} onChange={e => { setFilter({ ...filter, outcome: e.target.value }); setPage(1); }}><option value="">Any</option><option value="success">Success</option><option value="failure">Failure</option><option value="denied">Denied</option></select></div>
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-actor">Actor (id or username)</label><input id="audit-actor" className="form-input" maxLength={200} value={filter.actor} onChange={e => { setFilter({ ...filter, actor: e.target.value }) }} /></div>
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-target">Target id</label><input id="audit-target" className="form-input" maxLength={200} value={filter.target} onChange={e => { setFilter({ ...filter, target: e.target.value }) }} /></div>
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-action">Action (prefix, e.g. oauth.)</label><input id="audit-action" className="form-input font-mono" maxLength={200} value={filter.action} onChange={e => { setFilter({ ...filter, action: e.target.value }) }} /></div>
+          <div className="form-group"><label className="form-label" htmlFor="audit-outcome">Outcome</label><select id="audit-outcome" className="form-select" value={filter.outcome} onChange={e => { setFilter({ ...filter, outcome: e.target.value }) }}><option value="">Any</option><option value="success">Success</option><option value="failure">Failure</option><option value="denied">Denied</option></select></div>
         </div>
         <div className="form-row">
-          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-from">From ({localZone()})</label><input id="audit-from" type="datetime-local" className="form-input" value={filter.from} onChange={e => { setFilter({ ...filter, from: e.target.value }); setPage(1); }} /></div>
-          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-to">To ({localZone()})</label><input id="audit-to" type="datetime-local" className="form-input" value={filter.to} onChange={e => { setFilter({ ...filter, to: e.target.value }); setPage(1); }} /></div>
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-from">From ({localZone()})</label><input id="audit-from" type="datetime-local" className="form-input" value={filter.from} onChange={e => { setFilter({ ...filter, from: e.target.value }) }} /></div>
+          <div className="form-group flex-1"><label className="form-label" htmlFor="audit-to">To ({localZone()})</label><input id="audit-to" type="datetime-local" className="form-input" value={filter.to} onChange={e => { setFilter({ ...filter, to: e.target.value }) }} /></div>
         </div>
       </section>
+
+      {error && !loadedAt && (
+        <div className="alert-box error" role="alert">
+          {error}
+          <button className="secondary-btn sm" onClick={() => fetchEvents(false)} disabled={loading}>Retry</button>
+        </div>
+      )}
+      {error && loadedAt && (
+        <p className="text-muted text-sm" role="status">
+          <AlertTriangle size={12} /> Refresh failed ({error}); showing events loaded at {loadedAt.toLocaleTimeString()}.
+        </p>
+      )}
 
       <div className="audit-container">
         {/* Controls header bar */}
@@ -287,7 +324,7 @@ export const AdminAudit: React.FC = () => {
               ) : events.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-5 text-muted">
-                    No audit events recorded yet.
+                    {error && !loadedAt ? 'Audit events could not be loaded.' : query ? 'No events match this filter.' : 'No audit events recorded yet.'}
                   </td>
                 </tr>
               ) : (
@@ -310,7 +347,10 @@ export const AdminAudit: React.FC = () => {
                         title="Click to view details"
                       >
                         <td className="text-center text-muted" style={{ padding: '0.5rem' }}>
-                          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          <button type="button" className="icon-btn" aria-expanded={isExpanded} aria-label={`Details for ${e.action}`}
+                            onClick={(ev) => { ev.stopPropagation(); toggleExpand(e.id); }}>
+                            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          </button>
                         </td>
                         <td className="font-mono text-sm text-muted" style={{ whiteSpace: 'nowrap' }}>
                           {new Date(e.createdAt).toLocaleString()}

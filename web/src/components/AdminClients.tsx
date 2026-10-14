@@ -8,11 +8,13 @@ const isSuiteClient = (id: string) => SUITE_CLIENT_IDS.includes(id.trim().toLowe
 import { OAuthClient } from '../types';
 import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
+import { Modal } from './Modal';
 import { parseCreatedClientSecret, parseOAuthClients, parseOIDCIssuer } from '../parsers';
 import { Plus, Trash2, CheckCircle, AlertTriangle, Info, KeyRound } from 'lucide-react';
 
 export const AdminClients: React.FC = () => {
-  const [clients, setClients] = useState<OAuthClient[]>([]);
+  const [clients, setClients] = useState<OAuthClient[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [issuer, setIssuer] = useState('');
   const [detailsClient, setDetailsClient] = useState<OAuthClient | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -36,8 +38,9 @@ export const AdminClients: React.FC = () => {
       ]);
       setClients(nextClients);
       setIssuer(nextIssuer);
-    } catch {
-      // A failed refresh leaves the previous list on screen.
+      setListError(null);
+    } catch (err) {
+      setListError(errorMessage(err, 'Could not load OAuth clients'));
     }
   };
 
@@ -191,6 +194,7 @@ export const AdminClients: React.FC = () => {
           <span>Register Client</span>
         </button>
       </div>
+      {listError && <div className="alert-box error" role="alert">{listError}<button className="secondary-btn sm" onClick={fetchClients}>Retry</button></div>}
 
       <div className="table-card">
         <table className="admin-table">
@@ -205,14 +209,14 @@ export const AdminClients: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {clients.length === 0 ? (
+            {clients?.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-5 text-muted">
                   No OAuth clients registered yet.
                 </td>
               </tr>
             ) : (
-              clients.map((c) => {
+              clients?.map((c) => {
                 return (
                   <tr key={c.id}>
                     <td className="font-bold text-white">{c.clientName}</td>
@@ -267,253 +271,233 @@ export const AdminClients: React.FC = () => {
       </div>
 
       {detailsClient && (
-        <div className="modal-backdrop" onMouseDown={() => setDetailsClient(null)}>
-          <div className="modal-card client-details-modal" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{detailsClient.clientName} connection details</h3>
-              <button
-                className="close-btn"
-                onClick={() => setDetailsClient(null)}
-                aria-label="Close connection details"
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-body connection-details">
-              {[
-                ['Client ID', detailsClient.id],
-                ['Authorization URL', `${issuer}/oauth/authorize`],
-                ['Access token URL', `${issuer}/oauth/token`],
-                ['Resource URL', `${issuer}/oauth/userinfo`],
-                ['Logout URL', `${issuer}/oauth/logout`],
-                ['Post-logout redirect URIs', detailsClient.postLogoutRedirectUris.join(' ') || 'None registered; sign-out ends on the KySignOn page'],
-                ['Back-channel logout URI', detailsClient.backchannelLogoutUri || 'None; this app is not told when a login ends'],
-                ['User identifier', 'username'],
-                ['Scope', detailsClient.allowedScopes.join(' ')],
-                ['Auth Style', 'In Params'],
-              ].map(([label, value]) => (
-                <div className="form-group" key={label}>
-                  <label className="form-label">{label}</label>
-                  <input className="form-input font-mono" value={value} readOnly />
-                </div>
-              ))}
-              <div className="form-group">
-                <label className="form-label">Redirect URL</label>
-                {detailsClient.redirectUris.map((uri) => (
-                  <input className="form-input font-mono" value={uri} readOnly key={uri} />
-                ))}
+        <Modal title={`${detailsClient.clientName} connection details`} onClose={() => setDetailsClient(null)} className="client-details-modal" closeOnBackdrop>
+          <div className="modal-body connection-details">
+            {[
+              ['Client ID', detailsClient.id],
+              ['Authorization URL', `${issuer}/oauth/authorize`],
+              ['Access token URL', `${issuer}/oauth/token`],
+              ['Resource URL', `${issuer}/oauth/userinfo`],
+              ['Logout URL', `${issuer}/oauth/logout`],
+              ['Post-logout redirect URIs', detailsClient.postLogoutRedirectUris.join(' ') || 'None registered; sign-out ends on the KySignOn page'],
+              ['Back-channel logout URI', detailsClient.backchannelLogoutUri || 'None; this app is not told when a login ends'],
+              ['User identifier', 'username'],
+              ['Scope', detailsClient.allowedScopes.join(' ')],
+              ['Auth Style', 'In Params'],
+            ].map(([label, value]) => (
+              <div className="form-group" key={label}>
+                <label className="form-label">{label}</label>
+                <input className="form-input font-mono" value={value} readOnly />
               </div>
+            ))}
+            <div className="form-group">
+              <label className="form-label">Redirect URL</label>
+              {detailsClient.redirectUris.map((uri) => (
+                <input className="form-input font-mono" value={uri} readOnly key={uri} />
+              ))}
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {showModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>{secretWasRotated ? 'New Client Secret' : 'Register OAuth / OIDC Client'}</h3>
-              <button className="close-btn" onClick={resetForm}>
-                ×
-              </button>
-            </div>
-            {!createdClientId ? (
-              <form onSubmit={handleCreateClient} className="modal-body">
-                <div className="form-group">
-                  <label className="form-label">Quick App Preset</label>
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="secondary-btn sm"
-                      onClick={() => applyPreset('kydns', 'KyDNS Server', '/auth/sso/callback', '/auth/sso/login')}
-                    >
-                      + KyDNS
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-btn sm"
-                      onClick={() => applyPreset('kypost', 'KyPost Mail Server', '/api/auth/oidc/callback', '/api/auth/oidc/login')}
-                    >
-                      + KyPost
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-btn sm"
-                      onClick={() => applyPreset('kypasswords', 'KyPasswords Vault', '/api/auth/oidc/callback', '/api/auth/oidc/login')}
-                    >
-                      + KyPasswords
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-btn sm"
-                      onClick={() => applyPreset('kybookmarks', 'KyBookmarks', '/api/auth/oidc/callback', '/api/auth/oidc/login')}
-                    >
-                      + KyBookmarks
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-btn sm"
-                      onClick={() => applyPreset('kynotes', 'KyNotes', '/api/auth/oidc/callback', '/api/auth/oidc/login')}
-                    >
-                      + KyNotes
-                    </button>
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Client ID (optional identifier)</label>
-                  <input
-                    type="text"
-                    className="form-input font-mono"
-                    placeholder="e.g. kydns (auto-generated if empty)"
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Client Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. KyDNS Server"
-                    value={clientName}
-                    onChange={(e) => setClientName(e.target.value)}
-                    autoFocus
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Client Type</label>
-                  <select
-                    className="form-select"
-                    value={suiteLocked ? 'confidential' : clientType}
-                    disabled={suiteLocked}
-                    onChange={(e) => setClientType(e.target.value === 'confidential' ? 'confidential' : 'public')}
+        <Modal title={secretWasRotated ? 'New Client Secret' : 'Register OAuth / OIDC Client'} onClose={resetForm}>
+          {!createdClientId ? (
+            <form onSubmit={handleCreateClient} className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Quick App Preset</label>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="secondary-btn sm"
+                    onClick={() => applyPreset('kydns', 'KyDNS Server', '/auth/sso/callback', '/auth/sso/login')}
                   >
-                    <option value="confidential">Confidential — server-side, gets a client secret (recommended)</option>
-                    <option value="public">Public — no client secret, PKCE only</option>
-                  </select>
-
-                  {suiteLocked && (
-                    <div className="alert-box sm" style={{ alignItems: 'flex-start' }}>
-                      <CheckCircle size={16} />
-                      <span>
-                        <strong>{clientId.trim()}</strong> is a KySecurity suite service. It runs
-                        server-side and can hold a secret, so it is always confidential.
-                      </span>
-                    </div>
-                  )}
-
-                  {!suiteLocked && clientType === 'public' && (
-                    <div className="alert-box warn" role="alert" style={{ alignItems: 'flex-start' }}>
-                      <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '0.15rem' }} />
-                      <span>
-                        <strong>No client secret will be issued.</strong> Anyone who obtains an
-                        authorization code for this client can redeem it if they also have the PKCE
-                        verifier. Choose this only for a single-page app or a native app, which
-                        cannot keep a secret. Any server-side service should be confidential.
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Allowed Redirect URIs (one per line)</label>
-                  <textarea
-                    className="form-textarea font-mono"
-                    rows={3}
-                    placeholder="https://dns.example.com/auth/sso/callback"
-                    value={redirectUris}
-                    onChange={(e) => setRedirectUris(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Post-logout redirect URIs (optional, one per line)</label>
-                  <textarea
-                    className="form-textarea font-mono"
-                    rows={2}
-                    placeholder="https://dns.example.com/signed-out"
-                    value={postLogoutUris}
-                    onChange={(e) => setPostLogoutUris(e.target.value)}
-                  />
-                  <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
-                    Where the app may send the browser after it asks KySignOn to sign the user out. Exact match only.
-                  </span>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Back-channel logout URI (optional)</label>
-                  <input
-                    type="url"
-                    className="form-input font-mono"
-                    placeholder="https://dns.example.com/auth/backchannel-logout"
-                    value={backchannelUri}
-                    onChange={(e) => setBackchannelUri(e.target.value)}
-                  />
-                  <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
-                    KySignOn POSTs a signed logout token here when a login ends. Public HTTPS only; without it the app is never told.
-                  </span>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Auto-Login / Launch URL (optional deep link for launcher)</label>
-                  <input
-                    type="url"
-                    className="form-input font-mono"
-                    placeholder="e.g. https://dns.urlxl.com/auth/sso/login or https://grafana.example.com/login/generic_oauth"
-                    value={launchUrl}
-                    onChange={(e) => setLaunchUrl(e.target.value)}
-                  />
-                  <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
-                    If provided, clicking the app tile in the KyIdentity launcher will open this exact auto-login URL.
-                  </span>
-                </div>
-
-                <div className="modal-footer">
-                  <button type="button" className="secondary-btn" onClick={resetForm}>
-                    Cancel
+                    + KyDNS
                   </button>
-                  <button type="submit" className="primary-btn">
-                    Register Client
+                  <button
+                    type="button"
+                    className="secondary-btn sm"
+                    onClick={() => applyPreset('kypost', 'KyPost Mail Server', '/api/auth/oidc/callback', '/api/auth/oidc/login')}
+                  >
+                    + KyPost
                   </button>
-                </div>
-              </form>
-            ) : (
-              <div className="modal-body text-center">
-                <div className="alert-box success">
-                  <CheckCircle size={16} />
-                  <span>
-                    {secretWasRotated
-                      ? 'Secret rotated. The previous secret and every token issued under it are now revoked.'
-                      : 'Client registered. Assign access under App connections before users can sign in.'}
-                  </span>
-                </div>
-
-                <div className="form-group mt-3 text-left">
-                  <label className="form-label">Client ID</label>
-                  <input type="text" className="form-input font-mono" value={createdClientId} readOnly />
-                </div>
-
-                {createdSecret && (
-                  <div className="form-group text-left">
-                    <label className="form-label">Client Secret (Shown once)</label>
-                    <input type="text" className="form-input font-mono" value={createdSecret} readOnly />
-                  </div>
-                )}
-
-                <div className="modal-footer mt-4">
-                  <button className="primary-btn" onClick={resetForm}>
-                    Done
+                  <button
+                    type="button"
+                    className="secondary-btn sm"
+                    onClick={() => applyPreset('kypasswords', 'KyPasswords Vault', '/api/auth/oidc/callback', '/api/auth/oidc/login')}
+                  >
+                    + KyPasswords
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn sm"
+                    onClick={() => applyPreset('kybookmarks', 'KyBookmarks', '/api/auth/oidc/callback', '/api/auth/oidc/login')}
+                  >
+                    + KyBookmarks
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn sm"
+                    onClick={() => applyPreset('kynotes', 'KyNotes', '/api/auth/oidc/callback', '/api/auth/oidc/login')}
+                  >
+                    + KyNotes
                   </button>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
+
+              <div className="form-group">
+                <label className="form-label">Client ID (optional identifier)</label>
+                <input
+                  type="text"
+                  className="form-input font-mono"
+                  placeholder="e.g. kydns (auto-generated if empty)"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Client Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. KyDNS Server"
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Client Type</label>
+                <select
+                  className="form-select"
+                  value={suiteLocked ? 'confidential' : clientType}
+                  disabled={suiteLocked}
+                  onChange={(e) => setClientType(e.target.value === 'confidential' ? 'confidential' : 'public')}
+                >
+                  <option value="confidential">Confidential — server-side, gets a client secret (recommended)</option>
+                  <option value="public">Public — no client secret, PKCE only</option>
+                </select>
+
+                {suiteLocked && (
+                  <div className="alert-box sm" style={{ alignItems: 'flex-start' }}>
+                    <CheckCircle size={16} />
+                    <span>
+                      <strong>{clientId.trim()}</strong> is a KySecurity suite service. It runs
+                      server-side and can hold a secret, so it is always confidential.
+                    </span>
+                  </div>
+                )}
+
+                {!suiteLocked && clientType === 'public' && (
+                  <div className="alert-box warn" role="alert" style={{ alignItems: 'flex-start' }}>
+                    <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '0.15rem' }} />
+                    <span>
+                      <strong>No client secret will be issued.</strong> Anyone who obtains an
+                      authorization code for this client can redeem it if they also have the PKCE
+                      verifier. Choose this only for a single-page app or a native app, which
+                      cannot keep a secret. Any server-side service should be confidential.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Allowed Redirect URIs (one per line)</label>
+                <textarea
+                  className="form-textarea font-mono"
+                  rows={3}
+                  placeholder="https://dns.example.com/auth/sso/callback"
+                  value={redirectUris}
+                  onChange={(e) => setRedirectUris(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Post-logout redirect URIs (optional, one per line)</label>
+                <textarea
+                  className="form-textarea font-mono"
+                  rows={2}
+                  placeholder="https://dns.example.com/signed-out"
+                  value={postLogoutUris}
+                  onChange={(e) => setPostLogoutUris(e.target.value)}
+                />
+                <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
+                  Where the app may send the browser after it asks KySignOn to sign the user out. Exact match only.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Back-channel logout URI (optional)</label>
+                <input
+                  type="url"
+                  className="form-input font-mono"
+                  placeholder="https://dns.example.com/auth/backchannel-logout"
+                  value={backchannelUri}
+                  onChange={(e) => setBackchannelUri(e.target.value)}
+                />
+                <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
+                  KySignOn POSTs a signed logout token here when a login ends. Public HTTPS only; without it the app is never told.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Auto-Login / Launch URL (optional deep link for launcher)</label>
+                <input
+                  type="url"
+                  className="form-input font-mono"
+                  placeholder="e.g. https://dns.urlxl.com/auth/sso/login or https://grafana.example.com/login/generic_oauth"
+                  value={launchUrl}
+                  onChange={(e) => setLaunchUrl(e.target.value)}
+                />
+                <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
+                  If provided, clicking the app tile in the KyIdentity launcher will open this exact auto-login URL.
+                </span>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="secondary-btn" onClick={resetForm}>
+                  Cancel
+                </button>
+                <button type="submit" className="primary-btn">
+                  Register Client
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="modal-body text-center">
+              <div className="alert-box success">
+                <CheckCircle size={16} />
+                <span>
+                  {secretWasRotated
+                    ? 'Secret rotated. The previous secret and every token issued under it are now revoked.'
+                    : 'Client registered. Assign access under App connections before users can sign in.'}
+                </span>
+              </div>
+
+              <div className="form-group mt-3 text-left">
+                <label className="form-label">Client ID</label>
+                <input type="text" className="form-input font-mono" value={createdClientId} readOnly />
+              </div>
+
+              {createdSecret && (
+                <div className="form-group text-left">
+                  <label className="form-label">Client Secret (Shown once)</label>
+                  <input type="text" className="form-input font-mono" value={createdSecret} readOnly />
+                </div>
+              )}
+
+              <div className="modal-footer mt-4">
+                <button className="primary-btn" onClick={resetForm}>
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
       )}
     </div>
   );

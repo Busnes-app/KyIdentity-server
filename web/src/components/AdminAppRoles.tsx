@@ -32,8 +32,8 @@ export function AdminAppRoles({ app: initial, onClose }: { app: AppRecord; onClo
   };
   useEffect(() => {
     void reload();
-    apiJson('/api/admin/users', parseUsers).then(setUsers).catch(() => setUsers([]));
-    apiJson('/api/admin/groups?limit=100', parseGroupPage).then(p => setGroups(p.items)).catch(() => setGroups([]));
+    apiJson('/api/admin/users', parseUsers).then(setUsers).catch(err => setError(errorMessage(err, 'Could not load users to map')));
+    apiJson('/api/admin/groups?limit=100', parseGroupPage).then(p => setGroups(p.items)).catch(err => setError(errorMessage(err, 'Could not load groups to map')));
   }, []);
 
   const mutate = async (reason: string, method: 'POST' | 'PUT' | 'DELETE', path: string, body?: object) => {

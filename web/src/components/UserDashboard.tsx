@@ -8,6 +8,7 @@ import { LAUNCHER_ICONS } from '../launcherIcons';
 import { AppIcon, LauncherView, uploadedIconUrl } from './Launcher';
 import { LauncherCustomize } from './LauncherCustomize';
 import { arrange, normalize, unhide } from '../launcherLayout';
+import { Modal } from './Modal';
 
 interface UserDashboardProps {
   user: User;
@@ -129,14 +130,15 @@ const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices 
 /** Every custom launcher card, independent of the admin's own access. */
 const ManageCards: React.FC<{ user: User }> = ({ user }) => {
   const [notice, setNotice] = useState<string | null>(null);
-  const [apps, setApps] = useState<Application[]>([]);
+  const [apps, setApps] = useState<Application[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState<CardDraft | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const fetchApps = () =>
     apiJson('/api/admin/applications', parseApplications)
-      .then(setApps)
-      .catch(() => setApps([]));
+      .then((list) => { setApps(list); setLoadError(null); })
+      .catch((err) => setLoadError(errorMessage(err, 'Could not load launcher cards')));
 
   useEffect(() => {
     fetchApps();
@@ -253,111 +255,104 @@ const ManageCards: React.FC<{ user: User }> = ({ user }) => {
       </div>
 
       {notice && <p className="alert-box success" role="status">{notice}</p>}
-      {apps.length === 0 && <p className="app-empty">No launcher cards yet. Add an application link.</p>}
-      {apps.length > 0 && appList(apps)}
+      {loadError && <div className="alert-box error" role="alert">{loadError}<button className="secondary-btn sm" onClick={fetchApps}>Retry</button></div>}
+      {apps?.length === 0 && <p className="app-empty">No launcher cards yet. Add an application link.</p>}
+      {apps && apps.length > 0 && appList(apps)}
 
       {draft && (
-        <div className="modal-backdrop" onMouseDown={() => setDraft(null)}>
-          <div className="modal-card" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{draft.id ? `Edit ${draft.name}` : 'Add external application'}</h3>
-              <button className="close-btn" onClick={() => setDraft(null)} aria-label="Close">
-                ×
-              </button>
-            </div>
-            <form className="modal-body" onSubmit={saveCard}>
-              {!isClientCard && (
-                <>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="app-name">Application name</label>
-                    <input
-                      id="app-name"
-                      className="form-input"
-                      value={draft.name}
-                      onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                      required
-                      autoFocus
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="app-url">Application URL</label>
-                    <input
-                      id="app-url"
-                      className="form-input font-mono"
-                      type="url"
-                      value={draft.url}
-                      onChange={(event) => setDraft({ ...draft, url: event.target.value })}
-                      placeholder="https://portainer.example.com"
-                      required
-                    />
-                  </div>
-                </>
-              )}
-              {isClientCard && (
-                <p className="form-hint">
-                  Name and sign-in URL come from this app&apos;s OAuth client registration. Change them
-                  under OAuth clients.
-                </p>
-              )}
-              <div className="form-group">
-                <label className="form-label" htmlFor="app-description">Description (optional)</label>
-                <input
-                  id="app-description"
-                  className="form-input"
-                  value={draft.description}
-                  onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-                  maxLength={200}
-                  placeholder="What this app is for"
-                  autoFocus={isClientCard}
-                />
-              </div>
-              <fieldset className="form-group icon-picker">
-                <legend className="form-label">Icon</legend>
-                <label className="icon-pick" aria-pressed={draft.iconName.startsWith('icon:')} title="Upload an image">
-                  {uploadedIconUrl(draft.iconName) ? (
-                    <img className="app-favicon" src={uploadedIconUrl(draft.iconName)} alt="" />
-                  ) : (
-                    <Upload size={20} />
-                  )}
-                  <span>Upload</span>
+        <Modal title={draft.id ? `Edit ${draft.name}` : 'Add external application'} onClose={() => setDraft(null)} closeOnBackdrop>
+          <form className="modal-body" onSubmit={saveCard}>
+            {!isClientCard && (
+              <>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="app-name">Application name</label>
                   <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                    onChange={(event) => uploadIcon(event.target.files?.[0])}
+                    id="app-name"
+                    className="form-input"
+                    value={draft.name}
+                    onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                    required
+                    autoFocus
                   />
-                </label>
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="app-url">Application URL</label>
+                  <input
+                    id="app-url"
+                    className="form-input font-mono"
+                    type="url"
+                    value={draft.url}
+                    onChange={(event) => setDraft({ ...draft, url: event.target.value })}
+                    placeholder="https://portainer.example.com"
+                    required
+                  />
+                </div>
+              </>
+            )}
+            {isClientCard && (
+              <p className="form-hint">
+                Name and sign-in URL come from this app&apos;s OAuth client registration. Change them
+                under OAuth clients.
+              </p>
+            )}
+            <div className="form-group">
+              <label className="form-label" htmlFor="app-description">Description (optional)</label>
+              <input
+                id="app-description"
+                className="form-input"
+                value={draft.description}
+                onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+                maxLength={200}
+                placeholder="What this app is for"
+                autoFocus={isClientCard}
+              />
+            </div>
+            <fieldset className="form-group icon-picker">
+              <legend className="form-label">Icon</legend>
+              <label className="icon-pick" aria-pressed={draft.iconName.startsWith('icon:')} title="Upload an image">
+                {uploadedIconUrl(draft.iconName) ? (
+                  <img className="app-favicon" src={uploadedIconUrl(draft.iconName)} alt="" />
+                ) : (
+                  <Upload size={20} />
+                )}
+                <span>Upload</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onChange={(event) => uploadIcon(event.target.files?.[0])}
+                />
+              </label>
+              <button
+                type="button"
+                className="icon-pick"
+                aria-pressed={draft.iconName === 'favicon'}
+                title="Site favicon"
+                onClick={() => setDraft({ ...draft, iconName: 'favicon' })}
+              >
+                <Image size={20} />
+                <span>Favicon</span>
+              </button>
+              {LAUNCHER_ICONS.map(([name, label, Icon]) => (
                 <button
+                  key={name}
                   type="button"
                   className="icon-pick"
-                  aria-pressed={draft.iconName === 'favicon'}
-                  title="Site favicon"
-                  onClick={() => setDraft({ ...draft, iconName: 'favicon' })}
+                  aria-pressed={draft.iconName === name}
+                  title={label}
+                  onClick={() => setDraft({ ...draft, iconName: name })}
                 >
-                  <Image size={20} />
-                  <span>Favicon</span>
+                  <Icon size={20} />
+                  <span>{label}</span>
                 </button>
-                {LAUNCHER_ICONS.map(([name, label, Icon]) => (
-                  <button
-                    key={name}
-                    type="button"
-                    className="icon-pick"
-                    aria-pressed={draft.iconName === name}
-                    title={label}
-                    onClick={() => setDraft({ ...draft, iconName: name })}
-                  >
-                    <Icon size={20} />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </fieldset>
-              {uploadError && <p className="form-hint text-danger">{uploadError}</p>}
-              <div className="modal-footer">
-                <button type="button" className="secondary-btn" onClick={() => setDraft(null)}>Cancel</button>
-                <button type="submit" className="primary-btn">{draft.id ? 'Save changes' : 'Add application'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
+              ))}
+            </fieldset>
+            {uploadError && <p className="form-hint text-danger">{uploadError}</p>}
+            <div className="modal-footer">
+              <button type="button" className="secondary-btn" onClick={() => setDraft(null)}>Cancel</button>
+              <button type="submit" className="primary-btn">{draft.id ? 'Save changes' : 'Add application'}</button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );
