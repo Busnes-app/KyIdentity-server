@@ -14,6 +14,7 @@ import type {
   DirectoryPage,
   GroupUser,
   Application,
+  Launcher,
   AuditEvent,
   AppGrant,
   BrowserSession,
@@ -313,8 +314,11 @@ export function parseApplications(value: unknown): Application[] {
   return list(o.applications, (item) => {
     const a = obj(item, 'an application object');
     const source = optStr(a, 'source');
+    const id = str(a, 'id');
     return {
-      id: str(a, 'id'),
+      id,
+      // The admin card list carries no key; every card there is a custom link.
+      key: optStr(a, 'key') ?? `custom:${id}`,
       source: source === 'client' || source === 'custom' ? source : undefined,
       name: str(a, 'name'),
       url: optStr(a, 'url') ?? '',
@@ -324,6 +328,24 @@ export function parseApplications(value: unknown): Application[] {
       enabled: a.enabled !== false,
     };
   });
+}
+
+export function parseLauncher(value: unknown): Launcher {
+  const o = obj(value, 'a launcher response');
+  const p = o.preferences;
+  if (p === null || p === undefined) return { applications: parseApplications(value), preferences: null };
+  const prefs = obj(p, 'launcher preferences');
+  return {
+    applications: parseApplications(value),
+    preferences: {
+      layout: oneOf(prefs, 'layout', ['tiles', 'dock'] as const),
+      groups: list(prefs.groups, (g) => {
+        const group = obj(g, 'a launcher group');
+        return { name: str(group, 'name'), apps: strArray(group.apps) };
+      }),
+      hidden: strArray(prefs.hidden),
+    },
+  };
 }
 
 export function parsePairedSystems(value: unknown): PairedSystem[] {

@@ -82,7 +82,9 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 	user, sess := GetUserFromContext(r.Context()), GetSessionFromContext(r.Context())
 	var req stepUpRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" || !validStepUpOperation(req.Operation) {
-		auth.DummyVerify(req.Password)
+		if argonBusy(w, auth.DummyVerify(req.Password)) {
+			return
+		}
 		http.Error(w, `{"error":"invalid_request","error_description":"Password and target operation are required"}`, 400)
 		return
 	}
@@ -106,6 +108,9 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		return
 	}
 	valid, err := auth.VerifyPassword(req.Password, user.PasswordHash)
+	if argonBusy(w, err) {
+		return
+	}
 	if err != nil || !valid {
 		h.stepUpFailure(w, r, "bad_password")
 		return

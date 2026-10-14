@@ -303,7 +303,7 @@ func TestMFATokenIsSpentAfterTooManyFailures(t *testing.T) {
 		if err != nil {
 			break
 		}
-		if _, err := e.RegisterMFAFailure(token.ID); err != nil {
+		if _, err := e.ReserveMFAAttempt(token.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -326,7 +326,7 @@ func TestMFATokenSurvivesAFewFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.RegisterMFAFailure(token.ID); err != nil {
+	if _, err := e.ReserveMFAAttempt(token.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.ValidateMFAToken(raw); err != nil {

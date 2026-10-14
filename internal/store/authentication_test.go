@@ -2,6 +2,8 @@ package store
 
 import (
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -80,5 +82,53 @@ func TestAuthenticationEvidenceMigration(t *testing.T) {
 	code, err := s.GetValidAuthorizationCode("new")
 	if err != nil || code == nil || !code.PrimaryAuthenticatedAt.Equal(now) {
 		t.Fatalf("repeat migration lost new code: %v", err)
+	}
+}
+
+// Parallel reservations on one token never grant more than maxAttempts, and spent or
+// exhausted tokens grant none.
+func TestReserveMFAAttemptIsAtomic(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	user := createTestUser(t, s)
+	if err := s.CreateMFAToken(&MFAToken{ID: "tok", UserID: user.ID, TokenHash: "h", ExpiresAt: time.Now().UTC().Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	const maxAttempts = 5
+	var wg sync.WaitGroup
+	var granted atomic.Int32
+	start := make(chan struct{})
+	for range 40 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			n, err := s.ReserveMFAAttempt("tok", maxAttempts)
+			if err != nil {
+				t.Error(err)
+			}
+			if n > 0 {
+				granted.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	var attempts int
+	if err := s.db.QueryRow(`SELECT attempts FROM mfa_tokens WHERE id='tok'`).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if granted.Load() != maxAttempts || attempts != maxAttempts {
+		t.Fatalf("granted %d reservations, stored %d attempts; want %d", granted.Load(), attempts, maxAttempts)
+	}
+
+	if err := s.CreateMFAToken(&MFAToken{ID: "spent", UserID: user.ID, TokenHash: "h2", ExpiresAt: time.Now().UTC().Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeMFAToken("spent"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.ReserveMFAAttempt("spent", maxAttempts); err != nil || n != 0 {
+		t.Fatalf("spent token granted an attempt: %d %v", n, err)
 	}
 }

@@ -3,5 +3,7 @@ node_modules/
 dist/
 *.log
 
-# Real config with live KV namespace ids — copy from wrangler.toml.example
+# Real configs with live KV namespace ids — copy from wrangler.toml.example.
+# wrangler.*.toml covers a second deployment's config, e.g. wrangler.kyauth.toml.
 wrangler.toml
+wrangler.*.toml

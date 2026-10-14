@@ -219,6 +219,13 @@ mails a 30-minute reset link when it can. Redeeming a reset link signs the accou
 everywhere and clears the lockout counter; it never removes a second factor. Losing a
 factor is a recovery-code sign-in or an administrator MFA reset, not a password reset.
 
+**Lockout.** Ten consecutive failures lock an account for 15 minutes. Wrong passwords,
+wrong second factors at sign-in and failed step-ups all count; the counter clears only
+when a sign-in fully succeeds, so a known password does not buy fresh TOTP guesses.
+Each sign-in allows five second-factor attempts. Password hashing runs at most eight
+at a time; past that, requests wait up to three seconds, then get `503` with
+`Retry-After`, which never counts as a failure.
+
 **Email verification.** `email_verified` in ID tokens and userinfo is true only after a
 link mailed to the address was redeemed; existing addresses start unverified. Changing
 an address clears verification and retires every outstanding link.
@@ -292,6 +299,14 @@ list is filtered. The preview reflects current membership; edits use app revisio
 reject stale settings. Mutations require operation-bound step-up and atomic audit records.
 Launcher-only access controls visibility, not authorization at the destination website.
 Provisioning follows effective access; see Outbound provisioning, Provisioning scope.
+
+Each user arranges their own **Applications** page under **Customize**. They can make,
+name and order groups, hide apps, and choose **Tiles** or **Dock + list**, where the first
+group is shown as large icons. The layout is stored per account
+(`PUT`/`DELETE /api/user/launcher-preferences`), and `GET /api/user/applications` returns
+it as `preferences`. It only arranges apps the user can already reach. Hiding an app does
+not remove access, and a hidden app stays one click away at the bottom of the page. Apps
+granted after the last save appear in a **New** group.
 
 OAuth authorization and token exchange both enforce current access. Losing effective
 access revokes online tokens and invalidates authorization codes in the same transaction.
