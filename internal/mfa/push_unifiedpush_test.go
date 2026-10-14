@@ -166,7 +166,7 @@ func TestUnifiedPushSenderEncryptsChallenge(t *testing.T) {
 	}
 	// Spelled out, not built with challengeData: KyAuth's parser needs every one of these.
 	want := map[string]string{
-		"type": "mfa_challenge", "title": "Sign-in request", "body": "Open KySecurity Authenticator to review.",
+		"type": "mfa_challenge", "title": "Sign-in request", "body": "Open KyAuth to review.",
 		"challengeId": "ch1", "deviceId": "dev1", "deviceUserId": "u1", "purpose": "login",
 		"expiresAtEpochMs": strconv.FormatInt(expires, 10), "devicePlatform": "android",
 	}

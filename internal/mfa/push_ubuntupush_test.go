@@ -125,7 +125,7 @@ func TestUbuntuPushSenderRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"type": "mfa_challenge", "title": "Sign-in request", "body": "Open KySecurity Authenticator to review.",
+		"type": "mfa_challenge", "title": "Sign-in request", "body": "Open KyAuth to review.",
 		"challengeId": "challenge-7f3a9c", "deviceId": "device-5b1d07", "deviceUserId": "user-9c2e41", "purpose": "step_up",
 		"expiresAtEpochMs": strconv.FormatInt(expires.UnixMilli(), 10), "devicePlatform": "linux",
 	}

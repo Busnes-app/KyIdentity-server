@@ -169,7 +169,6 @@ export async function sendApnsMessage(
         body: message.body,
       },
       sound: "default",
-      "mutable-content": 1,
       // The category binds the client's registered approval actions; do not
       // assign a mail-specific fallback category to KySecurity notifications.
       ...(data.type === "mfa_challenge" ? { category: "MFA_CHALLENGE" } : {}),
