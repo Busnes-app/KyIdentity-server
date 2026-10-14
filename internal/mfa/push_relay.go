@@ -124,7 +124,7 @@ func registerRelayKey(relayURL, label string) (string, error) {
 
 const (
 	pushTitle = "Sign-in request"
-	pushBody  = "Open KySecurity Authenticator to review."
+	pushBody  = "Open KyAuth to review."
 )
 
 // challengeData is the push payload every transport carries. The browser displays the
