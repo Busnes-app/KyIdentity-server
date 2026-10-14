@@ -140,6 +140,22 @@ export const MAX_DATA_ENTRIES = 16;
 export const MAX_DATA_KEY_LENGTH = 64;
 export const MAX_DATA_VALUE_LENGTH = 1024;
 
+/** Returns the canonical form of a device token, or null if it is not one. */
+export type TokenFormat = (token: string) => string | null;
+
+// The pin is keyed on sha256(token), so two spellings of one device are two
+// unpinned claims. Each format admits exactly one spelling per device: no
+// `/`, `.`, `%`, `?` or `#` to alias a URL path, no case or padding variants.
+
+/** APNs: hex, 32 bytes today; Apple says the length may grow. Lowercase is canonical. */
+export const apnsToken: TokenFormat = (token) => {
+  const lower = token.toLowerCase();
+  return /^[0-9a-f]{64,200}$/.test(lower) ? lower : null;
+};
+
+/** FCM: opaque and case-sensitive, so only the alphabet is checked; length is MAX_TOKEN_LENGTH. */
+export const fcmToken: TokenFormat = (token) => (/^[A-Za-z0-9_:-]+$/.test(token) ? token : null);
+
 // ---- small helpers ---------------------------------------------------------
 
 export interface RequestContext<TEnv extends CommonEnv = CommonEnv> {
@@ -755,8 +771,11 @@ export interface SendPayload {
  * request under a key holder's quota. Unknown fields are ignored rather than
  * refused — the Go sender already sends a `platform` field this relay has never
  * read, and a new one must not become a delivery outage on the older worker.
+ *
+ * The token comes back in `format`'s canonical form, the only form that may be
+ * hashed, pinned, charged for or sent.
  */
-export async function readSendPayload(request: Request): Promise<BodyResult<SendPayload>> {
+export async function readSendPayload(request: Request, format: TokenFormat): Promise<BodyResult<SendPayload>> {
   const body = await readBoundedBody(request, MAX_SEND_BODY_BYTES);
   if (!body.ok) {
     return body;
@@ -775,11 +794,12 @@ export async function readSendPayload(request: Request): Promise<BodyResult<Send
   if (raw.token !== undefined && typeof raw.token !== "string") {
     return { ok: false, status: 400, error: "invalid token" };
   }
-  const token = ((raw.token as string | undefined) ?? "").trim();
-  if (!token) {
+  const trimmed = ((raw.token as string | undefined) ?? "").trim();
+  if (!trimmed) {
     return { ok: false, status: 400, error: "missing token" };
   }
-  if (token.length > MAX_TOKEN_LENGTH) {
+  const token = trimmed.length > MAX_TOKEN_LENGTH ? null : format(trimmed);
+  if (token === null) {
     return { ok: false, status: 400, error: "invalid token" };
   }
 

@@ -156,7 +156,7 @@ Body limits, applied before the payload reaches APNs:
 | Field   | Limit                    | Over the limit                |
 | ------- | ------------------------ | ----------------------------- |
 | body    | 16 KiB total             | `413`                         |
-| `token` | 512 chars, string        | `400`                         |
+| `token` | 64-200 hex chars, case-insensitive (pinned lowercase) | `400` |
 | `title` | 256 chars, string        | clipped                       |
 | `body`  | 1024 chars, string       | clipped                       |
 | `data`  | 16 entries, string values; keys 64 chars | `400`         |

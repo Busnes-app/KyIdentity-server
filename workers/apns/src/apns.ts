@@ -158,7 +158,8 @@ export async function sendApnsMessage(
   // ApnsEnvironment, so "not production" really does mean sandbox here — when
   // this read a raw string, any typo in APNS_ENVIRONMENT landed in this branch.
   const host = config.environment === "production" ? APNS_PRODUCTION_HOST : APNS_SANDBOX_HOST;
-  const url = `https://${host}/3/device/${token}`;
+  // The token is already hex (apnsToken); encoding keeps it one path segment regardless.
+  const url = `https://${host}/3/device/${encodeURIComponent(token)}`;
 
   // Build the APS payload (matching FCM's structure for consistency)
   const data = message.data ?? {};

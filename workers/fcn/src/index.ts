@@ -32,13 +32,13 @@
  * ../../push-relay-shared/push-relay-common.ts.
  */
 
-import { FcmConfig, FcmMessage, sendFcmMessage } from "./fcm";
+// `import type` so node --test's type stripping can load this module too.
+import type { FcmConfig, FcmMessage } from "./fcm";
+import { sendFcmMessage } from "./fcm";
+import type { ApiKeyRecord, CommonEnv, RequestContext } from "../../../push-relay-shared/push-relay-common";
 import {
-  ApiKeyRecord,
-  CommonEnv,
   DEFAULT_LIMIT_PER_MINUTE,
   KEY_PREFIX,
-  RequestContext,
   bearer,
   checkMinuteLimit,
   checkDailyBudget,
@@ -49,6 +49,7 @@ import {
   failDelivery,
   isExpired,
   json,
+  fcmToken,
   readSendPayload,
   recordUsageAnalytics,
   resolveLimit,
@@ -100,7 +101,7 @@ async function handleSend(request: Request, rc: RequestContext<Env>): Promise<Re
   // readSendPayload): the body is refused at MAX_SEND_BODY_BYTES before it is
   // parsed, so an authenticated key cannot spend its per-minute quota on
   // multi-megabyte allocations here.
-  const parsed = await readSendPayload(request);
+  const parsed = await readSendPayload(request, fcmToken);
   if (!parsed.ok) {
     return fail(rc, parsed.status, parsed.error);
   }
