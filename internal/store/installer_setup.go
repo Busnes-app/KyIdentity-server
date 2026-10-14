@@ -71,7 +71,7 @@ func OpenInstallerStore(path string, inspect bool) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, rdb: db}, nil
 }
 
 // InstallerSetupExists reports native receipt ownership without creating resources.

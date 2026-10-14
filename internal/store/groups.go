@@ -342,7 +342,7 @@ func roleChangeForAppsTx(tx *sql.Tx, apps []AppRecord, users []string) error {
 // the user-management view without downloading the entire directory.
 // ponytail: substring searches scan names; add FTS if large-directory searches become slow.
 func (s *Store) ListGroups(query, userID string, limit, offset int) ([]Group, int, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.rdb.Begin()
 	if err != nil {
 		return nil, 0, err
 	}

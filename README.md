@@ -1024,8 +1024,9 @@ retain their signed webhook events, including the existing deletion contract.
 Per connector/user, only the earliest pending event can begin delivery. Backoff holds
 later events for that user; other users and connectors continue. A durable attempt
 survives process restart and local user deletion. Unsent claims may expire, but an
-attempt that might have reached the receiver stays blocked after a transport failure,
-HTTP 408/5xx, or asynchronous acceptance (202). A response acknowledging completion
+attempt whose request was written stays blocked after a lost response, HTTP 408 or
+5xx other than 503, or asynchronous acceptance (202). A request that never left (DNS,
+refused connection, TLS failure) and 429/503 refusals back off without blocking. A response acknowledging completion
 and its event status are persisted atomically. These rules rely on the receiver honoring
 its synchronous success/rejection responses; they cannot fence a nonconforming receiver.
 
@@ -1044,9 +1045,13 @@ To recover an expired attempt:
    confirms no account was created. The separate fresh-create checkbox additionally
    requires an empty externalId lookup before clearing that guard. Otherwise restore
    the account's correct externalId at the target and resume; lookup recovers its ID.
+4. When a receiver outage blocked many users, **Resume all expired for this system**
+   releases every expired attempt of that connector after the same confirmation, with one
+   step-up and one audit (`admin.sync_deliveries_resumed`). It keeps every create guard;
+   clearing one stays a per-attempt decision.
 
 The oldest 100 attempts are shown; resolving them exposes the next page. A definitive
-4xx rejection (except 408) uses ordinary backoff and the five-attempt budget;
+4xx rejection (except 408) or 503 uses ordinary backoff and the five-attempt budget;
 Retry-After extends backoff up to one hour. Do not use resync or disconnect/reconnect
 as an uncertain-write recovery mechanism. Stop old-version workers before upgrading;
 they do not honor the new persisted fences. Existing remote operations must finish

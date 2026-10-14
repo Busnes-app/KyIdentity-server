@@ -1,12 +1,15 @@
 package store
 
 import (
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
 
 // No event/user foreign key: deleting a user replaces its outbox rows, but must
-// not discard the fence protecting the subsequent remote deactivation.
+// not discard the fence protecting the subsequent remote deactivation. Events left by
+// connectors deleted before DeletePairedSystem removed them are dropped on every start.
 func (s *Store) migrateSyncDelivery() error {
 	var count int
 	if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('account_sync_events') WHERE name='claim_token'`).Scan(&count); err != nil {
@@ -23,7 +26,8 @@ func (s *Store) migrateSyncDelivery() error {
  recover_after DATETIME NOT NULL, PRIMARY KEY(system_id,user_id));
  CREATE INDEX IF NOT EXISTS sync_resource_queue ON account_sync_events(system_id,user_id,status);
  CREATE TRIGGER IF NOT EXISTS delete_sync_delivery_system AFTER DELETE ON paired_systems
- BEGIN DELETE FROM sync_delivery_attempts WHERE system_id=OLD.id; END;`)
+ BEGIN DELETE FROM sync_delivery_attempts WHERE system_id=OLD.id; END;
+ DELETE FROM account_sync_events WHERE NOT EXISTS(SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id);`)
 	return err
 }
 
@@ -126,14 +130,70 @@ func (s *Store) ResumeSyncDelivery(systemID, token string, allowCreateRetry bool
 			return err
 		}
 	}
-	_, err = tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=NULL,lease_until=NULL,claim_token='',last_error='',updated_at=? WHERE id=?`, time.Now().UTC(), eventID)
-	if err != nil {
+	if err = releaseAttemptEventTx(tx, eventID); err != nil {
 		return err
 	}
 	if err = recordAuditTx(tx, audit); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func releaseAttemptEventTx(tx *sql.Tx, eventID string) error {
+	_, err := tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=NULL,lease_until=NULL,claim_token='',last_error='',updated_at=? WHERE id=?`, time.Now().UTC(), eventID)
+	return err
+}
+
+// ResumeSyncDeliveries is ResumeSyncDelivery for every expired attempt of one
+// connector under one audit, whose details gain the released tokens. It never clears
+// an uncertain-create guard; that stays a per-attempt decision.
+func (s *Store) ResumeSyncDeliveries(systemID string, audit *AuditEvent) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`DELETE FROM sync_delivery_attempts WHERE system_id=? AND recover_after<=? RETURNING token,event_id`, systemID, time.Now().UTC())
+	if err != nil {
+		return 0, err
+	}
+	var tokens, events []string
+	for rows.Next() {
+		var token, eventID string
+		if err := rows.Scan(&token, &eventID); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		tokens, events = append(tokens, token), append(events, eventID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(tokens) == 0 {
+		return 0, errors.New("no expired attempts")
+	}
+	for _, id := range events {
+		if err := releaseAttemptEventTx(tx, id); err != nil {
+			return 0, err
+		}
+	}
+	details := map[string]any{}
+	if audit.DetailsJSON != "" {
+		if err := json.Unmarshal([]byte(audit.DetailsJSON), &details); err != nil {
+			return 0, err
+		}
+	}
+	details["attemptTokens"] = tokens
+	body, err := json.Marshal(details)
+	if err != nil {
+		return 0, err
+	}
+	audit.DetailsJSON = string(body)
+	if err := recordAuditTx(tx, audit); err != nil {
+		return 0, err
+	}
+	return len(tokens), tx.Commit()
 }
 
 func (s *Store) MarkSyncDeliveryUncertain(ev AccountSyncEvent) error {

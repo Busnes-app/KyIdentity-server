@@ -340,7 +340,8 @@ func reconcileProvisioningTx(tx *sql.Tx, now time.Time) error {
 	if _, err = tx.Exec(`DELETE FROM account_sync_events WHERE ` + unfenced + ` AND NOT ` + stateless + ` AND revision<>COALESCE(` + current + `,-1)`); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=?,updated_at=? WHERE `+unfenced+` AND (`+stateless+` OR revision=`+current+`)`, now.Add(30*time.Minute), now)
+	_, err = tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=?,updated_at=? WHERE `+unfenced+` AND (`+stateless+` OR revision=`+current+`)
+ AND EXISTS(SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id)`, now.Add(30*time.Minute), now)
 	return err
 }
 

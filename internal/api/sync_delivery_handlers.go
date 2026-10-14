@@ -111,3 +111,47 @@ func (h *AdminHandler) ResumeSyncDelivery(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
+
+// ResumeSyncDeliveries releases every expired attempt of one connector after the same
+// quiescence confirmation, with one step-up and one audit. Clearing an uncertain-create
+// guard needs its own read-back, so it stays per attempt.
+func (h *AdminHandler) ResumeSyncDeliveries(w http.ResponseWriter, r *http.Request) {
+	admin := GetUserFromContext(r.Context())
+	details := map[string]any{}
+	reject := func(reason string, status int) {
+		details["reason"] = reason
+		_ = h.audit.Record("admin.sync_deliveries_resumed", admin.ID, admin.Username, r.PathValue("id"), "system", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
+		http.Error(w, `{"error":"`+reason+`"}`, status)
+	}
+	sys, err := h.store.GetPairedSystemByID(r.PathValue("id"))
+	if err != nil {
+		reject("internal_error", 500)
+		return
+	}
+	if sys == nil {
+		reject("system_not_found", 404)
+		return
+	}
+	details["systemName"] = sys.Name
+	var req struct {
+		ConfirmedQuiescent bool `json:"confirmedQuiescent"`
+		AllowCreateRetry   bool `json:"allowCreateRetry"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || !req.ConfirmedQuiescent {
+		reject("confirm_remote_quiescence", 400)
+		return
+	}
+	if req.AllowCreateRetry {
+		reject("create_retry_requires_single_attempt", 400)
+		return
+	}
+	event := h.audit.Prepare("admin.sync_deliveries_resumed", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"systemName": sys.Name, "confirmedQuiescent": true})
+	n, err := h.store.ResumeSyncDeliveries(sys.ID, event.Row)
+	if err != nil {
+		reject("no_expired_attempts", 409)
+		return
+	}
+	event.Committed()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]int{"resumed": n})
+}
