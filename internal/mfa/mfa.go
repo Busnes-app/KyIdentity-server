@@ -231,7 +231,7 @@ func (e *Engine) GenerateRecoveryCodes(userID string, audit *store.AuditEvent) (
 		recoveryCodes = append(recoveryCodes, store.RecoveryCode{
 			ID:       uuid.New().String(),
 			UserID:   userID,
-			CodeHash: crypto.HashSHA256(strings.ToUpper(strings.ReplaceAll(code, "-", ""))),
+			CodeHash: e.recoveryCodeHash(userID, normalizeRecoveryCode(code)),
 		})
 	}
 
@@ -242,12 +242,22 @@ func (e *Engine) GenerateRecoveryCodes(userID string, audit *store.AuditEvent) (
 	return plainCodes, nil
 }
 
-// VerifyAndConsumeRecoveryCode validates and consumes a recovery code.
-func (e *Engine) VerifyAndConsumeRecoveryCode(userID, code string) (bool, error) {
-	normalized := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
-	codeHash := crypto.HashSHA256(normalized)
+func normalizeRecoveryCode(code string) string {
+	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
+}
 
-	return e.store.ConsumeRecoveryCode(userID, codeHash)
+// recoveryCodeHash keys the hash to this server's key and the user: a code holds only 40
+// bits, which a bare SHA-256 from a leaked database gives up in seconds.
+func (e *Engine) recoveryCodeHash(userID, normalized string) string {
+	key := crypto.DeriveKey(e.encryptionKey, "kyidentity:recovery-code")
+	return store.RecoveryCodeHMACPrefix + crypto.SignHMACSHA256(key, []byte(userID+"|"+normalized))
+}
+
+// VerifyAndConsumeRecoveryCode validates and consumes a recovery code. Codes issued before
+// keyed hashing still redeem until the user regenerates (store.HasLegacyRecoveryCodes).
+func (e *Engine) VerifyAndConsumeRecoveryCode(userID, code string) (bool, error) {
+	normalized := normalizeRecoveryCode(code)
+	return e.store.ConsumeRecoveryCode(userID, e.recoveryCodeHash(userID, normalized), crypto.HashSHA256(normalized))
 }
 
 // GenerateDevicePairingToken generates a 90s ephemeral PIN & token for registering a native mobile device.
@@ -438,7 +448,12 @@ func randomMatchNumber() (int, error) {
 	return int(n.Int64()) + 10, nil
 }
 
-// CreatePushChallenge creates a push challenge with a 2-digit match and 3 decoys.
+// ErrPushPending means the user already has a live login push. Sharing it with a second
+// login would let one approval sign in both, so no new push is sent until it settles.
+var ErrPushPending = errors.New("a login push is already pending")
+
+// CreatePushChallenge creates a push challenge with a 2-digit match and 3 decoys. A user
+// has at most one pending login push (ErrPushPending).
 func (e *Engine) CreatePushChallenge(userID, purpose string) (*store.MFAChallenge, error) {
 	if purpose != "login" && purpose != "step_up" {
 		return nil, errors.New("unknown push purpose")
@@ -485,7 +500,15 @@ func (e *Engine) CreatePushChallenge(userID, purpose string) (*store.MFAChalleng
 		ExpiresAt: time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second),
 	}
 
-	if err := e.store.CreateMFAChallenge(challenge); err != nil {
+	if purpose == "login" {
+		created, err := e.store.CreateLoginPushChallenge(challenge)
+		if err != nil {
+			return nil, err
+		}
+		if !created {
+			return nil, ErrPushPending
+		}
+	} else if err := e.store.CreateMFAChallenge(challenge); err != nil {
 		return nil, err
 	}
 

@@ -82,9 +82,10 @@ func TestAlertRulesFromAuditEvents(t *testing.T) {
 	audited(t, s, "admin.scim_token_issued", "root", "conn-1", "scim_connector", "success", `{"scope":"users"}`)
 	audited(t, s, "account.end_failed", "expiry", u.ID, "user", "failure", `{"error":"disk full SECRET-DETAIL"}`)
 	audited(t, s, "oauth.token_exchange", "target", "", "client", "failure", `{"reason":"invalid_grant"}`)
+	audited(t, s, "auth.mfa_push_fatigue", "target", u.ID, "user", "denied", `{"count":3}`)
 	evaluate(t, s)
 	got := openAlerts(t, s)
-	want := map[string]int{"privilege_change/" + u.ID: 1, "recovery_use/" + u.ID: 2, "connector_credentials/conn-1": 1, "access_removal_failed/" + u.ID: 1}
+	want := map[string]int{"privilege_change/" + u.ID: 1, "recovery_use/" + u.ID: 2, "connector_credentials/conn-1": 1, "access_removal_failed/" + u.ID: 1, "push_fatigue/" + u.ID: 1}
 	if len(got) != len(want) {
 		t.Fatalf("alerts %+v", got)
 	}

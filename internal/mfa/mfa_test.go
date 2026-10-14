@@ -313,7 +313,7 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 	device := pairSigningDevice(t, dbStore, user.ID, "phone-1")
 
 	t.Run("unsigned response is rejected", func(t *testing.T) {
-		ch, _ := engine.CreatePushChallenge(user.ID, "login")
+		ch, _ := engine.CreatePushChallenge(user.ID, "step_up")
 		if ok, _, err := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, ""); ok || err == nil {
 			t.Fatalf("expected unsigned response to be rejected, got ok=%v err=%v", ok, err)
 		}
@@ -323,7 +323,7 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 	})
 
 	t.Run("signature from an unpaired key is rejected", func(t *testing.T) {
-		ch, _ := engine.CreatePushChallenge(user.ID, "login")
+		ch, _ := engine.CreatePushChallenge(user.ID, "step_up")
 		attacker := &testDevice{id: device.id}
 		attacker.priv, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
@@ -336,8 +336,8 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 	})
 
 	t.Run("signature bound to another challenge is rejected", func(t *testing.T) {
-		chA, _ := engine.CreatePushChallenge(user.ID, "login")
-		chB, _ := engine.CreatePushChallenge(user.ID, "login")
+		chA, _ := engine.CreatePushChallenge(user.ID, "step_up")
+		chB, _ := engine.CreatePushChallenge(user.ID, "step_up")
 
 		// A valid signature for challenge A, replayed against challenge B.
 		replay := device.sign(t, chA, true, chB.MatchDigits)
@@ -347,7 +347,7 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 	})
 
 	t.Run("flipping approve invalidates the signature", func(t *testing.T) {
-		ch, _ := engine.CreatePushChallenge(user.ID, "login")
+		ch, _ := engine.CreatePushChallenge(user.ID, "step_up")
 		denial := device.sign(t, ch, false, ch.MatchDigits)
 		if ok, _, err := engine.RespondPushChallenge(ch.ID, device.id, ch.MatchDigits, true, denial); ok || err == nil {
 			t.Fatalf("expected an approval carrying a denial signature to be rejected, got ok=%v err=%v", ok, err)
@@ -446,7 +446,7 @@ func TestPushChallengeDigitsAreDistinctAndInRange(t *testing.T) {
 	defer cleanup()
 
 	for i := 0; i < 200; i++ {
-		ch, err := engine.CreatePushChallenge(user.ID, "login")
+		ch, err := engine.CreatePushChallenge(user.ID, "step_up")
 		if err != nil {
 			t.Fatalf("CreatePushChallenge failed: %v", err)
 		}

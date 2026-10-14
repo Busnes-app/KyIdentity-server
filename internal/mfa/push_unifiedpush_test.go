@@ -308,7 +308,7 @@ func TestDispatchRoutesByTransport(t *testing.T) {
 	fcm := &fakePushSender{}
 	e.SetPushSender(fcm)
 	up.sent = nil
-	if _, err := e.CreatePushChallenge(u.ID, "login"); err != nil {
+	if _, err := e.CreatePushChallenge(u.ID, "step_up"); err != nil {
 		t.Fatal(err)
 	}
 	if len(fcm.sent) != 1 || fcm.sent[0].ID != fcmDev.ID || len(up.sent) != 1 || up.sent[0].ID != upDev.ID {

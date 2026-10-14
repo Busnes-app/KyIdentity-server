@@ -106,7 +106,7 @@ See [Session Behavior](README.md#session-behavior) for full details. Key points:
 
 Android pairings are graded from a Keystore attestation chain that describes the signing key itself: hardware-resident, user authentication on every use. iOS has no attestation for arbitrary Secure Enclave keys. With `KYIDENTITY_APPATTEST_APP_IDS` set, an iOS pairing is graded `appattest` when Apple App Attest proves the request, including its public key, was built by a genuine, unmodified KyAuth on a genuine Apple device.
 
-**The grade rests on app integrity, not on key attestation.** It is MFA-grade because that genuine build always creates its signing key in the Secure Enclave with per-use user presence. A flaw in KyAuth iOS, or a compromised Apple device that defeats App Attest, would undermine it in a way an Android key attestation would not. Leave the setting empty to grade every iOS device `none`; pairing still works, with device-only (`pop`) sign-on.
+**The grade rests on app integrity, not on key attestation**, so it is not MFA-grade. App Attest does not prove the signing key lives in the Secure Enclave or that each use requires user presence. An `appattest` device signs on like an unattested one: single factor (`pop`, `urn:kysignon:acr:device`), refused by mandatory MFA and by `fresh`/`max_age` app policies. Push approvals from it are unaffected.
 
 ## Deployment Security
 

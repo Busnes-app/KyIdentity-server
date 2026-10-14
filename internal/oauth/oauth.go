@@ -203,13 +203,9 @@ func (e *Engine) CreateAuthorizationCodeForInteraction(clientID, sessionID, redi
 		return "", errors.New("invalid or disabled client")
 	}
 
-	// A public client presents no secret, so PKCE is the only thing binding this code to
-	// the party that requested it. Refuse to mint a code that nothing can bind.
-	if client.ClientType == "public" && challenge == "" {
-		return "", errors.New("PKCE is required for public clients")
-	}
-	if challenge != "" && method != "S256" {
-		return "", fmt.Errorf("unsupported code_challenge_method %q; only S256 is accepted", method)
+	// S256 PKCE for every client: a client secret does not stop an injected code (RFC 9700 2.1.1).
+	if challenge == "" || method != "S256" {
+		return "", fmt.Errorf("PKCE with S256 is required, got method %q", method)
 	}
 
 	session, err := e.store.GetSessionByID(sessionID)
@@ -320,12 +316,9 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 		return nil, errors.New("redirect uri mismatch")
 	}
 
-	// Public clients must always prove possession of the verifier; a stored challenge is
-	// always enforced regardless of client type.
-	if client.ClientType == "public" || authCode.CodeChallenge != "" {
-		if !ValidatePKCE(codeVerifier, authCode.CodeChallenge, authCode.CodeChallengeMethod) {
-			return nil, errors.New("invalid PKCE code verifier")
-		}
+	// Every client proves possession of the verifier; a code stored without a challenge never redeems.
+	if !ValidatePKCE(codeVerifier, authCode.CodeChallenge, authCode.CodeChallengeMethod) {
+		return nil, errors.New("invalid PKCE code verifier")
 	}
 
 	// Now that the caller has proven entitlement, spend the code. The compare-and-swap is

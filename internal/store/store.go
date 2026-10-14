@@ -1928,6 +1928,37 @@ func (s *Store) CreateMFAChallenge(ch *MFAChallenge) error {
 	return err
 }
 
+// CreateLoginPushChallenge inserts a login push challenge only while the user has no live
+// one, in one statement, so concurrent logins cannot each send a push. False: one is pending.
+func (s *Store) CreateLoginPushChallenge(ch *MFAChallenge) (bool, error) {
+	ch.CreatedAt = time.Now().UTC()
+	res, err := s.db.Exec(`INSERT INTO mfa_challenges (id, user_id, method_type, match_digits, decoy_digits_json, status, purpose, expires_at, created_at)
+		SELECT ?, ?, ?, ?, ?, ?, 'login', ?, ? WHERE NOT EXISTS (
+			SELECT 1 FROM mfa_challenges WHERE user_id = ? AND purpose = 'login' AND status = 'pending' AND expires_at > ?)`,
+		ch.ID, ch.UserID, ch.MethodType, ch.MatchDigits, ch.DecoyDigitsJSON, ch.Status, ch.ExpiresAt, ch.CreatedAt, ch.UserID, ch.CreatedAt)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// HasPendingLoginPush reports a live login push challenge for the user.
+func (s *Store) HasPendingLoginPush(userID string) (bool, error) {
+	var pending bool
+	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mfa_challenges WHERE user_id = ? AND purpose = 'login' AND status = 'pending' AND expires_at > ?)`, userID, time.Now().UTC()).Scan(&pending)
+	return pending, err
+}
+
+// CountUnansweredLoginPushes counts login pushes created since that were denied or left to
+// expire: the shape of someone holding the password and fishing for an approval.
+func (s *Store) CountUnansweredLoginPushes(userID string, since time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM mfa_challenges WHERE user_id = ? AND purpose = 'login' AND created_at > ?
+		AND (status IN ('denied', 'expired') OR (status = 'pending' AND expires_at <= ?))`, userID, since, time.Now().UTC()).Scan(&n)
+	return n, err
+}
+
 func (s *Store) GetMFAChallenge(challengeID string) (*MFAChallenge, error) {
 	query := `SELECT id, user_id, method_type, match_digits, decoy_digits_json, status, purpose, expires_at, created_at, verified_at FROM mfa_challenges WHERE id = ?`
 	ch := &MFAChallenge{}
@@ -1958,8 +1989,9 @@ func (s *Store) TransitionMFAChallengeStatus(challengeID, from, to string) (bool
 	return n == 1, nil
 }
 
+// DeleteExpiredMFAChallenges keeps challenges an hour past expiry for CountUnansweredLoginPushes.
 func (s *Store) DeleteExpiredMFAChallenges() error {
-	_, err := s.db.Exec(`DELETE FROM mfa_challenges WHERE expires_at < ?`, time.Now().UTC())
+	_, err := s.db.Exec(`DELETE FROM mfa_challenges WHERE expires_at < ?`, time.Now().UTC().Add(-time.Hour))
 	return err
 }
 
@@ -2228,16 +2260,29 @@ func (s *Store) GetValidRecoveryCodes(userID string) ([]RecoveryCode, error) {
 	return codes, nil
 }
 
-// ConsumeRecoveryCode atomically spends a recovery code. A separate lookup and update lets
+// RecoveryCodeHMACPrefix marks a keyed recovery-code hash. Unprefixed rows are legacy
+// unsalted SHA-256, accepted only until the user regenerates.
+const RecoveryCodeHMACPrefix = "hmac:"
+
+// ConsumeRecoveryCode atomically spends the code matching the keyed hash or, for a legacy
+// row, the bare SHA-256 (hex never carries the prefix). A separate lookup and update lets
 // concurrent logins redeem the same code.
-func (s *Store) ConsumeRecoveryCode(userID, codeHash string) (bool, error) {
+func (s *Store) ConsumeRecoveryCode(userID, keyedHash, legacyHash string) (bool, error) {
 	now := time.Now().UTC()
-	res, err := s.db.Exec(`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL`, now, userID, codeHash)
+	res, err := s.db.Exec(`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash IN (?, ?) AND used_at IS NULL`, now, userID, keyedHash, legacyHash)
 	if err != nil {
 		return false, err
 	}
 	n, err := res.RowsAffected()
 	return n == 1, err
+}
+
+// HasLegacyRecoveryCodes reports unused recovery codes stored as bare SHA-256, which the
+// user should regenerate.
+func (s *Store) HasLegacyRecoveryCodes(userID string) (bool, error) {
+	var legacy bool
+	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM recovery_codes WHERE user_id = ? AND used_at IS NULL AND code_hash NOT LIKE 'hmac:%')`, userID).Scan(&legacy)
+	return legacy, err
 }
 
 // OAuth Clients
