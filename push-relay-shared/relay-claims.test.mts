@@ -46,7 +46,13 @@ const {
   KEY_PREFIX,
   BOUND_TOKEN_PREFIX,
   handleRegister,
+  apnsToken,
+  fcmToken,
 } = await import("./push-relay-common.ts");
+
+// Real-shaped device tokens: 32 bytes of hex, and FCM's `<id>:APA91b…`.
+const APNS = "0123456789abcdef".repeat(4);
+const FCM = "dTxbVurMB3E:APA91b" + "x_-Y".repeat(35);
 
 // ---- doubles ---------------------------------------------------------------
 
@@ -307,8 +313,8 @@ function sendRequest(body, headers = {}) {
 test("a /send body over the ceiling is refused before it is parsed", async () => {
   // Valid JSON, and a body that would be accepted if it were smaller — so the
   // refusal can only be the byte ceiling.
-  const huge = JSON.stringify({ token: "device-token", title: "t", body: "x".repeat(MAX_SEND_BODY_BYTES) });
-  const refused = await readSendPayload(sendRequest(huge));
+  const huge = JSON.stringify({ token: APNS, title: "t", body: "x".repeat(MAX_SEND_BODY_BYTES) });
+  const refused = await readSendPayload(sendRequest(huge), apnsToken);
   assert.equal(refused.ok, false);
   assert.equal(refused.status, 413);
 });
@@ -318,10 +324,10 @@ test("an oversized Content-Length is refused without reading the body at all", a
   // is what catches a body that lies about (or omits) its length.
   const lying = new Request("https://relay.example/send", {
     method: "POST",
-    body: JSON.stringify({ token: "device-token" }),
+    body: JSON.stringify({ token: APNS }),
     headers: { "Content-Length": String(MAX_SEND_BODY_BYTES + 1) },
   });
-  const refused = await readSendPayload(lying);
+  const refused = await readSendPayload(lying, apnsToken);
   assert.equal(refused.ok, false);
   assert.equal(refused.status, 413);
 });
@@ -336,23 +342,23 @@ test("/send fields are type-checked, not coerced", async () => {
     [JSON.stringify({ token: 42 }), "invalid token"],
     [JSON.stringify({ token: "x".repeat(MAX_TOKEN_LENGTH + 1) }), "invalid token"],
     // Coerced, these became the string "[object Object]" in a delivered push.
-    [JSON.stringify({ token: "t", title: { a: 1 } }), "invalid title"],
-    [JSON.stringify({ token: "t", body: ["x"] }), "invalid body"],
-    [JSON.stringify({ token: "t", data: "x" }), "invalid data"],
-    [JSON.stringify({ token: "t", data: [1, 2] }), "invalid data"],
+    [JSON.stringify({ token: APNS, title: { a: 1 } }), "invalid title"],
+    [JSON.stringify({ token: APNS, body: ["x"] }), "invalid body"],
+    [JSON.stringify({ token: APNS, data: "x" }), "invalid data"],
+    [JSON.stringify({ token: APNS, data: [1, 2] }), "invalid data"],
     // data was forwarded to the provider unexamined: any JSON value at all
     // could ride into an FCM/APNs request under a key holder's quota.
-    [JSON.stringify({ token: "t", data: { k: { nested: true } } }), "invalid data value"],
-    [JSON.stringify({ token: "t", data: { ["k".repeat(65)]: "v" } }), "invalid data key"],
+    [JSON.stringify({ token: APNS, data: { k: { nested: true } } }), "invalid data value"],
+    [JSON.stringify({ token: APNS, data: { ["k".repeat(65)]: "v" } }), "invalid data key"],
     [
       JSON.stringify({
-        token: "t",
+        token: APNS,
         data: Object.fromEntries(Array.from({ length: MAX_DATA_ENTRIES + 1 }, (_, i) => ["k" + i, "v"])),
       }),
       "too many data entries",
     ],
   ]) {
-    const refused = await readSendPayload(sendRequest(body));
+    const refused = await readSendPayload(sendRequest(body), apnsToken);
     assert.equal(refused.ok, false, `accepted ${body.slice(0, 40)}`);
     assert.equal(refused.status, 400);
     assert.equal(refused.error, error);
@@ -367,16 +373,17 @@ test("/send text fields are clamped rather than refused, and unknown fields are 
   const accepted = await readSendPayload(
     sendRequest(
       JSON.stringify({
-        token: "  device-token  ",
+        token: `  ${APNS}  `,
         title: "T".repeat(MAX_TITLE_LENGTH + 50),
         body: "B".repeat(5_000),
         data: { subject: "S".repeat(5_000) },
         platform: "android",
       }),
     ),
+    apnsToken,
   );
   assert.equal(accepted.ok, true);
-  assert.equal(accepted.value.token, "device-token");
+  assert.equal(accepted.value.token, APNS);
   assert.equal(accepted.value.title.length, MAX_TITLE_LENGTH);
   assert.equal(accepted.value.body.length, 1024);
   assert.equal(accepted.value.data.subject.length, 1024);
@@ -388,10 +395,64 @@ test("clamping a text field never splits a surrogate pair", async () => {
   // leave a lone high surrogate — an unpaired surrogate is not valid text and
   // JSON.stringify of it produces a replacement character upstream.
   const accepted = await readSendPayload(
-    sendRequest(JSON.stringify({ token: "t", title: "😀".repeat(MAX_TITLE_LENGTH) })),
+    sendRequest(JSON.stringify({ token: APNS, title: "😀".repeat(MAX_TITLE_LENGTH) })),
+    apnsToken,
   );
   assert.equal(accepted.ok, true);
   assert.equal(/[\ud800-\udbff]$/.test(accepted.value.title), false, "clamped mid-pair");
+});
+
+// ---- one spelling per device token ------------------------------------------
+//
+// The pin is sha256(token). APNs puts the token in a URL path, which fetch
+// normalizes, so `a/../VICTIM` hashed to a fresh, unpinned claim and was then
+// delivered to VICTIM. Every alias must be refused or fold to the same token.
+
+async function tokenOf(raw, format) {
+  const parsed = await readSendPayload(sendRequest(JSON.stringify({ token: raw })), format);
+  return parsed.ok ? parsed.value.token : parsed.error;
+}
+
+const aliases = (t) => [
+  `a/../${t}`,
+  `%2e%2e/${t}`,
+  `../${t}`,
+  `${t}#x`,
+  `${t}?x`,
+  `${t}/`,
+  `${t.slice(0, 32)} ${t.slice(32)}`,
+  `${t.slice(0, 32)}\t${t.slice(32)}`,
+  `${t.slice(0, 32)}%20${t.slice(32)}`,
+];
+
+test("an APNs token has one spelling: aliases are refused, case and padding fold", async () => {
+  for (const bad of [...aliases(APNS), APNS.slice(1), "a".repeat(201), "g".repeat(64), `${APNS}é`]) {
+    assert.equal(await tokenOf(bad, apnsToken), "invalid token", `accepted ${JSON.stringify(bad)}`);
+  }
+  assert.equal(await tokenOf("a".repeat(200), apnsToken), "a".repeat(200));
+  for (const same of [APNS, APNS.toUpperCase(), ` ${APNS}\n`, `\t${APNS.toUpperCase()} `]) {
+    assert.equal(await tokenOf(same, apnsToken), APNS, `${JSON.stringify(same)} did not fold`);
+  }
+});
+
+test("an FCM token has one spelling: aliases are refused, case is preserved", async () => {
+  for (const bad of [...aliases(FCM), "a".repeat(513), `${FCM}.`, `${FCM}é`]) {
+    assert.equal(await tokenOf(bad, fcmToken), "invalid token", `accepted ${JSON.stringify(bad)}`);
+  }
+  assert.equal(await tokenOf(` ${FCM}\n`, fcmToken), FCM);
+  // FCM tokens are case-sensitive: a different case is a different device, not this one.
+  assert.equal(await tokenOf(FCM.toUpperCase(), fcmToken), FCM.toUpperCase());
+});
+
+test("every spelling of one APNs token lands on the same pin", async () => {
+  const env = relayEnv();
+  const rc = requestContext(env);
+  assert.deepEqual(await claimTokenForSend(rc, await tokenOf(APNS, apnsToken), "key-a"), { allowed: true });
+  for (const same of [APNS.toUpperCase(), ` ${APNS} `]) {
+    const stolen = await claimTokenForSend(rc, await tokenOf(same, apnsToken), "key-b");
+    assert.equal(stolen.allowed, false, `${JSON.stringify(same)} escaped the pin`);
+  }
+  assert.equal(env.instances.size, 1, "an alias created a second coordinator");
 });
 
 // ---- no admin surface -------------------------------------------------------

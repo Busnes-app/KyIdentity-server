@@ -80,7 +80,7 @@ function send(e: unknown) {
     new Request("https://relay.example/send", {
       method: "POST",
       headers: { Authorization: "Bearer " + API_KEY },
-      body: JSON.stringify({ token: "device-token", title: "t", body: "b" }),
+      body: JSON.stringify({ token: "0123456789abcdef".repeat(4), title: "t", body: "b" }),
     }),
     e,
     ctx,

@@ -50,6 +50,7 @@ import {
   failDelivery,
   isExpired,
   json,
+  apnsToken,
   readSendPayload,
   recordUsageAnalytics,
   resolveLimit,
@@ -138,7 +139,7 @@ async function handleSend(request: Request, rc: RequestContext<Env>): Promise<Re
   // type-checked in the shared reader (see readSendPayload): the body is refused
   // at MAX_SEND_BODY_BYTES before it is parsed, so an authenticated key cannot
   // spend its per-minute quota on multi-megabyte allocations here.
-  const parsed = await readSendPayload(request);
+  const parsed = await readSendPayload(request, apnsToken);
   if (!parsed.ok) {
     return fail(rc, parsed.status, parsed.error);
   }
