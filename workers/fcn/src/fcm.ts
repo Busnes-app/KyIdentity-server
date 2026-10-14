@@ -10,12 +10,16 @@ import { base64UrlEncode, base64UrlEncodeString, pemToDer } from "../../../push-
 
 const FCM_OAUTH_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const OAUTH_CACHE_KEY = "google_access_token";
 
 export interface FcmConfig {
   clientEmail: string;
   privateKeyPem: string;
   projectId: string;
+}
+
+/** Keyed by service account, so replacing FCM_CLIENT_EMAIL never reuses the old account's token. */
+export function accessTokenCacheKey(config: FcmConfig): string {
+  return `google_access_token:${config.clientEmail}`;
 }
 
 export interface FcmMessage {
@@ -99,8 +103,9 @@ export function oauthErrorCode(body: string): string {
 /**
  * Return a valid Google OAuth access token, using the KV cache when possible.
  */
-async function getAccessToken(config: FcmConfig, cache: KVNamespace): Promise<string> {
-  const cached = await cache.get(OAUTH_CACHE_KEY);
+async function getAccessToken(config: FcmConfig, cache: KVNamespace, fresh = false): Promise<string> {
+  // `fresh` skips the read: a KV delete is not guaranteed visible to the next get.
+  const cached = fresh ? null : await cache.get(accessTokenCacheKey(config));
   if (cached) {
     return cached;
   }
@@ -151,7 +156,7 @@ async function getAccessToken(config: FcmConfig, cache: KVNamespace): Promise<st
   const expiresIn = parsed.expires_in && parsed.expires_in > 0 ? parsed.expires_in : 3600;
   // Refresh a minute early, and respect KV's 60s minimum TTL.
   const ttl = Math.max(60, expiresIn - 60);
-  await cache.put(OAUTH_CACHE_KEY, token, { expirationTtl: ttl });
+  await cache.put(accessTokenCacheKey(config), token, { expirationTtl: ttl });
   return token;
 }
 
@@ -245,9 +250,7 @@ export async function sendFcmMessage(
   cache: KVNamespace,
   message: FcmMessage,
 ): Promise<FcmResult> {
-  const accessToken = await getAccessToken(config, cache);
-
-  const payload = {
+  const payload = JSON.stringify({
     message: {
       token: message.token,
       data: message.data ?? {},
@@ -255,25 +258,35 @@ export async function sendFcmMessage(
         priority: "HIGH",
       },
     },
-  };
-
-  const sendURL = `https://fcm.googleapis.com/v1/projects/${config.projectId}/messages:send`;
-  const resp = await fetch(sendURL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
   });
 
-  if (resp.ok) {
-    return { ok: true };
-  }
+  const sendURL = `https://fcm.googleapis.com/v1/projects/${config.projectId}/messages:send`;
+  for (let attempt = 0; ; attempt++) {
+    const accessToken = await getAccessToken(config, cache, attempt > 0);
+    const resp = await fetch(sendURL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: payload,
+    });
 
-  const detail = (await resp.text()).trim();
-  if (isStaleResponse(resp.status, detail)) {
-    return { ok: false, stale: true, status: resp.status, detail };
+    if (resp.ok) {
+      return { ok: true };
+    }
+
+    const detail = (await resp.text()).trim();
+    // Google refused the cached access token (revoked or rotated early): drop it and retry once.
+    if (resp.status === 401) {
+      await cache.delete(accessTokenCacheKey(config));
+      if (attempt === 0) {
+        continue;
+      }
+    }
+    if (isStaleResponse(resp.status, detail)) {
+      return { ok: false, stale: true, status: resp.status, detail };
+    }
+    return { ok: false, stale: false, status: resp.status, detail };
   }
-  return { ok: false, stale: false, status: resp.status, detail };
 }

@@ -46,6 +46,8 @@ const {
   KEY_PREFIX,
   BOUND_TOKEN_PREFIX,
   handleRegister,
+  denyUnknownKey,
+  sha256Hex,
   apnsToken,
   fcmToken,
 } = await import("./push-relay-common.ts");
@@ -659,3 +661,21 @@ test("registrations from one IPv6 /64 share a coordinator and so share the one k
   assert.deepEqual(activeKeyIds(kv), [second.id]);
 });
 
+
+// The relay keeps one key per address, so the displaced holder must be told why
+// its key stopped working; a plain "invalid" left it failing forever.
+test("a key displaced by re-registration answers key_superseded; an unknown key does not", async () => {
+  const kv = registerKv();
+  const env = registerEnv(kv);
+
+  const first = await (await handleRegister(registerRequest(), requestContext(env))).json();
+  assert.equal((await handleRegister(registerRequest(), requestContext(env))).status, 201);
+
+  const superseded = await denyUnknownKey(requestContext(env), await sha256Hex(first.key));
+  assert.equal(superseded.status, 401);
+  assert.equal((await superseded.json()).code, "key_superseded");
+
+  const unknown = await denyUnknownKey(requestContext(env), await sha256Hex("never-issued"));
+  assert.equal(unknown.status, 401);
+  assert.equal((await unknown.json()).code, undefined, "an operator-deleted key must not invite re-registration");
+});

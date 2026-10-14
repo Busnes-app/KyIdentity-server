@@ -412,7 +412,11 @@ func (s *Server) routes() *http.ServeMux {
 	return mux
 }
 
+// Start serves until Shutdown; the limiter sweeper lives exactly as long.
 func (s *Server) Start() error {
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go s.middleware.sweepLimitersEvery(ctx, time.Minute)
 	return s.httpServer.ListenAndServe()
 }
 

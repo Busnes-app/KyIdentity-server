@@ -86,7 +86,9 @@ KYIDENTITY_ISSUER_URL=https://auth.yourdomain.com
 BOOTSTRAP_ADMIN_USER=admin
 BOOTSTRAP_ADMIN_PASS=YourSecurePassword123!
 
-# Optional: Cloudflare Worker native-push relays
+# Optional: Cloudflare Worker native-push relays. Without a *_RELAY_KEY the server
+# self-registers, keeps the key under the data directory, and re-registers once if
+# the relay reports it superseded.
 PUSH_RELAY_URL=https://kysecurity-mobile-push-fcm.<account>.workers.dev
 APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 
@@ -890,6 +892,7 @@ Five wrong pairing PINs for one account expire all of its live pairing tokens; g
 new code to try again. A paired phone signs in to suite apps only when the pairing request
 sent `signOn: true` (the web UI sends the checkbox value); an omitted field means no.
 Removing a phone or changing whether it approves MFA or signs in spends a step-up grant.
+Push stays offered at sign-in only while some approver phone with a key remains.
 
 **`TRUSTED_PROXY_CIDRS` defaults to empty.** Forwarding headers are ignored unless the
 immediate peer is a CIDR you named. Set it to your proxy's address and nothing wider: every
