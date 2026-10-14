@@ -34,7 +34,8 @@ func TestSetDeviceSignOnTogglesOwnDeviceOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	do := func(id, body string) int {
-		return adminRequestNoStepUp(t, srv, http.MethodPut, "/api/notifications/native/devices/"+id+"/sign-on", cookie, body).Code
+		path := "/api/notifications/native/devices/" + id + "/sign-on"
+		return adminRequestWithStepUp(t, srv, http.MethodPut, path, cookie, body, mintStepUp(t, srv, cookie, "PUT "+path)).Code
 	}
 
 	if c := do("dev-1", `{"canSignOn":false}`); c != http.StatusOK {
@@ -155,7 +156,7 @@ func TestTokenEndpointDeviceSignOnGrant(t *testing.T) {
 		t.Fatal("error response must be no-store")
 	}
 
-	if err := dbStore.SetNativeDeviceCanSignOn(dev.ID, user.ID, false); err != nil {
+	if err := dbStore.SetNativeDeviceCanSignOn(dev.ID, user.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	claims["jti"] = uuid.NewString()
@@ -317,7 +318,8 @@ func TestSetDeviceSignOnNeedsApprover(t *testing.T) {
 		t.Fatal(err)
 	}
 	put := func(body string) *httptest.ResponseRecorder {
-		return adminRequestNoStepUp(t, srv, http.MethodPut, "/api/notifications/native/devices/dev-1/sign-on", cookie, body)
+		const path = "/api/notifications/native/devices/dev-1/sign-on"
+		return adminRequestWithStepUp(t, srv, http.MethodPut, path, cookie, body, mintStepUp(t, srv, cookie, "PUT "+path))
 	}
 	rec := put(`{"canSignOn":true}`)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "device_not_approver") {

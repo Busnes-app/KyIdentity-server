@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +134,26 @@ func (m *MiddlewareManager) ClientIP(r *http.Request) string {
 	return remoteHost
 }
 
+// rateLimitIP is ClientIP as a rate-limit bucket key. One IPv6 subscriber usually holds a
+// whole /64, so per-address buckets would hand it 2^64 allowances.
+func (m *MiddlewareManager) rateLimitIP(r *http.Request) string {
+	return rateLimitPrefix(m.ClientIP(r))
+}
+
+// rateLimitPrefix collapses an IPv6 address to its /64; IPv4 (and IPv4-mapped) stays whole.
+func rateLimitPrefix(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	prefix, _ := addr.Prefix(64)
+	return prefix.String()
+}
+
 // IsHTTPS reports whether the request reached the user over TLS. X-Forwarded-Proto is only
 // believed from a configured proxy.
 func (m *MiddlewareManager) IsHTTPS(r *http.Request) bool {
@@ -198,7 +219,7 @@ func (m *MiddlewareManager) SecurityHeaders(next http.Handler) http.Handler {
 func (m *MiddlewareManager) RateLimit(bucket string, maxTokens, refillRate float64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !m.allowRateLimit(bucket+":"+m.ClientIP(r), maxTokens, refillRate) {
+			if !m.allowRateLimit(bucket+":"+m.rateLimitIP(r), maxTokens, refillRate) {
 				http.Error(w, `{"error":"rate_limit_exceeded","error_description":"Too many requests"}`, http.StatusTooManyRequests)
 				return
 			}

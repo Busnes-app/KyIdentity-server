@@ -332,7 +332,7 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	case req.PairingToken != "":
 		validToken, err = e.store.GetValidDevicePairingToken(crypto.HashSHA256(req.PairingToken))
 	case req.PINCode != "" && req.UserID != "":
-		validToken, err = e.store.GetDevicePairingTokenByUserPIN(req.UserID, crypto.HashSHA256(req.PINCode))
+		validToken, err = e.store.MatchDevicePairingPIN(req.UserID, crypto.HashSHA256(req.PINCode))
 	case req.PINCode != "":
 		return nil, errors.New("a userId is required when pairing with a PIN")
 	default:

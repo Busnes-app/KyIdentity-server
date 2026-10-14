@@ -134,7 +134,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	// Validate the callback before rate-limit errors enter the OIDC error channel.
 	// Keep shared limiter keys address-derived: rotating browser identities must
 	// neither reset the source allowance nor allocate additional buckets.
-	if !h.middleware.allowRateLimit("authorize:ip:"+h.middleware.ClientIP(r), 300, 5) {
+	if !h.middleware.allowRateLimit("authorize:ip:"+h.middleware.rateLimitIP(r), 300, 5) {
 		redirectError(w, r, redirectURI, state, "temporarily_unavailable", "Too many authorization requests; try again shortly")
 		return
 	}
@@ -250,7 +250,7 @@ func (h *OAuthHandler) deviceSignOn(w http.ResponseWriter, r *http.Request, asse
 		return
 	}
 	ip := h.middleware.ClientIP(r)
-	if !h.middleware.allowRateLimit("device_signon:"+ip, 10, 0.2) {
+	if !h.middleware.allowRateLimit("device_signon:"+rateLimitPrefix(ip), 10, 0.2) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "slow_down"})
 		return

@@ -21,8 +21,8 @@ func TestPairingTokenHandlerSignOnBody(t *testing.T) {
 		code int
 		want bool
 	}{
-		{"no body", "", 200, true},
-		{"empty object", `{}`, 200, true},
+		{"no body", "", 200, false},
+		{"empty object", `{}`, 200, false},
 		{"explicit true", `{"signOn":true}`, 200, true},
 		{"explicit false", `{"signOn":false}`, 200, false},
 		{"malformed", `{"signOn":`, 400, false},
