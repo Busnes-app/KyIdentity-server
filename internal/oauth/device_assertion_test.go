@@ -907,11 +907,10 @@ func TestAttestedDeviceSatisfiesMandatoryMFA(t *testing.T) {
 	}
 }
 
-// App Attest grades on app integrity; the grant treats it as attested, and the token-time
-// device re-check binds it like any other level.
-func TestAppAttestDeviceSatisfiesMandatoryMFA(t *testing.T) {
+// App Attest proves the app, not a Secure Enclave key or user presence: one possession
+// factor, refused by mandatory MFA and fresh-password policies like an unattested device.
+func TestAppAttestDeviceIsSingleFactor(t *testing.T) {
 	f := newSignOnFixture(t)
-	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)
 	f.attest(t, "appattest")
 	resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
 	if err != nil {
@@ -919,10 +918,31 @@ func TestAppAttestDeviceSatisfiesMandatoryMFA(t *testing.T) {
 	}
 	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken)
 	amr, _ := claims["amr"].([]any)
-	if len(amr) != 3 || amr[2] != "mfa" || claims["acr"] != "urn:kysignon:acr:mfa" || claims["attested"] != "appattest" {
+	if len(amr) != 1 || amr[0] != "pop" || claims["acr"] != DeviceACR || claims["attested"] != nil {
 		t.Fatalf("claims %v", claims)
 	}
-	if n := f.issuedTokenCount(t); n != 1 {
+
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "fresh", Factor: "password"}, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t"); !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("fresh policy: want not permitted, got %v", err)
+	}
+}
+
+func TestAppAttestDeviceRefusedUnderMandatoryMFA(t *testing.T) {
+	f := newSignOnFixture(t)
+	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)
+	f.attest(t, "appattest")
+	_, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	if !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("want not permitted, got %v", err)
+	}
+	if n := f.issuedTokenCount(t); n != 0 {
 		t.Fatalf("issued tokens %d", n)
 	}
 }

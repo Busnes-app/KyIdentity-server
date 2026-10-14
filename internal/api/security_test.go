@@ -107,6 +107,38 @@ func TestLiveSessionStillMintsAuthorizationCode(t *testing.T) {
 	}
 }
 
+// Confidential clients get no exemption from S256 PKCE at authorize.
+func TestAuthorizeRequiresS256PKCEForConfidentialClients(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	u := newUser(t, db, "user")
+	cookie := newSession(t, db, u, time.Now().UTC().Add(24*time.Hour))
+	newClient(t, db, "kypost", []string{"https://mail.urlxl.com/callback"}, []string{"openid"})
+	c, err := db.GetOAuthClientByID("kypost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ClientType, c.ClientSecretHash = "confidential", "unused"
+	if err := db.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, pkce := range map[string]string{
+		"none":  "",
+		"plain": "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=plain",
+		"bare":  "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+	} {
+		req := httptest.NewRequest("GET", "/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.urlxl.com%2Fcallback&response_type=code&scope=openid"+pkce, nil)
+		req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
+		rr := httptest.NewRecorder()
+		srv.httpServer.Handler.ServeHTTP(rr, req)
+		if loc := rr.Header().Get("Location"); strings.Contains(loc, "code=") || !strings.Contains(loc, "error=invalid_request") {
+			t.Errorf("%s: confidential client without S256 PKCE: %d %s", name, rr.Code, loc)
+		}
+	}
+}
+
 // The limiter keys on client IP. If a peer can name its own IP, the limiter is decorative.
 func TestForwardedHeadersIgnoredFromUntrustedPeers(t *testing.T) {
 	mm := NewMiddlewareManager(nil, nil, config.DefaultForwardedHeader, testCSRFKey) // no trusted proxies, the shipped default

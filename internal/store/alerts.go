@@ -332,6 +332,8 @@ func classifyTx(tx *sql.Tx, e queuedEvent, settings AlertSettings, now time.Time
 		if success {
 			return alertSpec{"recovery_use", e.target, "warning", "Recovery used for " + user(), "A password reset link was redeemed for " + user() + ".", 1}, nil
 		}
+	case "auth.mfa_push_fatigue":
+		return alertSpec{"push_fatigue", e.target, "warning", "Unanswered sign-in pushes for " + user(), "Several sign-in pushes for " + user() + " were denied or left unanswered within an hour; someone else may know the password.", 1}, nil
 	case "admin.scim_token_issued", "admin.scim_token_revoked":
 		if success {
 			name := alertText(nameTx(tx, "scim_connectors", e.target))

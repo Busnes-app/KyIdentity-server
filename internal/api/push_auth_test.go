@@ -473,3 +473,65 @@ func TestPushRespondRequiresDeviceID(t *testing.T) {
 	}
 	f.requirePending(t, challengeID)
 }
+
+// A known password must not buy a stream of push prompts: a second login while one push is
+// live sends nothing, sends are capped per user per hour, and repeated denials are audited
+// for the push_fatigue alert.
+func TestLoginPushFatigueControls(t *testing.T) {
+	f, cleanup := newPushFixture(t)
+	defer cleanup()
+	login := func() LoginResponse {
+		t.Helper()
+		rec := f.post(t, "/api/auth/login", map[string]string{"username": "alice", "password": testPassword})
+		var resp LoginResponse
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &resp) != nil || !resp.MFARequired || resp.MFAToken == "" {
+			t.Fatalf("login: %d %s", rec.Code, rec.Body.String())
+		}
+		return resp
+	}
+	deny := func(challengeID string) {
+		t.Helper()
+		ch, err := f.store.GetMFAChallenge(challengeID)
+		if err != nil || ch == nil {
+			t.Fatal(err)
+		}
+		rec := f.post(t, "/api/mfa/push/respond", map[string]any{"challengeId": ch.ID, "deviceId": f.deviceID, "selectedDigits": "", "approve": false,
+			"signature": f.sign(t, ch, false, "")})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("deny: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	first := login()
+	if first.ChallengeID == "" {
+		t.Fatal("first login sent no push")
+	}
+	if again := login(); again.ChallengeID != "" {
+		t.Fatal("a second login while a push is pending sent another")
+	}
+	deny(first.ChallengeID)
+	for i := 2; i <= loginPushesPerHour; i++ {
+		resp := login()
+		if resp.ChallengeID == "" {
+			t.Fatalf("login push %d was not sent", i)
+		}
+		deny(resp.ChallengeID)
+		if fatigued := len(auditRows(t, f.store, "auth.mfa_push_fatigue")) > 0; fatigued != (i >= pushFatigueThreshold) {
+			t.Fatalf("after %d denied pushes fatigue audited = %v", i, fatigued)
+		}
+	}
+	if capped := login(); capped.ChallengeID != "" {
+		t.Fatalf("login push %d sent past the hourly cap", loginPushesPerHour+1)
+	}
+	outcomes := map[string]bool{}
+	for _, row := range auditRows(t, f.store, "auth.mfa_challenge") {
+		var d struct{ Push string }
+		_ = json.Unmarshal([]byte(row.DetailsJSON), &d)
+		outcomes[d.Push] = true
+	}
+	for _, want := range []string{"sent", "pending", "capped"} {
+		if !outcomes[want] {
+			t.Errorf("no auth.mfa_challenge audit with push=%s: %v", want, outcomes)
+		}
+	}
+}

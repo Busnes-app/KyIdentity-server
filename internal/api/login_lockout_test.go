@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/mfa"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
@@ -72,13 +74,71 @@ func TestWrongTOTPAcrossFreshLoginsLocksAccount(t *testing.T) {
 	}
 	assertLocked(t, f, true)
 
+	// Past the password the caller already knows the account exists, so this may say locked.
 	rec := anonPostFrom(t, f.srv, "198.51.100.200", "/api/auth/mfa/totp/verify", map[string]string{"mfaToken": spare, "code": testTOTPCode(t, secret)})
 	if rec.Code != http.StatusTooManyRequests || !strings.Contains(rec.Body.String(), "account_locked") {
 		t.Fatalf("a token issued before the lockout finished login: %d %s", rec.Code, rec.Body.String())
 	}
 	rec = anonPost(t, f.srv, "/api/auth/login", map[string]string{"username": f.user.Username, "password": f.pass})
-	if rec.Code != http.StatusTooManyRequests || !strings.Contains(rec.Body.String(), "account_locked") {
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "invalid_credentials") {
 		t.Fatalf("locked account accepted its password: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Before the password is proven, a locked account, an inactive one, an unknown name and a
+// foreign authorization interaction must all read as a wrong password; only audit differs.
+func TestLoginRefusalsAreIndistinguishable(t *testing.T) {
+	f, cleanup := newStepUpFixture(t)
+	defer cleanup()
+	other := func(name, status string) *store.User {
+		u := &store.User{ID: name + "-" + f.user.ID, Username: name, Email: name + "@stepup.test",
+			PasswordHash: f.user.PasswordHash, Role: "user", Status: status}
+		if err := f.store.CreateUser(u); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	locked := other("locked-user", "active")
+	for range store.MaxFailedLogins {
+		if _, err := f.store.RecordFailedLogin(locked.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	disabled := other("disabled-user", "disabled")
+
+	cases := map[string]map[string]string{
+		"wrong_password":      {"username": f.user.Username, "password": "wrong-password-123"},
+		"unknown_user":        {"username": "nobody-here", "password": "wrong-password-123"},
+		"locked_right_pass":   {"username": locked.Username, "password": f.pass},
+		"disabled_right_pass": {"username": disabled.Username, "password": f.pass},
+		"bad_interaction":     {"username": f.user.Username, "password": "wrong-password-123", "interaction": "not-a-real-interaction"},
+	}
+	var want string
+	ip := 0
+	for name, body := range cases {
+		ip++
+		rec := anonPostFrom(t, f.srv, fmt.Sprintf("198.51.100.%d", ip), "/api/auth/login", body)
+		got := fmt.Sprintf("%d %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: %s", name, got)
+		}
+		if want == "" {
+			want = got
+		} else if got != want {
+			t.Errorf("%s answered %q, others %q", name, got, want)
+		}
+	}
+
+	reasons := map[string]bool{}
+	for _, row := range auditRows(t, f.store, "auth.login") {
+		var details struct{ Reason string }
+		_ = json.Unmarshal([]byte(row.DetailsJSON), &details)
+		reasons[row.Outcome+":"+details.Reason] = true
+	}
+	for _, r := range []string{"denied:account_locked", "denied:user_disabled", "failure:user_not_found", "failure:invalid_password"} {
+		if !reasons[r] {
+			t.Errorf("audit lacks %s: %v", r, reasons)
+		}
 	}
 }
 
@@ -197,4 +257,33 @@ func TestArgonBusyIsNotAFailedLogin(t *testing.T) {
 	}
 	release()
 	assertLocked(t, f, false)
+}
+
+// Legacy unsalted recovery codes keep working, and /api/auth/me tells the user to regenerate.
+func TestMeFlagsLegacyRecoveryCodes(t *testing.T) {
+	f, cleanup := newStepUpFixture(t)
+	defer cleanup()
+	flag := func() string {
+		t.Helper()
+		var me struct {
+			Legacy *bool `json:"recoveryCodesNeedRegeneration"`
+		}
+		rec := f.do(t, "GET", "/api/auth/me", "")
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &me) != nil || me.Legacy == nil {
+			t.Fatalf("me: %d %s", rec.Code, rec.Body.String())
+		}
+		return fmt.Sprint(*me.Legacy)
+	}
+	if err := f.store.ReplaceRecoveryCodes(f.user.ID, []store.RecoveryCode{{ID: "legacy", UserID: f.user.ID, CodeHash: crypto.HashSHA256("ABCD2345")}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := flag(); got != "true" {
+		t.Fatalf("legacy codes flagged %s", got)
+	}
+	if _, err := f.srv.mfaEngine.GenerateRecoveryCodes(f.user.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := flag(); got != "false" {
+		t.Fatalf("regenerated codes flagged %s", got)
+	}
 }

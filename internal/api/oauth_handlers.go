@@ -139,12 +139,8 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if codeChallenge == "" && client.ClientType == "public" {
-		redirectError(w, r, redirectURI, state, "invalid_request", "PKCE (S256) is required for public clients")
-		return
-	}
-	if codeChallenge != "" && codeChallengeMethod != "S256" {
-		redirectError(w, r, redirectURI, state, "invalid_request", "Only the S256 code_challenge_method is supported")
+	if codeChallenge == "" || codeChallengeMethod != "S256" {
+		redirectError(w, r, redirectURI, state, "invalid_request", "PKCE with code_challenge_method S256 is required")
 		return
 	}
 

@@ -14,7 +14,7 @@ Built in Go with a focus on simplicity, minimal external dependencies, and nativ
    - **TOTP Authenticator Apps**: Standard RFC 6238 time-based one-time passwords with encrypted secrets at rest (AES-256-GCM).
    - **Push Authentication with Number Matching**: 2-digit verification challenges with decoy numbers for mobile pairing. Delivered through the FCM/APNs relay, directly over UnifiedPush, or through the UBports push service to Linux (Ubuntu Touch) devices; UnifiedPush distributors and UBports see when a sign-in happens but not its content (see SECURITY.md).
    - **Passkeys (WebAuthn)**: ES256 platform and roaming authenticators as a second factor, verified with the standard library alone. Works with KyAuth's Android credential provider, and with iCloud Keychain, Windows Hello and hardware keys.
-   - **Emergency Recovery Codes**: Cryptographically hashed single-use recovery codes.
+   - **Emergency Recovery Codes**: Single-use recovery codes stored as HMAC-SHA256 under a key derived from the encryption key, bound to the user. Codes issued by older versions (bare SHA-256) still work until regenerated; `GET /api/auth/me` reports `recoveryCodesNeedRegeneration` while any remain.
 4. **90-Second Ephemeral Pairing**: Frictionless UI-based pairing with QR codes and short PINs for native mobile devices and downstream server applications.
 5. **KySecurity Suite Application Launcher**: Single-pane dashboard themed in KySecurity Patina (dark `#0d0f14`, cyan `#4deeea`, Space Grotesk, IBM Plex Mono) embedding the full React frontend into the standalone binary.
 
@@ -222,9 +222,19 @@ factor is a recovery-code sign-in or an administrator MFA reset, not a password 
 **Lockout.** Ten consecutive failures lock an account for 15 minutes. Wrong passwords,
 wrong second factors at sign-in and failed step-ups all count; the counter clears only
 when a sign-in fully succeeds, so a known password does not buy fresh TOTP guesses.
-Each sign-in allows five second-factor attempts. Password hashing runs at most eight
+Each sign-in allows five second-factor attempts. A locked, disabled, pending or unknown
+account gets the same `401 invalid_credentials` as a wrong password, at the same hashing
+cost, even with the right password; only the audit row says which. A locked account that
+already passed its password learns it is locked at the second factor (`429
+account_locked`). Password hashing runs at most eight
 at a time; past that, requests wait up to three seconds, then get `503` with
 `Retry-After`, which never counts as a failure.
+
+**Push sign-in limits.** A user has at most one pending login push; a second sign-in
+while it is live sends none (the browser falls back to the other factors) until it is
+answered or expires. Login pushes are capped at five per user per hour. Three login
+pushes denied or left to expire within an hour record `auth.mfa_push_fatigue`, which
+raises the `push_fatigue` alert: someone else may know the password.
 
 **Email verification.** `email_verified` in ID tokens and userinfo is true only after a
 link mailed to the address was redeemed; existing addresses start unverified. Changing
@@ -511,7 +521,8 @@ its own, past ten live login alerts further sources share a single "many sources
 alert, a login alert whose source has been quiet for a whole window resolves itself
 without mail, and login-failure mail is one mailing per four hours however many
 sources appear, so an attacker cycling names or addresses cannot flood the inbox, the
-mail or the table),
+mail or the table), push fatigue (three denied or unanswered sign-in pushes for one
+account within an hour),
 failed or refused scheduled access removal, and outages (a connector whose deliveries are failing
 or given up, a client whose back-channel logouts were given up). Every audit insert
 queues its id through a trigger, the evaluator writes alerts and drains the queue in one
@@ -595,9 +606,10 @@ slash tolerance, or per-client fallbacks. A client that needs three callback por
 registers three URIs. This is the single control deciding who receives an authorization
 code; anything looser makes registration advisory.
 
-**PKCE (`S256`) is mandatory for public clients**, and `plain` is rejected everywhere. A
-public client presents no secret, so the verifier is the only thing binding a code to the
-party that requested it.
+**PKCE (`S256`) is mandatory for every client**, public and confidential, and `plain` is
+rejected everywhere. A public client presents no secret, so the verifier is the only thing
+binding a code to the party that requested it; for a confidential client it stops an
+injected authorization code (RFC 9700). A code stored without a challenge never redeems.
 
 **Clients are confidential by default.** Registration issues a client secret unless
 `"clientType":"public"` is passed explicitly. Every suite service (KyPost, KyDNS,
@@ -815,8 +827,8 @@ does not refresh the password's age. ID tokens expose these method/context value
 | Password + signed push | `pwd`, `urn:kysignon:amr:push`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + passkey | `pwd`, `urn:kysignon:amr:webauthn`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + recovery code | `pwd`, `urn:kysignon:amr:recovery` | `urn:kysignon:acr:recovery` |
-| Paired device key, unattested (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
-| Paired device key, hardware-attested (TEE or StrongBox) or App Attest (iOS) | `hwk`, `user`, `mfa` | `urn:kysignon:acr:mfa` |
+| Paired device key, unattested or App Attest (iOS) (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
+| Paired device key, hardware-attested (TEE or StrongBox) | `hwk`, `user`, `mfa` | `urn:kysignon:acr:mfa` |
 
 A device sign-on ID token also carries `signon_method: device`, `device_id`, and `origin`:
 the `https://host[:port]` of the relay address the user typed into the consumer app (KyPost),
@@ -827,11 +839,11 @@ origin (scheme, host, port): relays sharing an origin with different paths are o
 domain. Each consumer server accepts only its own configured base-URL origin, so registering
 extra aliases at KyIdentity does not widen what a consumer accepts.
 
-An attested device's ID token also carries `attested: tee|strongbox|appattest`. At pairing,
+An attested device's ID token also carries `attested: tee|strongbox`. At pairing,
 KyAuth Android uploads its Android Key Attestation chain; KyIdentity verifies it and grades the
 device `none`, `tee` or `strongbox`. KyAuth iOS uploads an App Attest object instead, graded
-`appattest` or `none` (below). Pairing never fails because of attestation, but only attested
-devices earn MFA-grade sign-on; `none` stays single factor. Configuration:
+`appattest` or `none` (below). Pairing never fails because of attestation, but only `tee` and
+`strongbox` devices earn MFA-grade sign-on; `none` and `appattest` stay single factor. Configuration:
 
 - `KYIDENTITY_ATTESTATION_STATUS_URL`: Google's revocation status list (default Google's; empty
   disables the check and logs a startup warning).
@@ -848,8 +860,9 @@ are graded only for `platform: "android"`. The object must chain to the embedded
 Apple App Attestation Root CA at the current time, carry the nonce
 `SHA256(authData || SHA256("kyidentity-appattest-v1|" + credential + "|" + publicKey))`, match the
 `keyId`, a configured App ID, sign count 0 and the accepted AAGUID. This proves a genuine KyAuth
-build on a genuine Apple device, not a statement about the signing key itself, so it is a level
-of its own. A pass is `appattest` with boot state `unknown`; the daily sweep skips these devices
+build on a genuine Apple device, not that the signing key lives in the Secure Enclave or needs
+user presence, so it is a level of its own and grades as one possession factor: an iOS device
+signs on only to apps whose policy is `reuse` + `password` for users without mandatory MFA. A pass is `appattest` with boot state `unknown`; the daily sweep skips these devices
 (no serials, no boot state). Failures grade `none` with the reason in the log and audit row only.
 
 - `KYIDENTITY_APPATTEST_APP_IDS`: comma-separated `<TeamID>.<bundleID>` (KyAuth iOS is

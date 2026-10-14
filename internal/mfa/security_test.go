@@ -7,6 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/base64"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -487,5 +490,142 @@ func TestUnsupportedDevicePlatformIsRejected(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("unsupported device platform was accepted")
+	}
+}
+
+// A leaked database must not give up recovery codes: 40 bits under a bare SHA-256 falls
+// to an offline search, so rows hold an HMAC under the server key, bound to the user.
+func TestRecoveryCodesAreKeyedHashes(t *testing.T) {
+	e, db, _, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	u := mfaUser(t, db)
+	codes, err := e.GenerateRecoveryCodes(u.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.GetValidRecoveryCodes(u.ID)
+	if err != nil || len(rows) != len(codes) {
+		t.Fatalf("rows %d %v", len(rows), err)
+	}
+	for _, row := range rows {
+		if !strings.HasPrefix(row.CodeHash, store.RecoveryCodeHMACPrefix) {
+			t.Fatalf("recovery code stored unkeyed: %q", row.CodeHash)
+		}
+		for _, c := range codes {
+			if row.CodeHash == crypto.HashSHA256(strings.ReplaceAll(c, "-", "")) {
+				t.Fatal("recovery code stored as bare SHA-256")
+			}
+		}
+	}
+	if legacy, err := db.HasLegacyRecoveryCodes(u.ID); err != nil || legacy {
+		t.Fatalf("fresh codes reported legacy: %v %v", legacy, err)
+	}
+	otherKey, _ := crypto.GenerateRandomBytes(32)
+	if ok, _ := NewEngine(db, otherKey).VerifyAndConsumeRecoveryCode(u.ID, codes[0]); ok {
+		t.Fatal("a recovery code verified without the server key")
+	}
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, strings.ToLower(codes[0])); !ok {
+		t.Fatal("a keyed recovery code did not verify")
+	}
+}
+
+// Rows from before keyed hashing cannot be converted (no plaintext), so they keep working,
+// flagged, until the user regenerates.
+func TestLegacyRecoveryCodesRedeemUntilRegenerated(t *testing.T) {
+	e, db, _, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	u := mfaUser(t, db)
+	legacy := func(code string) {
+		t.Helper()
+		if err := db.ReplaceRecoveryCodes(u.ID, []store.RecoveryCode{{ID: uuid.NewString(), UserID: u.ID, CodeHash: crypto.HashSHA256(strings.ReplaceAll(code, "-", ""))}}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy("ABCD-2345")
+	if flagged, err := db.HasLegacyRecoveryCodes(u.ID); err != nil || !flagged {
+		t.Fatalf("legacy row not flagged: %v %v", flagged, err)
+	}
+	if ok, err := e.VerifyAndConsumeRecoveryCode(u.ID, "abcd-2345"); err != nil || !ok {
+		t.Fatalf("legacy code refused: %v %v", ok, err)
+	}
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, "ABCD-2345"); ok {
+		t.Fatal("legacy code redeemed twice")
+	}
+	if flagged, _ := db.HasLegacyRecoveryCodes(u.ID); flagged {
+		t.Fatal("a spent legacy code is still flagged")
+	}
+
+	legacy("WXYZ-6789")
+	if _, err := e.GenerateRecoveryCodes(u.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, "WXYZ-6789"); ok {
+		t.Fatal("legacy code survived regeneration")
+	}
+	if flagged, _ := db.HasLegacyRecoveryCodes(u.ID); flagged {
+		t.Fatal("regenerated codes still flagged legacy")
+	}
+}
+
+// Every correct-password login used to push to every device, so a leaked password could
+// bombard the phone until someone tapped approve. One live login push per user, raced too.
+func TestOneLoginPushPerUser(t *testing.T) {
+	e, db, _, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	u := mfaUser(t, db)
+	registerTestDevice(t, e, u.ID, "phone", NativeDeviceRegisterRequest{PushToken: "fcm-token"})
+	fcm := &fakePushSender{}
+	e.SetPushSender(fcm)
+
+	const racers = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var created []*store.MFAChallenge
+	for range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ch, err := e.CreatePushChallenge(u.ID, "login")
+			if err != nil && !errors.Is(err, ErrPushPending) {
+				t.Error(err)
+			}
+			if ch != nil {
+				mu.Lock()
+				created = append(created, ch)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if len(created) != 1 || len(fcm.sent) != 1 {
+		t.Fatalf("%d login challenges and %d pushes from %d concurrent logins, want 1", len(created), len(fcm.sent), racers)
+	}
+	if pending, err := db.HasPendingLoginPush(u.ID); err != nil || !pending {
+		t.Fatalf("pending = %v %v", pending, err)
+	}
+	if _, err := e.CreatePushChallenge(u.ID, "step_up"); err != nil {
+		t.Fatalf("a pending login push blocked step-up: %v", err)
+	}
+
+	// Once the pending push is answered, the next login may push again; denials count.
+	if ok, err := db.TransitionMFAChallengeStatus(created[0].ID, "pending", "denied"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if err := db.CreateMFAChallenge(&store.MFAChallenge{ID: uuid.NewString(), UserID: u.ID, MethodType: "push", MatchDigits: "10", DecoyDigitsJSON: "[]",
+		Status: "pending", Purpose: "login", ExpiresAt: time.Now().UTC().Add(-time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CreatePushChallenge(u.ID, "login"); err != nil {
+		t.Fatalf("an expired login push still blocks: %v", err)
+	}
+	if n, err := db.CountUnansweredLoginPushes(u.ID, time.Now().UTC().Add(-time.Hour)); err != nil || n != 2 {
+		t.Fatalf("unanswered login pushes = %d %v, want 2 (one denied, one expired)", n, err)
+	}
+	// Housekeeping keeps them long enough to be counted.
+	if err := db.DeleteExpiredMFAChallenges(); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := db.CountUnansweredLoginPushes(u.ID, time.Now().UTC().Add(-time.Hour)); n != 2 {
+		t.Fatalf("housekeeping dropped unanswered pushes inside the hour: %d", n)
 	}
 }
