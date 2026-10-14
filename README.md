@@ -873,8 +873,9 @@ are listed to their owner and administrators for revocation; ID tokens publish a
 per-client `sid` for RP-initiated and back-channel logout.
 
 **System pairing requires the PIN** shown next to the token, and callback URLs must be
-`https` and resolve off-network unless `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` (the
-compose file sets this, since services on `kypost-net` address each other privately).
+`https` and resolve off-network. `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` admits http and
+private LAN ranges (RFC 1918, ULA, carrier-grade NAT), as services on `kypost-net` need; it is
+off by default and never admits loopback, link-local or cloud metadata addresses.
 Sync events are queued per paired system; a system only receives what was queued for it.
 
 **Device pairing requires a P-256 public key.** A device without one can never approve a

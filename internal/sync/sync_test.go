@@ -87,8 +87,8 @@ func setupTestSyncEngine(t *testing.T) (*Engine, *store.Store, *store.User, func
 	engine := NewEngine(dbStore, key)
 
 	// Pairing callbacks in these tests point at httptest servers on loopback.
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = false })
+	netguard.AllowPrivate, netguard.AllowLoopback = true, true
+	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = false, false })
 
 	cleanup := func() {
 		_ = dbStore.Close()

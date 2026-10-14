@@ -37,8 +37,8 @@ func setupSync(t *testing.T) (*Engine, *store.Store, *store.User, func()) {
 		t.Fatal(err)
 	}
 	// These tests point callbacks at httptest servers on loopback.
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = false })
+	netguard.AllowPrivate, netguard.AllowLoopback = true, true
+	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = false, false })
 
 	return NewEngine(db, key), db, admin, func() {
 		_ = db.Close()
@@ -50,7 +50,7 @@ func setupSync(t *testing.T) (*Engine, *store.Store, *store.User, func()) {
 func TestCallbackURLIsValidated(t *testing.T) {
 	e, _, _, cleanup := setupSync(t)
 	defer cleanup()
-	netguard.AllowPrivate = false // the production default
+	netguard.AllowPrivate, netguard.AllowLoopback = false, false // the production default
 
 	rejected := []string{
 		"http://169.254.169.254/latest/meta-data/",

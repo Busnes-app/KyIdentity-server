@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -273,6 +274,7 @@ func TestForgotAnswersBeforeTalkingToTheRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := newUser(t, db, "user")
+	verifyEmail(t, srv, u)
 	timed := func(identifier string) (time.Duration, *httptest.ResponseRecorder) {
 		start := time.Now()
 		rec := anonPost(t, srv, "/api/auth/password/forgot", map[string]string{"identifier": identifier})
@@ -288,5 +290,70 @@ func TestForgotAnswersBeforeTalkingToTheRelay(t *testing.T) {
 	}
 	if n := countAudit(t, db, "auth.password_reset_requested"); n != 1 {
 		t.Fatalf("reset link not issued for the known account: %d audit rows", n)
+	}
+}
+
+// verifyEmail marks u's address proven, as redeeming a mailed link would.
+func verifyEmail(t *testing.T, srv *Server, u *store.User) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`UPDATE users SET email_verified_at=CURRENT_TIMESTAMP WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A reset is mailed only to a proven address; an unverified one may not be the owner's.
+func TestForgotSkipsAnUnverifiedAddress(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	p, _ := strconv.Atoi(port)
+	if err := mail.Save(db, srv.cfg.EncryptionKey, &mail.Settings{Host: "127.0.0.1", Port: p, From: "id@example.test", Security: "starttls"}); err != nil {
+		t.Fatal(err)
+	}
+	u := newUser(t, db, "user")
+	issued := func() int {
+		n := 0
+		events, _, err := db.ListAuditEvents(200, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range events {
+			if e.Action == "auth.password_reset_requested" && e.Outcome == "success" {
+				n++
+			}
+		}
+		return n
+	}
+
+	rec := anonPost(t, srv, "/api/auth/password/forgot", map[string]string{"identifier": u.Username})
+	if rec.Code != http.StatusOK || issued() != 0 {
+		t.Fatalf("reset issued to an unverified address: %d", rec.Code)
+	}
+	if !auditContains(t, db, "email_unverified") {
+		t.Fatal("refusal not audited")
+	}
+
+	verifyEmail(t, srv, u)
+	if rec := anonPost(t, srv, "/api/auth/password/forgot", map[string]string{"identifier": u.Username}); rec.Code != http.StatusOK || issued() != 1 {
+		t.Fatalf("reset not issued to a verified address: %d", rec.Code)
 	}
 }

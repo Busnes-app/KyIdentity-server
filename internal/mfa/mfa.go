@@ -596,7 +596,8 @@ var ubuntuPushToken = regexp.MustCompile(`^[A-Za-z0-9+/=_.:-]{1,512}$`)
 var errInvalidPushTarget = errors.New("invalid push target")
 
 // ValidatePushTarget checks a device's push address and keys, and returns the effective
-// transport. A UnifiedPush endpoint is server-contacted, so it gets the outbound URL policy.
+// transport. A UnifiedPush endpoint is device-chosen and server-contacted, so it gets the strict
+// device URL policy.
 // UnifiedPush and ubuntupush require RFC 8291 keys: payloads are never sent in plaintext.
 func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, error) {
 	if pushToken == "" || len(pushToken) > MaxPushTokenBytes {
@@ -609,7 +610,7 @@ func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, erro
 		}
 		return store.PushTransportFCM, nil
 	case store.PushTransportUnifiedPush:
-		if u, err := url.Parse(pushToken); err != nil || u.Scheme != "https" || netguard.ValidateURL(pushToken, "push endpoint") != nil {
+		if netguard.ValidateDeviceURL(pushToken, "push endpoint") != nil {
 			return "", errInvalidPushTarget
 		}
 	case store.PushTransportUbuntuPush:

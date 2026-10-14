@@ -9,6 +9,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Busnes-app/kyidentity-server/internal/netguard"
 )
 
 const (
@@ -148,5 +150,22 @@ func TestRegistrationValidatesPushTarget(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Errorf("%s: got %q, %v; want %q", tc.name, got, err, tc.want)
 		}
+	}
+}
+
+// A device chooses its UnifiedPush endpoint, so the operator's AllowPrivate never applies to it.
+func TestUnifiedPushEndpointRefusesPrivateEvenWithAllowPrivate(t *testing.T) {
+	netguard.AllowPrivate = true
+	t.Cleanup(func() { netguard.AllowPrivate = false })
+	for _, endpoint := range []string{
+		"https://10.0.0.5/up", "https://192.168.1.2/up", "https://100.64.0.1/up", "https://[fd00::1]/up",
+		"https://127.0.0.1/up", "https://169.254.169.254/up", "http://push.example.net/up",
+	} {
+		if _, err := ValidatePushTarget("unifiedpush", endpoint, vectorP256dh, vectorAuth); err == nil {
+			t.Errorf("%s accepted", endpoint)
+		}
+	}
+	if _, err := ValidatePushTarget("unifiedpush", "https://ntfy.example.net/up", vectorP256dh, vectorAuth); err != nil {
+		t.Errorf("public endpoint rejected: %v", err)
 	}
 }

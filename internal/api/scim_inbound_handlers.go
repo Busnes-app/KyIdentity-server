@@ -426,6 +426,10 @@ func (h *SCIMHandler) save(w http.ResponseWriter, r *http.Request, c *store.SCIM
 	case errors.Is(err, store.ErrUserConflict):
 		scimError(w, http.StatusConflict, "uniqueness", "userName or email is already in use")
 		return
+	case errors.Is(err, store.ErrPrivilegedIdentity):
+		h.audit.Record("scim.user_updated", c.ID, "connector:"+c.Name, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "privileged_identity"})
+		scimError(w, http.StatusConflict, "mutability", "userName and email of an administrator or delegated account are managed locally")
+		return
 	case errors.Is(err, store.ErrNotFound):
 		scimError(w, http.StatusNotFound, "", "Resource not found")
 		return

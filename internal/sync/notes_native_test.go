@@ -49,9 +49,9 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 	}
 	t.Setenv("SSL_CERT_FILE", ca)
 	t.Setenv("SSL_CERT_DIR", t.TempDir())
-	previous := netguard.AllowPrivate
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = previous })
+	previous, previousLoopback := netguard.AllowPrivate, netguard.AllowLoopback
+	netguard.AllowPrivate, netguard.AllowLoopback = true, true
+	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = previous, previousLoopback })
 	s, err := store.New(filepath.Join(t.TempDir(), "identity.db"))
 	if err != nil {
 		t.Fatal(err)
