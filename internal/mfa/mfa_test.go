@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -85,6 +86,46 @@ func TestTOTPEnrollmentAndVerification(t *testing.T) {
 	code := calculateTOTPCode([]byte("12345678901234567890"), timeStep)
 	if !ValidateTOTP("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", code) {
 		t.Fatal("ValidateTOTP failed for RFC 6238 sample secret")
+	}
+}
+
+// With database write access, copying the attacker's sealed TOTP secret onto the victim's
+// row must not let the attacker's authenticator pass MFA for the victim.
+func TestTOTPSecretSwappedBetweenUsersDoesNotOpen(t *testing.T) {
+	engine, s, victim, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	attacker := &store.User{ID: uuid.New().String(), Username: "mallory", DisplayName: "M", Email: "m@example.com", PasswordHash: "h", Role: "user", Status: "active"}
+	if err := s.CreateUser(attacker); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []*store.User{victim, attacker} {
+		secret, _, err := engine.GenerateTOTPSecret(u.Username, "KyIdentity")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := engine.SaveUserTOTP(u.ID, secret, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stolen, err := s.GetMFAMethod(attacker.ID, "totp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMFAMethod(&store.MFAMethod{ID: uuid.New().String(), UserID: victim.ID, MethodType: "totp", EncryptedSecret: stolen.EncryptedSecret, IsPrimary: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := crypto.Open(engine.encryptionKey, store.SealTOTP, attacker.ID, stolen.EncryptedSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(string(plain))
+	code := calculateTOTPCode(raw, time.Now().Unix()/30)
+	if ok, err := engine.VerifyUserTOTP(victim.ID, code); ok || err == nil {
+		t.Fatalf("swapped secret verified for the victim: ok=%v err=%v", ok, err)
+	}
+	// The attacker's own row still works: binding, not breakage.
+	if ok, err := engine.VerifyUserTOTP(attacker.ID, code); !ok || err != nil {
+		t.Fatalf("attacker's own code: ok=%v err=%v", ok, err)
 	}
 }
 

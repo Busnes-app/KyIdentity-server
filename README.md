@@ -49,7 +49,7 @@ Following the **Ponytail** engineering philosophy (*use the smallest correct cha
 | **HTTP Routing & API** | `net/http` (Go 1.22+ pattern routing), `context`, `net` | *No Gin, Fiber, Chi, or Gorilla Mux* |
 | **OIDC, OAuth 2.0 & JWT** | `crypto/rsa`, `crypto/sha256`, `encoding/base64`, `encoding/json` | *No `golang-jwt`, `go-jose`, or `ory`* |
 | **TOTP / 2FA Engine** | `crypto/hmac`, `crypto/sha1`, `encoding/base32`, `encoding/binary` | *No third-party TOTP libraries* |
-| **At-Rest Encryption** | `crypto/aes` + `crypto/cipher` (AES-256-GCM) | *No third-party encryption packages* |
+| **At-Rest Encryption** | `crypto/aes` + `crypto/cipher` (AES-256-GCM, a per-purpose HMAC-derived key and the row identity as associated data, so a secret copied to another row or purpose does not decrypt) | *No third-party encryption packages* |
 | **Sync Webhooks** | `net/http` client + `crypto/hmac` + `crypto/sha256` | *No webhook frameworks* |
 | **Embedded Frontend** | `embed` + `io/fs` (React SPA served from binary memory) | *No packr or go-bindata* |
 | **Database Access** | `database/sql` | *No GORM, Ent, or ORM frameworks* |

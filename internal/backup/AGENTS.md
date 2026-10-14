@@ -5,7 +5,7 @@ KyIdentity's adapter over `github.com/Busnes-app/ky-primitives/recoveryclient`, 
 
 ## Ownership
 - `payload.go`: `CollectSealable` (database snapshot through the live handle, RSA signing key, encryption and secret keys, `recovery.pub` when present, config manifest), `Members`, the capsule paths, the verification recipe.
-- `drill.go`: `RunRestoreDrill` runs `recoveryclient.Drill` with `DataDir` as the scratch root and adds KyIdentity's checks from the authenticated, reopened manifest recipe: required files, SQLite integrity and application records, MFA secrets decrypt, paired-system tokens decrypt, the signing key issues a verifiable token. A "Recovery Key" check reports pin status; the drill never touches the suite key.
+- `drill.go`: `RunRestoreDrill` runs `recoveryclient.Drill` with `DataDir` as the scratch root and adds KyIdentity's checks from the authenticated, reopened manifest recipe: required files, SQLite integrity and application records, MFA secrets, paired-system tokens and mail settings open for their row (legacy ciphertext only when the restored database lacks `store.SealedSecretsSetting`, mirroring startup), the signing key issues a verifiable token. A "Recovery Key" check reports pin status; the drill never touches the suite key.
 - `adapter.go`: type and error aliases under the names the handlers use; `settings` maps `*store.Store` onto `recoveryclient.Settings` (`store.ErrNotFound` → `recoveryclient.ErrNotFound`); `sealer` wraps `crypto.EncryptAESGCM(crypto.DeriveKey(EncryptionKey, "kysignon:setting:kyrecovery_token"))` so pairings sealed before the lib keep opening (`TestAPairingSealedBeforeTheLibStillOpens`); `RunBackup` builds `RunConfig` from `config.Config` and passes `CollectSealable` as the collect func.
 
 ## Local Contracts

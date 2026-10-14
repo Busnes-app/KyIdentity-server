@@ -171,7 +171,7 @@ func calculateTOTPCode(secret []byte, counter int64) string {
 
 // SaveUserTOTP encrypts and saves a user's TOTP secret.
 func (e *Engine) SaveUserTOTP(userID, secretBase32 string, audit *store.AuditEvent) error {
-	encrypted, err := crypto.EncryptAESGCM(e.encryptionKey, []byte(secretBase32))
+	encrypted, err := crypto.Seal(e.encryptionKey, store.SealTOTP, userID, []byte(secretBase32))
 	if err != nil {
 		return fmt.Errorf("failed to encrypt TOTP secret: %w", err)
 	}
@@ -197,7 +197,7 @@ func (e *Engine) VerifyUserTOTP(userID, code string) (bool, error) {
 		return false, errors.New("TOTP not enrolled for this user")
 	}
 
-	decrypted, err := crypto.DecryptAESGCM(e.encryptionKey, method.EncryptedSecret)
+	decrypted, err := crypto.Open(e.encryptionKey, store.SealTOTP, method.UserID, method.EncryptedSecret)
 	if err != nil {
 		return false, fmt.Errorf("failed to decrypt TOTP secret: %w", err)
 	}

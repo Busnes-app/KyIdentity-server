@@ -349,7 +349,7 @@ func (e *Engine) ReviewSystem(sys *store.PairedSystem, kind, token string, group
 			return err
 		}
 		var err error
-		encrypted, err = crypto.EncryptAESGCM(e.encryptionKey, []byte(token))
+		encrypted, err = crypto.Seal(e.encryptionKey, store.SealConnector, sys.ID, []byte(token))
 		if err != nil {
 			return err
 		}

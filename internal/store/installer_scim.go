@@ -54,7 +54,7 @@ func configureInstallerConnector(tx *sql.Tx, p InstallerSetup, c InstallerClient
 			Scan(&name, &actualKind, &actualEndpoint, &encrypted, &status, &description, &icon, &groups, &hold, &reconcile); err != nil {
 			return err
 		}
-		token, err := crypto.DecryptAESGCM(p.EncryptionKey, encrypted)
+		token, err := crypto.Open(p.EncryptionKey, SealConnector, id, encrypted)
 		if err != nil || subtle.ConstantTimeCompare(token, []byte(credential)) != 1 || name != c.Name || actualKind != kind || actualEndpoint != endpoint ||
 			(status != "active" && status != "failing") || description != "" || icon != "" || groups != deliveryGroups || hold || reconcile != 0 {
 			return errors.New("owned connector configuration, credential or recovery hold differs")
@@ -65,11 +65,11 @@ func configureInstallerConnector(tx *sql.Tx, p InstallerSetup, c InstallerClient
 	if inspect {
 		return errors.New("connector is not configured")
 	}
-	encrypted, err := crypto.EncryptAESGCM(p.EncryptionKey, []byte(credential))
+	id = uuid.NewString()
+	encrypted, err := crypto.Seal(p.EncryptionKey, SealConnector, id, []byte(credential))
 	if err != nil {
 		return errors.New("cannot protect connector credential with existing product key")
 	}
-	id = uuid.NewString()
 	if _, err := tx.Exec(`INSERT INTO paired_systems(id,name,system_type,callback_url,hmac_secret_encrypted,status,created_at,groups_enabled) VALUES(?,?,?,?,?,'active',?,?)`, id, c.Name, kind, endpoint, encrypted, now, deliveryGroups); err != nil {
 		return err
 	}

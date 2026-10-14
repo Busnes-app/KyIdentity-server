@@ -164,7 +164,9 @@ The URL is the receiver's actual SCIM base, verified HTTPS with no credentials, 
 fragment. The token file follows the protected credential boundary; its token contains
 32 to 8192 visible ASCII bytes without spaces, with one optional trailing newline.
 The existing `KYIDENTITY_ENCRYPTION_KEY` or protected `encryption.key` under
-`KYIDENTITY_DATA_DIR` encrypts it at rest. Setup and inspection never generate that key.
+`KYIDENTITY_DATA_DIR` encrypts it at rest, bound to its connector ID. Setup and inspection
+never generate that key, and do not re-encrypt legacy secrets: after an upgrade, start the
+server once before rerunning setup over an existing connector.
 Container commands must inherit the running product's key/data configuration; `--db`
 does not select an alternative encryption key.
 

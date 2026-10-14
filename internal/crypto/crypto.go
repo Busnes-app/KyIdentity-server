@@ -103,9 +103,10 @@ func VerifyHMACSHA256(key []byte, data []byte, expectedHex string) bool {
 
 // DeriveKey produces a distinct 32-byte key for a named purpose from a master key.
 //
-// It is domain separation: a ciphertext encrypted for one label cannot be decrypted, or
-// silently relocated, under another. Use a stable label such as
-// "kysignon:setting:kyrecovery_token".
+// HMAC-SHA256 keyed by a uniformly random 32-byte master is a PRF, so each label yields
+// an independent key (single-block HKDF-Expand without the counter byte). A ciphertext
+// encrypted for one label cannot be decrypted, or silently relocated, under another.
+// Use a stable label such as "kysignon:setting:kyrecovery_token".
 func DeriveKey(master []byte, label string) []byte {
 	h := hmac.New(sha256.New, master)
 	h.Write([]byte(label))
@@ -113,15 +114,55 @@ func DeriveKey(master []byte, label string) []byte {
 }
 
 // EncryptAESGCM encrypts plaintext using AES-256-GCM with a prepended nonce.
+// Database row secrets use Seal instead.
 func EncryptAESGCM(key []byte, plaintext []byte) (string, error) {
-	if len(key) != 32 {
-		return "", errors.New("AES-256 key must be exactly 32 bytes")
-	}
-	block, err := aes.NewCipher(key)
+	return encryptAESGCM(key, plaintext, nil)
+}
+
+// DecryptAESGCM decrypts base64 encoded ciphertext using AES-256-GCM. Under the master
+// key it only reads legacy row secrets for migration; row secrets use Open.
+func DecryptAESGCM(key []byte, ciphertextBase64 string) ([]byte, error) {
+	return decryptAESGCM(key, ciphertextBase64, nil)
+}
+
+// sealedPrefix marks Seal output. ':' is outside the standard base64 alphabet, so no
+// legacy EncryptAESGCM output can begin with it.
+const sealedPrefix = "v2:"
+
+// ErrLegacyCiphertext is returned by Open for ciphertext Seal did not produce.
+var ErrLegacyCiphertext = errors.New("ciphertext is not row-bound (pre-v2 format)")
+
+// Seal encrypts a row secret under a key derived for purpose and authenticates purpose
+// and row, so the ciphertext opens nowhere else. row must be fixed for the row's lifetime.
+func Seal(master []byte, purpose, row string, plaintext []byte) (string, error) {
+	out, err := encryptAESGCM(sealKey(master, purpose), plaintext, sealAAD(purpose, row))
 	if err != nil {
 		return "", err
 	}
-	gcm, err := cipher.NewGCM(block)
+	return sealedPrefix + out, nil
+}
+
+// Open reverses Seal for the same purpose and row. Legacy ciphertext is refused.
+func Open(master []byte, purpose, row, sealed string) ([]byte, error) {
+	body, ok := strings.CutPrefix(sealed, sealedPrefix)
+	if !ok {
+		return nil, ErrLegacyCiphertext
+	}
+	return decryptAESGCM(sealKey(master, purpose), body, sealAAD(purpose, row))
+}
+
+// IsSealed reports whether s is Seal output rather than legacy ciphertext.
+func IsSealed(s string) bool { return strings.HasPrefix(s, sealedPrefix) }
+
+func sealKey(master []byte, purpose string) []byte {
+	return DeriveKey(master, "kyidentity:seal:"+purpose)
+}
+
+// Purposes are constants without '|', so purpose and row cannot run together.
+func sealAAD(purpose, row string) []byte { return []byte(purpose + "|" + row) }
+
+func encryptAESGCM(key, plaintext, aad []byte) (string, error) {
+	gcm, err := newGCM(key)
 	if err != nil {
 		return "", err
 	}
@@ -129,33 +170,34 @@ func EncryptAESGCM(key []byte, plaintext []byte) (string, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
+	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, plaintext, aad)), nil
 }
 
-// DecryptAESGCM decrypts base64 encoded ciphertext using AES-256-GCM.
-func DecryptAESGCM(key []byte, ciphertextBase64 string) ([]byte, error) {
-	if len(key) != 32 {
-		return nil, errors.New("AES-256 key must be exactly 32 bytes")
+func decryptAESGCM(key []byte, ciphertextBase64 string, aad []byte) ([]byte, error) {
+	gcm, err := newGCM(key)
+	if err != nil {
+		return nil, err
 	}
 	data, err := base64.StdEncoding.DecodeString(ciphertextBase64)
 	if err != nil {
 		return nil, err
 	}
+	if len(data) < gcm.NonceSize() {
+		return nil, errors.New("malformed ciphertext")
+	}
+	nonce, ciphertext := data[:gcm.NonceSize()], data[gcm.NonceSize():]
+	return gcm.Open(nil, nonce, ciphertext, aad)
+}
+
+func newGCM(key []byte) (cipher.AEAD, error) {
+	if len(key) != 32 {
+		return nil, errors.New("AES-256 key must be exactly 32 bytes")
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	nonceSize := gcm.NonceSize()
-	if len(data) < nonceSize {
-		return nil, errors.New("malformed ciphertext")
-	}
-	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
-	return gcm.Open(nil, nonce, ciphertext, nil)
+	return cipher.NewGCM(block)
 }
 
 // decodeBase64Any decodes standard, raw-standard, or raw-URL base64.

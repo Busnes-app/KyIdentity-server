@@ -2,6 +2,7 @@ package mail
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -201,6 +203,35 @@ func TestRecipientAndSubjectCannotInjectHeaders(t *testing.T) {
 	var none *Settings
 	if err := none.Send("ada@example.test", "x", "y"); err == nil {
 		t.Fatal("unconfigured mail sent")
+	}
+}
+
+// Ciphertext sealed for another purpose, even for the same row name, and legacy
+// unbound ciphertext are refused as mail settings; mail ciphertext is refused elsewhere.
+func TestMailSettingsRefuseOtherPurposesAndLegacy(t *testing.T) {
+	db, err := store.New(filepath.Join(t.TempDir(), "mail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	key := bytes.Repeat([]byte{9}, 32)
+	if err := Save(db, key, &Settings{Host: "smtp.example.test", Port: 465, Password: "p", From: "id@example.test", Security: "tls"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := db.GetSetting(settingKey)
+	if _, err := crypto.Open(key, store.SealConnector, settingKey, stored); err == nil {
+		t.Fatal("mail ciphertext opened as a connector credential")
+	}
+	raw := mustJSON(t, &Settings{Host: "evil.example.test", Port: 465, Password: "x", From: "id@example.test", Security: "tls"})
+	foreign, _ := crypto.Seal(key, store.SealConnector, settingKey, raw)
+	legacy, _ := crypto.EncryptAESGCM(key, raw)
+	for name, planted := range map[string]string{"other purpose": foreign, "legacy": legacy} {
+		if err := db.SetSetting(settingKey, planted); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := Load(db, key); err == nil {
+			t.Fatalf("%s ciphertext loaded as mail settings: %+v", name, got)
+		}
 	}
 }
 

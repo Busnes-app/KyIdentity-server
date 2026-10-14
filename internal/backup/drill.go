@@ -12,6 +12,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	_ "modernc.org/sqlite"
 )
 
@@ -287,26 +288,40 @@ func proveSecretDecryption(ctx context.Context, scratchDir string, recipe map[st
 	}
 	defer func() { _ = db.Close() }()
 
+	// Startup seals legacy secrets only in a database never marked sealed; anywhere else
+	// the service refuses them, so the drill does too.
+	var marker string
+	legacyOK := db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE key = ?`, store.SealedSecretsSetting).Scan(&marker) == sql.ErrNoRows
+	open := func(purpose, row, ciphertext string) error {
+		if !crypto.IsSealed(ciphertext) && legacyOK {
+			_, err := crypto.DecryptAESGCM(key, ciphertext)
+			return err
+		}
+		_, err := crypto.Open(key, purpose, row, ciphertext)
+		return err
+	}
+
 	for _, target := range []struct {
-		name  string
-		query string
-		empty string
+		name    string
+		purpose string
+		query   string
+		empty   string
 	}{
 		{
-			"MFA Secret Decryption",
-			`SELECT encrypted_secret FROM mfa_methods WHERE method_type = 'totp' AND encrypted_secret IS NOT NULL AND encrypted_secret != ''`,
+			"MFA Secret Decryption", store.SealTOTP,
+			`SELECT user_id, encrypted_secret FROM mfa_methods WHERE method_type = 'totp' AND encrypted_secret IS NOT NULL AND encrypted_secret != ''`,
 			"No TOTP secrets are enrolled, so none could be checked",
 		},
 		{
-			"Paired System Token Decryption",
-			`SELECT hmac_secret_encrypted FROM paired_systems WHERE hmac_secret_encrypted IS NOT NULL AND hmac_secret_encrypted != ''`,
+			"Paired System Token Decryption", store.SealConnector,
+			`SELECT id, hmac_secret_encrypted FROM paired_systems WHERE hmac_secret_encrypted IS NOT NULL AND hmac_secret_encrypted != ''`,
 			"No paired systems are configured, so none could be checked",
 		},
 		{
 			// Mail settings are the one encrypted blob in system_settings; a restore
 			// that cannot read them cannot send an activation or reset link.
-			"Mail Settings Decryption",
-			`SELECT value FROM system_settings WHERE key = 'mail_settings_enc' AND value != ''`,
+			"Mail Settings Decryption", store.SealMail,
+			`SELECT key, value FROM system_settings WHERE key = '` + store.MailSettingKey + `' AND value != ''`,
 			"Mail delivery is not configured, so nothing could be checked",
 		},
 	} {
@@ -317,13 +332,13 @@ func proveSecretDecryption(ctx context.Context, scratchDir string, recipe map[st
 		}
 		var checked, failed int
 		for rows.Next() {
-			var ciphertext string
-			if err := rows.Scan(&ciphertext); err != nil {
+			var row, ciphertext string
+			if err := rows.Scan(&row, &ciphertext); err != nil {
 				failed++
 				continue
 			}
 			checked++
-			if _, err := crypto.DecryptAESGCM(key, ciphertext); err != nil {
+			if err := open(target.purpose, row, ciphertext); err != nil {
 				failed++
 			}
 		}
