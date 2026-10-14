@@ -79,7 +79,7 @@ curl -X POST https://<your-worker>.workers.dev/register \
 # -> {"id":"...","label":"alice-server","key":"<RAW KEY>","expiresAt":null}
 ```
 
-**One active key per IP.** Registering from an IP that already holds a key invalidates the previous one — so a server that loses its key file can re-register and keep working.
+**One active key per IP.** Registering from an IP that already holds a key invalidates the previous one — so a server that loses its key file can re-register and keep working. The displaced key leaves a `superseded:<hash>` tombstone (one year), and `/send` with it answers 401 `{"code":"key_superseded"}`; KyIdentity then re-registers once and retries. A key you delete by hand gets a plain 401 and stays revoked.
 
 ## Managing keys
 

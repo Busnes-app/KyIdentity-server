@@ -46,6 +46,7 @@ import {
   secondsUntilUTCMidnight,
   claimTokenForSend,
   createRelayFetchHandler,
+  denyUnknownKey,
   fail,
   failDelivery,
   isExpired,
@@ -127,8 +128,7 @@ async function handleSend(request: Request, rc: RequestContext<Env>): Promise<Re
   const hash = await sha256Hex(presented);
   const record = await env.API_KEYS.get<ApiKeyRecord>(KEY_PREFIX + hash, "json");
   if (!record || !record.enabled) {
-    rc.log({ level: "warn", event: "send.denied", reason: "invalid_key" });
-    return fail(rc, 401, "invalid api key");
+    return denyUnknownKey(rc, hash);
   }
   if (isExpired(record, Date.now())) {
     rc.log({ level: "warn", event: "send.denied", reason: "expired", keyId: record.id });

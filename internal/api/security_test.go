@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -267,7 +268,7 @@ func TestRateLimiterEvictsIdleEntries(t *testing.T) {
 
 	// Long after every bucket has refilled, they carry no state worth keeping.
 	clock = clock.Add(30 * time.Minute)
-	hit(0)
+	mm.sweepLimiters()
 
 	if got := mm.TrackedLimiters(); got > 10 {
 		t.Errorf("limiter map still holds %d entries 30 minutes after last use; it must be reclaimed", got)
@@ -331,6 +332,62 @@ func TestRateLimiterAtCapacityDoesNotResetActiveOffenders(t *testing.T) {
 	if passed != before {
 		t.Errorf("the throttled client got %d more requests through after the map filled; "+
 			"its bucket was evicted and refilled", passed-before)
+	}
+}
+
+// A full map of refilled buckets carries no state, so it must not refuse a new client.
+func TestRateLimiterAtCapacityReplacesRefilledBucket(t *testing.T) {
+	mm := NewMiddlewareManager(nil, []string{"10.0.0.0/8"}, config.DefaultForwardedHeader, testCSRFKey)
+	mm.maxLimiters = 20
+	clock := time.Now()
+	mm.now = func() time.Time { return clock }
+	h := mm.RateLimit("login", 1, 1)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	hit := func(i int) int {
+		req := httptest.NewRequest("POST", "/api/auth/login", nil)
+		req.RemoteAddr = "10.0.0.1:5555"
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i+1))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for i := range 20 {
+		hit(i)
+	}
+	if code := hit(20); code != http.StatusTooManyRequests {
+		t.Fatalf("new client at capacity with only spent buckets: %d, want 429", code)
+	}
+	// One second refills every bucket; well inside the minute the sweep waits for.
+	clock = clock.Add(time.Second)
+	if code := hit(20); code != http.StatusOK {
+		t.Fatalf("new client refused while every bucket was refilled: %d", code)
+	}
+	if got := mm.TrackedLimiters(); got != 20 {
+		t.Fatalf("map holds %d buckets, want the cap of 20", got)
+	}
+}
+
+func TestRateLimiterSweeperStopsWithContext(t *testing.T) {
+	mm := NewMiddlewareManager(nil, []string{"10.0.0.0/8"}, config.DefaultForwardedHeader, testCSRFKey)
+	clock := time.Now()
+	mm.now = func() time.Time { return clock }
+	mm.allowRateLimit("login:198.51.100.1", 5, 1)
+	clock = clock.Add(30 * time.Minute)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { mm.sweepLimitersEvery(ctx, time.Millisecond); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for mm.TrackedLimiters() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("background sweep never reclaimed the idle bucket")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sweeper outlived its context")
 	}
 }
 

@@ -91,6 +91,9 @@ export interface ApiKeyRecord {
 
 export const KEY_PREFIX = "key:"; // key:<sha256(key)>      -> ApiKeyRecord (durable)
 export const KEY_INDEX_PREFIX = "keyid:"; // keyid:<id>     -> <sha256(key)> for revoke-by-id
+export const SUPERSEDED_PREFIX = "superseded:"; // superseded:<sha256(key)> -> "1", a key /register replaced
+// Long enough to outlast an idle server; each tombstone costs one rate-limited /register.
+const SUPERSEDED_TTL_SECONDS = 365 * 24 * 60 * 60;
 // The two ownership indexes below are no longer authoritative — RelayCoordinator
 // is (KV cannot make check-then-write atomic). They are kept as the one-time
 // seed for a coordinator instance that has never been touched, so claims made
@@ -861,7 +864,9 @@ export function registrationEnabled(env: CommonEnv): boolean {
  *
  * One active key per IP: registering from an IP that already holds a key
  * invalidates the previous one, so a server that loses its key file can simply
- * re-register. That bounds only *concurrent* keys per IP, so it is paired with a
+ * re-register. The displaced key leaves a tombstone, so its holder's next /send
+ * is told `key_superseded` (see denyUnknownKey) and can re-register in turn,
+ * rather than failing with a key it would otherwise keep forever. That bounds only *concurrent* keys per IP, so it is paired with a
  * per-IP minute-tier rate limit (REGISTER_RATE_LIMITER) on top of the per-key
  * rolling limits and the REGISTRATION_ENABLED kill-switch.
  *
@@ -997,7 +1002,7 @@ export async function handleRegister(request: Request, rc: RequestContext): Prom
   // revokeKeyById's cleanup below; that costs nothing, because the coordinator
   // holds the real answer and ignores the seed once set.
   await env.API_KEYS.put(IP_INDEX_PREFIX + registeredIp, record.id);
-  if (priorId && (await revokeKeyById(env, priorId))) {
+  if (priorId && (await revokeKeyById(env, priorId, true))) {
     rc.log({ level: "info", event: "key.superseded", keyId: priorId, ip: registeredIp });
   }
   return json({ id: record.id, label: record.label, key, expiresAt: record.expiresAt }, 201);
@@ -1006,12 +1011,16 @@ export async function handleRegister(request: Request, rc: RequestContext): Prom
 /**
  * Delete a key and all its indexes by id. Also clears the per-IP index, but only
  * if it still points at this key (so superseding a key doesn't drop a newer
- * registration's mapping). Returns false if the id was unknown.
+ * registration's mapping). Returns false if the id was unknown. `superseded`
+ * leaves a tombstone first, so /send never sees the key as merely unknown.
  */
-export async function revokeKeyById(env: CommonEnv, id: string): Promise<boolean> {
+export async function revokeKeyById(env: CommonEnv, id: string, superseded = false): Promise<boolean> {
   const hash = await env.API_KEYS.get(KEY_INDEX_PREFIX + id);
   if (!hash) {
     return false;
+  }
+  if (superseded) {
+    await env.API_KEYS.put(SUPERSEDED_PREFIX + hash, "1", { expirationTtl: SUPERSEDED_TTL_SECONDS });
   }
   const record = await env.API_KEYS.get<ApiKeyRecord>(KEY_PREFIX + hash, "json");
   await env.API_KEYS.delete(KEY_PREFIX + hash);
@@ -1024,6 +1033,20 @@ export async function revokeKeyById(env: CommonEnv, id: string): Promise<boolean
     }
   }
   return true;
+}
+
+/**
+ * The 401 for a presented key with no enabled record. Only a key /register
+ * replaced answers `key_superseded`; one an operator deleted stays a plain
+ * refusal, so the server does not undo that revocation by re-registering.
+ */
+export async function denyUnknownKey(rc: RequestContext, hash: string): Promise<Response> {
+  if (await rc.env.API_KEYS.get(SUPERSEDED_PREFIX + hash)) {
+    rc.log({ level: "warn", event: "send.denied", reason: "superseded" });
+    return fail(rc, 401, "api key superseded", { code: "key_superseded" });
+  }
+  rc.log({ level: "warn", event: "send.denied", reason: "invalid_key" });
+  return fail(rc, 401, "invalid api key");
 }
 
 // ---- router / fetch wrapper -------------------------------------------------
