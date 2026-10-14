@@ -228,7 +228,7 @@ func TestAppAuthenticationUpgradeAndLinks(t *testing.T) {
 	if err := s.SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateApplication(&Application{ID: "launcher", Name: "Card", URL: "https://example.com", Enabled: true}); err != nil {
+	if err := s.CreateApplication(&Application{ID: "launcher", Name: "Card", URL: "https://example.com", Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	apps, _, _ := s.ListAppRecords("client", 25, 0)

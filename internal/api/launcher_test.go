@@ -198,7 +198,7 @@ func TestApplicationUpdateEditsCustomCards(t *testing.T) {
 		ID: uuid.New().String(), Name: "Portainer", URL: "https://portainer.example.test",
 		IconName: "favicon", Enabled: true,
 	}
-	if err := db.CreateApplication(app); err != nil {
+	if err := db.CreateApplication(app, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,7 +231,7 @@ func TestApplicationUpdateValidatesLikeCreation(t *testing.T) {
 		ID: uuid.New().String(), Name: "Portainer", URL: "https://portainer.example.test",
 		IconName: "favicon", Enabled: true,
 	}
-	if err := db.CreateApplication(app); err != nil {
+	if err := db.CreateApplication(app, nil); err != nil {
 		t.Fatal(err)
 	}
 

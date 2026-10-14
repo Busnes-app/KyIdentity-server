@@ -15,7 +15,7 @@ func BenchmarkMutationReconcile(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer s.Close()
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "target", Name: "target", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "target", Name: "target", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 		b.Fatal(err)
 	}
 	var app string

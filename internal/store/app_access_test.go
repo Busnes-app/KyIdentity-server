@@ -13,7 +13,7 @@ func appAccessFixture(t *testing.T) (*Store, *User, AppRecord) {
 	s, cleanup := setupTestStore(t)
 	t.Cleanup(cleanup)
 	u := createTestUser(t, s)
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "App", ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateSession(&Session{ID: "session", UserID: u.ID, SessionTokenHash: "hash", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
@@ -194,7 +194,7 @@ func TestAppAccessMigrationAndLinkSafety(t *testing.T) {
 	if allowed, err := s.ClientAccessAllowed(u.ID, "client"); err != nil || !allowed {
 		t.Fatal("upgrade lost legacy access", err)
 	}
-	if err := s.CreateApplication(&Application{ID: "bookmark", Name: "Bookmark", URL: "https://example.com", IconName: "globe", Enabled: true}); err != nil {
+	if err := s.CreateApplication(&Application{ID: "bookmark", Name: "Bookmark", URL: "https://example.com", IconName: "globe", Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	bookmarks, _, err := s.ListAppRecords("bookmark", 25, 0)

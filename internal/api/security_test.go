@@ -60,7 +60,7 @@ func newClient(t *testing.T, db *store.Store, id string, uris, scopes []string) 
 	if err := db.CreateOAuthClient(&store.OAuthClient{
 		ID: id, ClientName: id, ClientType: "public",
 		RedirectURIsJSON: string(u), AllowedScopesJSON: string(s), Enabled: true,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("CreateOAuthClient: %v", err)
 	}
 	allowTestAppAccess(t, db, id)
@@ -739,7 +739,7 @@ func TestDeletingUserQueuesDeletionSyncEvent(t *testing.T) {
 		Name:        "KyPost",
 		SystemType:  "kypost",
 		CallbackURL: "https://kypost.example.com/scim/v2",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

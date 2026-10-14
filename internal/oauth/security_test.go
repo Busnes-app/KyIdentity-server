@@ -22,7 +22,7 @@ func testClient(t *testing.T, db *store.Store, id, ctype string, uris, scopes []
 		ID: id, ClientName: id, ClientType: ctype,
 		RedirectURIsJSON: string(u), AllowedScopesJSON: string(s), Enabled: true,
 	}
-	if err := db.CreateOAuthClient(c); err != nil {
+	if err := db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatalf("CreateOAuthClient: %v", err)
 	}
 	allowTestAppAccess(t, db, id)

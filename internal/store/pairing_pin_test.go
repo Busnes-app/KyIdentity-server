@@ -11,7 +11,7 @@ import (
 func livePairingTokens(t *testing.T, s *Store, userID string, pins ...string) {
 	t.Helper()
 	for _, pin := range pins {
-		if err := s.CreateDevicePairingToken(&DevicePairingToken{ID: userID + pin, UserID: userID, TokenHash: "tok-" + userID + pin, PINHash: pin, ExpiresAt: time.Now().UTC().Add(time.Minute)}); err != nil {
+		if err := s.CreateDevicePairingToken(&DevicePairingToken{ID: userID + pin, UserID: userID, TokenHash: "tok-" + userID + pin, PINHash: pin, ExpiresAt: time.Now().UTC().Add(time.Minute)}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

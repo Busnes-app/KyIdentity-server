@@ -36,7 +36,7 @@ func legacyStore(t *testing.T, key []byte) *Store {
 	if err := s.SetMFAMethod(&MFAMethod{ID: "m2", UserID: "u1", MethodType: "push"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "sys1", Name: "sys1", SystemType: "scim", CallbackURL: "https://a.example.test", HMACSecretEncrypted: legacy("token-sys1"), Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "sys1", Name: "sys1", SystemType: "scim", CallbackURL: "https://a.example.test", HMACSecretEncrypted: legacy("token-sys1"), Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetSetting(MailSettingKey, legacy(`{"host":"smtp"}`)); err != nil {

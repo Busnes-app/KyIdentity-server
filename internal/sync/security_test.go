@@ -27,6 +27,7 @@ func setupSync(t *testing.T) (*Engine, *store.Store, *store.User, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	syncTestDBs[db] = filepath.Join(dir, "test.db")
 	key, _ := crypto.GenerateRandomBytes(32)
 	admin := &store.User{
 		ID: uuid.New().String(), Username: "admin" + uuid.New().String()[:6],
@@ -65,7 +66,7 @@ func TestCallbackURLIsValidated(t *testing.T) {
 	for _, target := range rejected {
 		if _, _, err := e.CreateSystem(&CreateSystemRequest{
 			Name: "x", SystemType: "kypost", CallbackURL: target,
-		}); err == nil {
+		}, nil); err == nil {
 			t.Errorf("callback URL %q was accepted", target)
 		}
 	}
@@ -86,7 +87,7 @@ func TestEventsAreScopedToTheirSystem(t *testing.T) {
 	pair := func(name, url string) string {
 		ps, _, err := e.CreateSystem(&CreateSystemRequest{
 			Name: name, SystemType: "suite_webhook", CallbackURL: url,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("pairing %s: %v", name, err)
 		}
@@ -103,7 +104,7 @@ func TestEventsAreScopedToTheirSystem(t *testing.T) {
 	}
 	hitsA, hitsB = 0, 0
 
-	if err := e.ResyncAllAccounts(idA); err != nil {
+	if err := e.ResyncAllAccounts(idA, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.DispatchPendingEvents(context.Background()); err != nil {
@@ -131,7 +132,7 @@ func TestUndeliverableEventStaysQueued(t *testing.T) {
 
 	ps, _, err := e.CreateSystem(&CreateSystemRequest{
 		Name: "mail", SystemType: "suite_webhook", CallbackURL: srv.URL,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,9 +147,7 @@ func TestUndeliverableEventStaysQueued(t *testing.T) {
 	if err := func() error { queueForAll(t, e, u.ID, "user.deleted", map[string]any{"id": u.ID}); return nil }(); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpdatePairedSystemStatus(ps.ID, "disabled"); err != nil {
-		t.Fatal(err)
-	}
+	execRaw(t, db, `UPDATE paired_systems SET status='disabled' WHERE id=?`, ps.ID)
 
 	if err := e.DispatchPendingEvents(context.Background()); err != nil {
 		t.Fatal(err)
@@ -177,7 +176,7 @@ func TestFailedDeliveryBacksOff(t *testing.T) {
 
 	ps, _, err := e.CreateSystem(&CreateSystemRequest{
 		Name: "flaky", SystemType: "suite_webhook", CallbackURL: failing.URL,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,12 +188,10 @@ func TestFailedDeliveryBacksOff(t *testing.T) {
 	if err := db.CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateAccountSyncEvent(&store.AccountSyncEvent{
+	insertSyncEvent(t, db, store.AccountSyncEvent{
 		ID: uuid.New().String(), UserID: u.ID, SystemID: ps.ID,
 		EventType: "user.created", PayloadJSON: `{"id":"x"}`, Status: "pending",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	for i := 0; i < 5; i++ {
 		if err := e.DispatchPendingEvents(context.Background()); err != nil {
@@ -213,7 +210,7 @@ func TestHMACSecretIsNotStoredInPlaintext(t *testing.T) {
 
 	_, token, err := e.CreateSystem(&CreateSystemRequest{
 		Name: "mail", SystemType: "kypost", CallbackURL: "https://mail.urlxl.com/scim/v2",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,12 +254,12 @@ func TestConcurrentDispatchDeliversEachEventOnce(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ps, _, err := e.CreateSystem(&CreateSystemRequest{Name: "dup-check", SystemType: "suite_webhook", CallbackURL: srv.URL})
+	ps, _, err := e.CreateSystem(&CreateSystemRequest{Name: "dup-check", SystemType: "suite_webhook", CallbackURL: srv.URL}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	grantAllUsers(t, e.store, ps.ID)
-	if err := e.ResyncAllAccounts(ps.ID); err != nil {
+	if err := e.ResyncAllAccounts(ps.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 

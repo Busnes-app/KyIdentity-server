@@ -81,7 +81,7 @@ func TestDrillAndRestoreOfALegacyCapsule(t *testing.T) {
 	if err := st.SetMFAMethod(&store.MFAMethod{ID: "m1", UserID: "u1", MethodType: "totp", EncryptedSecret: legacy("JBSWY3DPEHPK3PXP")}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreatePairedSystem(&store.PairedSystem{ID: "sys1", Name: "sys1", SystemType: "scim", CallbackURL: "https://a.example.test", HMACSecretEncrypted: legacy("token"), Status: "active"}); err != nil {
+	if err := st.CreatePairedSystem(&store.PairedSystem{ID: "sys1", Name: "sys1", SystemType: "scim", CallbackURL: "https://a.example.test", HMACSecretEncrypted: legacy("token"), Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SetSetting(store.MailSettingKey, legacy(`{"host":"smtp.example.test","port":587,"from":"sso@example.test","security":"starttls"}`)); err != nil {

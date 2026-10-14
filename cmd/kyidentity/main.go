@@ -186,24 +186,11 @@ func main() {
 	go syncEngine.StartWorker(ctx)
 	go oauthEngine.StartLogoutWorker(ctx)
 
-	// Background housekeeping. Every table below is written by unauthenticated or
-	// per-request paths, so none of them may grow without bound.
+	// Background housekeeping.
 	go func() {
 		var lastSweep time.Time
 		housekeep := func() {
-			_ = dbStore.CleanupExpiredSessions()
-			_ = dbStore.DeleteExpiredMFATokens()
-			_ = dbStore.DeleteExpiredAuthorizationCodes()
-			_ = dbStore.DeleteExpiredIssuedTokens()
-			_ = dbStore.DeleteExpiredDevicePairingTokens()
-			_ = dbStore.DeleteExpiredAccountTokens()
-			_ = dbStore.DeleteExpiredMFAChallenges()
-			_ = dbStore.DeleteExpiredWebAuthnChallenges()
-			_ = dbStore.DeleteDeliveredSyncEvents(time.Now().UTC().Add(-7 * 24 * time.Hour))
-			_ = dbStore.DeleteLogoutDeliveriesOlderThan(time.Now().UTC().Add(-7 * 24 * time.Hour))
-			_ = dbStore.DeleteAuditEventsOlderThan(time.Now().UTC().Add(-auditRetention))
-			_ = dbStore.DeleteAlertsOlderThan(time.Now().UTC().Add(-auditRetention))
-			_, _ = dbStore.DeleteOrphanedLauncherIcons(time.Hour)
+			purgeExpired(dbStore, time.Now().UTC())
 			if err := clearFirstRunPasswordFile(dbStore, cfg.DataDir); err != nil {
 				log.Printf("Housekeeping: %v", err)
 			}
@@ -216,7 +203,9 @@ func main() {
 				}
 			}, func() {
 				n, err := mfaEngine.SweepAttestations(attestStatus, sweepRequireLocked(dbStore.AttestationSettings, log.Printf), func(id, uid, reason string) {
-					_ = auditLogger.Record("device.attestation_downgraded", "", "", id, "device", "", "sweep", "success", map[string]any{"userId": uid, "reason": reason})
+					// The downgrade stands even if its record is lost: rolling it back would keep
+					// trusting a revoked key.
+					auditLogger.Observe("device.attestation_downgraded", "", "", id, "device", "", "sweep", "success", map[string]any{"userId": uid, "reason": reason})
 				})
 				log.Printf("attestation sweep: %d downgraded", n)
 				if err != nil {
@@ -559,7 +548,7 @@ func runDeposit() {
 
 	res, err := backup.RunBackup(context.Background(), cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appVersion)
 	action, outcome, details := backup.Outcome(res, err)
-	_ = auditLogger.Record(action, "", "cli", res.Manifest.CapsuleID, "backup", "", "kyidentity-cli", outcome, details)
+	auditLogger.Observe(action, "", "cli", res.Manifest.CapsuleID, "backup", "", "kyidentity-cli", outcome, details)
 	if err != nil {
 		log.Fatalf("Backup: %v", err)
 	}
@@ -606,7 +595,7 @@ func backupLoop(ctx context.Context, cfg *config.Config, dbStore *store.Store, a
 			continue
 		}
 		action, outcome, details := backup.Outcome(res, err)
-		_ = auditLogger.Record(action, "", "system", res.Manifest.CapsuleID, "backup", "", "kyidentity-scheduler", outcome, details)
+		auditLogger.Observe(action, "", "system", res.Manifest.CapsuleID, "backup", "", "kyidentity-scheduler", outcome, details)
 		if err != nil {
 			log.Printf("[BACKUP] scheduled backup: %s", backup.AuditSafe(err.Error()))
 			continue
@@ -800,6 +789,35 @@ func restoreServiceHelp() string {
 
 // runAttestationHousekeeping refreshes the attestation caches whenever the status list is stale
 // or the daily sweep is due, so a failed fetch is retried next tick. It returns the sweep time.
+// purgeExpired deletes rows past their use. Every table here is written by unauthenticated
+// or per-request paths, so none may grow without bound; a failed purge is retried next tick.
+func purgeExpired(s *store.Store, now time.Time) {
+	purges := []struct {
+		name string
+		run  func() error
+	}{
+		{"sessions", s.CleanupExpiredSessions},
+		{"MFA tokens", s.DeleteExpiredMFATokens},
+		{"authorization codes", s.DeleteExpiredAuthorizationCodes},
+		{"issued tokens", s.DeleteExpiredIssuedTokens},
+		{"device pairing tokens", s.DeleteExpiredDevicePairingTokens},
+		{"account tokens", s.DeleteExpiredAccountTokens},
+		{"MFA challenges", s.DeleteExpiredMFAChallenges},
+		{"WebAuthn challenges", s.DeleteExpiredWebAuthnChallenges},
+		{"step-up tokens", s.DeleteExpiredStepUpTokens},
+		{"delivered sync events", func() error { return s.DeleteDeliveredSyncEvents(now.Add(-7 * 24 * time.Hour)) }},
+		{"logout deliveries", func() error { return s.DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)) }},
+		{"audit events", func() error { return s.DeleteAuditEventsOlderThan(now.Add(-auditRetention)) }},
+		{"alerts", func() error { return s.DeleteAlertsOlderThan(now.Add(-auditRetention)) }},
+		{"orphaned launcher icons", func() error { _, err := s.DeleteOrphanedLauncherIcons(time.Hour); return err }},
+	}
+	for _, p := range purges {
+		if err := p.run(); err != nil {
+			log.Printf("Housekeeping: purge %s: %v", p.name, err)
+		}
+	}
+}
+
 func runAttestationHousekeeping(now, lastSweep time.Time, stale bool, refresh, sweep func()) time.Time {
 	due := now.Sub(lastSweep) >= 24*time.Hour
 	if stale || due {

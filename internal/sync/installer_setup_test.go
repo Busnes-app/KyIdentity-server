@@ -72,12 +72,10 @@ func TestInstallerSCIMNativeDeliveryAndAccessLoss(t *testing.T) {
 			case "unassign":
 				err = s.SetAppAssignment(app.ID, "users", day.ID, false, nil)
 			case "disable":
-				day.Status = "disabled"
-				err = s.UpdateUserWithSyncEvents(day, true, nil)
+				_, err = s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil })
 			case "account-end":
 				end := time.Now().Add(1100 * time.Millisecond)
-				day.EndsAt = &end
-				err = s.UpdateUserWithSyncEvents(day, true, nil)
+				_, err = s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.EndsAt = &end; return true, nil })
 				if err == nil {
 					time.Sleep(1200 * time.Millisecond)
 					_, err = s.RunDueExpiries(time.Now())

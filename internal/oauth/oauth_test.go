@@ -91,7 +91,7 @@ func TestAuthorizationCodeExchangeWithPKCE(t *testing.T) {
 		AllowedScopesJSON: `["openid","profile","email"]`,
 		Enabled:           true,
 	}
-	if err := dbStore.CreateOAuthClient(client); err != nil {
+	if err := dbStore.CreateOAuthClient(client, nil); err != nil {
 		t.Fatalf("CreateOAuthClient failed: %v", err)
 	}
 

@@ -194,10 +194,10 @@ func TestRecoveryStepUpOnlyEnrollsReplacementFactor(t *testing.T) {
 	if err := json.Unmarshal(r.Body.Bytes(), &enabled); err != nil || len(enabled.RecoveryCodes) != 8 {
 		t.Fatalf("enrollment did not rotate recovery codes: %v", err)
 	}
-	if valid, err := f.srv.mfaEngine.VerifyAndConsumeRecoveryCode(f.user.ID, codes[1]); err != nil || valid {
+	if valid, err := f.srv.mfaEngine.VerifyAndConsumeRecoveryCode(f.user.ID, codes[1], nil); err != nil || valid {
 		t.Fatalf("old recovery set survived: %v", err)
 	}
-	if valid, err := f.srv.mfaEngine.VerifyAndConsumeRecoveryCode(f.user.ID, enabled.RecoveryCodes[0]); err != nil || !valid {
+	if valid, err := f.srv.mfaEngine.VerifyAndConsumeRecoveryCode(f.user.ID, enabled.RecoveryCodes[0], nil); err != nil || !valid {
 		t.Fatalf("new recovery set unusable: %v", err)
 	}
 	// Step-up never changes the login evidence used by OIDC.
@@ -248,7 +248,7 @@ func TestStepUpSupportsExistingClientIDsWithSpaces(t *testing.T) {
 	f, cleanup := newStepUpFixture(t)
 	defer cleanup()
 	f.user.Role = "admin"
-	if err := f.store.UpdateUserWithSyncEvents(f.user, false, nil); err != nil {
+	if _, err := f.store.EditUser(f.user.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	newClient(t, f.store, "app one", []string{"https://app.test/cb"}, []string{"openid"})

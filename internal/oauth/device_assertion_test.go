@@ -252,7 +252,7 @@ func newSignOnFixture(t *testing.T) *signOnFixture {
 	}
 	client := &store.OAuthClient{ID: uuid.NewString(), ClientName: "KyPost", ClientType: "public",
 		RedirectURIsJSON: `["https://kypost.local/callback"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
-	if err := db.CreateOAuthClient(client); err != nil {
+	if err := db.CreateOAuthClient(client, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, db, client.ID)
@@ -430,7 +430,7 @@ func (f *signOnFixture) secondClient(t *testing.T) *store.OAuthClient {
 	t.Helper()
 	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "Other", ClientType: "public",
 		RedirectURIsJSON: `["https://other.local/callback"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
-	if err := f.db.CreateOAuthClient(c); err != nil {
+	if err := f.db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, f.db, c.ID)
@@ -610,7 +610,7 @@ func TestExchangeDeviceAssertionRequiresOpenIDScope(t *testing.T) {
 	f := newSignOnFixture(t)
 	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "NoOpenID", ClientType: "public",
 		RedirectURIsJSON: `["https://noid.local/callback"]`, AllowedScopesJSON: `["profile","email"]`, Enabled: true}
-	if err := f.db.CreateOAuthClient(c); err != nil {
+	if err := f.db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, f.db, c.ID)
@@ -796,7 +796,7 @@ func (f *signOnFixture) clientWithRedirects(t *testing.T, redirectURIsJSON strin
 	t.Helper()
 	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "Relay", ClientType: "public",
 		RedirectURIsJSON: redirectURIsJSON, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
-	if err := f.db.CreateOAuthClient(c); err != nil {
+	if err := f.db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, f.db, c.ID)

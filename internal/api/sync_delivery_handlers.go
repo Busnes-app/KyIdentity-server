@@ -62,8 +62,8 @@ func (h *AdminHandler) ResumeSyncDelivery(w http.ResponseWriter, r *http.Request
 	// own audit entry, using fixed reasons rather than store/remote error text.
 	reject := func(reason string, status int) {
 		details["reason"] = reason
-		_ = h.audit.Record("admin.sync_delivery_resumed", admin.ID, admin.Username, r.PathValue("id"), "system", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
-		http.Error(w, `{"error":"`+reason+`"}`, status)
+		h.audit.Observe("admin.sync_delivery_resumed", admin.ID, admin.Username, r.PathValue("id"), "system", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
+		writeAPIError(w, status, reason, "")
 	}
 	sys, err := h.store.GetPairedSystemByID(r.PathValue("id"))
 	if err != nil {
@@ -120,8 +120,8 @@ func (h *AdminHandler) ResumeSyncDeliveries(w http.ResponseWriter, r *http.Reque
 	details := map[string]any{}
 	reject := func(reason string, status int) {
 		details["reason"] = reason
-		_ = h.audit.Record("admin.sync_deliveries_resumed", admin.ID, admin.Username, r.PathValue("id"), "system", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
-		http.Error(w, `{"error":"`+reason+`"}`, status)
+		h.audit.Observe("admin.sync_deliveries_resumed", admin.ID, admin.Username, r.PathValue("id"), "system", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
+		writeAPIError(w, status, reason, "")
 	}
 	sys, err := h.store.GetPairedSystemByID(r.PathValue("id"))
 	if err != nil {

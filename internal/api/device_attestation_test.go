@@ -54,7 +54,7 @@ func TestRegisterHandlerReturnsAttestedLevelAndCapsBody(t *testing.T) {
 	user := newUser(t, dbStore, "user")
 	mfaEngine.SetAttestor(stubAttestor{attest.Result{Level: "tee", BootState: "locked-verified"}})
 
-	token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestRegisterHandlerReturnsAttestedLevelAndCapsBody(t *testing.T) {
 	}
 
 	// An oversize body is refused before any pairing token is spent or device created.
-	token2, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true)
+	token2, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +104,8 @@ func TestRepairingResetsAttestation(t *testing.T) {
 	mfaEngine.SetAttestor(stubAttestor{attest.Result{Level: "tee", BootState: "locked-verified"}})
 	pub := testSPKI(t)
 
-	token, _, _, _ := mfaEngine.GenerateDevicePairingToken(user.ID, true)
-	first, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}})
+	token, _, _, _ := mfaEngine.GenerateDevicePairingToken(user.ID, true, nil)
+	first, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm", Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}}, nil)
 	if err != nil || first.AttestedLevel != "tee" {
 		t.Fatalf("%v %+v", err, first)
 	}
@@ -113,8 +113,8 @@ func TestRepairingResetsAttestation(t *testing.T) {
 		t.Fatalf("setup: %+v", stored)
 	}
 
-	token2, _, _, _ := mfaEngine.GenerateDevicePairingToken(user.ID, true)
-	second, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token2, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm"})
+	token2, _, _, _ := mfaEngine.GenerateDevicePairingToken(user.ID, true, nil)
+	second, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token2, DeviceName: "p", DeviceIdentifier: "i", PublicKey: pub, PushToken: "fcm"}, nil)
 	if err != nil || second.ID != first.ID {
 		t.Fatalf("%v %+v", err, second)
 	}
@@ -137,7 +137,7 @@ func TestRegisterHandlerGradesIOSAppAttestWithoutEchoingReason(t *testing.T) {
 		want string
 	}{{nil, "appattest"}, {errors.New("secret-reason"), "none"}} {
 		mfaEngine.SetAppAttestor(stubAppAttestor{tc.err})
-		token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true)
+		token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -189,13 +189,11 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 		t.Fatal(err)
 	}
 	phase("reassigned")
-	day.Status = "disabled"
-	if err := s.UpdateUserWithSyncEvents(day, true, nil); err != nil {
+	if _, err := s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	phase("disabled")
-	day.Status = "active"
-	if err := s.UpdateUserWithSyncEvents(day, false, nil); err != nil {
+	if _, err := s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "active"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	phase("reactivated")

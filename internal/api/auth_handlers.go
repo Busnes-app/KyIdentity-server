@@ -111,9 +111,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if user == nil {
-			h.audit.Record("auth.login", "", req.Username, "", "user", ip, ua, "failure", map[string]any{"reason": reason})
+			h.audit.Observe("auth.login", "", req.Username, "", "user", ip, ua, "failure", map[string]any{"reason": reason})
 		} else {
-			h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": reason})
+			h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": reason})
 		}
 		http.Error(w, invalidCredentials, http.StatusUnauthorized)
 		return
@@ -125,7 +125,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil || !validPass {
 		attempts, _ := h.store.RecordFailedLogin(user.ID)
-		h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure",
+		h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure",
 			map[string]any{"reason": "invalid_password", "consecutiveFailures": attempts})
 		http.Error(w, invalidCredentials, http.StatusUnauthorized)
 		return
@@ -257,7 +257,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.MFAToken = mfaToken
 
-		h.audit.Record("auth.mfa_challenge", user.ID, user.Username, user.ID, "user", ip, ua, "success", map[string]any{"methods": methodTypes, "push": pushed})
+		h.audit.Observe("auth.mfa_challenge", user.ID, user.Username, user.ID, "user", ip, ua, "success", map[string]any{"methods": methodTypes, "push": pushed})
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 		return
@@ -351,7 +351,7 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 		Secure:   h.middleware.IsHTTPS(r) || h.secureCookies,
 	})
 
-	h.audit.Record("auth.login_success", user.ID, user.Username, user.ID, "user", ip, ua, "success", nil)
+	h.audit.Observe("auth.login_success", user.ID, user.Username, user.ID, "user", ip, ua, "success", nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(LoginResponse{
@@ -420,7 +420,7 @@ func (h *AuthHandler) reserveMFAAttempt(w http.ResponseWriter, token *store.MFAT
 // sees guesses spread over fresh logins made with a known password.
 func (h *AuthHandler) mfaFailure(w http.ResponseWriter, r *http.Request, user *store.User, action string, details map[string]any, status int, body string) {
 	details["consecutiveFailures"], _ = h.store.RecordFailedLogin(user.ID)
-	h.audit.Record(action, user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
+	h.audit.Observe(action, user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
 	http.Error(w, body, status)
 }
 
@@ -461,7 +461,7 @@ func (h *AuthHandler) auditPushFatigue(r *http.Request, userID, username string)
 	if err != nil || n < pushFatigueThreshold {
 		return
 	}
-	h.audit.Record("auth.mfa_push_fatigue", userID, username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"count": n})
+	h.audit.Observe("auth.mfa_push_fatigue", userID, username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"count": n})
 }
 
 // argonBusy answers 503 when password hashing is saturated. Callers check it before
@@ -538,19 +538,25 @@ func (h *AuthHandler) VerifyRecoveryCode(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	valid, err := h.mfaEngine.VerifyAndConsumeRecoveryCode(user.ID, req.Code)
-	if err != nil || !valid {
+	consumed := h.audit.Prepare("auth.mfa_recovery_consumed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	valid, err := h.mfaEngine.VerifyAndConsumeRecoveryCode(user.ID, req.Code, consumed.Row)
+	if err != nil {
+		log.Printf("recovery code check for user %s failed: %v", user.ID, err)
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	if !valid {
 		h.mfaFailure(w, r, user, "auth.mfa_recovery", map[string]any{"attempts": attempts},
 			http.StatusUnauthorized, `{"error":"invalid_recovery_code","error_description":"Invalid or already used recovery code"}`)
 		return
 	}
+	consumed.Committed()
 
 	factorAt := time.Now().UTC()
 	if !h.spendMFAToken(w, token) {
 		return
 	}
 
-	h.audit.Record("auth.mfa_recovery_consumed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
 	h.createSessionAndRespond(w, r, user, store.AuthenticationEvidence{PrimaryAuthenticatedAt: token.PrimaryAuthenticatedAt, FactorAuthenticatedAt: &factorAt, FactorMethod: "recovery"}, token.InteractionHash)
 }
 
@@ -616,7 +622,7 @@ func (h *AuthHandler) FinishPushLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if challenge.UserID != user.ID {
-		h.audit.Record("auth.mfa_push_mismatch", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied",
+		h.audit.Observe("auth.mfa_push_mismatch", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied",
 			map[string]any{"reason": "challenge_owner_mismatch", "challengeId": req.ChallengeID})
 		http.Error(w, `{"error":"mfa_not_approved","error_description":"Push challenge is not approved"}`, http.StatusUnauthorized)
 		return
@@ -626,7 +632,7 @@ func (h *AuthHandler) FinishPushLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.audit.Record("auth.mfa_push_approved", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	h.audit.Observe("auth.mfa_push_approved", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
 	h.createSessionAndRespond(w, r, user, store.AuthenticationEvidence{PrimaryAuthenticatedAt: token.PrimaryAuthenticatedAt, FactorAuthenticatedAt: challenge.VerifiedAt, FactorMethod: "push"}, token.InteractionHash)
 }
 
@@ -655,12 +661,12 @@ func (h *AuthHandler) RespondPush(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ip := h.middleware.ClientIP(r)
 		if errors.Is(err, mfa.ErrUnsignedDevice) {
-			h.audit.Record("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", ip, r.UserAgent(), "denied",
+			h.audit.Observe("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", ip, r.UserAgent(), "denied",
 				map[string]any{"reason": "no_signing_device"})
 			http.Error(w, `{"error":"device_not_enrolled_for_signing","error_description":"Re-pair your authenticator to approve sign-ins"}`, http.StatusUnauthorized)
 			return
 		}
-		h.audit.Record("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", ip, r.UserAgent(), "failure",
+		h.audit.Observe("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", ip, r.UserAgent(), "failure",
 			map[string]any{"reason": err.Error()})
 		http.Error(w, `{"error":"challenge_error","error_description":"Challenge could not be answered"}`, http.StatusBadRequest)
 		return
@@ -670,7 +676,7 @@ func (h *AuthHandler) RespondPush(w http.ResponseWriter, r *http.Request) {
 	if approved {
 		outcome = "success"
 	}
-	h.audit.Record("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", h.middleware.ClientIP(r), r.UserAgent(), outcome,
+	h.audit.Observe("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", h.middleware.ClientIP(r), r.UserAgent(), outcome,
 		map[string]any{"deviceId": deviceID})
 	if !approved {
 		if ch, err := h.store.GetMFAChallenge(req.ChallengeID); err == nil && ch != nil && ch.Purpose == "login" {

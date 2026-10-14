@@ -19,7 +19,7 @@ func TestAppRolesAdminAPI(t *testing.T) {
 	user := newUser(t, db, "user")
 	adminCookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 	cookie := newSession(t, db, user, time.Now().UTC().Add(time.Hour))
-	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "roles-app", ClientName: "Roles app", ClientType: "public", RedirectURIsJSON: `["https://app.example/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "roles-app", ClientName: "Roles app", ClientType: "public", RedirectURIsJSON: `["https://app.example/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, _, _ := db.ListAppRecords("roles-app", 25, 0)

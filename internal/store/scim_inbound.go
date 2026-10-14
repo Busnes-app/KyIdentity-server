@@ -104,7 +104,7 @@ func (s *Store) CreateSCIMConnector(name string, audit *AuditEvent) (*SCIMConnec
 	now := time.Now().UTC()
 	c := &SCIMConnector{ID: uuid.NewString(), Name: strings.TrimSpace(name), Status: "active", CreatedAt: now, UpdatedAt: now}
 	if c.Name == "" {
-		return nil, errors.New("name is required")
+		return nil, InputError("name is required")
 	}
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO scim_connectors (id, name, status, created_at, updated_at) VALUES (?,?,?,?,?)`, c.ID, c.Name, c.Status, now, now)
@@ -118,10 +118,10 @@ func (s *Store) CreateSCIMConnector(name string, audit *AuditEvent) (*SCIMConnec
 
 func (s *Store) UpdateSCIMConnector(id, name, status string, audit *AuditEvent) error {
 	if status != "active" && status != "disabled" {
-		return errors.New("status must be active or disabled")
+		return InputError("status must be active or disabled")
 	}
 	if name = strings.TrimSpace(name); name == "" {
-		return errors.New("name is required")
+		return InputError("name is required")
 	}
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`UPDATE scim_connectors SET name=?, status=?, updated_at=? WHERE id=?`, name, status, time.Now().UTC(), id)
@@ -205,7 +205,7 @@ func (s *Store) CountSCIMConnectorUsers(connectorID string) (int, error) {
 // can overlap the upstream's cut-over.
 func (s *Store) IssueSCIMToken(connectorID, scope string, audit *AuditEvent) (string, *SCIMConnectorToken, error) {
 	if scope != "read" && scope != "write" {
-		return "", nil, errors.New("scope must be read or write")
+		return "", nil, InputError("scope must be read or write")
 	}
 	raw, err := crypto.GenerateRandomHex(32)
 	if err != nil {

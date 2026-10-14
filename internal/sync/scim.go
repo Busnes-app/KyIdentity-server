@@ -335,18 +335,18 @@ func (e *Engine) TestSystem(ctx context.Context, sys *store.PairedSystem) error 
 // keeps its token when none is supplied. Suite protocols cannot be switched or deliver groups.
 func (e *Engine) ReviewSystem(sys *store.PairedSystem, kind, token string, groups bool, reconcileHours int, audit *store.AuditEvent) error {
 	if kind != "scim" && kind != "suite_webhook" {
-		return errors.New("choose scim or suite_webhook")
+		return store.InputError("choose scim or suite_webhook")
 	}
 	if supportedSystemType(sys.SystemType) && sys.SystemType != kind {
-		return errors.New("an established connector cannot change protocol")
+		return store.InputError("an established connector cannot change protocol")
 	}
 	if (groups || reconcileHours > 0) && kind != "scim" {
-		return errors.New("group delivery and reconciliation require a generic SCIM connector")
+		return store.InputError("group delivery and reconciliation require a generic SCIM connector")
 	}
 	encrypted := sys.HMACSecretEncrypted
 	if kind == "scim" && (token != "" || sys.SystemType != "scim") {
 		if err := validateSCIMConfig(sys.CallbackURL, token); err != nil {
-			return err
+			return store.InputError(err.Error())
 		}
 		var err error
 		encrypted, err = crypto.Seal(e.encryptionKey, store.SealConnector, sys.ID, []byte(token))
@@ -354,7 +354,7 @@ func (e *Engine) ReviewSystem(sys *store.PairedSystem, kind, token string, group
 			return err
 		}
 	} else if kind != "scim" && token != "" {
-		return errors.New("suite webhook retains its existing signing secret")
+		return store.InputError("suite webhook retains its existing signing secret")
 	}
 	return e.store.ConfigureSystem(sys.ID, sys.SystemType, kind, encrypted, groups, reconcileHours, audit)
 }

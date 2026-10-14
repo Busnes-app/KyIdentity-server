@@ -16,6 +16,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/capsule"
 	"github.com/Busnes-app/ky-primitives/recoverykey"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
+	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
@@ -66,15 +67,21 @@ func (h *BackupHandler) actor(r *http.Request) (string, string) {
 	return "", ""
 }
 
-func (h *BackupHandler) record(r *http.Request, action, actorID, actorName, targetID, outcome string, details map[string]any) error {
-	return h.audit.Record(action, actorID, actorName, targetID, "backup", h.middleware.ClientIP(r), r.UserAgent(), outcome, details)
+// observe records a backup event no settings change commits with: a failure, a drill, a run.
+func (h *BackupHandler) observe(r *http.Request, action, actorID, actorName, targetID, outcome string, details map[string]any) {
+	h.audit.Observe(action, actorID, actorName, targetID, "backup", h.middleware.ClientIP(r), r.UserAgent(), outcome, details)
+}
+
+// prepare builds the audit row for a backup settings change; Store.EditSettings commits it.
+func (h *BackupHandler) prepare(r *http.Request, action, actorID, actorName, targetID string, details map[string]any) *audit.Pending {
+	return h.audit.Prepare(action, actorID, actorName, targetID, "backup", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
 }
 
 // recordCritical writes an audit event for an operation that must not proceed unrecorded.
 // A capsule leaving this server with no durable record of who took it is not an export, it is
 // an unattributed disclosure, so the caller aborts when this returns false.
 func (h *BackupHandler) recordCritical(w http.ResponseWriter, r *http.Request, action, actorID, actorName, targetID, outcome string, details map[string]any) bool {
-	if err := h.record(r, action, actorID, actorName, targetID, outcome, details); err != nil {
+	if err := h.audit.Record(action, actorID, actorName, targetID, "backup", h.middleware.ClientIP(r), r.UserAgent(), outcome, details); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"error": "audit_unavailable",
 			"error_description": "The audit trail could not be written, so this operation was refused. " +
@@ -93,6 +100,32 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// writeAPIError answers {"error":code,"error_description":description}, marshalled so any
+// text stays valid JSON. An empty description is left out.
+func writeAPIError(w http.ResponseWriter, status int, code, description string) {
+	body := map[string]string{"error": code}
+	if description != "" {
+		body["error_description"] = description
+	}
+	writeJSON(w, status, body)
+}
+
+// writeInputError answers an input refusal with its own fixed text as a 400 under code. Any
+// other error is internal: it is logged and the caller gets a generic 500.
+func writeInputError(w http.ResponseWriter, code string, err error) {
+	var input store.InputError
+	var policy auth.PolicyError
+	switch {
+	case errors.As(err, &input):
+		writeAPIError(w, http.StatusBadRequest, code, input.Error())
+	case errors.As(err, &policy):
+		writeAPIError(w, http.StatusBadRequest, code, policy.Error())
+	default:
+		log.Printf("%s: internal error: %v", code, err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
+	}
 }
 
 // RunDrill seals the live payload to a throwaway key, opens it in a sandbox and runs the
@@ -114,26 +147,29 @@ func (h *BackupHandler) RunDrill(w http.ResponseWriter, r *http.Request) {
 	adminID, adminUsername := h.actor(r)
 	payload, err := backup.CollectSealable(h.cfg, h.store, appVersion)
 	if err != nil {
-		_ = h.record(r, "admin.backup_drill_run", adminID, adminUsername, "", "failure", map[string]any{"error": backup.AuditSafe(err.Error())})
-		writeError(w, http.StatusInternalServerError, "Failed to collect backup payload: "+err.Error())
+		log.Printf("[BACKUP] drill: collect failed: %s", backup.AuditSafe(err.Error()))
+		h.observe(r, "admin.backup_drill_run", adminID, adminUsername, "", "failure", map[string]any{"error": backup.AuditSafe(err.Error())})
+		writeError(w, http.StatusInternalServerError, "Failed to collect backup payload")
 		return
 	}
 	pinned, err := backup.LoadRecoveryKey(h.cfg.DataDir, h.store)
 	if err != nil && !errors.Is(err, backup.ErrNotPaired) {
-		writeError(w, http.StatusInternalServerError, "Failed to load recovery key: "+err.Error())
+		log.Printf("[BACKUP] drill: load recovery key failed: %s", backup.AuditSafe(err.Error()))
+		writeError(w, http.StatusInternalServerError, "Failed to load recovery key")
 		return
 	}
 	result, err := backup.RunRestoreDrill(r.Context(), h.cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
 	if err != nil {
-		_ = h.record(r, "admin.backup_drill_run", adminID, adminUsername, "", "failure", map[string]any{"error": backup.AuditSafe(err.Error())})
-		writeError(w, http.StatusInternalServerError, "Failed to execute restore drill: "+err.Error())
+		log.Printf("[BACKUP] drill failed: %s", backup.AuditSafe(err.Error()))
+		h.observe(r, "admin.backup_drill_run", adminID, adminUsername, "", "failure", map[string]any{"error": backup.AuditSafe(err.Error())})
+		writeError(w, http.StatusInternalServerError, "Failed to execute restore drill")
 		return
 	}
 	outcome := "success"
 	if !result.Passed {
 		outcome = "failure"
 	}
-	_ = h.record(r, "admin.backup_drill_run", adminID, adminUsername, "", outcome, map[string]any{"passed": result.Passed, "duration_ms": result.DurationMs})
+	h.observe(r, "admin.backup_drill_run", adminID, adminUsername, "", outcome, map[string]any{"passed": result.Passed, "duration_ms": result.DurationMs})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -157,7 +193,8 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 	}
 	payload, err := backup.CollectSealable(h.cfg, h.store, appVersion)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to collect backup payload: "+err.Error())
+		log.Printf("[BACKUP] export capsule: collect failed: %s", backup.AuditSafe(err.Error()))
+		writeError(w, http.StatusInternalServerError, "Failed to collect backup payload")
 		return
 	}
 	raw, m, err := backup.Seal(payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, key)
@@ -212,7 +249,7 @@ func (h *BackupHandler) PairRemote(w http.ResponseWriter, r *http.Request) {
 	}
 	target := backup.AuditSafe(req.RecoveryURL)
 	fail := func(status int, msg string) {
-		_ = h.record(r, "admin.backup_remote_pair", adminID, adminUsername, target, "failure", map[string]any{"recovery_url": target, "error": backup.AuditSafe(msg)})
+		h.observe(r, "admin.backup_remote_pair", adminID, adminUsername, target, "failure", map[string]any{"recovery_url": target, "error": backup.AuditSafe(msg)})
 		writeError(w, status, msg)
 	}
 
@@ -223,27 +260,36 @@ func (h *BackupHandler) PairRemote(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := backup.StoreRecoveryKey(h.cfg.DataDir, h.store, result.Key); err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			fail(http.StatusConflict, "Already paired to a different recovery key")
-			return
-		}
-		fail(http.StatusInternalServerError, "Failed to save recovery key")
-		return
-	}
-	// The pin is now on disk whatever happens next, so it is recorded whatever happens next:
-	// a write-once pin that exists nowhere in the audit trail is the gap this closes.
-	if err := backup.StorePairing(h.store, h.cfg.EncryptionKey, req.RecoveryURL, result.APIToken); err != nil {
-		_ = h.record(r, "admin.backup_remote_pair", adminID, adminUsername, target, "failure", map[string]any{
-			"recovery_url": target, "recovery_key_id": result.Key.Public.ID(), "error": "key pinned but the pairing was not stored: " + backup.AuditSafe(err.Error()),
-		})
-		writeError(w, http.StatusInternalServerError, "Failed to persist recovery pairing")
-		return
-	}
-	_ = h.record(r, "admin.backup_remote_pair", adminID, adminUsername, target, "success", map[string]any{
+	// The settings pin, the pairing and the success audit commit together: a pin that exists
+	// nowhere in the audit trail is the gap this closes. recovery.pub is written no-clobber
+	// first and is inert without the settings pin; a retry with the same key reuses it.
+	paired := h.prepare(r, "admin.backup_remote_pair", adminID, adminUsername, target, map[string]any{
 		"recovery_url": target, "recovery_key_id": result.Key.Public.ID(), "threshold": result.Key.Threshold, "total_shares": result.Key.TotalShares,
 		"private_recovery_allowed": h.cfg.BackupAllowPrivateRecovery,
 	})
+	keyStored := false
+	err = h.store.EditSettings(paired.Row, func(st store.Settings) error {
+		if err := backup.StoreRecoveryKey(h.cfg.DataDir, st, result.Key); err != nil {
+			return err
+		}
+		keyStored = true
+		return backup.StorePairing(st, h.cfg.EncryptionKey, req.RecoveryURL, result.APIToken)
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, fs.ErrExist):
+		fail(http.StatusConflict, "Already paired to a different recovery key")
+		return
+	case !keyStored:
+		log.Printf("[BACKUP] pair: store recovery key failed: %s", backup.AuditSafe(err.Error()))
+		fail(http.StatusInternalServerError, "Failed to save recovery key")
+		return
+	default:
+		log.Printf("[BACKUP] pair: store pairing failed: %s", backup.AuditSafe(err.Error()))
+		fail(http.StatusInternalServerError, "Failed to persist recovery pairing")
+		return
+	}
+	paired.Committed()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"paired":          true,
 		"recovery_url":    req.RecoveryURL,
@@ -267,7 +313,7 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
 	res, err := backup.RunBackup(ctx, h.cfg, h.store, h.store, h.recovery, appVersion)
 	action, outcome, details := backup.Outcome(res, err)
-	_ = h.record(r, action, adminID, adminUsername, res.Manifest.CapsuleID, outcome, details)
+	h.observe(r, action, adminID, adminUsername, res.Manifest.CapsuleID, outcome, details)
 	if errors.Is(err, backup.ErrReceiptUnrecorded) {
 		log.Printf("[BACKUP] run %s: receipt not recorded: %s", res.Manifest.CapsuleID, backup.AuditSafe(err.Error()))
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Capsule %s was deposited but the receipt could not be recorded locally", res.Manifest.CapsuleID))
@@ -316,16 +362,17 @@ func (h *BackupHandler) Unpair(w http.ResponseWriter, r *http.Request) {
 	adminID, adminUsername := h.actor(r)
 	target, _ := h.store.GetSetting("kyrecovery_url")
 	target = backup.AuditSafe(target)
-	if err := backup.ClearPairing(h.store); err != nil {
+	unpaired := h.prepare(r, "admin.backup_unpair", adminID, adminUsername, target, map[string]any{"recovery_url": target})
+	if err := h.store.EditSettings(unpaired.Row, func(st store.Settings) error { return backup.ClearPairing(st) }); err != nil {
 		if errors.Is(err, backup.ErrNotPaired) {
 			writeError(w, http.StatusPreconditionFailed, "Not paired with KyRecovery")
 			return
 		}
-		_ = h.record(r, "admin.backup_unpair", adminID, adminUsername, target, "failure", map[string]any{"recovery_url": target, "error": backup.AuditSafe(err.Error())})
+		h.observe(r, "admin.backup_unpair", adminID, adminUsername, target, "failure", map[string]any{"recovery_url": target, "error": backup.AuditSafe(err.Error())})
 		writeError(w, http.StatusInternalServerError, "Failed to remove the pairing")
 		return
 	}
-	_ = h.record(r, "admin.backup_unpair", adminID, adminUsername, target, "success", map[string]any{"recovery_url": target})
+	unpaired.Committed()
 	writeJSON(w, http.StatusOK, map[string]any{"paired": false})
 }
 
@@ -361,23 +408,25 @@ func (h *BackupHandler) PinKey(w http.ResponseWriter, r *http.Request) {
 	}
 	key := backup.RecoveryKey{Public: pub, Threshold: req.Threshold, TotalShares: req.TotalShares}
 	fail := func(status int, msg string) {
-		_ = h.record(r, "admin.backup_key_pin", adminID, adminUsername, pub.ID(), "failure", map[string]any{"recovery_key_id": pub.ID(), "error": backup.AuditSafe(msg)})
+		h.observe(r, "admin.backup_key_pin", adminID, adminUsername, pub.ID(), "failure", map[string]any{"recovery_key_id": pub.ID(), "error": backup.AuditSafe(msg)})
 		writeError(w, status, msg)
 	}
-	if err := backup.StoreRecoveryKey(h.cfg.DataDir, h.store, key); err != nil {
+	pinned := h.prepare(r, "admin.backup_key_pin", adminID, adminUsername, pub.ID(), map[string]any{
+		"recovery_key_id": pub.ID(), "threshold": key.Threshold, "total_shares": key.TotalShares,
+	})
+	if err := h.store.EditSettings(pinned.Row, func(st store.Settings) error { return backup.StoreRecoveryKey(h.cfg.DataDir, st, key) }); err != nil {
 		switch {
 		case errors.Is(err, fs.ErrExist):
 			fail(http.StatusConflict, "Already pinned to a different recovery key")
 		case strings.Contains(err.Error(), "custodian topology"):
 			fail(http.StatusBadRequest, "threshold and total_shares must describe a k-of-n split with k at least 2")
 		default:
+			log.Printf("[BACKUP] pin key failed: %s", backup.AuditSafe(err.Error()))
 			fail(http.StatusInternalServerError, "Failed to save recovery key")
 		}
 		return
 	}
-	_ = h.record(r, "admin.backup_key_pin", adminID, adminUsername, pub.ID(), "success", map[string]any{
-		"recovery_key_id": pub.ID(), "threshold": key.Threshold, "total_shares": key.TotalShares,
-	})
+	pinned.Committed()
 	writeJSON(w, http.StatusOK, map[string]any{"recovery_key_id": pub.ID(), "threshold": key.Threshold, "total_shares": key.TotalShares})
 }
 
@@ -398,23 +447,30 @@ func (h *BackupHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid JSON request body")
 		return
 	}
-	if err := backup.SetInterval(h.store, req.IntervalSec); err != nil {
+	sec := req.IntervalSec
+	scheduled := h.prepare(r, "admin.backup_schedule", adminID, adminUsername, "", map[string]any{"interval_sec": sec})
+	err := h.store.EditSettings(scheduled.Row, func(st store.Settings) error {
+		if err := backup.SetInterval(st, sec); err != nil {
+			return err
+		}
+		// Read back what the store holds, so the audit row and the reply never describe a
+		// schedule the scheduler will not run.
+		stored, err := backup.Interval(h.cfg, st)
+		if err == nil && int64(stored/time.Second) != sec {
+			err = fmt.Errorf("schedule read back as %s", stored)
+		}
+		return err
+	})
+	if err != nil {
 		if errors.Is(err, backup.ErrBadInterval) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		log.Printf("[BACKUP] schedule: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to save the schedule")
 		return
 	}
-	// Read back what the store holds, so the audit row and the reply never describe a
-	// schedule the scheduler will not run.
-	stored, err := backup.Interval(h.cfg, h.store)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to read the schedule back")
-		return
-	}
-	sec := int64(stored / time.Second)
-	_ = h.record(r, "admin.backup_schedule", adminID, adminUsername, "", "success", map[string]any{"interval_sec": sec})
+	scheduled.Committed()
 	writeJSON(w, http.StatusOK, map[string]any{"interval_sec": sec})
 }
 

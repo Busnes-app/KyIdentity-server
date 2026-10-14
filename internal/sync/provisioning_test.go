@@ -242,7 +242,7 @@ func TestGenericSCIMFollowsAssignments(t *testing.T) {
 	srv := httptest.NewTLSServer(remote)
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestGenericSCIMFollowsAssignments(t *testing.T) {
 	if _, ok := remote.userByExternal(other.ID); ok {
 		t.Fatal("unassigned user provisioned")
 	}
-	if err := e.ResyncAllAccounts(sys.ID); err != nil {
+	if err := e.ResyncAllAccounts(sys.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -325,7 +325,7 @@ func TestGenericSCIMGroupDelivery(t *testing.T) {
 	srv := httptest.NewTLSServer(remote)
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func groupFixture(t *testing.T) (*Engine, *store.Store, *fakeSCIM, *store.Group,
 	remote := newFakeSCIM()
 	srv := httptest.NewTLSServer(remote)
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +534,7 @@ func TestSuiteReceiverRevisionsAndInactiveNotFound(t *testing.T) {
 	defer cleanup()
 	srv, hits := newSuiteReceiver(t, 0)
 	defer srv.Close()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "suite", SystemType: "suite_webhook", CallbackURL: srv.URL})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "suite", SystemType: "suite_webhook", CallbackURL: srv.URL}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func TestConcurrentDispatchAndRestartPreserveOrdering(t *testing.T) {
 	defer cleanup()
 	srv, hits := newSuiteReceiver(t, 20*time.Millisecond)
 	defer srv.Close()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "suite", SystemType: "suite_webhook", CallbackURL: srv.URL})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "suite", SystemType: "suite_webhook", CallbackURL: srv.URL}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +645,7 @@ func TestRevokedRolesReachTheTargetAsAnEmptyList(t *testing.T) {
 	srv := httptest.NewTLSServer(remote)
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,7 +688,7 @@ func TestCreateCarriesTheExplicitRoleList(t *testing.T) {
 	srv := httptest.NewTLSServer(remote)
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,7 +735,7 @@ func TestUserReplaceRequiresCompletion(t *testing.T) {
 	srv := httptest.NewTLSServer(remote)
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

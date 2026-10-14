@@ -182,7 +182,7 @@ func TestClientDeleteRollsBackWhenItsAuditRowCannotBeWritten(t *testing.T) {
 	if err := s.CreateOAuthClient(&OAuthClient{
 		ID: "c1", ClientName: "App", ClientType: "public",
 		RedirectURIsJSON: "[]", AllowedScopesJSON: "[]", Enabled: true,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE app_registry SET access_mode='all_active_users' WHERE client_id='c1'`); err != nil {

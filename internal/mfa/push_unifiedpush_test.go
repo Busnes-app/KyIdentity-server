@@ -272,13 +272,13 @@ func TestVAPIDKeyIsCreatedOnceWithPrivateMode(t *testing.T) {
 
 func registerTestDevice(t *testing.T, e *Engine, userID, ident string, req NativeDeviceRegisterRequest) *store.NativeDevice {
 	t.Helper()
-	token, _, _, err := e.GenerateDevicePairingToken(userID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(userID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, pub := signingKey(t)
 	req.PairingToken, req.DeviceName, req.DeviceIdentifier, req.PublicKey = token, ident, ident, pub
-	dev, err := e.RegisterNativeDevice(&req)
+	dev, err := e.RegisterNativeDevice(&req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

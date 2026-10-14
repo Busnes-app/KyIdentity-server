@@ -34,14 +34,12 @@ func TestTimedOutWriteBlocksLaterDelivery(t *testing.T) {
 	defer close(release)
 	e.httpClient = remote.Client()
 	e.httpClient.Timeout = 50 * time.Millisecond
-	target, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "suite_webhook", CallbackURL: remote.URL})
+	target, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "suite_webhook", CallbackURL: remote.URL}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"old", "new"} {
-		if err := s.CreateAccountSyncEvent(&store.AccountSyncEvent{ID: id, UserID: u.ID, SystemID: target.ID, EventType: "user.updated", PayloadJSON: `{}`, Status: "pending"}); err != nil {
-			t.Fatal(err)
-		}
+		insertSyncEvent(t, s, store.AccountSyncEvent{ID: id, UserID: u.ID, SystemID: target.ID, EventType: "user.updated", PayloadJSON: `{}`, Status: "pending"})
 	}
 	if err := e.DispatchPendingEvents(context.Background()); err != nil {
 		t.Fatal(err)
@@ -174,13 +172,11 @@ func TestDeliveryFencesOnlyWrittenRequests(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e, s, u, cleanup := setupSync(t)
 			defer cleanup()
-			target, _, err := e.CreateSystem(&CreateSystemRequest{Name: tc.name, SystemType: "suite_webhook", CallbackURL: tc.url})
+			target, _, err := e.CreateSystem(&CreateSystemRequest{Name: tc.name, SystemType: "suite_webhook", CallbackURL: tc.url}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.CreateAccountSyncEvent(&store.AccountSyncEvent{ID: "ev", UserID: u.ID, SystemID: target.ID, EventType: "user.updated", PayloadJSON: `{}`, Status: "pending"}); err != nil {
-				t.Fatal(err)
-			}
+			insertSyncEvent(t, s, store.AccountSyncEvent{ID: "ev", UserID: u.ID, SystemID: target.ID, EventType: "user.updated", PayloadJSON: `{}`, Status: "pending"})
 			if err := e.DispatchPendingEvents(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -226,11 +222,11 @@ func TestSlowConnectorDoesNotDelayOthers(t *testing.T) {
 		w.WriteHeader(204)
 	}))
 	defer fast.Close()
-	slowSys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "slow", SystemType: "suite_webhook", CallbackURL: slow.URL})
+	slowSys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "slow", SystemType: "suite_webhook", CallbackURL: slow.URL}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fastSys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "fast", SystemType: "suite_webhook", CallbackURL: fast.URL})
+	fastSys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "fast", SystemType: "suite_webhook", CallbackURL: fast.URL}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,9 +237,7 @@ func TestSlowConnectorDoesNotDelayOthers(t *testing.T) {
 		if id == "slow-1" {
 			system = slowSys.ID
 		}
-		if err := s.CreateAccountSyncEvent(&store.AccountSyncEvent{ID: id, UserID: u.ID, SystemID: system, EventType: "user.updated", PayloadJSON: `{}`, Status: "pending"}); err != nil {
-			t.Fatal(err)
-		}
+		insertSyncEvent(t, s, store.AccountSyncEvent{ID: id, UserID: u.ID, SystemID: system, EventType: "user.updated", PayloadJSON: `{}`, Status: "pending"})
 	}
 	done := make(chan error, 1)
 	go func() { done <- e.DispatchPendingEvents(context.Background()) }()

@@ -15,7 +15,7 @@ func TestReconciliationAdministration(t *testing.T) {
 	admin := newUser(t, db, "admin")
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 	user := newUser(t, db, "user")
-	sys, _, err := engine.CreateSystem(&sync.CreateSystemRequest{Name: "SCIM", SystemType: "scim", CallbackURL: "https://example.com/scim/v2", BearerToken: "target-secret"})
+	sys, _, err := engine.CreateSystem(&sync.CreateSystemRequest{Name: "SCIM", SystemType: "scim", CallbackURL: "https://example.com/scim/v2", BearerToken: "target-secret"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

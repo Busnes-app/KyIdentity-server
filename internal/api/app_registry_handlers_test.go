@@ -16,10 +16,10 @@ func TestAppRegistryAdminAPI(t *testing.T) {
 	user := newUser(t, db, "user")
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 	userCookie := newSession(t, db, user, time.Now().UTC().Add(time.Hour))
-	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "client", ClientName: "Client", ClientType: "confidential", ClientSecretHash: "private-client-hash", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "client", ClientName: "Client", ClientType: "confidential", ClientSecretHash: "private-client-hash", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateApplication(&store.Application{ID: "launcher", Name: "Launcher", URL: "https://example.com", IconName: "globe", Enabled: true}); err != nil {
+	if err := db.CreateApplication(&store.Application{ID: "launcher", Name: "Launcher", URL: "https://example.com", IconName: "globe", Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, _, err := db.ListAppRecords("", 25, 0)

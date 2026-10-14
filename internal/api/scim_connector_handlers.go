@@ -65,7 +65,7 @@ func (h *SCIMHandler) AdminCreate(w http.ResponseWriter, r *http.Request) {
 	pending := h.audit.Prepare("admin.scim_connector_created", admin.ID, admin.Username, "", "scim_connector", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"name": req.Name})
 	c, err := h.store.CreateSCIMConnector(req.Name, pending.Row)
 	if err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeInputError(w, "invalid_request", err)
 		return
 	}
 	pending.Committed()
@@ -95,7 +95,7 @@ func (h *SCIMHandler) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeInputError(w, "invalid_request", err)
 		return
 	}
 	pending.Committed()
@@ -126,7 +126,7 @@ func (h *SCIMHandler) AdminIssueToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeInputError(w, "invalid_request", err)
 		return
 	}
 	pending.Committed()

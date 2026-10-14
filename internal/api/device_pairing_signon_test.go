@@ -73,7 +73,7 @@ func TestPairingTokenHandlerSignOnBody(t *testing.T) {
 			pub := base64.StdEncoding.EncodeToString(elliptic.Marshal(elliptic.P256(), key.PublicKey.X, key.PublicKey.Y))
 			dev, err := srv.mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{
 				PairingToken: resp.PairingToken, DeviceName: "phone", DeviceIdentifier: "ident", PublicKey: pub, PushToken: "fcm",
-			})
+			}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

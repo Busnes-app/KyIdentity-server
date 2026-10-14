@@ -65,6 +65,11 @@ Access was removed here but the far end still has the account.
 3. An attempt recorded as uncertain is a write that may have landed. Read the far end
    yourself, then resolve it with the read-back and resume routes; do not simply retry,
    which is how a second account appears upstream.
+   When a stopped worker or outage left many expired attempts on one connector,
+   `POST /api/admin/systems/{id}/deliveries/resume` with `{"confirmedQuiescent": true}`
+   releases all of them under one step-up and one `admin.sync_deliveries_resumed` audit
+   listing the released tokens. It refuses `allowCreateRetry` and never clears an
+   uncertain-create guard; resume those one attempt at a time after a read-back.
 4. If the connector is broken rather than slow, disable it. Delivery stops, the
    directory keeps recording what should happen, and a repair reconciliation catches up
    when it is fixed.

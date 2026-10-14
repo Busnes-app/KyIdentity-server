@@ -17,7 +17,7 @@ func TestPermissionMatrixCoversEveryAdminRoute(t *testing.T) {
 	defer cleanup()
 	exp := time.Now().UTC().Add(time.Hour)
 	for _, id := range []string{"app-a", "app-b"} {
-		if err := db.CreateOAuthClient(&store.OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+		if err := db.CreateOAuthClient(&store.OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -130,7 +130,7 @@ func TestDelegationsAdminAPI(t *testing.T) {
 	admin := newSession(t, db, newUser(t, db, "admin"), exp)
 	u := newUser(t, db, "user")
 	cookie := newSession(t, db, u, exp)
-	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "app-a", ClientName: "A", ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "app-a", ClientName: "A", ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	apps, _, _ := db.ListAppRecords("app-a", 1, 0)

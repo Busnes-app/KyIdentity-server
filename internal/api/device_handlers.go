@@ -60,7 +60,8 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 		return
 	}
 
-	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID, signOn)
+	generated := h.audit.Prepare("device.pairing_token_generated", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"signOn": signOn})
+	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID, signOn, generated.Row)
 	if err != nil {
 		log.Printf("device pairing token creation failed for user %s: %v", user.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -80,7 +81,7 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 	}
 	qrBytes, _ := json.Marshal(qrPayload)
 
-	h.audit.Record("device.pairing_token_generated", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"signOn": signOn})
+	generated.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -100,19 +101,22 @@ func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	dev, err := h.mfaEngine.RegisterNativeDevice(&req)
+	var registered *audit.Pending
+	dev, err := h.mfaEngine.RegisterNativeDevice(&req, func(dev *store.NativeDevice) *store.AuditEvent {
+		registered = h.audit.Prepare("device.registered", dev.UserID, "", dev.ID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
+			"deviceName":        dev.DeviceName,
+			"attestedLevel":     dev.AttestedLevel,
+			"bootState":         dev.BootState,
+			"attestationReason": dev.AttestationReason,
+			"pushTransport":     dev.PushTransport,
+		})
+		return registered.Row
+	})
 	if err != nil {
-		http.Error(w, `{"error":"registration_failed","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeInputError(w, "registration_failed", err)
 		return
 	}
-
-	h.audit.Record("device.registered", dev.UserID, "", dev.ID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"deviceName":        dev.DeviceName,
-		"attestedLevel":     dev.AttestedLevel,
-		"bootState":         dev.BootState,
-		"attestationReason": dev.AttestationReason,
-		"pushTransport":     dev.PushTransport,
-	})
+	registered.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -287,7 +291,7 @@ func (h *DeviceHandler) SetDeviceSignOn(w http.ResponseWriter, r *http.Request) 
 	changed := h.audit.Prepare("device.sign_on_changed", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
 	err := h.store.SetNativeDeviceCanSignOn(deviceID, user.ID, req.CanSignOn, changed.Row)
 	if deviceChangeFailed(w, err) {
-		h.audit.Record("device.sign_on_changed", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
+		h.audit.Observe("device.sign_on_changed", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
 		return
 	}
 	changed.Committed()

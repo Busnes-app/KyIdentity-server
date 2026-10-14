@@ -22,7 +22,7 @@ func TestAccessRequestsEndToEnd(t *testing.T) {
 	owner := newUser(t, db, "user")
 	ownerCookie := newSession(t, db, owner, exp)
 	for _, id := range []string{"open-app", "private-app"} {
-		if err := db.CreateOAuthClient(&store.OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+		if err := db.CreateOAuthClient(&store.OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
