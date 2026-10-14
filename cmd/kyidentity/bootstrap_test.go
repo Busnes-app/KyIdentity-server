@@ -213,3 +213,22 @@ func TestFirstRunPasswordFileSurvivesUntilFirstLogin(t *testing.T) {
 		t.Error("the credentials file was deleted before anyone could read it")
 	}
 }
+
+func TestGeneratedPasswordIsHandedOverPrivately(t *testing.T) {
+	dir := t.TempDir()
+	path, err := writeFirstRunPassword(dir, "admin", "s3cret-generated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0600 {
+		t.Fatalf("mode = %o, want 600", mode)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "Password: s3cret-generated") {
+		t.Fatalf("file lacks the password: %q", raw)
+	}
+}

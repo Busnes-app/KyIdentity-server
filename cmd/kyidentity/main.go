@@ -294,12 +294,22 @@ func bootstrapOnStart(dbStore *store.Store, username, password, dataDir string) 
 		log.Printf("Bootstrap administrator %q created from BOOTSTRAP_ADMIN_PASS.", username)
 		return nil
 	}
-	passFile := filepath.Join(dataDir, "first-run-password.txt")
-	if err := os.WriteFile(passFile, []byte(fmt.Sprintf("User: %s\nPassword: %s\n", username, password)), 0600); err != nil {
-		return fmt.Errorf("created the bootstrap admin but could not write %s: %w", passFile, err)
+	passFile, err := writeFirstRunPassword(dataDir, username, password)
+	if err != nil {
+		return err
 	}
 	log.Printf("Bootstrap admin created. Credentials written to %s (removed automatically after first sign-in).", passFile)
 	return nil
+}
+
+// writeFirstRunPassword hands a generated password over in a private file, never on
+// stdout or in a log: container output is routinely collected.
+func writeFirstRunPassword(dataDir, username, password string) (string, error) {
+	passFile := filepath.Join(dataDir, "first-run-password.txt")
+	if err := os.WriteFile(passFile, []byte(fmt.Sprintf("User: %s\nPassword: %s\n", username, password)), 0600); err != nil {
+		return "", fmt.Errorf("created the bootstrap admin but could not write %s: %w", passFile, err)
+	}
+	return passFile, nil
 }
 
 type bootstrapRequest struct {
@@ -370,7 +380,11 @@ func runBootstrap(args []string) {
 		return
 	}
 	if req.generated {
-		fmt.Printf("Generated admin password: %s\n", req.password)
+		passFile, err := writeFirstRunPassword(cfg.DataDir, req.username, req.password)
+		if err != nil {
+			log.Fatalf("Bootstrap failed: %v", err)
+		}
+		fmt.Printf("Generated admin password written to %s (removed automatically after first sign-in).\n", passFile)
 	}
 	fmt.Printf("Admin user '%s' bootstrapped successfully.\n", req.username)
 }
