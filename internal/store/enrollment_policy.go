@@ -224,7 +224,9 @@ func preserveCompliantEnrollmentTx(tx *sql.Tx, userID string, wasCompliant bool)
 	return nil
 }
 
-func (s *Store) changeEnrollmentDevice(userID, query string, args ...any) error {
+// changeEnrollmentDevice runs one device write with its audit row, returning
+// sql.ErrNoRows when it matched no device.
+func (s *Store) changeEnrollmentDevice(userID string, audit *AuditEvent, query string, args ...any) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -237,7 +239,16 @@ func (s *Store) changeEnrollmentDevice(userID, query string, args ...any) error 
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(query, args...); err != nil {
+	res, err := tx.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return sql.ErrNoRows
+	}
+	if err = recordAuditTx(tx, audit); err != nil {
 		return err
 	}
 	if err = preserveCompliantEnrollmentTx(tx, userID, wasCompliant); err != nil {

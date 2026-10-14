@@ -505,7 +505,7 @@ func TestExchangeDeviceAssertionReplay(t *testing.T) {
 
 func TestExchangeDeviceAssertionSignOnDisabled(t *testing.T) {
 	f := newSignOnFixture(t)
-	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false); err != nil {
+	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
@@ -528,7 +528,7 @@ func TestExchangeDeviceAssertionInactiveUser(t *testing.T) {
 func TestExchangeDeviceAssertionDoesNotProbeFlags(t *testing.T) {
 	f := newSignOnFixture(t)
 	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false); err != nil {
+	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, other, testHeader("dev-1"), f.claims(nil))
@@ -729,11 +729,11 @@ func TestExchangeDeviceAssertionRefusesMFAMethodsDeletedBeforeIssue(t *testing.T
 }
 
 func TestExchangeDeviceAssertionRefusesSignOnDisabledBeforeIssue(t *testing.T) {
-	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false) })
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false, nil) })
 }
 
 func TestExchangeDeviceAssertionRefusesDeviceDeletedBeforeIssue(t *testing.T) {
-	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DeleteNativeDevice("dev-1", f.user.ID) })
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DeleteNativeDevice("dev-1", f.user.ID, nil) })
 }
 
 func TestExchangeDeviceAssertionRefusesKeyChangedBeforeIssue(t *testing.T) {

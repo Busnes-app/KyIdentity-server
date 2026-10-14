@@ -140,6 +140,7 @@ func (s *Store) migrate() error {
 		token_hash TEXT NOT NULL UNIQUE,
 		pin_hash TEXT NOT NULL,
 		sign_on BOOLEAN NOT NULL DEFAULT 0,
+		pin_failures INTEGER NOT NULL DEFAULT 0,
 		expires_at DATETIME NOT NULL,
 		used_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -337,6 +338,9 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if err := s.migrateDevicePairingTokenSignOn(); err != nil {
+		return err
+	}
+	if err := s.migrateDevicePairingTokenPINFailures(); err != nil {
 		return err
 	}
 	if err := s.migrateNativeDeviceAttestation(); err != nil {
@@ -583,6 +587,10 @@ func (s *Store) migrateDevicePairingTokenSignOn() error {
 	return s.addColumnIfMissing("device_pairing_tokens", "sign_on", `ALTER TABLE device_pairing_tokens ADD COLUMN sign_on BOOLEAN NOT NULL DEFAULT 0`)
 }
 
+func (s *Store) migrateDevicePairingTokenPINFailures() error {
+	return s.addColumnIfMissing("device_pairing_tokens", "pin_failures", `ALTER TABLE device_pairing_tokens ADD COLUMN pin_failures INTEGER NOT NULL DEFAULT 0`)
+}
+
 func (s *Store) migrateNativeDeviceAttestation() error {
 	for _, m := range []struct{ col, alter string }{
 		{"attested_level", `ALTER TABLE native_devices ADD COLUMN attested_level TEXT NOT NULL DEFAULT 'none'`},
@@ -713,6 +721,7 @@ func (s *Store) migrateLegacyDevicePairingTokens() error {
 			token_hash TEXT NOT NULL UNIQUE,
 			pin_hash TEXT NOT NULL,
 			sign_on BOOLEAN NOT NULL DEFAULT 0,
+			pin_failures INTEGER NOT NULL DEFAULT 0,
 			expires_at DATETIME NOT NULL,
 			used_at DATETIME,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1419,14 +1428,53 @@ func (s *Store) GetValidDevicePairingToken(tokenHash string) (*DevicePairingToke
 		tokenHash, time.Now().UTC()))
 }
 
-// GetDevicePairingTokenByUserPIN resolves a PIN within a single user's pairing tokens.
-// A global PIN lookup would let any live 6-digit PIN in the deployment match, which turns
-// one user's pairing window into everyone's.
-func (s *Store) GetDevicePairingTokenByUserPIN(userID, pinHash string) (*DevicePairingToken, error) {
-	return scanDevicePairingToken(s.db.QueryRow(
+// PairingPINBudget is how many wrong PINs a user's live pairing tokens survive.
+const PairingPINBudget = 5
+
+// MatchDevicePairingPIN resolves a PIN within a single user's live pairing tokens. A global
+// lookup would let any live PIN in the deployment match. Every miss counts against all of
+// the user's live tokens, and the miss that spends PairingPINBudget expires them. Lookup and
+// count share one immediate transaction, so concurrent guesses cannot overspend.
+func (s *Store) MatchDevicePairingPIN(userID, pinHash string) (*DevicePairingToken, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	t, err := scanDevicePairingToken(tx.QueryRow(
 		`SELECT `+devicePairingTokenColumns+` FROM device_pairing_tokens
 		 WHERE user_id = ? AND pin_hash = ? AND pin_hash != '' AND used_at IS NULL AND expires_at > ?`,
-		userID, pinHash, time.Now().UTC()))
+		userID, pinHash, now))
+	if err != nil || t != nil {
+		return t, err
+	}
+
+	rows, err := tx.Query(`UPDATE device_pairing_tokens SET pin_failures = pin_failures + 1
+		WHERE user_id = ? AND used_at IS NULL AND expires_at > ? RETURNING pin_failures`, userID, now)
+	if err != nil {
+		return nil, err
+	}
+	worst := 0
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		worst = max(worst, n)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if worst >= PairingPINBudget {
+		if _, err := tx.Exec(`UPDATE device_pairing_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL AND expires_at > ?`, now, userID, now); err != nil {
+			return nil, err
+		}
+	}
+	return nil, tx.Commit()
 }
 
 // ExpireDevicePairingTokens forces a user's outstanding pairing tokens to expire.
@@ -1589,7 +1637,7 @@ func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
 	if err != nil {
 		return err
 	}
-	return s.changeEnrollmentDevice(dev.UserID, nativeDeviceUpsert, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.PushTransport, dev.PushP256dh, dev.PushAuth, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt)
+	return s.changeEnrollmentDevice(dev.UserID, nil, nativeDeviceUpsert, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.PushTransport, dev.PushP256dh, dev.PushAuth, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt)
 }
 
 func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
@@ -1707,8 +1755,9 @@ func (s *Store) UpdateNativeDevicePushToken(deviceID, transport, pushToken, p256
 	return true, tx.Commit()
 }
 
-func (s *Store) SetNativeDeviceMFAApprover(deviceID, userID string, isApprover bool) error {
-	return s.changeEnrollmentDevice(userID, `UPDATE native_devices SET is_mfa_approver = ? WHERE id = ? AND user_id = ?`, isApprover, deviceID, userID)
+// SetNativeDeviceMFAApprover returns sql.ErrNoRows when the device is not the user's.
+func (s *Store) SetNativeDeviceMFAApprover(deviceID, userID string, isApprover bool, audit *AuditEvent) error {
+	return s.changeEnrollmentDevice(userID, audit, `UPDATE native_devices SET is_mfa_approver = ? WHERE id = ? AND user_id = ?`, isApprover, deviceID, userID)
 }
 
 // ErrDeviceNotApprover means sign-on was requested for a device that is not an MFA approver.
@@ -1717,8 +1766,13 @@ var ErrDeviceNotApprover = errors.New("device is not an MFA approver")
 // SetNativeDeviceCanSignOn is not an enrollment change, so it needs none of
 // changeEnrollmentDevice's compliance checks. Enabling needs an approver device;
 // disabling is always allowed.
-func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool) error {
-	res, err := s.db.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (? = 0 OR is_mfa_approver = 1)`, enabled, deviceID, userID, enabled)
+func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool, audit *AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (? = 0 OR is_mfa_approver = 1)`, enabled, deviceID, userID, enabled)
 	if err != nil {
 		return err
 	}
@@ -1727,17 +1781,21 @@ func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool) 
 		return err
 	}
 	if n == 1 {
-		return nil
+		if err := recordAuditTx(tx, audit); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	var exists int
-	if err := s.db.QueryRow(`SELECT 1 FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID).Scan(&exists); err != nil {
+	if err := tx.QueryRow(`SELECT 1 FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID).Scan(&exists); err != nil {
 		return err // sql.ErrNoRows when the device is not the user's
 	}
 	return ErrDeviceNotApprover
 }
 
-func (s *Store) DeleteNativeDevice(deviceID, userID string) error {
-	return s.changeEnrollmentDevice(userID, `DELETE FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID)
+// DeleteNativeDevice returns sql.ErrNoRows when the device is not the user's.
+func (s *Store) DeleteNativeDevice(deviceID, userID string, audit *AuditEvent) error {
+	return s.changeEnrollmentDevice(userID, audit, `DELETE FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID)
 }
 
 // ClearNativeDevicePushToken forgets the push target the provider reported gone, unless a

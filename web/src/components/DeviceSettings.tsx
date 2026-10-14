@@ -371,24 +371,28 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
   };
 
   const handleToggleSignOn = async (deviceId: string, canSignOn: boolean) => {
+    const path = `/api/notifications/native/devices/${deviceId}/sign-on`;
     try {
-      await apiJson(`/api/notifications/native/devices/${deviceId}/sign-on`, parseSuccess, {
-        method: 'PUT',
-        body: JSON.stringify({ canSignOn }),
-      });
+      const stepUpToken = await requestGrant(
+        canSignOn ? 'Let this phone sign you in to suite apps.' : 'Stop this phone signing you in to suite apps.',
+        `PUT ${path}`,
+      );
+      await apiJson(path, parseSuccess, { method: 'PUT', stepUpToken, body: JSON.stringify({ canSignOn }) });
       fetchDevices();
     } catch (err) {
-      alert(errorMessage(err, 'Failed to update device'));
+      if (!isCancelled(err)) alert(errorMessage(err, 'Failed to update device'));
     }
   };
 
   const handleDeleteDevice = async (deviceId: string) => {
     if (!confirm('Are you sure you want to disconnect this device?')) return;
+    const path = `/api/user/devices/${deviceId}`;
     try {
-      await apiRequest(`/api/user/devices/${deviceId}`, { method: 'DELETE' });
+      const stepUpToken = await requestGrant('Removing a phone revokes its sign-in approvals immediately.', `DELETE ${path}`);
+      await apiRequest(path, { method: 'DELETE', stepUpToken });
       fetchDevices();
     } catch (err) {
-      alert(errorMessage(err, 'Failed to delete device'));
+      if (!isCancelled(err)) alert(errorMessage(err, 'Failed to delete device'));
     }
   };
 

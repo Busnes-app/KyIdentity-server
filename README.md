@@ -879,11 +879,17 @@ Sync events are queued per paired system; a system only receives what was queued
 
 **Device pairing requires a P-256 public key.** A device without one can never approve a
 push, and pairing it previously enrolled push MFA that no response could satisfy.
+Five wrong pairing PINs for one account expire all of its live pairing tokens; generate a
+new code to try again. A paired phone signs in to suite apps only when the pairing request
+sent `signOn: true` (the web UI sends the checkbox value); an omitted field means no.
+Removing a phone or changing whether it approves MFA or signs in spends a step-up grant.
 
 **`TRUSTED_PROXY_CIDRS` defaults to empty.** Forwarding headers are ignored unless the
 immediate peer is a CIDR you named. Set it to your proxy's address and nothing wider: every
 host inside a listed range can choose its own rate-limit bucket and its own entry in your
 audit log.
+IPv6 clients share one rate-limit bucket per /64, since one subscriber usually holds the
+whole prefix; the audit log keeps the full address.
 
 **`KYIDENTITY_FORWARDED_HEADER` names the one header that is believed, defaulting to
 `X-Forwarded-For`.** Behind Cloudflare, set it to `CF-Connecting-IP`. Exactly one header is

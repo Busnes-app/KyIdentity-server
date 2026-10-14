@@ -323,10 +323,10 @@ func TestEnrollmentLastPushApproverAndConcurrentPasskeys(t *testing.T) {
 	if err := s.SetEnrollmentPolicy(p, "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetNativeDeviceMFAApprover(dev.ID, u.ID, false); !errors.Is(err, ErrLastCompliantFactor) {
+	if err := s.SetNativeDeviceMFAApprover(dev.ID, u.ID, false, nil); !errors.Is(err, ErrLastCompliantFactor) {
 		t.Fatal("last push approver disabled", err)
 	}
-	if err := s.DeleteNativeDevice(dev.ID, u.ID); !errors.Is(err, ErrLastCompliantFactor) {
+	if err := s.DeleteNativeDevice(dev.ID, u.ID, nil); !errors.Is(err, ErrLastCompliantFactor) {
 		t.Fatal("last push approver deleted", err)
 	}
 	dev.PublicKey = ""
@@ -338,7 +338,7 @@ func TestEnrollmentLastPushApproverAndConcurrentPasskeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.DeleteNativeDevice(dev.ID, u.ID); err != nil {
+	if err := s.DeleteNativeDevice(dev.ID, u.ID, nil); err != nil {
 		t.Fatal("alternative did not permit push removal", err)
 	}
 	start := make(chan struct{})

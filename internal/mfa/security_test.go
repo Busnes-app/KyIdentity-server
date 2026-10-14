@@ -266,7 +266,7 @@ func TestPairingPINIsHashedAndScopedToItsUser(t *testing.T) {
 		t.Skip("PIN collision between the two users, rerun")
 	}
 
-	stored, err := db.GetDevicePairingTokenByUserPIN(alice.ID, crypto.HashSHA256(alicePIN))
+	stored, err := db.MatchDevicePairingPIN(alice.ID, crypto.HashSHA256(alicePIN))
 	if err != nil || stored == nil {
 		t.Fatalf("alice could not redeem her own PIN: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestPairingPINIsHashedAndScopedToItsUser(t *testing.T) {
 	}
 
 	// Scoping is what stops any live PIN in the deployment matching any pairing attempt.
-	if other, _ := db.GetDevicePairingTokenByUserPIN(bob.ID, crypto.HashSHA256(alicePIN)); other != nil {
+	if other, _ := db.MatchDevicePairingPIN(bob.ID, crypto.HashSHA256(alicePIN)); other != nil {
 		t.Error("alice's PIN was redeemable against bob's account")
 	}
 }

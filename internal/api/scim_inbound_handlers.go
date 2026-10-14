@@ -75,7 +75,7 @@ func (h *SCIMHandler) Authenticate(write bool, next http.HandlerFunc) http.Handl
 		}
 		c, scope, err := h.store.AuthenticateSCIMToken(strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
 		if errors.Is(err, store.ErrNotFound) {
-			if !h.middleware.allowRateLimit("scim_auth:"+h.middleware.ClientIP(r), 10, 0.2) {
+			if !h.middleware.allowRateLimit("scim_auth:"+h.middleware.rateLimitIP(r), 10, 0.2) {
 				scimError(w, http.StatusTooManyRequests, "", "Too many failed authentications")
 				return
 			}
