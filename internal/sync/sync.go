@@ -46,7 +46,7 @@ func (e *Engine) SigningSecret(sys *store.PairedSystem) (string, error) {
 	if sys.HMACSecretEncrypted == "" {
 		return "", errors.New("paired system has no signing secret; re-pair it")
 	}
-	plain, err := crypto.DecryptAESGCM(e.encryptionKey, sys.HMACSecretEncrypted)
+	plain, err := crypto.Open(e.encryptionKey, store.SealConnector, sys.ID, sys.HMACSecretEncrypted)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt signing secret for %s: %w", sys.Name, err)
 	}
@@ -298,13 +298,14 @@ func (e *Engine) CreateSystem(req *CreateSystemRequest) (*store.PairedSystem, st
 		}
 	}
 
-	encrypted, err := crypto.EncryptAESGCM(e.encryptionKey, []byte(token))
+	id := uuid.New().String()
+	encrypted, err := crypto.Seal(e.encryptionKey, store.SealConnector, id, []byte(token))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encrypt bearer token: %w", err)
 	}
 
 	ps := &store.PairedSystem{
-		ID:                  uuid.New().String(),
+		ID:                  id,
 		Name:                req.Name,
 		SystemType:          req.SystemType,
 		Description:         req.Description,

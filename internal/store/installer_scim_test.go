@@ -45,7 +45,7 @@ func TestInstallerSCIMExtendsOwnedClientAndPreservesRoles(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT a.id,s.hmac_secret_encrypted FROM app_registry a JOIN paired_systems s ON s.id=a.system_id WHERE a.client_id='kydrive'`).Scan(&actualApp, &encrypted); err != nil {
 		t.Fatal(err)
 	}
-	plain, err := crypto.DecryptAESGCM(p.EncryptionKey, encrypted)
+	plain, err := crypto.Open(p.EncryptionKey, SealConnector, id, encrypted)
 	if err != nil || string(plain) != scim.Token || actualApp != appID || strings.Contains(encrypted, scim.Token) {
 		t.Fatal("wrong native app or protected credential", err)
 	}

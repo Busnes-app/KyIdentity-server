@@ -86,6 +86,10 @@ func main() {
 		log.Fatalf("Failed to initialize database store: %v", err)
 	}
 	defer dbStore.Close()
+	// Before anything reads a secret: the read path refuses legacy ciphertext.
+	if err := dbStore.SealLegacySecrets(cfg.EncryptionKey); err != nil {
+		log.Fatalf("Sealing legacy secrets failed, refusing to start: %v", err)
+	}
 
 	keyManager, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath)
 	if err != nil {

@@ -137,6 +137,32 @@ func TestDirectSCIMSystemCreationAndRecovery(t *testing.T) {
 	}
 }
 
+// A connector credential copied onto another connector's row must not open there, or a
+// database write would redirect one target's token to another's endpoint.
+func TestConnectorTokenSwappedBetweenSystemsDoesNotOpen(t *testing.T) {
+	engine, dbStore, _, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	a, _, err := engine.CreateSystem(&CreateSystemRequest{Name: "A", SystemType: "scim", CallbackURL: "https://a.example.test/scim/v2", BearerToken: "token-for-a-0123456789abcdef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := engine.CreateSystem(&CreateSystemRequest{Name: "B", SystemType: "scim", CallbackURL: "https://b.example.test/scim/v2", BearerToken: "token-for-b-0123456789abcdef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := dbStore.GetPairedSystemByID(b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.HMACSecretEncrypted = a.HMACSecretEncrypted
+	if got, err := engine.SigningSecret(loaded); err == nil {
+		t.Fatalf("A's token opened on B: %q", got)
+	}
+	if got, err := engine.SigningSecret(a); err != nil || got != "token-for-a-0123456789abcdef" {
+		t.Fatalf("A's own token: %q %v", got, err)
+	}
+}
+
 func TestKyBookmarksLegacyPresetUsesSignedWebhook(t *testing.T) {
 	sys := &store.PairedSystem{SystemType: "kybookmarks", CallbackURL: "https://bookmarks.example.com/scim/v2"}
 	for _, eventType := range []string{"user.created", "user.updated", "user.deleted"} {
@@ -171,12 +197,13 @@ func TestAccountSyncWebhookDispatch(t *testing.T) {
 	defer mockServer.Close()
 
 	// Register paired system pointing to mock server
+	psID := uuid.New().String()
 	ps := &store.PairedSystem{
-		ID:                  uuid.New().String(),
+		ID:                  psID,
 		Name:                "Mock KyPost",
 		SystemType:          "kypost",
 		CallbackURL:         mockServer.URL,
-		HMACSecretEncrypted: mustEncrypt(t, engine, sharedSecret),
+		HMACSecretEncrypted: mustEncrypt(t, engine, psID, sharedSecret),
 		Status:              "active",
 	}
 	if err := dbStore.CreatePairedSystem(ps); err != nil {
@@ -238,12 +265,13 @@ func TestAccountSyncSCIMPayloadAndHeaders(t *testing.T) {
 	}))
 	defer mockSCIMServer.Close()
 
+	psID := uuid.New().String()
 	ps := &store.PairedSystem{
-		ID:                  uuid.New().String(),
+		ID:                  psID,
 		Name:                "SCIM Downstream",
 		SystemType:          "suite_webhook",
 		CallbackURL:         mockSCIMServer.URL,
-		HMACSecretEncrypted: mustEncrypt(t, engine, sharedSecret),
+		HMACSecretEncrypted: mustEncrypt(t, engine, psID, sharedSecret),
 		Status:              "active",
 	}
 	if err := dbStore.CreatePairedSystem(ps); err != nil {
@@ -285,11 +313,11 @@ func TestAccountSyncSCIMPayloadAndHeaders(t *testing.T) {
 
 // mustEncrypt seals a webhook signing secret the way pairing does, so a hand-built
 // PairedSystem in a test carries a secret the engine can actually recover.
-func mustEncrypt(t *testing.T, e *Engine, secret string) string {
+func mustEncrypt(t *testing.T, e *Engine, systemID, secret string) string {
 	t.Helper()
-	sealed, err := crypto.EncryptAESGCM(e.encryptionKey, []byte(secret))
+	sealed, err := crypto.Seal(e.encryptionKey, store.SealConnector, systemID, []byte(secret))
 	if err != nil {
-		t.Fatalf("EncryptAESGCM: %v", err)
+		t.Fatalf("Seal: %v", err)
 	}
 	return sealed
 }

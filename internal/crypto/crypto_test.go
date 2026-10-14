@@ -8,8 +8,10 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,6 +35,35 @@ func TestAESGCMEncryption(t *testing.T) {
 
 	if string(decrypted) != secretMessage {
 		t.Fatalf("decrypted mismatch: got %s, want %s", string(decrypted), secretMessage)
+	}
+}
+
+// A sealed secret opens only for the purpose and row it was sealed for, and Open never
+// accepts the unbound legacy format, which would reopen the row-swap.
+func TestSealBindsPurposeAndRow(t *testing.T) {
+	master, _ := GenerateRandomBytes(32)
+	sealed, err := Seal(master, "mfa_totp", "user-a", []byte("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Open(master, "mfa_totp", "user-a", sealed); err != nil || string(got) != "secret" {
+		t.Fatalf("round trip: %q %v", got, err)
+	}
+	for _, c := range []struct{ purpose, row string }{{"mfa_totp", "user-b"}, {"paired_system", "user-a"}} {
+		if _, err := Open(master, c.purpose, c.row, sealed); err == nil {
+			t.Errorf("opened under %s/%s", c.purpose, c.row)
+		}
+	}
+	legacy, _ := EncryptAESGCM(master, []byte("secret"))
+	if IsSealed(legacy) {
+		t.Fatal("legacy ciphertext looks sealed")
+	}
+	if _, err := Open(master, "mfa_totp", "user-a", legacy); !errors.Is(err, ErrLegacyCiphertext) {
+		t.Fatalf("legacy accepted by Open: %v", err)
+	}
+	// The v2 body under the master key with no AAD is not a legacy ciphertext either.
+	if _, err := DecryptAESGCM(master, strings.TrimPrefix(sealed, "v2:")); err == nil {
+		t.Fatal("sealed body opened as legacy")
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
-const settingKey = "mail_settings_enc"
+const settingKey = store.MailSettingKey
 
 // Settings is the SMTP configuration an administrator enters. Password is write-only
 // on the wire: it is stored here for sending and dropped by View.
@@ -79,7 +79,7 @@ func Load(s *store.Store, key []byte) (*Settings, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := crypto.DecryptAESGCM(key, enc)
+	raw, err := crypto.Open(key, store.SealMail, settingKey, enc)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func Save(s *store.Store, key []byte, in *Settings) error {
 	if err != nil {
 		return err
 	}
-	enc, err := crypto.EncryptAESGCM(key, raw)
+	enc, err := crypto.Seal(key, store.SealMail, settingKey, raw)
 	if err != nil {
 		return err
 	}

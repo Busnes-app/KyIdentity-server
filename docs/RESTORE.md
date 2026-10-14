@@ -30,7 +30,7 @@ Everything a fresh KyIdentity needs to be the old one:
 |---|---|
 | `data/kyidentity.db` | The whole directory: users, sessions, OAuth clients, MFA state, audit log, settings |
 | `data/jwt_rs256.key` | The RSA signing key. Without it every issued token and every OIDC client breaks |
-| `data/encryption.key` | 32 bytes. Every TOTP secret and paired-system token in the database is encrypted under it |
+| `data/encryption.key` | 32 bytes. Every TOTP secret, paired-system token and the mail relay settings are encrypted under keys derived from it. A capsule from before row-bound encryption is re-encrypted at the first start; the server refuses to start if any of its secrets does not decrypt under this key |
 | `data/secret.key` | 32 bytes. Signs sessions and CSRF tokens |
 | `data/recovery.pub` | The suite recovery public key, so the restored server comes back pinned (present when the backup was paired) |
 | `data/push-vapid-private.key` | The UnifiedPush VAPID key, so the restored server keeps its push identity (present once the server has started with UnifiedPush support) |
