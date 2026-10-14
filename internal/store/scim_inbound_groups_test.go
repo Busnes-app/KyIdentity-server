@@ -18,6 +18,21 @@ func activated(t *testing.T, s *Store, connectorID, external, username string) *
 
 // An upstream group carries exactly its connector's accounts; a foreign member, a local
 // account or a group in the member list fails the whole write.
+// replaceGroup writes g's name and external id and exactly members, refusing like an
+// If-Match would when expect is set and the group has moved on.
+func replaceGroup(s *Store, connectorID string, g *Group, members []string, expect *time.Time) error {
+	return s.ReplaceUpstreamGroup(connectorID, g.ID, nil, func(cur *UpstreamGroup) error {
+		if expect != nil && !cur.UpdatedAt.Equal(*expect) {
+			return ErrGroupVersionStale
+		}
+		cur.Name, cur.Members = g.Name, members
+		if g.ExternalID != "" {
+			cur.ExternalID = g.ExternalID
+		}
+		return nil
+	})
+}
+
 func TestUpstreamGroupsHoldOnlyTheConnectorsAccounts(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
@@ -61,23 +76,23 @@ func TestUpstreamGroupsHoldOnlyTheConnectorsAccounts(t *testing.T) {
 
 	// Replace is all or nothing: a foreign member in the new set rolls the rename back.
 	g.Name = "Renamed"
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID, other.ID}, nil, nil); !errors.Is(err, ErrGroupMemberForeign) {
+	if err := replaceGroup(s, a.ID, g, []string{alice.ID, other.ID}, nil); !errors.Is(err, ErrGroupMemberForeign) {
 		t.Fatalf("cross-connector member accepted on replace: %v", err)
 	}
 	if got, _ = s.GetUpstreamGroup(a.ID, g.ID); got.Name != "Engineering" || len(got.Members) != 2 {
 		t.Fatalf("refused replace changed the group: %+v", got)
 	}
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{bob.ID}, nil, nil); err != nil {
+	if err := replaceGroup(s, a.ID, g, []string{bob.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ = s.GetUpstreamGroup(a.ID, g.ID); got.Name != "Renamed" || len(got.Members) != 1 || got.Members[0] != bob.ID {
 		t.Fatalf("replace: %+v", got)
 	}
 	g.ExternalID = "grp-2"
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{bob.ID}, nil, nil); err == nil {
+	if err := replaceGroup(s, a.ID, g, []string{bob.ID}, nil); err == nil {
 		t.Fatal("external id changed")
 	}
-	if err := s.ReplaceUpstreamGroup(b.ID, &Group{ID: g.ID, Name: "Hijack"}, nil, nil, nil); !errors.Is(err, ErrGroupTargetMissing) {
+	if err := replaceGroup(s, b.ID, &Group{ID: g.ID, Name: "Hijack"}, nil, nil); !errors.Is(err, ErrGroupTargetMissing) {
 		t.Fatalf("another connector replaced the group: %v", err)
 	}
 
@@ -109,20 +124,20 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 0 {
 		t.Fatalf("access before membership: %+v", got)
 	}
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID}, nil, nil); err != nil {
+	if err := replaceGroup(s, a.ID, g, []string{alice.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 1 || got[0].Type != "user.created" {
 		t.Fatalf("join did not provision: %+v", got)
 	}
 	deliverAll(t, s)
-	if err := s.ReplaceUpstreamGroup(a.ID, g, nil, nil, nil); err != nil {
+	if err := replaceGroup(s, a.ID, g, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 1 || got[0].Active {
 		t.Fatalf("leave did not deprovision: %+v", got)
 	}
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID}, nil, nil); err != nil {
+	if err := replaceGroup(s, a.ID, g, []string{alice.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteUpstreamGroup(a.ID, g.ID, nil, nil); err != nil {
@@ -184,7 +199,7 @@ func TestUpstreamGroupBulkMembershipReconcilesOnce(t *testing.T) {
 		t.Fatalf("create reconciled %d times for 200 members", runs)
 	}
 	before = reconcileRuns.Load()
-	if err := s.ReplaceUpstreamGroup(a.ID, g, members[:100], nil, nil); err != nil {
+	if err := replaceGroup(s, a.ID, g, members[:100], nil); err != nil {
 		t.Fatal(err)
 	}
 	if runs := reconcileRuns.Load() - before; runs != 1 {
@@ -234,14 +249,14 @@ func TestUpstreamRenameOfMFARequiredGroupIsRefused(t *testing.T) {
 	}
 	renamed := *g
 	renamed.Name = "Relabelled"
-	if err := s.ReplaceUpstreamGroup(a.ID, &renamed, []string{alice.ID}, nil, nil); !errors.Is(err, ErrEmergencyAdministrator) {
+	if err := replaceGroup(s, a.ID, &renamed, []string{alice.ID}, nil); !errors.Is(err, ErrEmergencyAdministrator) {
 		t.Fatalf("upstream renamed an MFA-required group: %v", err)
 	}
 	if got, _ := s.GetUpstreamGroup(a.ID, g.ID); got.Name != "Secure" {
 		t.Fatalf("name changed: %+v", got)
 	}
 	// The same name with the same members is a no-op the upstream may still send.
-	if err := s.ReplaceUpstreamGroup(a.ID, g, []string{alice.ID}, nil, nil); err != nil {
+	if err := replaceGroup(s, a.ID, g, []string{alice.ID}, nil); err != nil {
 		t.Fatalf("idempotent replace refused: %v", err)
 	}
 }
@@ -260,12 +275,12 @@ func TestUpstreamGroupReplaceRejectsStaleVersion(t *testing.T) {
 	stale := read.UpdatedAt
 	first := read.Group
 	first.Name = "Versioned 2"
-	if err := s.ReplaceUpstreamGroup(a.ID, &first, []string{alice.ID}, &stale, nil); err != nil {
+	if err := replaceGroup(s, a.ID, &first, []string{alice.ID}, &stale); err != nil {
 		t.Fatalf("first conditional write: %v", err)
 	}
 	second := read.Group
 	second.Name = "Versioned 3"
-	if err := s.ReplaceUpstreamGroup(a.ID, &second, nil, &stale, nil); !errors.Is(err, ErrGroupVersionStale) {
+	if err := replaceGroup(s, a.ID, &second, nil, &stale); !errors.Is(err, ErrGroupVersionStale) {
 		t.Fatalf("stale write accepted: %v", err)
 	}
 	got, _ := s.GetUpstreamGroup(a.ID, g.ID)

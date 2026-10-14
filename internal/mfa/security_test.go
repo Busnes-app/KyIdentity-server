@@ -367,7 +367,7 @@ func TestMFAResetExpiresPendingDevicePairingTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeleteUserMFAMethods(u.ID); err != nil {
+	if err := db.ResetUserMFA(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{

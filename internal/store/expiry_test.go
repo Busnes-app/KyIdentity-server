@@ -387,9 +387,14 @@ func TestUnchangedScheduleDoesNotTripTheGuard(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(first, false, nil); err != nil {
 		t.Fatalf("scheduling one of two administrators: %v", err)
 	}
+	// first's end date would leave no administrator once it passes.
 	second.Role = "user"
-	if err := s.UpdateUserWithSyncEvents(second, false, nil); err != nil {
-		t.Fatalf("demoting the unscheduled administrator: %v", err)
+	if err := s.UpdateUserWithSyncEvents(second, false, nil); !errors.Is(err, ErrLastActiveAdmin) {
+		t.Fatalf("demoting the only administrator without an end date: %v", err)
+	}
+	// A database from before that rule can still hold a sole, end-dated administrator.
+	if _, err := s.db.Exec(`UPDATE users SET role='user' WHERE id=?`, second.ID); err != nil {
+		t.Fatal(err)
 	}
 	stored, _ := s.GetUserByID(first.ID)
 	stored.DisplayName = "Renamed"
@@ -402,5 +407,49 @@ func TestUnchangedScheduleDoesNotTripTheGuard(t *testing.T) {
 	stored.EndsAt = future(2 * time.Hour)
 	if err := s.UpdateUserWithSyncEvents(stored, false, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatalf("new schedule on the sole administrator accepted: %v", err)
+	}
+}
+
+// Another administrator's future end date is no cover: removing, disabling, demoting or
+// end-dating an administrator needs one other active administrator with no end date.
+func TestEndDatedAdministratorIsNoCoverForTheLast(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	c, _ := s.CreateSCIMConnector("A", nil)
+	permanent := upstream(t, s, c.ID, "ext-1", "permanent")
+	if _, err := s.db.Exec(`UPDATE users SET role='admin', status='active', pending=0, password_hash='x' WHERE id=?`, permanent.ID); err != nil {
+		t.Fatal(err)
+	}
+	ending := createTestUserNamed(t, s, "ending")
+	ending.Role, ending.EndsAt = "admin", future(time.Hour)
+	if err := s.UpdateUserWithSyncEvents(ending, false, nil); err != nil {
+		t.Fatalf("end-dating one of two administrators: %v", err)
+	}
+	for name, change := range map[string]func(*User){
+		"demote":   func(u *User) { u.Role = "user" },
+		"disable":  func(u *User) { u.Status, u.LocallyDisabled = "disabled", true },
+		"end-date": func(u *User) { u.EndsAt = future(2 * time.Hour) },
+	} {
+		if _, err := s.EditUser(permanent.ID, nil, func(u *User) (bool, error) { change(u); return false, nil }); !errors.Is(err, ErrLastActiveAdmin) {
+			t.Fatalf("%s the only administrator without an end date: %v", name, err)
+		}
+	}
+	if err := s.DeleteUserWithSyncEvents(permanent.ID, nil); !errors.Is(err, ErrLastActiveAdmin) {
+		t.Fatalf("deleting the only administrator without an end date: %v", err)
+	}
+	if _, err := s.DeleteSCIMConnector(c.ID, true, nil); !errors.Is(err, ErrLastActiveAdmin) {
+		t.Fatalf("disabling the connector's administrator: %v", err)
+	}
+	if got, _ := s.GetUserByID(permanent.ID); got == nil || got.Role != "admin" || got.Status != "active" || got.EndsAt != nil {
+		t.Fatalf("refused change touched the administrator: %+v", got)
+	}
+	// A second administrator without an end date makes every one of them allowed.
+	spare := createTestUserNamed(t, s, "spare")
+	spare.Role = "admin"
+	if err := s.UpdateUserWithSyncEvents(spare, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeleteSCIMConnector(c.ID, true, nil); err != nil {
+		t.Fatalf("disabling with a spare administrator: %v", err)
 	}
 }

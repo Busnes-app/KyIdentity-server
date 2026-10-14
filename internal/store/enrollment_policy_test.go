@@ -204,9 +204,6 @@ func TestEnrollmentLastFactorRemovalAndReset(t *testing.T) {
 	if err := s.SetEnrollmentPolicy(enrollmentPolicy("organization", 3600), "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUserMFAMethods(u.ID); !errors.Is(err, ErrLastCompliantFactor) {
-		t.Fatal("last factor removed", err)
-	}
 	if err := s.CreateWebAuthnCredential(&WebAuthnCredential{ID: "key", UserID: u.ID, CredentialID: "key", PublicKeySPKI: "test", Name: "key"}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +300,7 @@ func TestEnrollmentRecoveryDuringGraceAndPromotionDeadline(t *testing.T) {
 	}
 	u.Role = "admin"
 	promotionStartedAt := time.Now().Unix()
-	if err := s.UpdateUser(u); err != nil {
+	if err := s.UpdateUserWithSyncEvents(u, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	status, err := s.SessionEnrollmentStatus(u.ID, "session")

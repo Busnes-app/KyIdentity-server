@@ -233,15 +233,33 @@ func expectedVersion(r *http.Request, g *store.Group) *time.Time {
 	return &v
 }
 
-func (h *SCIMHandler) saveGroup(w http.ResponseWriter, r *http.Request, g *store.UpstreamGroup, members []string) {
-	c := scimConnector(r)
-	pending := h.audit.Prepare("scim.group_updated", c.ID, "connector:"+c.Name, g.ID, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"name": g.Name, "members": len(members)})
-	if err := h.store.ReplaceUpstreamGroup(c.ID, &g.Group, members, expectedVersion(r, &g.Group), pending.Row); err != nil {
+// saveGroup applies edit to the owned group and its members as read under the write
+// lock, after If-Match is checked against that same version.
+func (h *SCIMHandler) saveGroup(w http.ResponseWriter, r *http.Request, edit func(g *store.UpstreamGroup) error) {
+	c, id := scimConnector(r), r.PathValue("id")
+	pending := h.audit.Prepare("scim.group_updated", c.ID, "connector:"+c.Name, id, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	err := h.store.ReplaceUpstreamGroup(c.ID, id, pending.Row, func(g *store.UpstreamGroup) error {
+		if !groupIfMatch(r, &g.Group) {
+			return store.ErrGroupVersionStale
+		}
+		if err := edit(g); err != nil {
+			return err
+		}
+		details, _ := json.Marshal(map[string]any{"name": g.Name, "members": len(g.Members)})
+		pending.Row.DetailsJSON = string(details)
+		return nil
+	})
+	var problem *scimProblem
+	if errors.As(err, &problem) {
+		scimError(w, problem.status, problem.scimType, problem.detail)
+		return
+	}
+	if err != nil {
 		h.groupError(w, err)
 		return
 	}
 	pending.Committed()
-	stored, err := h.store.GetUpstreamGroup(c.ID, g.ID)
+	stored, err := h.store.GetUpstreamGroup(c.ID, id)
 	if err != nil || stored == nil {
 		scimError(w, http.StatusInternalServerError, "", "Internal error")
 		return
@@ -250,17 +268,9 @@ func (h *SCIMHandler) saveGroup(w http.ResponseWriter, r *http.Request, g *store
 }
 
 func (h *SCIMHandler) ReplaceGroup(w http.ResponseWriter, r *http.Request) {
-	g := h.loadGroup(w, r)
-	if g == nil {
-		return
-	}
 	in, problem := decodeGroup(r)
 	if problem != "" {
 		scimError(w, http.StatusBadRequest, "invalidValue", problem)
-		return
-	}
-	if in.ExternalID != "" && g.ExternalID != "" && in.ExternalID != g.ExternalID {
-		scimError(w, http.StatusBadRequest, "mutability", "externalId is immutable")
 		return
 	}
 	members, problem := memberIDs(in.Members)
@@ -268,23 +278,25 @@ func (h *SCIMHandler) ReplaceGroup(w http.ResponseWriter, r *http.Request) {
 		scimError(w, http.StatusBadRequest, "invalidValue", problem)
 		return
 	}
-	g.Name = in.DisplayName
-	if in.ExternalID != "" {
-		g.ExternalID = in.ExternalID
-	}
-	h.saveGroup(w, r, g, members)
+	h.saveGroup(w, r, func(g *store.UpstreamGroup) error {
+		if in.ExternalID != "" && g.ExternalID != "" && in.ExternalID != g.ExternalID {
+			return &scimProblem{http.StatusBadRequest, "mutability", "externalId is immutable"}
+		}
+		g.Name, g.Members = in.DisplayName, members
+		if in.ExternalID != "" {
+			g.ExternalID = in.ExternalID
+		}
+		return nil
+	})
 }
 
 var memberFilter = regexp.MustCompile(`^members\[value\s+eq\s+"((?:[^"\\]|\\.)*)"\]$`)
 
-// PatchGroup validates every operation against the current group, computes the final
-// name and member set, and applies them as one replace: an invalid operation anywhere
+// PatchGroup validates every operation and applies them, in order, to the group as it is
+// under the write lock: an add or remove lands on the current membership, so concurrent
+// PATCHes of different members both take effect, and an invalid operation anywhere
 // means nothing changes.
 func (h *SCIMHandler) PatchGroup(w http.ResponseWriter, r *http.Request) {
-	g := h.loadGroup(w, r)
-	if g == nil {
-		return
-	}
 	var body struct {
 		Operations []struct {
 			Op    string          `json:"op"`
@@ -296,78 +308,38 @@ func (h *SCIMHandler) PatchGroup(w http.ResponseWriter, r *http.Request) {
 		scimError(w, http.StatusBadRequest, "invalidSyntax", "PatchOp body with 1 to 100 Operations required")
 		return
 	}
-	name := g.Name
-	members := map[string]bool{}
-	for _, id := range g.Members {
-		members[id] = true
+	bad := func(scimType, detail string) error {
+		return &scimProblem{http.StatusBadRequest, scimType, detail}
 	}
-	for _, op := range body.Operations {
-		kind, path := strings.ToLower(strings.TrimSpace(op.Op)), strings.TrimSpace(op.Path)
-		switch {
-		case kind == "remove" && memberFilter.MatchString(path):
-			id, err := strconv.Unquote(`"` + memberFilter.FindStringSubmatch(path)[1] + `"`)
-			if err != nil {
-				scimError(w, http.StatusBadRequest, "invalidPath", "malformed member filter")
-				return
-			}
-			delete(members, id)
-		case kind == "remove" && path == "members":
-			list, problem := decodeMembers(op.Value)
-			if problem != "" {
-				scimError(w, http.StatusBadRequest, "invalidValue", problem)
-				return
-			}
-			if len(list) == 0 {
-				members = map[string]bool{}
-			}
-			for _, id := range list {
-				delete(members, id)
-			}
-		case (kind == "add" || kind == "replace") && path == "members":
-			list, problem := decodeMembers(op.Value)
-			if problem != "" {
-				scimError(w, http.StatusBadRequest, "invalidValue", problem)
-				return
-			}
-			if kind == "replace" {
-				members = map[string]bool{}
-			}
-			for _, id := range list {
-				members[id] = true
-			}
-		case (kind == "add" || kind == "replace") && path == "displayName":
-			var v string
-			if err := json.Unmarshal(op.Value, &v); err != nil || strings.TrimSpace(v) == "" {
-				scimError(w, http.StatusBadRequest, "invalidValue", "displayName must be a non-empty string")
-				return
-			}
-			name = strings.TrimSpace(v)
-		case (kind == "add" || kind == "replace") && path == "":
-			var v struct {
-				DisplayName *string      `json:"displayName"`
-				ExternalID  *string      `json:"externalId"`
-				Members     []scimMember `json:"members"`
-			}
-			if err := json.Unmarshal(op.Value, &v); err != nil {
-				scimError(w, http.StatusBadRequest, "invalidValue", "a path-less operation needs an object value")
-				return
-			}
-			if v.ExternalID != nil && g.ExternalID != "" && *v.ExternalID != g.ExternalID {
-				scimError(w, http.StatusBadRequest, "mutability", "externalId is immutable")
-				return
-			}
-			if v.DisplayName != nil {
-				if strings.TrimSpace(*v.DisplayName) == "" {
-					scimError(w, http.StatusBadRequest, "invalidValue", "displayName must be a non-empty string")
-					return
+	h.saveGroup(w, r, func(g *store.UpstreamGroup) error {
+		members := map[string]bool{}
+		for _, id := range g.Members {
+			members[id] = true
+		}
+		for _, op := range body.Operations {
+			kind, path := strings.ToLower(strings.TrimSpace(op.Op)), strings.TrimSpace(op.Path)
+			switch {
+			case kind == "remove" && memberFilter.MatchString(path):
+				id, err := strconv.Unquote(`"` + memberFilter.FindStringSubmatch(path)[1] + `"`)
+				if err != nil {
+					return bad("invalidPath", "malformed member filter")
 				}
-				name = strings.TrimSpace(*v.DisplayName)
-			}
-			if v.Members != nil {
-				list, problem := memberIDs(v.Members)
+				delete(members, id)
+			case kind == "remove" && path == "members":
+				list, problem := decodeMembers(op.Value)
 				if problem != "" {
-					scimError(w, http.StatusBadRequest, "invalidValue", problem)
-					return
+					return bad("invalidValue", problem)
+				}
+				if len(list) == 0 {
+					members = map[string]bool{}
+				}
+				for _, id := range list {
+					delete(members, id)
+				}
+			case (kind == "add" || kind == "replace") && path == "members":
+				list, problem := decodeMembers(op.Value)
+				if problem != "" {
+					return bad("invalidValue", problem)
 				}
 				if kind == "replace" {
 					members = map[string]bool{}
@@ -375,21 +347,54 @@ func (h *SCIMHandler) PatchGroup(w http.ResponseWriter, r *http.Request) {
 				for _, id := range list {
 					members[id] = true
 				}
+			case (kind == "add" || kind == "replace") && path == "displayName":
+				var v string
+				if err := json.Unmarshal(op.Value, &v); err != nil || strings.TrimSpace(v) == "" {
+					return bad("invalidValue", "displayName must be a non-empty string")
+				}
+				g.Name = strings.TrimSpace(v)
+			case (kind == "add" || kind == "replace") && path == "":
+				var v struct {
+					DisplayName *string      `json:"displayName"`
+					ExternalID  *string      `json:"externalId"`
+					Members     []scimMember `json:"members"`
+				}
+				if err := json.Unmarshal(op.Value, &v); err != nil {
+					return bad("invalidValue", "a path-less operation needs an object value")
+				}
+				if v.ExternalID != nil && g.ExternalID != "" && *v.ExternalID != g.ExternalID {
+					return bad("mutability", "externalId is immutable")
+				}
+				if v.DisplayName != nil {
+					if strings.TrimSpace(*v.DisplayName) == "" {
+						return bad("invalidValue", "displayName must be a non-empty string")
+					}
+					g.Name = strings.TrimSpace(*v.DisplayName)
+				}
+				if v.Members != nil {
+					list, problem := memberIDs(v.Members)
+					if problem != "" {
+						return bad("invalidValue", problem)
+					}
+					if kind == "replace" {
+						members = map[string]bool{}
+					}
+					for _, id := range list {
+						members[id] = true
+					}
+				}
+			case path == "externalId":
+				return bad("mutability", "externalId is immutable")
+			default:
+				return bad("invalidPath", "unsupported operation "+kind+" on "+strconv.Quote(path))
 			}
-		case path == "externalId":
-			scimError(w, http.StatusBadRequest, "mutability", "externalId is immutable")
-			return
-		default:
-			scimError(w, http.StatusBadRequest, "invalidPath", "unsupported operation "+kind+" on "+strconv.Quote(path))
-			return
 		}
-	}
-	final := make([]string, 0, len(members))
-	for id := range members {
-		final = append(final, id)
-	}
-	g.Name = name
-	h.saveGroup(w, r, g, final)
+		g.Members = g.Members[:0]
+		for id := range members {
+			g.Members = append(g.Members, id)
+		}
+		return nil
+	})
 }
 
 func decodeMembers(raw json.RawMessage) ([]string, string) {

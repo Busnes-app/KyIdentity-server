@@ -46,7 +46,10 @@ func TestBootstrapDoesNotResetAnExistingAdminPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpdateUserPassword(admin.ID, rotated); err != nil {
+	if _, err := db.EditUser(admin.ID, nil, func(u *store.User) (bool, error) {
+		u.PasswordHash = rotated
+		return true, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 

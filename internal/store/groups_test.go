@@ -64,7 +64,7 @@ func TestGroupMembershipIntegrity(t *testing.T) {
 	if err != nil || total != 3 {
 		t.Fatalf("concurrent edits lost members: %d %v", total, err)
 	}
-	if err := s.DeleteUser(u.ID); err != nil {
+	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	_, total, err = s.ListGroupUsers(g.ID, "", false, 25, 0)
