@@ -32,7 +32,7 @@ func testStore(t *testing.T) *store.Store {
 func TestBootstrapDoesNotResetAnExistingAdminPassword(t *testing.T) {
 	db := testStore(t)
 
-	if err := ensureBootstrapAdmin(db, "admin", "first-run-password"); err != nil {
+	if _, err := ensureBootstrapAdmin(db, "admin", "", "first-run-password", "test"); err != nil {
 		t.Fatalf("initial bootstrap failed: %v", err)
 	}
 
@@ -51,7 +51,7 @@ func TestBootstrapDoesNotResetAnExistingAdminPassword(t *testing.T) {
 	}
 
 	// A restart with the same environment variable still set.
-	if err := ensureBootstrapAdmin(db, "admin", "first-run-password"); err != nil {
+	if _, err := ensureBootstrapAdmin(db, "admin", "", "first-run-password", "test"); err != nil {
 		t.Fatalf("second bootstrap returned an error: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestBootstrapDoesNotResetAnExistingAdminPassword(t *testing.T) {
 func TestBootstrapReportsFailure(t *testing.T) {
 	db := testStore(t)
 
-	if err := ensureBootstrapAdmin(db, "admin", "short"); err == nil {
+	if _, err := ensureBootstrapAdmin(db, "admin", "", "short", "test"); err == nil {
 		t.Error("a password that violates the policy was accepted silently")
 	}
 	if u, _ := db.GetUserByUsername("admin"); u != nil {
@@ -80,10 +80,76 @@ func TestBootstrapReportsFailure(t *testing.T) {
 	}
 }
 
+// A password in argv is readable through /proc by every local user and lands in shell
+// history; bootstrap-admin takes it from stdin only.
+func TestBootstrapRefusesArgvPassword(t *testing.T) {
+	if _, err := parseBootstrap([]string{"-password", "a-good-first-password"}, strings.NewReader(""), false); err == nil {
+		t.Fatal("a password on the command line was accepted")
+	}
+	req, err := parseBootstrap(nil, strings.NewReader("a good first password\nignored\n"), false)
+	if err != nil || req.password != "a good first password" || req.generated {
+		t.Fatalf("stdin password: %+v %v", req, err)
+	}
+	req, err = parseBootstrap(nil, strings.NewReader(""), false)
+	if err != nil || !req.generated || len(req.password) < 16 {
+		t.Fatalf("empty stdin should generate a password: %+v %v", req, err)
+	}
+}
+
+func TestBootstrapHonoursEmailAndAudits(t *testing.T) {
+	if _, err := parseBootstrap([]string{"-email", "Root <root@example.test>"}, strings.NewReader("pw\n"), false); err == nil {
+		t.Fatal("a non-bare email address was accepted")
+	}
+	req, err := parseBootstrap([]string{"-username", "root", "-email", "root@example.test"}, strings.NewReader("a-good-first-password\n"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := testStore(t)
+	created, err := ensureBootstrapAdmin(db, req.username, req.email, req.password, "kyidentity-cli")
+	if err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	u, err := db.GetUserByUsername("root")
+	if err != nil || u == nil || u.Email != "root@example.test" {
+		t.Fatalf("email not honoured: %+v %v", u, err)
+	}
+	events, _, err := db.SearchAuditEvents(store.AuditFilter{Action: "admin.user_created", Limit: 5})
+	if err != nil || len(events) != 1 || events[0].TargetID != u.ID || !strings.Contains(events[0].DetailsJSON, `"role":"admin"`) {
+		t.Fatalf("admin.user_created audit: %+v %v", events, err)
+	}
+}
+
+// An existing account that is not an active administrator is not a successful bootstrap:
+// nothing is promoted or re-enabled, and no password file names an account bootstrap did
+// not create.
+func TestBootstrapRefusesAnExistingNonAdmin(t *testing.T) {
+	db := testStore(t)
+	if err := db.CreateUser(&store.User{ID: "u1", Username: "admin", DisplayName: "A", Email: "a@test.invalid", PasswordHash: "x", Role: "user", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := bootstrapOnStart(db, "admin", "", dir); err == nil {
+		t.Fatal("first start reported success over an existing ordinary user")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "first-run-password.txt")); !os.IsNotExist(err) {
+		t.Fatal("a password file was written for an account bootstrap did not create:", err)
+	}
+	if u, _ := db.GetUserByUsername("admin"); u == nil || u.Role != "user" || u.PasswordHash != "x" {
+		t.Fatalf("the existing account was changed: %+v", u)
+	}
+
+	if err := db.CreateUser(&store.User{ID: "u2", Username: "old-admin", DisplayName: "B", Email: "b@test.invalid", PasswordHash: "x", Role: "admin", Status: "disabled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureBootstrapAdmin(db, "old-admin", "", "a-good-first-password", "test"); err == nil {
+		t.Fatal("a disabled administrator was reported as bootstrapped")
+	}
+}
+
 func TestBootstrapCreatesAdminWhenNoneExists(t *testing.T) {
 	db := testStore(t)
 
-	if err := ensureBootstrapAdmin(db, "admin", "a-good-first-password"); err != nil {
+	if _, err := ensureBootstrapAdmin(db, "admin", "", "a-good-first-password", "test"); err != nil {
 		t.Fatal(err)
 	}
 	admin, err := db.GetUserByUsername("admin")
@@ -108,7 +174,7 @@ func TestFirstRunPasswordFileIsRemovedAfterAdminLogsIn(t *testing.T) {
 	}
 
 	db := testStore(t)
-	if err := ensureBootstrapAdmin(db, "admin", "a-good-first-password"); err != nil {
+	if _, err := ensureBootstrapAdmin(db, "admin", "", "a-good-first-password", "test"); err != nil {
 		t.Fatal(err)
 	}
 	admin, _ := db.GetUserByUsername("admin")

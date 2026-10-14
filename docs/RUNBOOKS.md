@@ -40,11 +40,13 @@ Nobody can log in as an administrator.
 
 1. Stop the server. A second administrator being created while the first is being reset
    is how two half-configured accounts appear.
-2. `kysignon bootstrap-admin -username <name> -password <password> -email <address>`
-   against the same data directory. It creates an administrator, or resets the password
-   of the named one.
-3. Start the server and sign in. If mail is configured, prefer a password reset link to
-   a password typed on a command line, which lands in shell history.
+2. `kyidentity bootstrap-admin -username <new name> -email <address>` against the same
+   data directory, with the password on stdin (an empty line generates and prints one;
+   `-password` is refused). It creates a new administrator with an `admin.user_created`
+   audit row. It never resets a password, promotes or re-enables an account: a name that
+   already exists and is not an active administrator is an error, so pick an unused one.
+3. Start the server and sign in. If mail is configured, use the new administrator to send
+   the locked-out one a password reset link.
 
 If the first-run password was never used, it is at `<data>/first-run-password.txt`,
 mode 0600, and the server deletes it once that account has a password of its own.

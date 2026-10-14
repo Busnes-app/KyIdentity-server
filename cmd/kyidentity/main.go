@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,9 +13,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/mail"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,12 +55,7 @@ func main() {
 			}
 			return
 		case "bootstrap-admin":
-			bootstrapCmd := flag.NewFlagSet("bootstrap-admin", flag.ExitOnError)
-			bootstrapUser := bootstrapCmd.String("username", "admin", "Admin username")
-			bootstrapPass := bootstrapCmd.String("password", "", "Admin password (min 12 chars)")
-			bootstrapEmail := bootstrapCmd.String("email", "admin@local.kysecurity", "Admin email")
-			_ = bootstrapCmd.Parse(os.Args[2:])
-			runBootstrap(*bootstrapUser, *bootstrapPass, *bootstrapEmail)
+			runBootstrap(os.Args[2:])
 			return
 		case "backup-drill":
 			runBackupDrill()
@@ -172,34 +171,8 @@ func main() {
 	mfaEngine.SetUbuntuPushSender(mfa.NewUbuntuPushSender(cfg.UbuntuPushURL, cfg.UbuntuPushAppID))
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
-	adminCount, err := dbStore.CountAdmins()
-	if err != nil {
-		log.Fatalf("Failed to count administrators: %v", err)
-	}
-	switch {
-	case adminCount > 0:
-		if cfg.BootstrapPass != "" {
-			log.Println("BOOTSTRAP_ADMIN_PASS is set but an administrator already exists; ignoring it. " +
-				"Use the admin UI to change a password.")
-		}
-	case cfg.BootstrapPass != "":
-		if err := ensureBootstrapAdmin(dbStore, cfg.BootstrapUser, cfg.BootstrapPass); err != nil {
-			log.Fatalf("Bootstrap failed: %v", err)
-		}
-		log.Printf("Bootstrap administrator %q created from BOOTSTRAP_ADMIN_PASS.", cfg.BootstrapUser)
-	default:
-		firstRunPass, err := crypto.GenerateRandomAlphanumeric(16)
-		if err != nil {
-			log.Fatalf("Failed to generate first-run admin password: %v", err)
-		}
-		if err := ensureBootstrapAdmin(dbStore, cfg.BootstrapUser, firstRunPass); err != nil {
-			log.Fatalf("Bootstrap failed: %v", err)
-		}
-		passFile := filepath.Join(cfg.DataDir, "first-run-password.txt")
-		if err := os.WriteFile(passFile, []byte(fmt.Sprintf("User: %s\nPassword: %s\n", cfg.BootstrapUser, firstRunPass)), 0600); err != nil {
-			log.Fatalf("Created the bootstrap admin but could not write %s: %v", passFile, err)
-		}
-		log.Printf("Bootstrap admin created. Credentials written to %s (removed automatically after first sign-in).", passFile)
+	if err := bootstrapOnStart(dbStore, cfg.BootstrapUser, cfg.BootstrapPass, cfg.DataDir); err != nil {
+		log.Fatalf("Bootstrap failed: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -300,63 +273,156 @@ func main() {
 	log.Println("KyIdentity Server stopped.")
 }
 
-func runBootstrap(username, password, email string) {
+// bootstrapOnStart creates the first administrator when none exists, from
+// BOOTSTRAP_ADMIN_PASS or a generated password written to first-run-password.txt.
+func bootstrapOnStart(dbStore *store.Store, username, password, dataDir string) error {
+	adminCount, err := dbStore.CountAdmins()
+	if err != nil {
+		return fmt.Errorf("failed to count administrators: %w", err)
+	}
+	if adminCount > 0 {
+		if password != "" {
+			log.Println("BOOTSTRAP_ADMIN_PASS is set but an administrator already exists; ignoring it. " +
+				"Use the admin UI to change a password.")
+		}
+		return nil
+	}
+	generated := password == ""
+	if generated {
+		if password, err = crypto.GenerateRandomAlphanumeric(16); err != nil {
+			return fmt.Errorf("failed to generate first-run admin password: %w", err)
+		}
+	}
+	created, err := ensureBootstrapAdmin(dbStore, username, "", password, "kyidentity-startup")
+	if err != nil || !created {
+		return err
+	}
+	if !generated {
+		log.Printf("Bootstrap administrator %q created from BOOTSTRAP_ADMIN_PASS.", username)
+		return nil
+	}
+	passFile := filepath.Join(dataDir, "first-run-password.txt")
+	if err := os.WriteFile(passFile, []byte(fmt.Sprintf("User: %s\nPassword: %s\n", username, password)), 0600); err != nil {
+		return fmt.Errorf("created the bootstrap admin but could not write %s: %w", passFile, err)
+	}
+	log.Printf("Bootstrap admin created. Credentials written to %s (removed automatically after first sign-in).", passFile)
+	return nil
+}
+
+type bootstrapRequest struct {
+	username, email, password string
+	generated                 bool
+}
+
+// parseBootstrap reads the bootstrap-admin flags and the password, which comes from the
+// first line of stdin and never from argv: argv is world-readable and lands in shell history.
+func parseBootstrap(args []string, stdin io.Reader, prompt bool) (bootstrapRequest, error) {
+	fs := flag.NewFlagSet("bootstrap-admin", flag.ContinueOnError)
+	username := fs.String("username", "admin", "Admin username")
+	email := fs.String("email", "", "Admin email (default <username>@local.kysecurity)")
+	argvPass := fs.String("password", "", "refused: the password is read from stdin")
+	if err := fs.Parse(args); err != nil {
+		return bootstrapRequest{}, err
+	}
+	if *argvPass != "" {
+		return bootstrapRequest{}, errors.New("refusing -password: argv is world-readable and lands in shell history; pipe the password on stdin")
+	}
+	req := bootstrapRequest{username: strings.TrimSpace(*username), email: strings.TrimSpace(*email)}
+	if req.username == "" {
+		return bootstrapRequest{}, errors.New("-username must not be empty")
+	}
+	if req.email != "" {
+		if a, err := mail.ParseAddress(req.email); err != nil || a.Address != req.email {
+			return bootstrapRequest{}, fmt.Errorf("-email %q is not a bare email address", req.email)
+		}
+	}
+	if prompt {
+		fmt.Fprintln(os.Stderr, "Admin password (min 12 characters; empty generates one), then Enter:")
+	}
+	line, err := bufio.NewReader(io.LimitReader(stdin, 4<<10)).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return bootstrapRequest{}, fmt.Errorf("reading the password from stdin: %w", err)
+	}
+	req.password = strings.TrimRight(line, "\r\n")
+	if req.password == "" {
+		if req.password, err = crypto.GenerateRandomAlphanumeric(16); err != nil {
+			return bootstrapRequest{}, fmt.Errorf("failed to generate admin password: %w", err)
+		}
+		req.generated = true
+	}
+	return req, nil
+}
+
+func runBootstrap(args []string) {
+	req, err := parseBootstrap(args, os.Stdin, stdinIsTerminal())
+	if err != nil {
+		log.Fatalf("bootstrap-admin: %v", err)
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Config load error: %v", err)
 	}
-
 	dbStore, err := store.New(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("Store error: %v", err)
 	}
 	defer dbStore.Close()
 
-	if password == "" {
-		password, err = crypto.GenerateRandomAlphanumeric(16)
-		if err != nil {
-			log.Fatalf("Failed to generate admin password: %v", err)
-		}
-		fmt.Printf("Generated admin password: %s\n", password)
-	}
-
-	if err := ensureBootstrapAdmin(dbStore, username, password); err != nil {
+	created, err := ensureBootstrapAdmin(dbStore, req.username, req.email, req.password, "kyidentity-cli")
+	if err != nil {
 		log.Fatalf("Bootstrap failed: %v", err)
 	}
-	fmt.Printf("Admin user '%s' bootstrapped successfully.\n", username)
+	if !created {
+		fmt.Printf("%q is already an active administrator; nothing changed.\n", req.username)
+		return
+	}
+	if req.generated {
+		fmt.Printf("Generated admin password: %s\n", req.password)
+	}
+	fmt.Printf("Admin user '%s' bootstrapped successfully.\n", req.username)
 }
 
-// ensureBootstrapAdmin creates the first administrator. It deliberately does NOT touch an
-// existing account: BOOTSTRAP_ADMIN_PASS usually lives in an .env file that stays set, and
+// ensureBootstrapAdmin creates an administrator and its admin.user_created audit row in one
+// transaction, and reports whether it did. It deliberately does NOT touch an existing
+// account: BOOTSTRAP_ADMIN_PASS usually lives in an .env file that stays set, and
 // re-applying it on every restart would silently revert any password rotation the admin
-// performed, with nothing in the audit log to explain it.
-func ensureBootstrapAdmin(dbStore *store.Store, username, password string) error {
+// performed. An existing account that is not an active administrator is an error, never a
+// silent success: bootstrap neither promotes nor re-enables anyone.
+func ensureBootstrapAdmin(dbStore *store.Store, username, email, password, via string) (bool, error) {
 	existing, err := dbStore.GetUserByUsername(username)
 	if err != nil {
-		return fmt.Errorf("failed to check for an existing %q account: %w", username, err)
+		return false, fmt.Errorf("failed to check for an existing %q account: %w", username, err)
 	}
 	if existing != nil {
-		return nil
+		if existing.Role == "admin" && existing.Status == "active" {
+			return false, nil
+		}
+		return false, fmt.Errorf("account %q exists but is not an active administrator; bootstrap will not promote or re-enable it", username)
 	}
 
 	passHash, err := auth.HashPassword(password)
 	if err != nil {
-		return fmt.Errorf("bootstrap password rejected: %w", err)
+		return false, fmt.Errorf("bootstrap password rejected: %w", err)
 	}
-
+	if email == "" {
+		email = username + "@local.kysecurity"
+	}
 	admin := &store.User{
 		ID:           uuid.New().String(),
 		Username:     username,
 		DisplayName:  "Administrator",
-		Email:        username + "@local.kysecurity",
+		Email:        email,
 		PasswordHash: passHash,
 		Role:         "admin",
 		Status:       "active",
 	}
-	if err := dbStore.CreateUser(admin); err != nil {
-		return fmt.Errorf("failed to create the bootstrap administrator: %w", err)
+	event := audit.NewLogger(dbStore).Prepare("admin.user_created", "", "bootstrap", admin.ID, "user", "", via, "success",
+		map[string]any{"username": admin.Username, "role": admin.Role, "pending": false})
+	if err := dbStore.CreateUserWithSyncEvents(admin, event.Row); err != nil {
+		return false, fmt.Errorf("failed to create the bootstrap administrator: %w", err)
 	}
-	return nil
+	event.Committed()
+	return true, nil
 }
 
 func adminSessionExpiry() time.Time {
@@ -473,7 +539,8 @@ func runExportCapsule(outPath string) {
 	if err := os.WriteFile(outPath, raw, 0600); err != nil {
 		log.Fatalf("Write: %v", err)
 	}
-	log.Printf("Capsule %s sealed to recovery key %s, written to %s (%d bytes)", m.CapsuleID, m.RecoveryKeyID, outPath, len(raw))
+	// The digest is what `restore -expect-digest` checks; record it away from the file.
+	log.Printf("Capsule %s sealed to recovery key %s, written to %s (%d bytes); digest %s", m.CapsuleID, m.RecoveryKeyID, outPath, len(raw), sha256Hex(raw))
 }
 
 // runDeposit seals and deposits one capsule now, for cron or an operator at a shell.
@@ -556,15 +623,18 @@ func stdinIsTerminal() bool {
 const restoreMarkerName = "restored.json"
 
 type restoreMarker struct {
-	Capsule    string    `json:"capsule"`
-	Service    string    `json:"service"`
+	Capsule string `json:"capsule"`
+	Service string `json:"service"`
+	// Digest is the deposit-record SHA-256 the capsule was checked against; empty when the
+	// operator accepted it unauthenticated.
+	Digest     string    `json:"digest,omitempty"`
 	RestoredAt time.Time `json:"restoredAt"`
 }
 
 // writeRestoreMarker records that this directory came out of a capsule. It holds no
-// secret: the capsule path, the service name and the time.
-func writeRestoreMarker(targetDir, capsulePath, service string) error {
-	body, err := json.Marshal(restoreMarker{Capsule: filepath.Base(capsulePath), Service: service, RestoredAt: time.Now().UTC()})
+// secret: the capsule name, the service name, the verified digest and the time.
+func writeRestoreMarker(targetDir, capsulePath, service, digest string) error {
+	body, err := json.Marshal(restoreMarker{Capsule: filepath.Base(capsulePath), Service: service, Digest: digest, RestoredAt: time.Now().UTC()})
 	if err != nil {
 		return err
 	}
@@ -595,7 +665,7 @@ func applyRestoreMarker(dataDir string, s *store.Store, auditLogger *audit.Logge
 		log.Printf("Restore marker at %s is unreadable (%v); applying the restore anyway", path, err)
 	}
 	event := auditLogger.Prepare("system.restored", "", "restore", "", "system", "", "", "success",
-		map[string]any{"capsule": marker.Capsule, "restoredAt": marker.RestoredAt})
+		map[string]any{"capsule": marker.Capsule, "restoredAt": marker.RestoredAt, "digest": marker.Digest, "authenticated": marker.Digest != ""})
 	report, err := s.ApplyRestoredState(time.Now().UTC(), event.Row)
 	if err != nil {
 		return err
@@ -606,27 +676,87 @@ func applyRestoreMarker(dataDir string, s *store.Store, auditLogger *audit.Logge
 	return os.Remove(path)
 }
 
-// restore is the one place in this server that combines custodian shares and opens a capsule
-// sealed to the suite key; the decrypt guard test pins that.
-func restore(capsulePath, targetDir, expectService string, shares []string, stdout io.Writer) error {
-	return recoveryclient.Restore(capsulePath, targetDir, expectService, shares, stdout)
+// sha256Hex is a capsule's digest as KyRecovery records it at deposit.
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
-func runRestore(args []string) {
-	fs := flag.NewFlagSet("restore", flag.ExitOnError)
+// readAuthenticCapsule returns the capsule's bytes only when they hash to wantDigest. The
+// suite recovery public key is not secret, so a capsule that opens proves nothing about who
+// sealed it; the digest KyRecovery recorded when this server deposited it does.
+func readAuthenticCapsule(path, wantDigest string) ([]byte, error) {
+	want := strings.ToLower(strings.TrimSpace(wantDigest))
+	if b, err := hex.DecodeString(want); err != nil || len(b) != sha256.Size {
+		return nil, fmt.Errorf("-expect-digest must be the 64-hex-character SHA-256 from the deposit record, got %q", wantDigest)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if got := sha256Hex(raw); got != want {
+		return nil, fmt.Errorf("capsule digest is %s, the deposit record says %s; refusing a capsule this server did not deposit", got, want)
+	}
+	return raw, nil
+}
+
+// restore is the one place in this server that combines custodian shares and opens a capsule
+// sealed to the suite key; the decrypt guard test pins that. It opens a private copy of raw,
+// so the file cannot change between its digest check and the open.
+func restore(raw []byte, targetDir, expectService string, shares []string, stdout io.Writer) error {
+	dir, err := os.MkdirTemp("", "kyidentity-restore-") // mode 0700
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "capsule.kycap")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		return err
+	}
+	return recoveryclient.Restore(path, targetDir, expectService, shares, stdout)
+}
+
+const restoreUsage = "Usage: kyidentity restore -capsule <file.kycap> -to <dir> -expect-digest <sha256> [-service <name>]\n\n" +
+	"-expect-digest is the capsule's digest from KyRecovery's deposit record (or the one\n" +
+	"export-capsule printed), checked before any share is read: anyone can seal a capsule to\n" +
+	"the public recovery key. Custodian shares are read from stdin, one ky2-... share per\n" +
+	"line, and never from the command line: argv is world-readable and lands in shell history.\n\n"
+
+func restoreCommand(args []string, stdin io.Reader, stdout, stderr io.Writer, prompt bool) error {
+	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	capsulePath := fs.String("capsule", "", "path to the .kycap file")
 	target := fs.String("to", "", "empty directory to restore into")
 	service := fs.String("service", "", restoreServiceHelp())
+	digest := fs.String("expect-digest", "", "SHA-256 of the capsule from KyRecovery's deposit record")
+	unauthenticated := fs.Bool("accept-unauthenticated-capsule", false, "restore without -expect-digest: whoever could write the capsule file chooses the restored administrators and keys")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "Usage: kyidentity restore -capsule <file.kycap> -to <dir> [-service <name>]\n\n"+
-			"Custodian shares are read from stdin, one ky2-... share per line, and never from\n"+
-			"the command line: argv is world-readable and lands in shell history.\n\n")
+		fmt.Fprint(stderr, restoreUsage)
 		fs.PrintDefaults()
 	}
-	_ = fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if *capsulePath == "" || *target == "" {
 		fs.Usage()
-		os.Exit(2)
+		return errors.New("-capsule and -to are required")
+	}
+	var raw []byte
+	var err error
+	switch {
+	case *digest != "" && *unauthenticated:
+		return errors.New("-expect-digest and -accept-unauthenticated-capsule contradict each other")
+	case *digest != "":
+		raw, err = readAuthenticCapsule(*capsulePath, *digest)
+	case *unauthenticated:
+		fmt.Fprintln(stderr, "WARNING: -accept-unauthenticated-capsule: this capsule's origin is unproven; anyone who could write it chose its administrators and keys.")
+		raw, err = os.ReadFile(*capsulePath)
+	default:
+		fs.Usage()
+		return errors.New("-expect-digest is required: take it from KyRecovery's deposit record for this capsule")
+	}
+	if err != nil {
+		return err
 	}
 	if *service == "" {
 		*service = os.Getenv("KYIDENTITY_APP_NAME")
@@ -634,23 +764,30 @@ func runRestore(args []string) {
 	if *service == "" {
 		*service = config.DefaultAppName
 	}
-	if stdinIsTerminal() {
-		fmt.Fprintln(os.Stderr, "Paste the custodian shares, one per line, then press Ctrl-D:")
+	if prompt {
+		fmt.Fprintln(stderr, "Paste the custodian shares, one per line, then press Ctrl-D:")
 	}
-	shares, err := recoveryclient.ReadShares(os.Stdin)
+	shares, err := recoveryclient.ReadShares(stdin)
 	if err != nil {
-		log.Fatalf("Reading shares: %v", err)
+		return fmt.Errorf("reading shares: %w", err)
 	}
 	if len(shares) == 0 {
-		log.Fatal("No shares read from stdin")
+		return errors.New("no shares read from stdin")
 	}
-	if err := restore(*capsulePath, *target, *service, shares, os.Stdout); err != nil {
+	if err := restore(raw, *target, *service, shares, stdout); err != nil {
+		return err
+	}
+	if err := writeRestoreMarker(*target, *capsulePath, *service, strings.ToLower(strings.TrimSpace(*digest))); err != nil {
+		return fmt.Errorf("restore unpacked but the restore marker could not be written (%v); the next start would treat the old sessions, tokens and queued deliveries as live", err)
+	}
+	fmt.Fprintln(stdout, "Restored. On first start the server invalidates the sessions, tokens and invitations this capsule contains and holds outbound provisioning until each connector is reconciled.")
+	return nil
+}
+
+func runRestore(args []string) {
+	if err := restoreCommand(args, os.Stdin, os.Stdout, os.Stderr, stdinIsTerminal()); err != nil {
 		log.Fatalf("Restore: %v", err)
 	}
-	if err := writeRestoreMarker(*target, *capsulePath, *service); err != nil {
-		log.Fatalf("Restore unpacked but the restore marker could not be written (%v); the next start would treat the old sessions, tokens and queued deliveries as live", err)
-	}
-	fmt.Fprintln(os.Stdout, "Restored. On first start the server invalidates the sessions, tokens and invitations this capsule contains and holds outbound provisioning until each connector is reconciled.")
 }
 
 func restoreServiceHelp() string {

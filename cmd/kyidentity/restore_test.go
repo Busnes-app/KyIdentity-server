@@ -73,13 +73,13 @@ func TestRestoreMarkerAppliesOnceAndIsThenGone(t *testing.T) {
 // otherwise start an empty directory that reports a successful restore.
 func TestRestoreMarkerNeedsARestoredDataDirectory(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeRestoreMarker(dir, "x.kycap", "KySignOn"); err == nil {
+	if err := writeRestoreMarker(dir, "x.kycap", "KySignOn", ""); err == nil {
 		t.Fatal("marked a target with no data directory as restored")
 	}
 	if err := os.Mkdir(filepath.Join(dir, "data"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeRestoreMarker(dir, "/tmp/x.kycap", "KySignOn"); err != nil {
+	if err := writeRestoreMarker(dir, "/tmp/x.kycap", "KySignOn", ""); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "data", restoreMarkerName))
