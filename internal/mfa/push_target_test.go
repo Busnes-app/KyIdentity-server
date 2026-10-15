@@ -36,6 +36,14 @@ func TestPushTokenRefreshMessageGoldenVectors(t *testing.T) {
 			want:     "kyidentity-push-token-v2|https://id.example.com|d-456|1791331200000|ubuntupush|2fc9f793cda3f150612f317c41b146738a3eba4b1dc16a80b43c5ec229552875|" + vectorP256dh + "|" + vectorAuth,
 		},
 		{
+			// KyAuth iOS asserts the same string, with the RFC 8291 section 5 receiver keys.
+			name: "fcm with keys", transport: "fcm", token: "fcm-token-1",
+			p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", auth: "BTBZMqHH6r4Tts7J_aSIgg",
+			tokenSHA: "3cfaa3f1d62d114805029366153fbb440a2d4e4b56406a04830579ac65db6a5c",
+			want: "kyidentity-push-token-v2|https://id.example.com|d-456|1791331200000|fcm|3cfaa3f1d62d114805029366153fbb440a2d4e4b56406a04830579ac65db6a5c|" +
+				"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4|BTBZMqHH6r4Tts7J_aSIgg",
+		},
+		{
 			name: "fcm", transport: "fcm", token: "fcm-token-1",
 			tokenSHA: "3cfaa3f1d62d114805029366153fbb440a2d4e4b56406a04830579ac65db6a5c",
 			want:     "kyidentity-push-token-v2|https://id.example.com|d-456|1791331200000|fcm|3cfaa3f1d62d114805029366153fbb440a2d4e4b56406a04830579ac65db6a5c||",
@@ -112,7 +120,10 @@ func TestRegistrationValidatesPushTarget(t *testing.T) {
 		{"auth 15 bytes", "unifiedpush", endpoint, p256dh, b64([]byte("0123456789abcde"))},
 		{"auth 17 bytes", "unifiedpush", endpoint, p256dh, b64([]byte("0123456789abcdefg"))},
 		{"auth missing", "unifiedpush", endpoint, p256dh, ""},
-		{"keys with fcm", "fcm", "fcm-token", p256dh, auth},
+		{"fcm p256dh only", "fcm", "fcm-token", p256dh, ""},
+		{"fcm auth only", "fcm", "fcm-token", "", auth},
+		{"fcm p256dh off curve", "fcm", "fcm-token", b64(offCurve), auth},
+		{"fcm auth 15 bytes", "fcm", "fcm-token", p256dh, b64([]byte("0123456789abcde"))},
 		{"auth with default transport", "", "fcm-token", "", auth},
 		{"unknown transport", "apns", "token", "", ""},
 		{"transport case", "UnifiedPush", endpoint, p256dh, auth},
@@ -140,6 +151,8 @@ func TestRegistrationValidatesPushTarget(t *testing.T) {
 	for _, tc := range []struct{ name, transport, token, p256dh, auth, want string }{
 		{"default fcm", "", "fcm-token", "", "", "fcm"},
 		{"fcm", "fcm", "fcm-token", "", "", "fcm"},
+		{"fcm with keys", "fcm", "fcm-token", p256dh, auth, "fcm"},
+		{"default fcm with keys", "", "fcm-token", p256dh, auth, "fcm"},
 		{"unifiedpush", "unifiedpush", endpoint, p256dh, auth, "unifiedpush"},
 		{"ubuntupush", "ubuntupush", "NQq1Ox+9Ah/lOM=:ubports_kyauth.-1", p256dh, auth, "ubuntupush"},
 		{"ubuntupush 512 bytes", "ubuntupush", strings.Repeat("A", 512), p256dh, auth, "ubuntupush"},

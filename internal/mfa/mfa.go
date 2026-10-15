@@ -301,7 +301,8 @@ type NativeDeviceRegisterRequest struct {
 	Platform         string `json:"platform,omitempty"`
 	PublicKey        string `json:"publicKey,omitempty"`
 	PushToken        string `json:"pushToken,omitempty"`
-	// PushTransport is fcm (default), unifiedpush or ubuntupush; the last two need the RFC 8291 keys.
+	// PushTransport is fcm (default), unifiedpush or ubuntupush; the last two need the RFC 8291
+	// keys, which are optional on fcm.
 	PushTransport string `json:"pushTransport,omitempty"`
 	PushP256dh    string `json:"pushP256dh,omitempty"`
 	PushAuth      string `json:"pushAuth,omitempty"`
@@ -625,16 +626,17 @@ var errInvalidPushTarget error = store.InputError("invalid push target")
 // transport. A UnifiedPush endpoint is device-chosen and server-contacted, so it gets the strict
 // device URL policy.
 // UnifiedPush and ubuntupush require RFC 8291 keys: payloads are never sent in plaintext.
+// On fcm (the relay) keys are optional; a device that sends them gets sealed pushes.
 func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, error) {
 	if pushToken == "" || len(pushToken) > MaxPushTokenBytes {
 		return "", errInvalidPushTarget
 	}
 	switch transport {
 	case "", store.PushTransportFCM:
-		if p256dh != "" || auth != "" {
-			return "", errInvalidPushTarget
+		if p256dh == "" && auth == "" {
+			return store.PushTransportFCM, nil
 		}
-		return store.PushTransportFCM, nil
+		transport = store.PushTransportFCM
 	case store.PushTransportUnifiedPush:
 		if netguard.ValidateDeviceURL(pushToken, "push endpoint") != nil {
 			return "", errInvalidPushTarget
@@ -671,7 +673,7 @@ func decodeBase64URL(s string) ([]byte, error) {
 }
 
 // PushTokenRefreshMessage builds the exact string a device signs to replace its push target.
-// p256dh and auth are the strings the device sent, empty for fcm.
+// p256dh and auth are the strings the device sent, empty when it has no keys.
 func PushTokenRefreshMessage(origin, deviceID string, issuedAtMS int64, transport, pushToken, p256dh, auth string) ([]byte, error) {
 	for _, f := range []string{origin, deviceID, transport} {
 		if f == "" {

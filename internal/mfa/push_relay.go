@@ -2,6 +2,7 @@ package mfa
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -207,6 +208,11 @@ func challengeData(dev store.NativeDevice, ch MFAChallengePush) map[string]strin
 	}
 }
 
+// relayRecordSize pads every sealed relay payload to 86+640 bytes, 968 base64url characters:
+// under the relay's 1024-character cap on one data value (MAX_DATA_VALUE_LENGTH), past which
+// it truncates.
+const relayRecordSize = 640
+
 func (s *RelaySender) SendPush(dev store.NativeDevice, ch MFAChallengePush) error {
 	endpoint, err := s.endpointFor(dev.Platform)
 	if err != nil {
@@ -215,12 +221,25 @@ func (s *RelaySender) SendPush(dev store.NativeDevice, ch MFAChallengePush) erro
 	if endpoint == nil {
 		return nil
 	}
+	data := challengeData(dev, ch)
+	if dev.PushP256dh != "" {
+		// The relay and the push provider then see only this ciphertext and the fixed alert.
+		plain, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		sealed, err := webPushEncrypt(plain, dev.PushP256dh, dev.PushAuth, relayRecordSize)
+		if err != nil {
+			return fmt.Errorf("relay push encrypt: %w", err)
+		}
+		data = map[string]string{"type": "mfa_challenge", "kyauth": base64.RawURLEncoding.EncodeToString(sealed)}
+	}
 	body, _ := json.Marshal(map[string]any{
 		"token":    dev.PushToken,
 		"title":    pushTitle,
 		"body":     pushBody,
 		"platform": dev.Platform,
-		"data":     challengeData(dev, ch),
+		"data":     data,
 	})
 	key := endpoint.currentKey()
 	err = s.send(endpoint.url, key, body, dev)
