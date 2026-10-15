@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { PairedSystem } from '../types';
 import { apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
+import { Modal } from './Modal';
 import { parseCreatedSystem, parsePairedSystems } from '../parsers';
 import {
   RefreshCw,
@@ -56,7 +57,8 @@ const PRESET_METADATA: Record<
 export const AdminSystems: React.FC = () => {
   const [deliverySystem, setDeliverySystem] = useState<PairedSystem | null>(null);
   const [provisioningSystem, setProvisioningSystem] = useState<PairedSystem | null>(null);
-  const [systems, setSystems] = useState<PairedSystem[]>([]);
+  const [systems, setSystems] = useState<PairedSystem[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
 
   // Modal State
   const [showPairModal, setShowPairModal] = useState(false);
@@ -79,8 +81,9 @@ export const AdminSystems: React.FC = () => {
   const fetchSystems = async () => {
     try {
       setSystems(await apiJson('/api/admin/systems', parsePairedSystems));
-    } catch {
-      // A failed refresh leaves the previous list on screen.
+      setListError(null);
+    } catch (err) {
+      setListError(errorMessage(err, 'Could not load connected services'));
     }
   };
 
@@ -219,6 +222,7 @@ export const AdminSystems: React.FC = () => {
           <span>Connect SCIM Target</span>
         </button>
       </div>
+      {listError && <div className="alert-box error" role="alert">{listError}<button className="secondary-btn sm" onClick={fetchSystems}>Retry</button></div>}
 
       {deliverySystem && <SyncDeliveries key={deliverySystem.id} system={deliverySystem} onClose={() => setDeliverySystem(null)} />}
       {provisioningSystem && <ProvisioningState key={provisioningSystem.id} system={provisioningSystem} onClose={() => setProvisioningSystem(null)} />}
@@ -235,14 +239,14 @@ export const AdminSystems: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {systems.length === 0 ? (
+            {systems?.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-5 text-muted">
                   No downstream SCIM products connected yet. Click <strong>"Connect SCIM Target"</strong> to connect a service.
                 </td>
               </tr>
             ) : (
-              systems.map((s) => (
+              systems?.map((s) => (
                 <tr key={s.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
@@ -349,152 +353,144 @@ export const AdminSystems: React.FC = () => {
 
       {/* Connect SCIM Target Modal */}
       {showPairModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>{editing ? 'Configure connection' : 'Connect service'}</h3>
-              <button className="close-btn" onClick={handleCloseModal}>
-                ×
-              </button>
-            </div>
+        <Modal title={editing ? 'Configure connection' : 'Connect service'} onClose={handleCloseModal}>
 
-            {createdToken ? (
-              <div className="modal-body text-center">
-                <div className="alert-box success">
-                  <CheckCircle size={16} />
-                  <span>SCIM Target connected successfully!</span>
-                </div>
-                <div className="form-group mt-3 text-left">
-                  <label className="form-label">Generated webhook signing secret</label>
-                  <div className="pin-box">
-                    <span className="pairing-token-text font-mono">{createdToken}</span>
-                    <button className="secondary-btn sm mt-2" onClick={copyCreatedToken}>
-                      {copied ? <Check size={13} /> : <Copy size={13} />}
-                      <span>{copied ? 'Copied Token' : 'Copy signing secret'}</span>
-                    </button>
-                  </div>
-                  <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.35rem', display: 'block' }}>
-                    Configure this secret in the downstream suite webhook verifier. KyIdentity signs requests and never sends the secret in Authorization.
-                  </span>
-                </div>
-                <div className="modal-footer mt-4">
-                  <button className="primary-btn" onClick={handleCloseModal}>
-                    Done
-                  </button>
-                </div>
+          {createdToken ? (
+            <div className="modal-body text-center">
+              <div className="alert-box success">
+                <CheckCircle size={16} />
+                <span>SCIM Target connected successfully!</span>
               </div>
-            ) : (
-              <form onSubmit={handleCreateSCIMTarget} className="modal-body">
-                {formError && <div className="alert-box error sm">{formError}</div>}
-
-                <div className="form-group">
-                  <label className="form-label">Product / Service Type</label>
-                  <select
-                    className="form-select"
-                    value={systemType}
-                    onChange={(e) => editing ? setSystemType(e.target.value) : handleTypeChange(e.target.value)}
-                    disabled={editing?.systemType === 'scim'}
-                    autoFocus
-                  >
-                    {editing && <option value="">Select the protocol used by this service</option>}
-                    {!editing && <>
-                    <option value="kypost">KyPost (IMAP Mail & Security)</option>
-                    <option value="kypasswords">KyPasswords (Password Vault)</option>
-                    <option value="kybookmarks">KyBookmarks (Encrypted Bookmarks)</option>
-                    <option value="kynotes">KyNotes (Encrypted Notes)</option>
-                    </>}
-                    <option value="scim">Generic SCIM 2.0 (Nextcloud, OwnCloud, etc.)</option>
-                    <option value="suite_webhook">Custom signed suite webhook</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Target Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. KyPost Mail Server"
-                    disabled={editing !== null}
-                    value={targetName}
-                    onChange={(e) => setTargetName(e.target.value)}
-                    required
-                    autoFocus
-                  />
-                </div>
-
-                {isCustomOrGeneric && !editing && (
-                  <>
-                    <div className="form-group">
-                      <label className="form-label">Description (Optional)</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g. Self-hosted storage & productivity suite"
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Custom Icon / Image URL (Optional)</label>
-                      <input
-                        type="url"
-                        className="form-input font-mono"
-                        placeholder="https://example.com/logo.svg"
-                        value={iconUrl}
-                        onChange={(e) => setIconUrl(e.target.value)}
-                      />
-                    </div>
-                  </>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label">{systemType === 'scim' ? 'SCIM Base URL' : 'Signed webhook URL'}</label>
-                  <input
-                    type="url"
-                    className="form-input font-mono"
-                    placeholder="https://mail.example.com/scim/v2"
-                    disabled={editing !== null}
-                    value={callbackUrl}
-                    onChange={(e) => setCallbackUrl(e.target.value)}
-                    required
-                  />
-                  <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
-                    {systemType === 'scim' ? 'Uses the target’s user IDs for updates and deactivation. Requires externalId filtering, PUT, and PATCH support.' : 'Sends signed SCIM user bodies to this exact webhook URL.'}
-                  </span>
-                </div>
-
-                {systemType === 'scim' && <div className="form-group">
-                  <label className="form-label" htmlFor="scim-bearer">Bearer token issued by the target service</label>
-                  <input id="scim-bearer" className="form-input" type="password" autoComplete="new-password" value={bearerToken} onChange={(e) => setBearerToken(e.target.value)} required={editing?.systemType !== 'scim'} maxLength={8192} />
-                  <span className="muted">{editing?.systemType === 'scim' ? 'Leave blank to keep the current token.' : 'Stored encrypted. The saved token is never displayed.'}</span>
-                </div>}
-                {systemType === 'scim' && <div className="form-group">
-                  <label><input type="checkbox" checked={groups} onChange={(e) => setGroups(e.target.checked)} /> Deliver SCIM Groups: assigned groups and their in-scope members</label>
-                  <span className="muted">Only for targets that support the Groups resource. Turning this off leaves remote groups in place.</span>
-                </div>}
-                {systemType === 'scim' && <div className="form-group">
-                  <label className="form-label" htmlFor="scim-reconcile">Scheduled repair every N hours (0 = off)</label>
-                  <input id="scim-reconcile" className="form-input" type="number" min={0} max={720} step={1} value={reconcileHours} onChange={(e) => setReconcileHours(Math.min(720, Math.max(0, Math.trunc(Number(e.target.value) || 0))))} />
-                  <span className="muted">Each run lists the target's Users (and Groups when enabled), compares managed accounts with effective access, and queues repairs. An incomplete listing never deactivates anyone.</span>
-                </div>}
-                <div className="alert-box info sm" style={{ marginBottom: '1.25rem' }}>
-                  <Key size={14} />
-                  <span>{systemType === 'scim' ? 'Use an HTTPS SCIM base URL and the service’s provisioning token.' : editing ? 'The existing webhook signing secret will be retained.' : 'KyIdentity generates a signing secret shown once after connection.'}</span>
-                </div>
-
-                <div className="modal-footer">
-                  <button type="button" className="secondary-btn" onClick={handleCloseModal}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="primary-btn" disabled={submitting || !systemType}>
-                    {submitting ? <RefreshCw className="spin" size={14} /> : <span>{editing ? 'Save connection' : 'Connect service'}</span>}
+              <div className="form-group mt-3 text-left">
+                <label className="form-label">Generated webhook signing secret</label>
+                <div className="pin-box">
+                  <span className="pairing-token-text font-mono">{createdToken}</span>
+                  <button className="secondary-btn sm mt-2" onClick={copyCreatedToken}>
+                    {copied ? <Check size={13} /> : <Copy size={13} />}
+                    <span>{copied ? 'Copied Token' : 'Copy signing secret'}</span>
                   </button>
                 </div>
-              </form>
-            )}
-          </div>
-        </div>
+                <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.35rem', display: 'block' }}>
+                  Configure this secret in the downstream suite webhook verifier. KyIdentity signs requests and never sends the secret in Authorization.
+                </span>
+              </div>
+              <div className="modal-footer mt-4">
+                <button className="primary-btn" onClick={handleCloseModal}>
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleCreateSCIMTarget} className="modal-body">
+              {formError && <div className="alert-box error sm">{formError}</div>}
+
+              <div className="form-group">
+                <label className="form-label">Product / Service Type</label>
+                <select
+                  className="form-select"
+                  value={systemType}
+                  onChange={(e) => editing ? setSystemType(e.target.value) : handleTypeChange(e.target.value)}
+                  disabled={editing?.systemType === 'scim'}
+                  autoFocus
+                >
+                  {editing && <option value="">Select the protocol used by this service</option>}
+                  {!editing && <>
+                  <option value="kypost">KyPost (IMAP Mail & Security)</option>
+                  <option value="kypasswords">KyPasswords (Password Vault)</option>
+                  <option value="kybookmarks">KyBookmarks (Encrypted Bookmarks)</option>
+                  <option value="kynotes">KyNotes (Encrypted Notes)</option>
+                  </>}
+                  <option value="scim">Generic SCIM 2.0 (Nextcloud, OwnCloud, etc.)</option>
+                  <option value="suite_webhook">Custom signed suite webhook</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Target Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. KyPost Mail Server"
+                  disabled={editing !== null}
+                  value={targetName}
+                  onChange={(e) => setTargetName(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              {isCustomOrGeneric && !editing && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Description (Optional)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Self-hosted storage & productivity suite"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Custom Icon / Image URL (Optional)</label>
+                    <input
+                      type="url"
+                      className="form-input font-mono"
+                      placeholder="https://example.com/logo.svg"
+                      value={iconUrl}
+                      onChange={(e) => setIconUrl(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">{systemType === 'scim' ? 'SCIM Base URL' : 'Signed webhook URL'}</label>
+                <input
+                  type="url"
+                  className="form-input font-mono"
+                  placeholder="https://mail.example.com/scim/v2"
+                  disabled={editing !== null}
+                  value={callbackUrl}
+                  onChange={(e) => setCallbackUrl(e.target.value)}
+                  required
+                />
+                <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
+                  {systemType === 'scim' ? 'Uses the target’s user IDs for updates and deactivation. Requires externalId filtering, PUT, and PATCH support.' : 'Sends signed SCIM user bodies to this exact webhook URL.'}
+                </span>
+              </div>
+
+              {systemType === 'scim' && <div className="form-group">
+                <label className="form-label" htmlFor="scim-bearer">Bearer token issued by the target service</label>
+                <input id="scim-bearer" className="form-input" type="password" autoComplete="new-password" value={bearerToken} onChange={(e) => setBearerToken(e.target.value)} required={editing?.systemType !== 'scim'} maxLength={8192} />
+                <span className="muted">{editing?.systemType === 'scim' ? 'Leave blank to keep the current token.' : 'Stored encrypted. The saved token is never displayed.'}</span>
+              </div>}
+              {systemType === 'scim' && <div className="form-group">
+                <label><input type="checkbox" checked={groups} onChange={(e) => setGroups(e.target.checked)} /> Deliver SCIM Groups: assigned groups and their in-scope members</label>
+                <span className="muted">Only for targets that support the Groups resource. Turning this off leaves remote groups in place.</span>
+              </div>}
+              {systemType === 'scim' && <div className="form-group">
+                <label className="form-label" htmlFor="scim-reconcile">Scheduled repair every N hours (0 = off)</label>
+                <input id="scim-reconcile" className="form-input" type="number" min={0} max={720} step={1} value={reconcileHours} onChange={(e) => setReconcileHours(Math.min(720, Math.max(0, Math.trunc(Number(e.target.value) || 0))))} />
+                <span className="muted">Each run lists the target's Users (and Groups when enabled), compares managed accounts with effective access, and queues repairs. An incomplete listing never deactivates anyone.</span>
+              </div>}
+              <div className="alert-box info sm" style={{ marginBottom: '1.25rem' }}>
+                <Key size={14} />
+                <span>{systemType === 'scim' ? 'Use an HTTPS SCIM base URL and the service’s provisioning token.' : editing ? 'The existing webhook signing secret will be retained.' : 'KyIdentity generates a signing secret shown once after connection.'}</span>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="secondary-btn" onClick={handleCloseModal}>
+                  Cancel
+                </button>
+                <button type="submit" className="primary-btn" disabled={submitting || !systemType}>
+                  {submitting ? <RefreshCw className="spin" size={14} /> : <span>{editing ? 'Save connection' : 'Connect service'}</span>}
+                </button>
+              </div>
+            </form>
+          )}
+        </Modal>
       )}
     </div>
   );

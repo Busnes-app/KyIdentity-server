@@ -16,7 +16,7 @@ func rolesFixture(t *testing.T) (*Store, *User, AppRecord, AppRecord) {
 	u := createTestUser(t, s)
 	var apps []AppRecord
 	for _, id := range []string{"billing", "hr"} {
-		if err := s.CreateOAuthClient(&OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}); err != nil {
+		if err := s.CreateOAuthClient(&OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://example.com/cb"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}, nil); err != nil {
 			t.Fatal(err)
 		}
 		rows, _, err := s.ListAppRecords(id, 25, 0)
@@ -224,7 +224,7 @@ func TestAppRolesReachProvisioningAndDeletingARoleRevokesIt(t *testing.T) {
 		t.Fatalf("role survived deletion: %+v", roles)
 	}
 	// Apps with roles cannot be linked or unlinked until the roles are removed.
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "portal", ClientName: "Portal", ClientType: "public", RedirectURIsJSON: `["https://p/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "portal", ClientName: "Portal", ClientType: "public", RedirectURIsJSON: `["https://p/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreateAppRole(appID, "again", "", nil); err != nil {

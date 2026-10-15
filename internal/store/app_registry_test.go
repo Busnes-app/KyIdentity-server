@@ -9,13 +9,13 @@ import (
 
 func registryFixtures(t *testing.T, s *Store) (AppRecord, AppRecord, AppRecord) {
 	t.Helper()
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "Same app", ClientType: "confidential", ClientSecretHash: "keep-secret", RedirectURIsJSON: `["https://app.example/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "client", ClientName: "Same app", ClientType: "confidential", ClientSecretHash: "keep-secret", RedirectURIsJSON: `["https://app.example/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateApplication(&Application{ID: "launcher", Name: "Same app", URL: "https://app.example", IconName: "globe", Enabled: true}); err != nil {
+	if err := s.CreateApplication(&Application{ID: "launcher", Name: "Same app", URL: "https://app.example", IconName: "globe", Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "system", Name: "Same app", SystemType: "scim", CallbackURL: "https://app.example/scim", HMACSecretEncrypted: "keep-sync-secret", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "system", Name: "Same app", SystemType: "scim", CallbackURL: "https://app.example/scim", HMACSecretEncrypted: "keep-sync-secret", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, total, err := s.ListAppRecords("", 25, 0)
@@ -131,7 +131,7 @@ func TestAppRegistryMigrationAndLinkLifecycle(t *testing.T) {
 		t.Fatal("empty identity survived", err)
 	}
 	// Insert trigger still creates a fresh record after migration and explicit links.
-	if err := s.CreateApplication(&Application{ID: "new", Name: "New", URL: "https://example.com", IconName: "globe"}); err != nil {
+	if err := s.CreateApplication(&Application{ID: "new", Name: "New", URL: "https://example.com", IconName: "globe"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, total, err = s.ListAppRecords("", 1, 1)
@@ -203,7 +203,7 @@ func TestAppRegistryConflictConcurrencyAndAuditRollback(t *testing.T) {
 	if _, err = s.db.Exec("DROP TRIGGER fail_registry_audit"); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.CreateApplication(&Application{ID: "other", Name: "Other", URL: "https://other.example", IconName: "globe"}); err != nil {
+	if err = s.CreateApplication(&Application{ID: "other", Name: "Other", URL: "https://other.example", IconName: "globe"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, _, err = s.ListAppRecords("Other", 25, 0)

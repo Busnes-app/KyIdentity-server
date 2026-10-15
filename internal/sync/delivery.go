@@ -7,13 +7,16 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync/atomic"
 )
 
-// A transport error, server error, or asynchronous acceptance of a mutation may
-// mean the server is still writing. A successful read does not settle that write.
-// The tracker belongs to one synchronous delivery, including its cloned SCIM client.
+// Once a mutation's headers are written, a transport error, server error, or
+// asynchronous acceptance may mean the server is still writing. A request that never
+// got that far (DNS, refused dial, TLS) cannot have been applied. A successful read
+// does not settle that write. The tracker belongs to one synchronous delivery,
+// including its cloned SCIM client.
 type deliveryTransport struct {
 	base      http.RoundTripper
 	uncertain atomic.Bool
@@ -25,17 +28,18 @@ func (t *deliveryTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		// Preserve the wire idempotency key, but do not let net/http replay a
 		// mutation internally after a lost response on a reused connection.
 		// The persisted delivery attempt must see that uncertainty first.
-		req = req.Clone(req.Context())
+		trace := &httptrace.ClientTrace{WroteHeaders: func() { t.uncertain.Store(true) }}
+		req = req.Clone(httptrace.WithClientTrace(req.Context(), trace))
 		req.GetBody = nil
 		if req.Body == nil || req.Body == http.NoBody {
 			req.Body = io.NopCloser(http.NoBody)
 		}
-		t.uncertain.Store(true)
 	}
 	resp, err := t.base.RoundTrip(req)
 	if mutation && err == nil {
+		// 429 and 503 refuse the request before applying it; they back off like 4xx.
 		code := resp.StatusCode
-		if code == 200 || code == 201 || code == 204 || (code >= 400 && code < 500 && code != 408) {
+		if code == 200 || code == 201 || code == 204 || code == 503 || (code >= 400 && code < 500 && code != 408) {
 			t.uncertain.Store(false)
 		}
 	}

@@ -45,7 +45,7 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Optional body; absent or empty means the device may sign on.
+	// Optional body; absent or empty means the device may not sign on.
 	var body struct {
 		SignOn *bool `json:"signOn"`
 	}
@@ -53,14 +53,15 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
-	signOn := body.SignOn == nil || *body.SignOn
+	signOn := body.SignOn != nil && *body.SignOn
 
 	if err := consumeStepUp(h.store, r); err != nil {
 		writeStepUpError(w, err)
 		return
 	}
 
-	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID, signOn)
+	generated := h.audit.Prepare("device.pairing_token_generated", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"signOn": signOn})
+	token, pin, expiresAt, err := h.mfaEngine.GenerateDevicePairingToken(user.ID, signOn, generated.Row)
 	if err != nil {
 		log.Printf("device pairing token creation failed for user %s: %v", user.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -80,7 +81,7 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 	}
 	qrBytes, _ := json.Marshal(qrPayload)
 
-	h.audit.Record("device.pairing_token_generated", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"signOn": signOn})
+	generated.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -100,19 +101,22 @@ func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	dev, err := h.mfaEngine.RegisterNativeDevice(&req)
+	var registered *audit.Pending
+	dev, err := h.mfaEngine.RegisterNativeDevice(&req, func(dev *store.NativeDevice) *store.AuditEvent {
+		registered = h.audit.Prepare("device.registered", dev.UserID, "", dev.ID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
+			"deviceName":        dev.DeviceName,
+			"attestedLevel":     dev.AttestedLevel,
+			"bootState":         dev.BootState,
+			"attestationReason": dev.AttestationReason,
+			"pushTransport":     dev.PushTransport,
+		})
+		return registered.Row
+	})
 	if err != nil {
-		http.Error(w, `{"error":"registration_failed","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeInputError(w, "registration_failed", err)
 		return
 	}
-
-	h.audit.Record("device.registered", dev.UserID, "", dev.ID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"deviceName":        dev.DeviceName,
-		"attestedLevel":     dev.AttestedLevel,
-		"bootState":         dev.BootState,
-		"attestationReason": dev.AttestationReason,
-		"pushTransport":     dev.PushTransport,
-	})
+	registered.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -213,36 +217,28 @@ func (h *DeviceHandler) ListUserDevices(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(map[string]any{"devices": devices})
 }
 
-// DeleteUserDevice deletes a device.
+// DeleteUserDevice deletes a device. Removing a factor costs a step-up grant, as for passkeys.
 func (h *DeviceHandler) DeleteUserDevice(w http.ResponseWriter, r *http.Request) {
 	user := GetUserFromContext(r.Context())
 	if user == nil {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+	if err := consumeStepUp(h.store, r); err != nil {
+		writeStepUpError(w, err)
+		return
+	}
 
 	deviceID := r.PathValue("id")
-	if deviceID == "" {
-		http.Error(w, `{"error":"device_id_required"}`, http.StatusBadRequest)
-		return
+	deleted := h.audit.Prepare("device.deleted", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if !deviceChangeFailed(w, h.store.DeleteNativeDevice(deviceID, user.ID, deleted.Row)) {
+		deleted.Committed()
+		writeDeviceSuccess(w)
 	}
-
-	if err := h.store.DeleteNativeDevice(deviceID, user.ID); err != nil {
-		if errors.Is(err, store.ErrLastCompliantFactor) {
-			enrollmentError(w, err)
-			return
-		}
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
-	}
-
-	h.audit.Record("device.deleted", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
-// SetDeviceMFAApprover enables/disables a device as an MFA approver.
+// SetDeviceMFAApprover enables/disables a device as an MFA approver. Either direction
+// changes which phone can approve sign-ins, so it costs a step-up grant.
 func (h *DeviceHandler) SetDeviceMFAApprover(w http.ResponseWriter, r *http.Request) {
 	user := GetUserFromContext(r.Context())
 	if user == nil {
@@ -254,25 +250,24 @@ func (h *DeviceHandler) SetDeviceMFAApprover(w http.ResponseWriter, r *http.Requ
 	var req struct {
 		IsMFAApprover bool `json:"isMfaApprover"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
-
-	if err := h.store.SetNativeDeviceMFAApprover(deviceID, user.ID, req.IsMFAApprover); err != nil {
-		if errors.Is(err, store.ErrLastCompliantFactor) {
-			enrollmentError(w, err)
-			return
-		}
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+	if err := consumeStepUp(h.store, r); err != nil {
+		writeStepUpError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	changed := h.audit.Prepare("device.mfa_approver_changed", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"isMfaApprover": req.IsMFAApprover})
+	if !deviceChangeFailed(w, h.store.SetNativeDeviceMFAApprover(deviceID, user.ID, req.IsMFAApprover, changed.Row)) {
+		changed.Committed()
+		writeDeviceSuccess(w)
+	}
 }
 
-// SetDeviceSignOn enables/disables a device as a sign-on device.
+// SetDeviceSignOn enables/disables a device as a sign-on device. Both directions cost a
+// step-up grant: one rule is simpler to reason about than a per-direction one.
 func (h *DeviceHandler) SetDeviceSignOn(w http.ResponseWriter, r *http.Request) {
 	user := GetUserFromContext(r.Context())
 	if user == nil {
@@ -283,28 +278,44 @@ func (h *DeviceHandler) SetDeviceSignOn(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		CanSignOn bool `json:"canSignOn"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
-	err := h.store.SetNativeDeviceCanSignOn(deviceID, user.ID, req.CanSignOn)
-	outcome := "success"
-	if err != nil {
-		outcome = "failure"
+	if err := consumeStepUp(h.store, r); err != nil {
+		writeStepUpError(w, err)
+		return
 	}
-	h.audit.Record("device.sign_on_changed", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), outcome, map[string]any{"canSignOn": req.CanSignOn})
-	if errors.Is(err, sql.ErrNoRows) {
+
+	details := map[string]any{"canSignOn": req.CanSignOn}
+	changed := h.audit.Prepare("device.sign_on_changed", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
+	err := h.store.SetNativeDeviceCanSignOn(deviceID, user.ID, req.CanSignOn, changed.Row)
+	if deviceChangeFailed(w, err) {
+		h.audit.Observe("device.sign_on_changed", user.ID, user.Username, deviceID, "device", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
+		return
+	}
+	changed.Committed()
+	writeDeviceSuccess(w)
+}
+
+// deviceChangeFailed writes the error response for a failed device mutation.
+func deviceChangeFailed(w http.ResponseWriter, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, sql.ErrNoRows):
 		http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
-		return
-	}
-	if errors.Is(err, store.ErrDeviceNotApprover) {
+	case errors.Is(err, store.ErrDeviceNotApprover):
 		http.Error(w, `{"error":"device_not_approver"}`, http.StatusConflict)
-		return
-	}
-	if err != nil {
+	case errors.Is(err, store.ErrLastCompliantFactor):
+		enrollmentError(w, err)
+	default:
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
 	}
+	return true
+}
+
+func writeDeviceSuccess(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

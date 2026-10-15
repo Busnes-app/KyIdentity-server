@@ -171,7 +171,7 @@ func calculateTOTPCode(secret []byte, counter int64) string {
 
 // SaveUserTOTP encrypts and saves a user's TOTP secret.
 func (e *Engine) SaveUserTOTP(userID, secretBase32 string, audit *store.AuditEvent) error {
-	encrypted, err := crypto.EncryptAESGCM(e.encryptionKey, []byte(secretBase32))
+	encrypted, err := crypto.Seal(e.encryptionKey, store.SealTOTP, userID, []byte(secretBase32))
 	if err != nil {
 		return fmt.Errorf("failed to encrypt TOTP secret: %w", err)
 	}
@@ -197,7 +197,7 @@ func (e *Engine) VerifyUserTOTP(userID, code string) (bool, error) {
 		return false, errors.New("TOTP not enrolled for this user")
 	}
 
-	decrypted, err := crypto.DecryptAESGCM(e.encryptionKey, method.EncryptedSecret)
+	decrypted, err := crypto.Open(e.encryptionKey, store.SealTOTP, method.UserID, method.EncryptedSecret)
 	if err != nil {
 		return false, fmt.Errorf("failed to decrypt TOTP secret: %w", err)
 	}
@@ -231,7 +231,7 @@ func (e *Engine) GenerateRecoveryCodes(userID string, audit *store.AuditEvent) (
 		recoveryCodes = append(recoveryCodes, store.RecoveryCode{
 			ID:       uuid.New().String(),
 			UserID:   userID,
-			CodeHash: crypto.HashSHA256(strings.ToUpper(strings.ReplaceAll(code, "-", ""))),
+			CodeHash: e.recoveryCodeHash(userID, normalizeRecoveryCode(code)),
 		})
 	}
 
@@ -242,16 +242,28 @@ func (e *Engine) GenerateRecoveryCodes(userID string, audit *store.AuditEvent) (
 	return plainCodes, nil
 }
 
-// VerifyAndConsumeRecoveryCode validates and consumes a recovery code.
-func (e *Engine) VerifyAndConsumeRecoveryCode(userID, code string) (bool, error) {
-	normalized := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
-	codeHash := crypto.HashSHA256(normalized)
-
-	return e.store.ConsumeRecoveryCode(userID, codeHash)
+func normalizeRecoveryCode(code string) string {
+	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
 }
 
-// GenerateDevicePairingToken generates a 90s ephemeral PIN & token for registering a native mobile device.
-func (e *Engine) GenerateDevicePairingToken(userID string, signOn bool) (token string, pin string, expiresAt time.Time, err error) {
+// recoveryCodeHash keys the hash to this server's key and the user: a code holds only 40
+// bits, which a bare SHA-256 from a leaked database gives up in seconds.
+func (e *Engine) recoveryCodeHash(userID, normalized string) string {
+	key := crypto.DeriveKey(e.encryptionKey, "kyidentity:recovery-code")
+	return store.RecoveryCodeHMACPrefix + crypto.SignHMACSHA256(key, []byte(userID+"|"+normalized))
+}
+
+// VerifyAndConsumeRecoveryCode validates and consumes a recovery code. Codes issued before
+// keyed hashing still redeem until the user regenerates (store.HasLegacyRecoveryCodes).
+// A spent code commits with audit.
+func (e *Engine) VerifyAndConsumeRecoveryCode(userID, code string, audit *store.AuditEvent) (bool, error) {
+	normalized := normalizeRecoveryCode(code)
+	return e.store.ConsumeRecoveryCode(userID, e.recoveryCodeHash(userID, normalized), crypto.HashSHA256(normalized), audit)
+}
+
+// GenerateDevicePairingToken generates a 90s ephemeral PIN & token for registering a native
+// mobile device, committing audit with the token.
+func (e *Engine) GenerateDevicePairingToken(userID string, signOn bool, audit *store.AuditEvent) (token string, pin string, expiresAt time.Time, err error) {
 	rawToken, err := crypto.GenerateRandomHex(24)
 	if err != nil {
 		return "", "", time.Time{}, err
@@ -273,7 +285,7 @@ func (e *Engine) GenerateDevicePairingToken(userID string, signOn bool) (token s
 		ExpiresAt: expiresAt,
 	}
 
-	if err := e.store.CreateDevicePairingToken(item); err != nil {
+	if err := e.store.CreateDevicePairingToken(item, audit); err != nil {
 		return "", "", time.Time{}, err
 	}
 
@@ -305,12 +317,13 @@ type NativeDeviceRegisterRequest struct {
 //
 // A device must present a usable P-256 public key. Pairing one without a key enrols push
 // MFA that no response can ever satisfy, which locks the user out of every later login.
-func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.NativeDevice, error) {
+// audit builds the audit row from the stored device; it commits with the enrolment.
+func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest, audit func(*store.NativeDevice) *store.AuditEvent) (*store.NativeDevice, error) {
 	if req.PublicKey == "" {
-		return nil, errors.New("a device public key is required to pair an authenticator")
+		return nil, store.InputError("a device public key is required to pair an authenticator")
 	}
 	if strings.TrimSpace(req.PushToken) == "" {
-		return nil, errors.New("a push token is required to pair an authenticator")
+		return nil, store.InputError("a push token is required to pair an authenticator")
 	}
 	transport, err := ValidatePushTarget(req.PushTransport, strings.TrimSpace(req.PushToken), req.PushP256dh, req.PushAuth)
 	if err != nil {
@@ -324,7 +337,7 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 		return nil, errInvalidPushTarget
 	}
 	if _, err := crypto.ParseP256PublicKey(req.PublicKey); err != nil {
-		return nil, fmt.Errorf("device public key is not a valid P-256 key: %w", err)
+		return nil, store.InputError("device public key is not a valid P-256 key")
 	}
 
 	var validToken *store.DevicePairingToken
@@ -333,18 +346,18 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 	case req.PairingToken != "":
 		validToken, err = e.store.GetValidDevicePairingToken(crypto.HashSHA256(req.PairingToken))
 	case req.PINCode != "" && req.UserID != "":
-		validToken, err = e.store.GetDevicePairingTokenByUserPIN(req.UserID, crypto.HashSHA256(req.PINCode))
+		validToken, err = e.store.MatchDevicePairingPIN(req.UserID, crypto.HashSHA256(req.PINCode))
 	case req.PINCode != "":
-		return nil, errors.New("a userId is required when pairing with a PIN")
+		return nil, store.InputError("a userId is required when pairing with a PIN")
 	default:
-		return nil, errors.New("pairingToken or pinCode is required")
+		return nil, store.InputError("pairingToken or pinCode is required")
 	}
 
 	if err != nil {
 		return nil, err
 	}
 	if validToken == nil {
-		return nil, errors.New("invalid or expired pairing token")
+		return nil, store.InputError("invalid or expired pairing token")
 	}
 
 	name := req.DeviceName
@@ -373,12 +386,12 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest) (*store.
 		UserID:     validToken.UserID,
 		MethodType: "push",
 		IsPrimary:  false,
-	})
+	}, audit)
 	if err != nil {
 		return nil, err
 	}
 	if !enrolled {
-		return nil, errors.New("pairing token has already been redeemed or expired")
+		return nil, store.InputError("pairing token has already been redeemed or expired")
 	}
 	return device, nil
 }
@@ -414,7 +427,7 @@ func normalizeDevicePlatform(platform string) (string, error) {
 	case "ios", "macos", "linux":
 		return strings.ToLower(strings.TrimSpace(platform)), nil
 	default:
-		return "", errors.New("unsupported device platform")
+		return "", store.InputError("unsupported device platform")
 	}
 }
 
@@ -439,7 +452,12 @@ func randomMatchNumber() (int, error) {
 	return int(n.Int64()) + 10, nil
 }
 
-// CreatePushChallenge creates a push challenge with a 2-digit match and 3 decoys.
+// ErrPushPending means the user already has a live login push. Sharing it with a second
+// login would let one approval sign in both, so no new push is sent until it settles.
+var ErrPushPending = errors.New("a login push is already pending")
+
+// CreatePushChallenge creates a push challenge with a 2-digit match and 3 decoys. A user
+// has at most one pending login push (ErrPushPending).
 func (e *Engine) CreatePushChallenge(userID, purpose string) (*store.MFAChallenge, error) {
 	if purpose != "login" && purpose != "step_up" {
 		return nil, errors.New("unknown push purpose")
@@ -486,7 +504,15 @@ func (e *Engine) CreatePushChallenge(userID, purpose string) (*store.MFAChalleng
 		ExpiresAt: time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second),
 	}
 
-	if err := e.store.CreateMFAChallenge(challenge); err != nil {
+	if purpose == "login" {
+		created, err := e.store.CreateLoginPushChallenge(challenge)
+		if err != nil {
+			return nil, err
+		}
+		if !created {
+			return nil, ErrPushPending
+		}
+	} else if err := e.store.CreateMFAChallenge(challenge); err != nil {
 		return nil, err
 	}
 
@@ -594,10 +620,11 @@ const MaxPushTokenBytes = 4096
 // ubuntuPushToken is a Lomiri PushClient token.
 var ubuntuPushToken = regexp.MustCompile(`^[A-Za-z0-9+/=_.:-]{1,512}$`)
 
-var errInvalidPushTarget = errors.New("invalid push target")
+var errInvalidPushTarget error = store.InputError("invalid push target")
 
 // ValidatePushTarget checks a device's push address and keys, and returns the effective
-// transport. A UnifiedPush endpoint is server-contacted, so it gets the outbound URL policy.
+// transport. A UnifiedPush endpoint is device-chosen and server-contacted, so it gets the strict
+// device URL policy.
 // UnifiedPush and ubuntupush require RFC 8291 keys: payloads are never sent in plaintext.
 // On fcm (the relay) keys are optional; a device that sends them gets sealed pushes.
 func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, error) {
@@ -611,7 +638,7 @@ func ValidatePushTarget(transport, pushToken, p256dh, auth string) (string, erro
 		}
 		transport = store.PushTransportFCM
 	case store.PushTransportUnifiedPush:
-		if u, err := url.Parse(pushToken); err != nil || u.Scheme != "https" || netguard.ValidateURL(pushToken, "push endpoint") != nil {
+		if netguard.ValidateDeviceURL(pushToken, "push endpoint") != nil {
 			return "", errInvalidPushTarget
 		}
 	case store.PushTransportUbuntuPush:
@@ -799,9 +826,17 @@ func (e *Engine) IssueMFATokenForInteraction(userID, challengeID string, primary
 // Without it, one token allows unlimited guesses for its whole five-minute lifetime.
 const MaxMFAAttempts = 5
 
-// RegisterMFAFailure counts a wrong second-factor guess against the token.
-func (e *Engine) RegisterMFAFailure(tokenID string) (int, error) {
-	return e.store.RecordMFAFailure(tokenID)
+// ErrMFAAttemptsExhausted means the token has no attempt left to spend.
+var ErrMFAAttemptsExhausted = errors.New("mfa token has no attempts left")
+
+// ReserveMFAAttempt spends one attempt before the proof is checked, so parallel guesses
+// on one token cannot exceed MaxMFAAttempts. It returns the attempts used so far.
+func (e *Engine) ReserveMFAAttempt(tokenID string) (int, error) {
+	n, err := e.store.ReserveMFAAttempt(tokenID, MaxMFAAttempts)
+	if err == nil && n == 0 {
+		err = ErrMFAAttemptsExhausted
+	}
+	return n, err
 }
 
 // ValidateMFAToken resolves a raw token to its stored record without consuming it.

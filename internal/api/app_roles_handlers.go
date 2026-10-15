@@ -13,7 +13,7 @@ func writeAppRoleError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrAppRoleExists):
 		http.Error(w, `{"error":"role_exists","error_description":"A role with that name already exists for this app"}`, http.StatusConflict)
 	case errors.Is(err, store.ErrAppRoleInvalid):
-		http.Error(w, `{"error":"invalid_request","error_description":"`+store.ErrAppRoleInvalid.Error()+`"}`, http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", store.ErrAppRoleInvalid.Error())
 	default:
 		writeAppRegistryError(w, err)
 	}

@@ -1,30 +1,31 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
  * The step-up prompt is opened from inside a feature modal that stays mounted — Register
- * Client asks for a grant without closing its own form. Both use `.modal-backdrop`, which
- * covers the viewport opaquely, so if the prompt does not outrank the modal it is buried:
- * invisible, unclickable, and the grant promise never settles. The action silently does
- * nothing.
+ * Client asks for a grant without closing its own form. If the prompt does not stack above
+ * that modal it is buried: invisible, unclickable, and the grant promise never settles.
+ * Modal.tsx opens with showModal(), whose top layer stacks the later dialog on top whatever
+ * the z-index, so every modal has to go through it.
  */
-const css = readFileSync(new URL('./index.css', import.meta.url), 'utf8');
-const stepUp = readFileSync(new URL('./components/StepUpPrompt.tsx', import.meta.url), 'utf8');
+const components = new URL('./components/', import.meta.url);
+const source = (name: string) => readFileSync(new URL(name, components), 'utf8');
 
-function zIndexOf(selector: string): number {
-  const rule = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(css);
-  expect(rule, `${selector} has no rule in index.css`).not.toBeNull();
-  const z = /z-index:\s*(\d+)/.exec(rule![1]);
-  expect(z, `${selector} declares no z-index`).not.toBeNull();
-  return Number(z![1]);
-}
+const unmigrated = new Set(['Modal.tsx']);
 
-describe('step-up prompt stacking', () => {
-  it('carries the raised backdrop class', () => {
-    expect(stepUp).toContain('className="modal-backdrop step-up-backdrop"');
+describe('modal stacking', () => {
+  it('opens modals in the top layer', () => {
+    expect(source('Modal.tsx')).toContain('.showModal()');
   });
 
-  it('outranks the modals it is opened from', () => {
-    expect(zIndexOf('.step-up-backdrop')).toBeGreaterThan(zIndexOf('.modal-backdrop'));
+  it('renders the step-up prompt through Modal', () => {
+    expect(source('StepUpPrompt.tsx')).toContain('<Modal ');
+  });
+
+  it('leaves no hand-rolled backdrop outside Modal', () => {
+    const offenders = readdirSync(components)
+      .filter(name => name.endsWith('.tsx') && !unmigrated.has(name))
+      .filter(name => source(name).includes('modal-backdrop'));
+    expect(offenders).toEqual([]);
   });
 });

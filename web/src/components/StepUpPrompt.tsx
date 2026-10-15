@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Modal } from './Modal';
 import { Lock } from 'lucide-react';
 import { apiJson, errorMessage } from '../api';
 import { cancelStepUp, methodLabels, parseStepUpMethods, verifyStepUp, type StepUpMethod } from '../stepUp';
@@ -6,6 +7,7 @@ import { cancelStepUp, methodLabels, parseStepUpMethods, verifyStepUp, type Step
 interface Pending {
   reason: string;
   operation: string;
+  // Captured before the caller's own busy state can disable it.
   returnFocus: Element | null;
   resolve: (grant: string) => void;
   reject: (reason: Error) => void;
@@ -23,7 +25,6 @@ export function useStepUp() {
   const [busy, setBusy] = useState(false);
   const pending = useRef<Pending | null>(null);
   const attempt = useRef<AbortController | null>(null);
-  const dialog = useRef<HTMLDialogElement | null>(null);
 
   const dismiss = useCallback(() => {
     attempt.current?.abort();
@@ -65,17 +66,6 @@ export function useStepUp() {
     });
   }, [dismiss]);
 
-  useEffect(() => {
-    if (!prompt) return;
-    const previousFocus = prompt.returnFocus;
-    dialog.current?.showModal();
-    dialog.current?.querySelector('input')?.focus();
-    return () => {
-      dialog.current?.close();
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
-    };
-  }, [prompt]);
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const current = pending.current;
@@ -111,57 +101,48 @@ export function useStepUp() {
   };
 
   const stepUpPrompt = prompt ? (
-    <dialog ref={dialog} className="modal-backdrop step-up-backdrop"
-      aria-labelledby="step-up-title" onCancel={e => { e.preventDefault(); cancel(); }}
-      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); cancel(); } }}
-      style={{ width: '100vw', maxWidth: 'none', height: '100%', maxHeight: 'none', margin: 0, border: 0, color: 'inherit' }}>
-      <div className="modal-card">
-        <div className="modal-header">
-          <h3 id="step-up-title">Confirm It's You</h3>
-          <button className="close-btn" onClick={cancel} aria-label="Cancel">×</button>
-        </div>
-        <form onSubmit={submit}>
-          <div className="modal-body">
-            <p className="modal-desc">{prompt.reason}</p>
+    <Modal title="Confirm It's You" onClose={cancel} className="step-up-card" returnFocus={prompt.returnFocus}>
+      <form onSubmit={submit}>
+        <div className="modal-body">
+          <p className="modal-desc">{prompt.reason}</p>
+          <div className="form-group">
+            <label className="form-label" htmlFor="admin-stepup-password">Password</label>
+            <input id="admin-stepup-password" type="password" className="form-input"
+              autoComplete="current-password" autoFocus value={password} required disabled={busy}
+              onChange={e => setPassword(e.target.value)} />
+          </div>
+          {methods === null && !error && <p role="status">Loading verification methods...</p>}
+          {methods && methods.length > 0 && (
             <div className="form-group">
-              <label className="form-label" htmlFor="admin-stepup-password">Password</label>
-              <input id="admin-stepup-password" type="password" className="form-input"
-                autoComplete="current-password" autoFocus value={password} required disabled={busy}
-                onChange={e => setPassword(e.target.value)} />
+              <label className="form-label" htmlFor="step-up-method">Verify with</label>
+              <select id="step-up-method" className="form-input" value={method} disabled={busy}
+                onChange={e => {
+                  const selected = methods.find(value => value === e.target.value);
+                  if (selected) { setMethod(selected); setCode(''); }
+                }}>
+                {methods.map(value => <option key={value} value={value}>{methodLabels[value]}</option>)}
+              </select>
             </div>
-            {methods === null && !error && <p role="status">Loading verification methods...</p>}
-            {methods && methods.length > 0 && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="step-up-method">Verify with</label>
-                <select id="step-up-method" className="form-input" value={method} disabled={busy}
-                  onChange={e => {
-                    const selected = methods.find(value => value === e.target.value);
-                    if (selected) { setMethod(selected); setCode(''); }
-                  }}>
-                  {methods.map(value => <option key={value} value={value}>{methodLabels[value]}</option>)}
-                </select>
-              </div>
-            )}
-            {(method === 'totp' || method === 'recovery') && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="admin-stepup-code">{methodLabels[method]}</label>
-                <input id="admin-stepup-code" className="form-input" type="text"
-                  autoComplete="one-time-code" value={code} required disabled={busy}
-                  onChange={e => setCode(e.target.value)} />
-              </div>
-            )}
-            {digits && <p role="status">Approve the request on your phone and select <strong>{digits}</strong>.</p>}
-            {error && <div className="alert-box error" role="alert">{error}</div>}
-          </div>
-          <div className="modal-footer">
-            <button type="button" className="secondary-btn" onClick={cancel}>Cancel</button>
-            <button type="submit" className="primary-btn" disabled={busy || !password || methods === null}>
-              <Lock size={16} /><span>{busy ? 'Verifying...' : 'Continue'}</span>
-            </button>
-          </div>
-        </form>
-      </div>
-    </dialog>
+          )}
+          {(method === 'totp' || method === 'recovery') && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="admin-stepup-code">{methodLabels[method]}</label>
+              <input id="admin-stepup-code" className="form-input" type="text"
+                autoComplete="one-time-code" value={code} required disabled={busy}
+                onChange={e => setCode(e.target.value)} />
+            </div>
+          )}
+          {digits && <p role="status">Approve the request on your phone and select <strong>{digits}</strong>.</p>}
+          {error && <div className="alert-box error" role="alert">{error}</div>}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="secondary-btn" onClick={cancel}>Cancel</button>
+          <button type="submit" className="primary-btn" disabled={busy || !password || methods === null}>
+            <Lock size={16} /><span>{busy ? 'Verifying...' : 'Continue'}</span>
+          </button>
+        </div>
+      </form>
+    </Modal>
   ) : null;
 
   return { requestGrant, stepUpPrompt };

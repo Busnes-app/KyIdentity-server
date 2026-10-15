@@ -252,7 +252,7 @@ func newSignOnFixture(t *testing.T) *signOnFixture {
 	}
 	client := &store.OAuthClient{ID: uuid.NewString(), ClientName: "KyPost", ClientType: "public",
 		RedirectURIsJSON: `["https://kypost.local/callback"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
-	if err := db.CreateOAuthClient(client); err != nil {
+	if err := db.CreateOAuthClient(client, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, db, client.ID)
@@ -430,7 +430,7 @@ func (f *signOnFixture) secondClient(t *testing.T) *store.OAuthClient {
 	t.Helper()
 	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "Other", ClientType: "public",
 		RedirectURIsJSON: `["https://other.local/callback"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
-	if err := f.db.CreateOAuthClient(c); err != nil {
+	if err := f.db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, f.db, c.ID)
@@ -505,7 +505,7 @@ func TestExchangeDeviceAssertionReplay(t *testing.T) {
 
 func TestExchangeDeviceAssertionSignOnDisabled(t *testing.T) {
 	f := newSignOnFixture(t)
-	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false); err != nil {
+	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
@@ -516,7 +516,10 @@ func TestExchangeDeviceAssertionSignOnDisabled(t *testing.T) {
 
 func TestExchangeDeviceAssertionInactiveUser(t *testing.T) {
 	f := newSignOnFixture(t)
-	if err := f.db.UpdateUserStatus(f.user.ID, "disabled"); err != nil {
+	if _, err := f.db.EditUser(f.user.ID, nil, func(u *store.User) (bool, error) {
+		u.Status = "disabled"
+		return false, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
@@ -528,7 +531,7 @@ func TestExchangeDeviceAssertionInactiveUser(t *testing.T) {
 func TestExchangeDeviceAssertionDoesNotProbeFlags(t *testing.T) {
 	f := newSignOnFixture(t)
 	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false); err != nil {
+	if err := f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, other, testHeader("dev-1"), f.claims(nil))
@@ -607,7 +610,7 @@ func TestExchangeDeviceAssertionRequiresOpenIDScope(t *testing.T) {
 	f := newSignOnFixture(t)
 	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "NoOpenID", ClientType: "public",
 		RedirectURIsJSON: `["https://noid.local/callback"]`, AllowedScopesJSON: `["profile","email"]`, Enabled: true}
-	if err := f.db.CreateOAuthClient(c); err != nil {
+	if err := f.db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, f.db, c.ID)
@@ -724,16 +727,12 @@ func TestExchangeDeviceAssertionRefusesMFAResetBeforeIssue(t *testing.T) {
 	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.ResetUserMFA(f.user.ID, nil) })
 }
 
-func TestExchangeDeviceAssertionRefusesMFAMethodsDeletedBeforeIssue(t *testing.T) {
-	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DeleteUserMFAMethods(f.user.ID) })
-}
-
 func TestExchangeDeviceAssertionRefusesSignOnDisabledBeforeIssue(t *testing.T) {
-	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false) })
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.SetNativeDeviceCanSignOn("dev-1", f.user.ID, false, nil) })
 }
 
 func TestExchangeDeviceAssertionRefusesDeviceDeletedBeforeIssue(t *testing.T) {
-	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DeleteNativeDevice("dev-1", f.user.ID) })
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DeleteNativeDevice("dev-1", f.user.ID, nil) })
 }
 
 func TestExchangeDeviceAssertionRefusesKeyChangedBeforeIssue(t *testing.T) {
@@ -797,7 +796,7 @@ func (f *signOnFixture) clientWithRedirects(t *testing.T, redirectURIsJSON strin
 	t.Helper()
 	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "Relay", ClientType: "public",
 		RedirectURIsJSON: redirectURIsJSON, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
-	if err := f.db.CreateOAuthClient(c); err != nil {
+	if err := f.db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, f.db, c.ID)
@@ -907,11 +906,10 @@ func TestAttestedDeviceSatisfiesMandatoryMFA(t *testing.T) {
 	}
 }
 
-// App Attest grades on app integrity; the grant treats it as attested, and the token-time
-// device re-check binds it like any other level.
-func TestAppAttestDeviceSatisfiesMandatoryMFA(t *testing.T) {
+// App Attest proves the app, not a Secure Enclave key or user presence: one possession
+// factor, refused by mandatory MFA and fresh-password policies like an unattested device.
+func TestAppAttestDeviceIsSingleFactor(t *testing.T) {
 	f := newSignOnFixture(t)
-	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)
 	f.attest(t, "appattest")
 	resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
 	if err != nil {
@@ -919,10 +917,31 @@ func TestAppAttestDeviceSatisfiesMandatoryMFA(t *testing.T) {
 	}
 	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken)
 	amr, _ := claims["amr"].([]any)
-	if len(amr) != 3 || amr[2] != "mfa" || claims["acr"] != "urn:kysignon:acr:mfa" || claims["attested"] != "appattest" {
+	if len(amr) != 1 || amr[0] != "pop" || claims["acr"] != DeviceACR || claims["attested"] != nil {
 		t.Fatalf("claims %v", claims)
 	}
-	if n := f.issuedTokenCount(t); n != 1 {
+
+	rows, _, err := f.db.ListAppRecords(f.client.ID, 100, 0)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "fresh", Factor: "password"}, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t"); !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("fresh policy: want not permitted, got %v", err)
+	}
+}
+
+func TestAppAttestDeviceRefusedUnderMandatoryMFA(t *testing.T) {
+	f := newSignOnFixture(t)
+	f.requireOrganizationMFA(t, []string{"totp", "push"}, 0)
+	f.attest(t, "appattest")
+	_, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)), f.client.ID, "127.0.0.1", "t")
+	if !errors.Is(err, ErrDeviceSignOnNotPermitted) {
+		t.Fatalf("want not permitted, got %v", err)
+	}
+	if n := f.issuedTokenCount(t); n != 0 {
 		t.Fatalf("issued tokens %d", n)
 	}
 }

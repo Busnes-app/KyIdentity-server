@@ -39,9 +39,9 @@ type pushServer struct {
 
 func newPushServer(t *testing.T, status int) *pushServer {
 	t.Helper()
-	allow := netguard.AllowPrivate
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = allow })
+	allow := netguard.AllowLoopback
+	netguard.AllowLoopback = true
+	t.Cleanup(func() { netguard.AllowLoopback = allow })
 	ps := &pushServer{status: status}
 	ps.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -209,11 +209,13 @@ func TestUnifiedPushSenderResponses(t *testing.T) {
 	}
 }
 
-// The sender dials through netguard, and its errors never carry the capability URL.
+// The sender dials through the device guard, which AllowPrivate does not open, and its
+// errors never carry the capability URL.
 func TestUnifiedPushSenderRefusesPrivateDialWithoutLeakingEndpoint(t *testing.T) {
 	ps := newPushServer(t, http.StatusCreated)
 	s := newTestUnifiedPushSender(t, ps)
-	netguard.AllowPrivate = false
+	netguard.AllowLoopback, netguard.AllowPrivate = false, true
+	t.Cleanup(func() { netguard.AllowPrivate = false })
 	rk := newReceiver(t)
 	dev := store.NativeDevice{ID: "d", PushToken: ps.URL + "/secret-topic", PushP256dh: rk.p256dh, PushAuth: rk.a64}
 	err := s.SendPush(dev, MFAChallengePush{ChallengeID: "c", Purpose: "login", ExpiresAtMS: time.Now().Add(time.Minute).UnixMilli()})
@@ -270,13 +272,13 @@ func TestVAPIDKeyIsCreatedOnceWithPrivateMode(t *testing.T) {
 
 func registerTestDevice(t *testing.T, e *Engine, userID, ident string, req NativeDeviceRegisterRequest) *store.NativeDevice {
 	t.Helper()
-	token, _, _, err := e.GenerateDevicePairingToken(userID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(userID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, pub := signingKey(t)
 	req.PairingToken, req.DeviceName, req.DeviceIdentifier, req.PublicKey = token, ident, ident, pub
-	dev, err := e.RegisterNativeDevice(&req)
+	dev, err := e.RegisterNativeDevice(&req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +308,7 @@ func TestDispatchRoutesByTransport(t *testing.T) {
 	fcm := &fakePushSender{}
 	e.SetPushSender(fcm)
 	up.sent = nil
-	if _, err := e.CreatePushChallenge(u.ID, "login"); err != nil {
+	if _, err := e.CreatePushChallenge(u.ID, "step_up"); err != nil {
 		t.Fatal(err)
 	}
 	if len(fcm.sent) != 1 || fcm.sent[0].ID != fcmDev.ID || len(up.sent) != 1 || up.sent[0].ID != upDev.ID {

@@ -34,9 +34,9 @@ func AppAttestClientData(req *NativeDeviceRegisterRequest) []byte {
 	return []byte("kyidentity-appattest-v1|" + cred + "|" + req.PublicKey)
 }
 
-// gradeAppAttest grades an iOS registration. App Attest proves a genuine KyAuth build, which
-// always creates its signing key in the Secure Enclave with per-use user presence; the grade
-// rests on that app integrity, hence its own level. Failures stay in the audit row and log.
+// gradeAppAttest grades an iOS registration. App Attest proves a genuine KyAuth build, not
+// where its signing key lives or that a user was present, so the grade earns no second
+// factor. Failures stay in the audit row and log.
 func (e *Engine) gradeAppAttest(req *NativeDeviceRegisterRequest, device *store.NativeDevice) {
 	if req.AppAttest == nil {
 		return

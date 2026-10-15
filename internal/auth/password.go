@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -27,17 +28,57 @@ var DefaultParams = &Argon2Params{
 	KeyLength:   32,
 }
 
-// HashPassword generates an Argon2id hash with standard encoded representation.
 // MaxPasswordLength bounds the input to Argon2id, which allocates 64 MB per call. An
 // unbounded password turns every login into a memory amplifier.
 const MaxPasswordLength = 1024
 
+// ErrBusy means every Argon2 slot stayed taken for argonWait. It is load, not a wrong
+// password: callers answer 503 and never count it as a failed login.
+var ErrBusy = errors.New("password hashing is at capacity")
+
+// argonSlots caps concurrent Argon2id calls, so a login flood costs at most
+// cap*Memory instead of an OOM kill.
+var (
+	argonSlots = make(chan struct{}, 8)
+	argonWait  = 3 * time.Second
+)
+
+func idKey(password, salt []byte, iterations, memory uint32, threads uint8, keyLen uint32) ([]byte, error) {
+	wait := time.NewTimer(argonWait)
+	defer wait.Stop()
+	select {
+	case argonSlots <- struct{}{}:
+	case <-wait.C:
+		return nil, ErrBusy
+	}
+	defer func() { <-argonSlots }()
+	return argon2.IDKey(password, salt, iterations, memory, threads, keyLen), nil
+}
+
+// Saturate takes every Argon2 slot until release is called. Tests use it to reach ErrBusy.
+func Saturate() (release func()) {
+	for range cap(argonSlots) {
+		argonSlots <- struct{}{}
+	}
+	return func() {
+		for range cap(argonSlots) {
+			<-argonSlots
+		}
+	}
+}
+
+// PolicyError is a password the policy refuses; its text is safe to show the user.
+type PolicyError string
+
+func (e PolicyError) Error() string { return string(e) }
+
+// HashPassword generates an Argon2id hash with standard encoded representation.
 func HashPassword(password string) (string, error) {
 	if len(password) < 12 {
-		return "", errors.New("password must be at least 12 characters")
+		return "", PolicyError("password must be at least 12 characters")
 	}
 	if len(password) > MaxPasswordLength {
-		return "", fmt.Errorf("password must be at most %d characters", MaxPasswordLength)
+		return "", PolicyError(fmt.Sprintf("password must be at most %d characters", MaxPasswordLength))
 	}
 
 	salt := make([]byte, DefaultParams.SaltLength)
@@ -45,7 +86,7 @@ func HashPassword(password string) (string, error) {
 		return "", err
 	}
 
-	hash := argon2.IDKey(
+	hash, err := idKey(
 		[]byte(password),
 		salt,
 		DefaultParams.Iterations,
@@ -53,6 +94,9 @@ func HashPassword(password string) (string, error) {
 		DefaultParams.Parallelism,
 		DefaultParams.KeyLength,
 	)
+	if err != nil {
+		return "", err
+	}
 
 	b64Salt := base64.RawStdEncoding.EncodeToString(salt)
 	b64Hash := base64.RawStdEncoding.EncodeToString(hash)
@@ -84,12 +128,16 @@ func init() {
 }
 
 // DummyVerify burns the same work a real verification costs. Call it on every path that
-// rejects a login before reaching VerifyPassword.
-func DummyVerify(password string) {
+// rejects a login before reaching VerifyPassword. It returns only ErrBusy, which callers
+// must answer as the real path would, or the busy reply becomes a username oracle.
+func DummyVerify(password string) error {
 	if len(password) > MaxPasswordLength {
 		password = password[:MaxPasswordLength]
 	}
-	_, _ = VerifyPassword(password, dummyHash)
+	if _, err := VerifyPassword(password, dummyHash); errors.Is(err, ErrBusy) {
+		return err
+	}
+	return nil
 }
 
 // VerifyPassword verifies a plaintext password against an Argon2id encoded hash.
@@ -127,7 +175,7 @@ func VerifyPassword(password, encodedHash string) (bool, error) {
 		return false, err
 	}
 
-	calculatedHash := argon2.IDKey(
+	calculatedHash, err := idKey(
 		[]byte(password),
 		salt,
 		iterations,
@@ -135,6 +183,9 @@ func VerifyPassword(password, encodedHash string) (bool, error) {
 		parallelism,
 		uint32(len(expectedHash)),
 	)
+	if err != nil {
+		return false, err
+	}
 
 	if subtle.ConstantTimeCompare(calculatedHash, expectedHash) == 1 {
 		return true, nil

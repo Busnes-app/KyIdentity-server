@@ -82,7 +82,9 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 	user, sess := GetUserFromContext(r.Context()), GetSessionFromContext(r.Context())
 	var req stepUpRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" || !validStepUpOperation(req.Operation) {
-		auth.DummyVerify(req.Password)
+		if argonBusy(w, auth.DummyVerify(req.Password)) {
+			return
+		}
 		http.Error(w, `{"error":"invalid_request","error_description":"Password and target operation are required"}`, 400)
 		return
 	}
@@ -101,11 +103,14 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		return
 	}
 	if locked {
-		h.audit.Record("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "account_locked", "operation": stepUpOperation(req.Operation)})
+		h.audit.Observe("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "account_locked", "operation": stepUpOperation(req.Operation)})
 		http.Error(w, `{"error":"account_locked"}`, 429)
 		return
 	}
 	valid, err := auth.VerifyPassword(req.Password, user.PasswordHash)
+	if argonBusy(w, err) {
+		return
+	}
 	if err != nil || !valid {
 		h.stepUpFailure(w, r, "bad_password")
 		return
@@ -118,7 +123,7 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		return
 	}
 	if len(methods) > 0 && !slices.Contains(methods, req.Method) {
-		h.audit.Record("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "mfa_required", "method": req.Method, "operation": req.Operation})
+		h.audit.Observe("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "mfa_required", "method": req.Method, "operation": req.Operation})
 		http.Error(w, `{"error":"mfa_required","error_description":"Choose an enrolled factor; recovery codes only authorize replacement factor enrollment"}`, 400)
 		return
 	}
@@ -141,7 +146,7 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		if req.Method == "totp" {
 			valid, err = h.mfaEngine.VerifyUserTOTP(user.ID, req.Code)
 		} else {
-			valid, err = h.mfaEngine.VerifyAndConsumeRecoveryCode(user.ID, req.Code)
+			valid, err = h.mfaEngine.VerifyAndConsumeRecoveryCode(user.ID, req.Code, nil) // the grant commits its own audit
 		}
 		if err != nil {
 			stepUpInternalError(w)
@@ -225,7 +230,7 @@ func (h *AuthHandler) FinishStepUp(w http.ResponseWriter, r *http.Request, wh *W
 		return
 	}
 	if locked {
-		h.audit.Record("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "account_locked", "method": c.Method, "operation": c.Operation})
+		h.audit.Observe("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "account_locked", "method": c.Method, "operation": c.Operation})
 		http.Error(w, `{"error":"account_locked"}`, 429)
 		return
 	}
@@ -325,7 +330,7 @@ func (h *AuthHandler) CancelStepUp(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) stepUpFailure(w http.ResponseWriter, r *http.Request, reason string) {
 	user := GetUserFromContext(r.Context())
 	_, _ = h.store.RecordFailedLogin(user.ID)
-	h.audit.Record("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": reason})
+	h.audit.Observe("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": reason})
 	http.Error(w, `{"error":"invalid_credentials","error_description":"Re-authentication failed"}`, 401)
 }
 

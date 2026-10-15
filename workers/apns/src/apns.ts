@@ -80,13 +80,32 @@ async function generateProviderToken(config: ApnsConfig, nowSeconds: number): Pr
   return `${signingInput}.${base64UrlEncode(signature)}`;
 }
 
+/** Keyed by signing identity, so rotating APNS_KEY_ID or APNS_TEAM_ID never reuses a token signed by the old one. */
+export function providerTokenCacheKey(config: ApnsConfig): string {
+  return `apns_provider_token:${config.teamId}:${config.keyId}`;
+}
+
+/** Reasons where Apple rejected our provider token rather than the device or payload. */
+const PROVIDER_TOKEN_REJECTED = new Set(["ExpiredProviderToken", "InvalidProviderToken"]);
+
+/** Apple's `{"reason":"..."}`, or "" when the body is not that shape. */
+export function apnsReason(body: string): string {
+  try {
+    const reason = (JSON.parse(body) as { reason?: unknown } | null)?.reason;
+    return typeof reason === "string" ? reason : "";
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Retrieve a cached APNs provider token, or generate a new one.
  * Token is cached for ~29 minutes (refresh before 30-min expiry).
  */
-async function getProviderToken(config: ApnsConfig, cache: KVNamespace): Promise<string> {
-  const cacheKey = "apns_provider_token";
-  const cached = await cache.get(cacheKey);
+async function getProviderToken(config: ApnsConfig, cache: KVNamespace, fresh = false): Promise<string> {
+  const cacheKey = providerTokenCacheKey(config);
+  // `fresh` skips the read: a KV delete is not guaranteed visible to the next get.
+  const cached = fresh ? null : await cache.get(cacheKey);
   if (cached) {
     return cached;
   }
@@ -166,68 +185,66 @@ export async function sendApnsMessage(
     return { ok: false, stale: false, status: 400, detail: "missing token" };
   }
 
-  let providerToken: string;
-  try {
-    providerToken = await getProviderToken(config, cache);
-  } catch (err) {
-    return {
-      ok: false,
-      stale: false,
-      status: 500,
-      detail: `provider token generation failed: ${(err as Error).message}`,
-    };
-  }
+  const payload = apnsPayload(message);
 
   // APNs HTTP/2 request to /3/device/{token}. config.environment is an
   // ApnsEnvironment, so "not production" really does mean sandbox here — when
   // this read a raw string, any typo in APNS_ENVIRONMENT landed in this branch.
   const host = config.environment === "production" ? APNS_PRODUCTION_HOST : APNS_SANDBOX_HOST;
-  const url = `https://${host}/3/device/${token}`;
+  // The token is already hex (apnsToken); encoding keeps it one path segment regardless.
+  const url = `https://${host}/3/device/${encodeURIComponent(token)}`;
+  const body = JSON.stringify(payload);
 
-  const payload = apnsPayload(message);
-
-  try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        authorization: `bearer ${providerToken}`,
-        "apns-topic": config.topic,
-        "apns-push-type": "alert",
-        "apns-priority": "10",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (resp.ok) {
-      return { ok: true };
-    }
-
-    const detail = (await resp.text()).trim();
-
-    // Distinguish device-token errors (stale) from provider/server errors (retriable)
-    if (isStaleResponse(resp.status, detail)) {
-      return { ok: false, stale: true, status: resp.status, detail };
-    }
-
-    // Provider-token errors: refresh the token cache and return 502 so backend retries
-    const detailLower = detail.toLowerCase();
-    if (
-      resp.status === 403 &&
-      (detailLower.includes("expiredtoken") || detailLower.includes("invalidtoken"))
-    ) {
-      await cache.delete("apns_provider_token");
+  for (let attempt = 0; ; attempt++) {
+    let providerToken: string;
+    try {
+      providerToken = await getProviderToken(config, cache, attempt > 0);
+    } catch (err) {
       return {
         ok: false,
         stale: false,
-        status: 502,
-        detail: "provider token expired; backend should retry",
+        status: 500,
+        detail: `provider token generation failed: ${(err as Error).message}`,
       };
     }
 
-    return { ok: false, stale: false, status: resp.status, detail };
-  } catch (err) {
-    const msg = (err as Error).message ?? String(err);
-    return { ok: false, stale: false, status: 502, detail: `apns fetch error: ${msg}` };
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          authorization: `bearer ${providerToken}`,
+          "apns-topic": config.topic,
+          "apns-push-type": "alert",
+          "apns-priority": "10",
+          "content-type": "application/json",
+        },
+        body,
+      });
+
+      if (resp.ok) {
+        return { ok: true };
+      }
+
+      const detail = (await resp.text()).trim();
+
+      // Distinguish device-token errors (stale) from provider/server errors (retriable)
+      if (isStaleResponse(resp.status, detail)) {
+        return { ok: false, stale: true, status: resp.status, detail };
+      }
+
+      // Apple refused our provider token: drop it and retry once with a fresh one.
+      if (resp.status === 403 && PROVIDER_TOKEN_REJECTED.has(apnsReason(detail))) {
+        await cache.delete(providerTokenCacheKey(config));
+        if (attempt === 0) {
+          continue;
+        }
+        return { ok: false, stale: false, status: 502, detail };
+      }
+
+      return { ok: false, stale: false, status: resp.status, detail };
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      return { ok: false, stale: false, status: 502, detail: `apns fetch error: ${msg}` };
+    }
   }
 }

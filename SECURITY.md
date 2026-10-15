@@ -93,7 +93,7 @@ See [Session Behavior](README.md#session-behavior) for full details. Key points:
 
 - A device can register a UnifiedPush endpoint instead of an FCM token. KyIdentity then posts directly to the user's distributor (ntfy, NextPush, ...), and no relay or Google service is involved.
 - The payload is RFC 8291 encrypted to keys the device holds; KyIdentity never sends a UnifiedPush payload in plaintext and refuses a registration without keys. The distributor sees **when** a sign-in request happens, the endpoint, and your server's address and origin (the VAPID subject). Bodies are padded to a fixed size, so it does not learn their length or content.
-- The endpoint URL is chosen by the device, so KyIdentity treats it as untrusted: HTTPS only, no private or loopback addresses (checked at registration and again when connecting), no redirects. A self-hosted distributor on a private network needs `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`, which also lets any paired device make KyIdentity post to internal HTTPS addresses. It is off by default.
+- The endpoint URL is chosen by the device, so KyIdentity treats it as untrusted: HTTPS only, no private or loopback addresses (checked at registration and again when connecting), no redirects. `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS` does not apply to device-supplied endpoints, so a self-hosted distributor must be reachable at a public address.
 - Endpoint URLs are capabilities and are never written to logs.
 
 ### Ubuntu Touch push
@@ -106,7 +106,7 @@ See [Session Behavior](README.md#session-behavior) for full details. Key points:
 
 Android pairings are graded from a Keystore attestation chain that describes the signing key itself: hardware-resident, user authentication on every use. iOS has no attestation for arbitrary Secure Enclave keys. With `KYIDENTITY_APPATTEST_APP_IDS` set, an iOS pairing is graded `appattest` when Apple App Attest proves the request, including its public key, was built by a genuine, unmodified KyAuth on a genuine Apple device.
 
-**The grade rests on app integrity, not on key attestation.** It is MFA-grade because that genuine build always creates its signing key in the Secure Enclave with per-use user presence. A flaw in KyAuth iOS, or a compromised Apple device that defeats App Attest, would undermine it in a way an Android key attestation would not. Leave the setting empty to grade every iOS device `none`; pairing still works, with device-only (`pop`) sign-on.
+**The grade rests on app integrity, not on key attestation**, so it is not MFA-grade. App Attest does not prove the signing key lives in the Secure Enclave or that each use requires user presence. An `appattest` device signs on like an unattested one: single factor (`pop`, `urn:kysignon:acr:device`), refused by mandatory MFA and by `fresh`/`max_age` app policies. Push approvals from it are unaffected.
 
 ## Deployment Security
 

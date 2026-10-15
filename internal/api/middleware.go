@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -25,9 +26,13 @@ const (
 const limiterIdleTTL = 10 * time.Minute
 
 // defaultMaxLimiters caps the bucket map so a stream of distinct clients cannot exhaust
-// memory. Reaching it forces a sweep; if the sweep frees nothing, new buckets are refused
-// rather than existing ones evicted.
+// memory. At the cap a new bucket replaces a fully refilled one; when a bounded probe finds
+// none, it is refused rather than a live bucket evicted.
 const defaultMaxLimiters = 100_000
+
+// limiterEvictionProbe bounds the buckets inspected per refused-at-capacity request, so a
+// map full of live buckets costs O(1) per request instead of a full walk under the lock.
+const limiterEvictionProbe = 64
 
 type MiddlewareManager struct {
 	store             *store.Store
@@ -35,7 +40,6 @@ type MiddlewareManager struct {
 	forwardedHeader   string
 	rateLimiters      map[string]*RateLimiter
 	rateLimitersMutex sync.Mutex
-	lastSweep         time.Time
 	maxLimiters       int
 	csrfKey           []byte
 	sessionIdleTTL    time.Duration
@@ -64,7 +68,6 @@ func NewMiddlewareManager(s *store.Store, trustedCIDRs []string, forwardedHeader
 		trustedCIDRs:    parsedCIDRs,
 		forwardedHeader: http.CanonicalHeaderKey(strings.TrimSpace(forwardedHeader)),
 		rateLimiters:    make(map[string]*RateLimiter),
-		lastSweep:       time.Now(),
 		maxLimiters:     defaultMaxLimiters,
 		csrfKey:         csrfKey,
 		sessionIdleTTL:  30 * time.Minute,
@@ -133,6 +136,26 @@ func (m *MiddlewareManager) ClientIP(r *http.Request) string {
 	return remoteHost
 }
 
+// rateLimitIP is ClientIP as a rate-limit bucket key. One IPv6 subscriber usually holds a
+// whole /64, so per-address buckets would hand it 2^64 allowances.
+func (m *MiddlewareManager) rateLimitIP(r *http.Request) string {
+	return rateLimitPrefix(m.ClientIP(r))
+}
+
+// rateLimitPrefix collapses an IPv6 address to its /64; IPv4 (and IPv4-mapped) stays whole.
+func rateLimitPrefix(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	prefix, _ := addr.Prefix(64)
+	return prefix.String()
+}
+
 // IsHTTPS reports whether the request reached the user over TLS. X-Forwarded-Proto is only
 // believed from a configured proxy.
 func (m *MiddlewareManager) IsHTTPS(r *http.Request) bool {
@@ -152,25 +175,58 @@ func (m *MiddlewareManager) TrackedLimiters() int {
 	return len(m.rateLimiters)
 }
 
-// sweepLimiters drops buckets that carry no state worth keeping. A bucket that has fully
-// refilled is indistinguishable from one that never existed, so dropping it loses nothing.
-// The caller must hold rateLimitersMutex.
-func (m *MiddlewareManager) sweepLimiters(now time.Time) {
-	atCapacity := len(m.rateLimiters) >= m.maxLimiters
-	if now.Sub(m.lastSweep) < time.Minute && !atCapacity {
-		return
-	}
-	m.lastSweep = now
+// refilled reports whether the bucket is back to full, which makes it indistinguishable
+// from one that never existed: dropping it loses nothing.
+func (l *RateLimiter) refilled(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.tokens+now.Sub(l.lastRefill).Seconds()*l.refillRate >= l.maxTokens
+}
 
+// sweepLimiters drops refilled buckets idle for a minute, and any bucket idle past
+// limiterIdleTTL.
+func (m *MiddlewareManager) sweepLimiters() {
+	now := m.now()
+	m.rateLimitersMutex.Lock()
+	defer m.rateLimitersMutex.Unlock()
 	for key, limiter := range m.rateLimiters {
 		limiter.mu.Lock()
 		idle := now.Sub(limiter.lastRefill)
-		refilled := limiter.tokens+idle.Seconds()*limiter.refillRate >= limiter.maxTokens
 		limiter.mu.Unlock()
-		if idle > limiterIdleTTL || (refilled && idle > time.Minute) {
+		if idle > limiterIdleTTL || (idle > time.Minute && limiter.refilled(now)) {
 			delete(m.rateLimiters, key)
 		}
 	}
+}
+
+// sweepLimitersEvery runs sweepLimiters until ctx ends, off the request path.
+func (m *MiddlewareManager) sweepLimitersEvery(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.sweepLimiters()
+		}
+	}
+}
+
+// evictRefilledLocked frees one slot by dropping a refilled bucket from a bounded sample
+// (map iteration starts at a random entry). The caller holds rateLimitersMutex.
+func (m *MiddlewareManager) evictRefilledLocked(now time.Time) bool {
+	probed := 0
+	for key, limiter := range m.rateLimiters {
+		if limiter.refilled(now) {
+			delete(m.rateLimiters, key)
+			return true
+		}
+		if probed++; probed >= limiterEvictionProbe {
+			break
+		}
+	}
+	return false
 }
 
 // SecurityHeaders applies security and CSP headers.
@@ -184,10 +240,10 @@ func (m *MiddlewareManager) SecurityHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 
-		// Content Security Policy allowing local assets, Google/local fonts, and inline styles for UI
+		// Content Security Policy allowing local assets, local fonts, and inline styles for UI
 		// Custom launcher favicons load directly in the browser. Keeping this to HTTPS images
 		// avoids making the server an SSRF proxy or permitting active external content.
-		csp := "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+		csp := "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
 		w.Header().Set("Content-Security-Policy", csp)
 
 		next.ServeHTTP(w, r)
@@ -198,7 +254,7 @@ func (m *MiddlewareManager) SecurityHeaders(next http.Handler) http.Handler {
 func (m *MiddlewareManager) RateLimit(bucket string, maxTokens, refillRate float64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !m.allowRateLimit(bucket+":"+m.ClientIP(r), maxTokens, refillRate) {
+			if !m.allowRateLimit(bucket+":"+m.rateLimitIP(r), maxTokens, refillRate) {
 				http.Error(w, `{"error":"rate_limit_exceeded","error_description":"Too many requests"}`, http.StatusTooManyRequests)
 				return
 			}
@@ -211,11 +267,10 @@ func (m *MiddlewareManager) RateLimit(bucket string, maxTokens, refillRate float
 func (m *MiddlewareManager) allowRateLimit(key string, maxTokens, refillRate float64) bool {
 	now := m.now()
 	m.rateLimitersMutex.Lock()
-	m.sweepLimiters(now)
 	limiter, exists := m.rateLimiters[key]
 	if !exists {
 		// Keep live buckets at capacity: evicting them would reset an attacker's allowance.
-		if len(m.rateLimiters) >= m.maxLimiters {
+		if len(m.rateLimiters) >= m.maxLimiters && !m.evictRefilledLocked(now) {
 			m.rateLimitersMutex.Unlock()
 			return false
 		}

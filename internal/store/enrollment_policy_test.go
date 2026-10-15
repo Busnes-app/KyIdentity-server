@@ -204,9 +204,6 @@ func TestEnrollmentLastFactorRemovalAndReset(t *testing.T) {
 	if err := s.SetEnrollmentPolicy(enrollmentPolicy("organization", 3600), "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUserMFAMethods(u.ID); !errors.Is(err, ErrLastCompliantFactor) {
-		t.Fatal("last factor removed", err)
-	}
 	if err := s.CreateWebAuthnCredential(&WebAuthnCredential{ID: "key", UserID: u.ID, CredentialID: "key", PublicKeySPKI: "test", Name: "key"}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +300,7 @@ func TestEnrollmentRecoveryDuringGraceAndPromotionDeadline(t *testing.T) {
 	}
 	u.Role = "admin"
 	promotionStartedAt := time.Now().Unix()
-	if err := s.UpdateUser(u); err != nil {
+	if err := s.UpdateUserWithSyncEvents(u, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	status, err := s.SessionEnrollmentStatus(u.ID, "session")
@@ -323,10 +320,10 @@ func TestEnrollmentLastPushApproverAndConcurrentPasskeys(t *testing.T) {
 	if err := s.SetEnrollmentPolicy(p, "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetNativeDeviceMFAApprover(dev.ID, u.ID, false); !errors.Is(err, ErrLastCompliantFactor) {
+	if err := s.SetNativeDeviceMFAApprover(dev.ID, u.ID, false, nil); !errors.Is(err, ErrLastCompliantFactor) {
 		t.Fatal("last push approver disabled", err)
 	}
-	if err := s.DeleteNativeDevice(dev.ID, u.ID); !errors.Is(err, ErrLastCompliantFactor) {
+	if err := s.DeleteNativeDevice(dev.ID, u.ID, nil); !errors.Is(err, ErrLastCompliantFactor) {
 		t.Fatal("last push approver deleted", err)
 	}
 	dev.PublicKey = ""
@@ -338,7 +335,7 @@ func TestEnrollmentLastPushApproverAndConcurrentPasskeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.DeleteNativeDevice(dev.ID, u.ID); err != nil {
+	if err := s.DeleteNativeDevice(dev.ID, u.ID, nil); err != nil {
 		t.Fatal("alternative did not permit push removal", err)
 	}
 	start := make(chan struct{})
@@ -358,5 +355,57 @@ func TestEnrollmentLastPushApproverAndConcurrentPasskeys(t *testing.T) {
 	}
 	if failed != 1 {
 		t.Fatal("concurrent removals did not preserve one factor", failed)
+	}
+}
+
+// Login offers push from mfa_methods; removing the last approver must take that offer away.
+func TestPushMethodFollowsApproverDevices(t *testing.T) {
+	s, u, _ := enrollmentFixture(t)
+	hasPush := func() bool {
+		t.Helper()
+		methods, err := s.ListUserMFAMethods(u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range methods {
+			if m.MethodType == "push" {
+				return true
+			}
+		}
+		return false
+	}
+	if err := s.SetMFAMethod(&MFAMethod{ID: "push", UserID: u.ID, MethodType: "push"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"one", "two"} {
+		if err := s.UpsertNativeDevice(&NativeDevice{ID: id, UserID: u.ID, DeviceIdentifier: id, DeviceName: id, PublicKey: "key-" + id, IsMFAApprover: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteNativeDevice("one", u.ID, nil); err != nil || !hasPush() {
+		t.Fatal("removing one of two approvers dropped push", err)
+	}
+	if err := s.SetNativeDeviceMFAApprover("two", u.ID, false, nil); err != nil || hasPush() {
+		t.Fatal("push still offered with no approver", err)
+	}
+	if err := s.SetNativeDeviceMFAApprover("two", u.ID, true, nil); err != nil || !hasPush() {
+		t.Fatal("re-enabled approver did not restore push", err)
+	}
+
+	// Push is the user's only compliant factor: the guard refuses, and the rollback keeps the row.
+	p := enrollmentPolicy("organization", 0)
+	p.AllowedMethods = []string{"totp", "push"}
+	if err := s.SetEnrollmentPolicy(p, "admin-session", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteNativeDevice("two", u.ID, nil); !errors.Is(err, ErrLastCompliantFactor) || !hasPush() {
+		t.Fatal("last compliant push device removed", err)
+	}
+	p.Required, p.Revision = false, 2
+	if err := s.SetEnrollmentPolicy(p, "admin-session", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteNativeDevice("two", u.ID, nil); err != nil || hasPush() {
+		t.Fatal("deleting the last approver left push offered", err)
 	}
 }

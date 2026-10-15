@@ -180,7 +180,7 @@ func (h *SessionHandler) revoke(w http.ResponseWriter, r *http.Request, pending 
 		return false
 	}
 	log.Printf("%s failed: %v", pending.Row.Action, err)
-	h.audit.Record(pending.Row.Action, pending.Row.ActorID, pending.Row.ActorUsername, pending.Row.TargetID, pending.Row.TargetType, pending.Row.IPAddress, pending.Row.UserAgent, "failure", map[string]any{"error": err.Error()})
+	h.audit.Observe(pending.Row.Action, pending.Row.ActorID, pending.Row.ActorUsername, pending.Row.TargetID, pending.Row.TargetType, pending.Row.IPAddress, pending.Row.UserAgent, "failure", map[string]any{"error": err.Error()})
 	http.Error(w, `{"error":"internal_error","error_description":"Revocation failed; access may still be active"}`, http.StatusInternalServerError)
 	return false
 }

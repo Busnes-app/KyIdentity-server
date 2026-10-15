@@ -30,7 +30,7 @@ Everything a fresh KyIdentity needs to be the old one:
 |---|---|
 | `data/kyidentity.db` | The whole directory: users, sessions, OAuth clients, MFA state, audit log, settings |
 | `data/jwt_rs256.key` | The RSA signing key. Without it every issued token and every OIDC client breaks |
-| `data/encryption.key` | 32 bytes. Every TOTP secret and paired-system token in the database is encrypted under it |
+| `data/encryption.key` | 32 bytes. Every TOTP secret, paired-system token and the mail relay settings are encrypted under keys derived from it. A capsule from before row-bound encryption is re-encrypted at the first start; the server refuses to start if any of its secrets does not decrypt under this key |
 | `data/secret.key` | 32 bytes. Signs sessions and CSRF tokens |
 | `data/recovery.pub` | The suite recovery public key, so the restored server comes back pinned (present when the backup was paired) |
 | `data/push-vapid-private.key` | The UnifiedPush VAPID key, so the restored server keeps its push identity (present once the server has started with UnifiedPush support) |
@@ -44,11 +44,18 @@ server still picks up those legacy filenames through the fallback in `internal/c
 
 ## Before you start
 
-- **Pick the capsule.** In the KyRecovery dashboard, open Capsules, find the newest one for
-  service `KySignOn` that is not flagged corrupt, and note its `capsule_id`, `created_at` and
-  `digest`. You will compare these after the restore. Download it with an operator session
-  (`GET /api/capsules/{id}/download`). From a local backup directory, the file is
-  `<APP_NAME>-<capsule-id>.kycap`; the newest is the one to use unless you have a reason.
+- **Pick the capsule and its digest.** In the KyRecovery dashboard, open Capsules, find the
+  newest one for service `KySignOn` that is not flagged corrupt, and note its `capsule_id`,
+  `created_at` and `digest`. Download it with an operator session
+  (`GET /api/capsules/{id}/download`), or use the copy of the same capsule in the local
+  backup directory, `<APP_NAME>-<capsule-id>.kycap`: the bytes are identical, so the digest
+  matches either. The restore refuses to run without that digest. The suite recovery public
+  key is not secret, so anyone who can write the backup directory, or the download on its
+  way to you, can seal a capsule of their own (their administrator, their keys) that the
+  custodian shares open just as well. KyRecovery's digest is recorded from an authenticated
+  deposit by this server, which is what tells the two apart.
+  For a capsule written by `kyidentity export-capsule`, the digest is the one it printed;
+  record it somewhere other than beside the file.
 - **Gather k custodians.** Each card carries one share, a single line beginning `ky2-`. They
   type or paste it themselves; do not collect the shares in a file, a chat, or an email. Two
   shares in one place is the suite key in one place.
@@ -60,8 +67,12 @@ server still picks up those legacy filenames through the fallback in `internal/c
 With the binary (from a release, or `go build ./cmd/kyidentity`):
 
 ```bash
-kyidentity restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored
+kyidentity restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored -expect-digest <digest>
 ```
+
+The digest is checked before any share is read, so a planted capsule fails before a
+custodian types anything, and the restore opens a private copy of the checked bytes, so the
+file cannot be swapped between the check and the open.
 
 For a published-image install, and always on a fresh recovery machine, pin the commit you
 intend to run (normally the one that made the backup, or the current tip) to a digest you have
@@ -107,7 +118,7 @@ mkdir -m 700 restored
 docker compose run --rm --no-deps --user "$(id -u):$(id -g)" \
   -v "$PWD/cap-KySignOn-XXXXXXXX.kycap:/in.kycap:ro" \
   -v "$PWD/restored:/restored" \
-  kyidentity-server restore -capsule /in.kycap -to /restored
+  kyidentity-server restore -capsule /in.kycap -to /restored -expect-digest <digest>
 ```
 
 The bare binary needs none of this: it creates a missing target itself at mode 700.
@@ -126,7 +137,7 @@ Only for a rehearsal with synthetic test shares, never with real cards, stdin ca
 Delete it afterwards; a file holding k shares is the suite key in a file.
 
 ```bash
-kyidentity restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored < test-shares.txt
+kyidentity restore -capsule cap-KySignOn-XXXXXXXX.kycap -to ./restored -expect-digest <digest> < test-shares.txt
 ```
 
 On success it prints the authenticated manifest:
@@ -139,15 +150,25 @@ Restored 5 files from capsule cap-KySignOn-1788564568139109864
   payload hash: 8a053985...
 ```
 
-**Check it against KyRecovery's record.** The capsule ID and `created` must match the
-deposit record you noted. `capsule.Open` has already proved the bytes are intact and were
-sealed to the suite key; matching the ID and time against the blind store's record is what
-proves this is the capsule you meant, not an older one someone substituted.
+**Check it against KyRecovery's record.** The digest check has already proved these are the
+bytes this server deposited, and the decrypt that they were sealed to the suite key. The
+capsule ID and `created` should match the record you noted; if they do not, you copied the
+digest of a different capsule than you meant, most likely an older one.
+
+**No digest.** A server that only ever wrote to its local backup directory, with no record
+of a digest kept elsewhere, has nothing that proves where its capsules came from. Then, and
+only then, `-accept-unauthenticated-capsule` replaces `-expect-digest`: it restores whatever
+the file holds, warns on stderr, and the `system.restored` audit row records
+`"authenticated": false`. Use it only on a file whose custody you can vouch for yourself,
+because whoever could write it chose the restored server's administrators and keys. Hashing
+the file yourself and passing that as `-expect-digest` proves nothing more than this flag does.
 
 Failures you may see, and what they mean:
 
 | Message | Meaning |
 |---|---|
+| `-expect-digest is required` | Pass the digest from the deposit record. See "No digest" above if there is none |
+| `capsule digest is X, the deposit record says Y` | The file is not the capsule that was deposited: a different capsule, a damaged download, or one someone planted. Do not work around this; fetch the capsule again from KyRecovery |
 | `capsule is for service "KySignOn", this instance is "X"` | You passed `-service` or set `KYIDENTITY_APP_NAME` to something else. Only override `-service` if the backup was made under a different app name |
 | `shamir: fewer shares than the threshold requires` | Fewer than k valid lines were read. Check for a missed line or a truncated paste |
 | `restore target directory is not empty` | Use an empty directory. The restore never overwrites |

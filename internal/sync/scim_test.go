@@ -92,7 +92,7 @@ func TestGenericSCIMLifecycle(t *testing.T) {
 			}))
 			defer srv.Close()
 			e.httpClient = srv.Client()
-			sys, shown, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"})
+			sys, shown, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,7 +161,7 @@ func TestSCIMLookupFailsClosed(t *testing.T) {
 			}))
 			defer srv.Close()
 			e.httpClient = srv.Client()
-			sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "target-token"})
+			sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "target-token"}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -195,7 +195,7 @@ func TestSCIMUncertainCreateNeverRepeats(t *testing.T) {
 	}))
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestSCIMConflictAndRetryAfter(t *testing.T) {
 			}))
 			defer srv.Close()
 			e.httpClient = srv.Client()
-			_, _, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "target-token"})
+			_, _, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "target-token"}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -260,8 +260,8 @@ func TestLegacyCustomDoesNotGuessProtocol(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))
 	defer srv.Close()
-	sys := &store.PairedSystem{ID: "legacy", Name: "legacy", SystemType: "custom", CallbackURL: srv.URL + "/scim/v2", HMACSecretEncrypted: mustEncrypt(t, e, "old-secret"), Status: "active"}
-	if err := s.CreatePairedSystem(sys); err != nil {
+	sys := &store.PairedSystem{ID: "legacy", Name: "legacy", SystemType: "custom", CallbackURL: srv.URL + "/scim/v2", HMACSecretEncrypted: mustEncrypt(t, e, "legacy", "old-secret"), Status: "active"}
+	if err := s.CreatePairedSystem(sys, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := func() error { queueForAll(t, e, u.ID, "user.created", u); return nil }(); err != nil {
@@ -294,7 +294,7 @@ func TestSCIMRedirectNeverForwardsCredentials(t *testing.T) {
 	}))
 	defer source.Close()
 	e.httpClient = source.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "redirect", SystemType: "scim", CallbackURL: source.URL, BearerToken: "target-token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "redirect", SystemType: "scim", CallbackURL: source.URL, BearerToken: "target-token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestGenericSCIMRejectsReassignedRemoteID(t *testing.T) {
 	}))
 	defer srv.Close()
 	e.httpClient = srv.Client()
-	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "reassigned", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "token"})
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "reassigned", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "token"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

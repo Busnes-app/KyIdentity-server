@@ -98,66 +98,55 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// An unknown username must cost the same as a wrong password. Returning early here
-	// would answer in ~1 ms against ~100 ms for a real account, which enumerates users.
-	if user == nil {
-		auth.DummyVerify(req.Password)
-		h.audit.Record("auth.login", "", req.Username, "", "user", ip, ua, "failure", map[string]any{"reason": "user_not_found"})
-		http.Error(w, `{"error":"invalid_credentials","error_description":"Invalid username or password"}`, http.StatusUnauthorized)
+	// Unknown, inactive and locked accounts answer exactly as a wrong password does, after
+	// the same Argon2 cost; anything else enumerates accounts or reveals a lockout. Audit
+	// records keep the real reason.
+	reason, err := h.loginRefusal(user)
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-
-	if user.Status != "active" {
-		auth.DummyVerify(req.Password)
-		reason := "user_disabled"
-		if user.Pending {
-			reason = "user_pending"
+	if reason != "" {
+		if argonBusy(w, auth.DummyVerify(req.Password)) {
+			return
 		}
-		h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": reason})
-		http.Error(w, `{"error":"invalid_credentials","error_description":"Invalid username or password"}`, http.StatusUnauthorized)
+		if user == nil {
+			h.audit.Observe("auth.login", "", req.Username, "", "user", ip, ua, "failure", map[string]any{"reason": reason})
+		} else {
+			h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": reason})
+		}
+		http.Error(w, invalidCredentials, http.StatusUnauthorized)
 		return
 	}
 
+	validPass, err := auth.VerifyPassword(req.Password, user.PasswordHash)
+	if argonBusy(w, err) {
+		return
+	}
+	if err != nil || !validPass {
+		attempts, _ := h.store.RecordFailedLogin(user.ID)
+		h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure",
+			map[string]any{"reason": "invalid_password", "consecutiveFailures": attempts})
+		http.Error(w, invalidCredentials, http.StatusUnauthorized)
+		return
+	}
+
+	// Checked only after the password, so it cannot tell an existing account from an unknown one.
 	interactionHash := ""
 	var interaction *store.AuthorizationInteraction
 	if req.Interaction != "" {
 		interactionHash = crypto.HashSHA256(req.Interaction)
 		i, err := h.store.GetAuthorizationInteraction(interactionHash, h.middleware.authorizationBrowserHash(r))
 		if err != nil || i.SessionID != "" || (i.UserID != "" && i.UserID != user.ID) {
-			auth.DummyVerify(req.Password)
 			http.Error(w, `{"error":"invalid_interaction","error_description":"Restart authorization with the original account and browser"}`, 400)
 			return
 		}
 		interaction = i
 	}
 
-	// Per-account lockout. The per-IP limiter cannot see a spray distributed across hosts.
-	locked, err := h.store.IsAccountLocked(user.ID)
-	if err != nil {
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
-	}
-	if locked {
-		auth.DummyVerify(req.Password)
-		h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": "account_locked"})
-		http.Error(w, `{"error":"account_locked","error_description":"Too many failed attempts. Try again later."}`, http.StatusTooManyRequests)
-		return
-	}
-
-	validPass, err := auth.VerifyPassword(req.Password, user.PasswordHash)
-	if err != nil || !validPass {
-		attempts, _ := h.store.RecordFailedLogin(user.ID)
-		h.audit.Record("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure",
-			map[string]any{"reason": "invalid_password", "consecutiveFailures": attempts})
-		http.Error(w, `{"error":"invalid_credentials","error_description":"Invalid username or password"}`, http.StatusUnauthorized)
-		return
-	}
-
+	// Failures clear only when the whole login succeeds (createSessionAndRespond); clearing
+	// here would reset the lockout before every second-factor guess.
 	primaryAt := time.Now().UTC()
-	if err := h.store.ClearFailedLogins(user.ID); err != nil {
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
-	}
 
 	// Check if user has enrolled MFA methods
 	mfaMethods, err := h.store.ListUserMFAMethods(user.ID)
@@ -245,9 +234,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var challengeID string
+		pushed := ""
 		if hasPush {
-			challenge, err := h.mfaEngine.CreatePushChallenge(user.ID, "login")
-			if err == nil && challenge != nil {
+			var challenge *store.MFAChallenge
+			challenge, pushed = h.loginPush(r, user)
+			if challenge != nil {
 				challengeID = challenge.ID
 				resp.ChallengeID = challenge.ID
 				resp.MatchDigits = challenge.MatchDigits
@@ -266,7 +257,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.MFAToken = mfaToken
 
-		h.audit.Record("auth.mfa_challenge", user.ID, user.Username, user.ID, "user", ip, ua, "success", map[string]any{"methods": methodTypes})
+		h.audit.Observe("auth.mfa_challenge", user.ID, user.Username, user.ID, "user", ip, ua, "success", map[string]any{"methods": methodTypes, "push": pushed})
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 		return
@@ -274,6 +265,26 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// No MFA enrolled, issue session directly
 	h.createSessionAndRespond(w, r, user, store.AuthenticationEvidence{PrimaryAuthenticatedAt: &primaryAt}, interactionHash)
+}
+
+const invalidCredentials = `{"error":"invalid_credentials","error_description":"Invalid username or password"}`
+
+// loginRefusal names why an account may not attempt a password, or "" if it may. The
+// per-account lockout catches a spray the per-IP limiter cannot see.
+func (h *AuthHandler) loginRefusal(user *store.User) (string, error) {
+	switch {
+	case user == nil:
+		return "user_not_found", nil
+	case user.Status != "active" && user.Pending:
+		return "user_pending", nil
+	case user.Status != "active":
+		return "user_disabled", nil
+	}
+	locked, err := h.store.IsAccountLocked(user.ID)
+	if locked {
+		return "account_locked", err
+	}
+	return "", err
 }
 
 func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Request, user *store.User, evidence store.AuthenticationEvidence, interactionHash string) {
@@ -310,6 +321,9 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
+	if err := h.store.ClearFailedLogins(user.ID); err != nil {
+		log.Printf("clearing failed logins for %s: %v", user.ID, err)
+	}
 
 	enrollment, err := h.store.SessionEnrollmentStatus(user.ID, sess.ID)
 	if err != nil {
@@ -337,7 +351,7 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 		Secure:   h.middleware.IsHTTPS(r) || h.secureCookies,
 	})
 
-	h.audit.Record("auth.login_success", user.ID, user.Username, user.ID, "user", ip, ua, "success", nil)
+	h.audit.Observe("auth.login_success", user.ID, user.Username, user.ID, "user", ip, ua, "success", nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(LoginResponse{
@@ -375,7 +389,90 @@ func (h *AuthHandler) resolveMFAToken(w http.ResponseWriter, rawToken string) (*
 		return nil, nil, false
 	}
 
+	locked, err := h.store.IsAccountLocked(user.ID)
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return nil, nil, false
+	}
+	if locked {
+		http.Error(w, `{"error":"account_locked","error_description":"Too many failed attempts. Try again later."}`, http.StatusTooManyRequests)
+		return nil, nil, false
+	}
+
 	return token, user, true
+}
+
+// reserveMFAAttempt spends one of the token's attempts before its proof is checked.
+func (h *AuthHandler) reserveMFAAttempt(w http.ResponseWriter, token *store.MFAToken) (int, bool) {
+	attempts, err := h.mfaEngine.ReserveMFAAttempt(token.ID)
+	if errors.Is(err, mfa.ErrMFAAttemptsExhausted) {
+		http.Error(w, `{"error":"invalid_mfa_token","error_description":"Second-factor token is invalid or expired"}`, http.StatusUnauthorized)
+		return 0, false
+	}
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return 0, false
+	}
+	return attempts, true
+}
+
+// mfaFailure also counts a rejected login second factor against the account, so lockout
+// sees guesses spread over fresh logins made with a known password.
+func (h *AuthHandler) mfaFailure(w http.ResponseWriter, r *http.Request, user *store.User, action string, details map[string]any, status int, body string) {
+	details["consecutiveFailures"], _ = h.store.RecordFailedLogin(user.ID)
+	h.audit.Observe(action, user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
+	http.Error(w, body, status)
+}
+
+// Login push limits: a known password must not buy a stream of approval prompts.
+const (
+	loginPushesPerHour   = 5
+	pushFatigueThreshold = 3 // denied or unanswered login pushes within an hour
+)
+
+// loginPush sends a login push unless one is already live or the user's hourly allowance
+// is spent. The outcome lands in the challenge audit row.
+func (h *AuthHandler) loginPush(r *http.Request, user *store.User) (*store.MFAChallenge, string) {
+	pending, err := h.store.HasPendingLoginPush(user.ID)
+	if err != nil {
+		return nil, "error"
+	}
+	if pending {
+		return nil, "pending"
+	}
+	if !h.middleware.allowRateLimit("login_push:"+user.ID, loginPushesPerHour, loginPushesPerHour/3600.0) {
+		return nil, "capped"
+	}
+	h.auditPushFatigue(r, user.ID, user.Username)
+	challenge, err := h.mfaEngine.CreatePushChallenge(user.ID, "login")
+	if errors.Is(err, mfa.ErrPushPending) {
+		return nil, "pending"
+	}
+	if err != nil {
+		return nil, "error"
+	}
+	return challenge, "sent"
+}
+
+// auditPushFatigue records auth.mfa_push_fatigue (alert rule push_fatigue) once a user's
+// denied or expired login pushes in the last hour reach pushFatigueThreshold.
+func (h *AuthHandler) auditPushFatigue(r *http.Request, userID, username string) {
+	n, err := h.store.CountUnansweredLoginPushes(userID, time.Now().UTC().Add(-time.Hour))
+	if err != nil || n < pushFatigueThreshold {
+		return
+	}
+	h.audit.Observe("auth.mfa_push_fatigue", userID, username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"count": n})
+}
+
+// argonBusy answers 503 when password hashing is saturated. Callers check it before
+// reading an error as a wrong password, so load never counts towards lockout.
+func argonBusy(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, auth.ErrBusy) {
+		return false
+	}
+	w.Header().Set("Retry-After", "5")
+	http.Error(w, `{"error":"temporarily_unavailable","error_description":"Server is busy. Try again shortly."}`, http.StatusServiceUnavailable)
+	return true
 }
 
 // spendMFAToken consumes the token exactly once. A losing racer gets no session.
@@ -405,14 +502,14 @@ func (h *AuthHandler) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	attempts, ok := h.reserveMFAAttempt(w, token)
+	if !ok {
+		return
+	}
 	valid, err := h.mfaEngine.VerifyUserTOTP(user.ID, req.Code)
 	if err != nil || !valid {
-		// Count the miss against this login attempt. Without it, one token funds
-		// unlimited guesses for its whole lifetime.
-		attempts, _ := h.mfaEngine.RegisterMFAFailure(token.ID)
-		h.audit.Record("auth.mfa_totp", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure",
-			map[string]any{"attempts": attempts})
-		http.Error(w, `{"error":"invalid_totp_code","error_description":"Invalid 6-digit TOTP code"}`, http.StatusUnauthorized)
+		h.mfaFailure(w, r, user, "auth.mfa_totp", map[string]any{"attempts": attempts},
+			http.StatusUnauthorized, `{"error":"invalid_totp_code","error_description":"Invalid 6-digit TOTP code"}`)
 		return
 	}
 
@@ -437,22 +534,29 @@ func (h *AuthHandler) VerifyRecoveryCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	valid, err := h.mfaEngine.VerifyAndConsumeRecoveryCode(user.ID, req.Code)
-	if err != nil || !valid {
-		attempts, _ := h.mfaEngine.RegisterMFAFailure(token.ID)
-		h.audit.Record("auth.mfa_recovery", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure",
-			map[string]any{"attempts": attempts})
-		http.Error(w, `{"error":"invalid_recovery_code","error_description":"Invalid or already used recovery code"}`, http.StatusUnauthorized)
+	attempts, ok := h.reserveMFAAttempt(w, token)
+	if !ok {
 		return
 	}
+	consumed := h.audit.Prepare("auth.mfa_recovery_consumed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	valid, err := h.mfaEngine.VerifyAndConsumeRecoveryCode(user.ID, req.Code, consumed.Row)
+	if err != nil {
+		log.Printf("recovery code check for user %s failed: %v", user.ID, err)
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	if !valid {
+		h.mfaFailure(w, r, user, "auth.mfa_recovery", map[string]any{"attempts": attempts},
+			http.StatusUnauthorized, `{"error":"invalid_recovery_code","error_description":"Invalid or already used recovery code"}`)
+		return
+	}
+	consumed.Committed()
 
 	factorAt := time.Now().UTC()
 	if !h.spendMFAToken(w, token) {
 		return
 	}
 
-	h.audit.Record("auth.mfa_recovery_consumed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	_ = h.store.ClearFailedLogins(user.ID)
 	h.createSessionAndRespond(w, r, user, store.AuthenticationEvidence{PrimaryAuthenticatedAt: token.PrimaryAuthenticatedAt, FactorAuthenticatedAt: &factorAt, FactorMethod: "recovery"}, token.InteractionHash)
 }
 
@@ -518,7 +622,7 @@ func (h *AuthHandler) FinishPushLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if challenge.UserID != user.ID {
-		h.audit.Record("auth.mfa_push_mismatch", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied",
+		h.audit.Observe("auth.mfa_push_mismatch", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied",
 			map[string]any{"reason": "challenge_owner_mismatch", "challengeId": req.ChallengeID})
 		http.Error(w, `{"error":"mfa_not_approved","error_description":"Push challenge is not approved"}`, http.StatusUnauthorized)
 		return
@@ -528,7 +632,7 @@ func (h *AuthHandler) FinishPushLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.audit.Record("auth.mfa_push_approved", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	h.audit.Observe("auth.mfa_push_approved", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
 	h.createSessionAndRespond(w, r, user, store.AuthenticationEvidence{PrimaryAuthenticatedAt: token.PrimaryAuthenticatedAt, FactorAuthenticatedAt: challenge.VerifiedAt, FactorMethod: "push"}, token.InteractionHash)
 }
 
@@ -557,12 +661,12 @@ func (h *AuthHandler) RespondPush(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ip := h.middleware.ClientIP(r)
 		if errors.Is(err, mfa.ErrUnsignedDevice) {
-			h.audit.Record("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", ip, r.UserAgent(), "denied",
+			h.audit.Observe("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", ip, r.UserAgent(), "denied",
 				map[string]any{"reason": "no_signing_device"})
 			http.Error(w, `{"error":"device_not_enrolled_for_signing","error_description":"Re-pair your authenticator to approve sign-ins"}`, http.StatusUnauthorized)
 			return
 		}
-		h.audit.Record("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", ip, r.UserAgent(), "failure",
+		h.audit.Observe("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", ip, r.UserAgent(), "failure",
 			map[string]any{"reason": err.Error()})
 		http.Error(w, `{"error":"challenge_error","error_description":"Challenge could not be answered"}`, http.StatusBadRequest)
 		return
@@ -572,8 +676,13 @@ func (h *AuthHandler) RespondPush(w http.ResponseWriter, r *http.Request) {
 	if approved {
 		outcome = "success"
 	}
-	h.audit.Record("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", h.middleware.ClientIP(r), r.UserAgent(), outcome,
+	h.audit.Observe("auth.mfa_push_respond", "", "", req.ChallengeID, "mfa_challenge", h.middleware.ClientIP(r), r.UserAgent(), outcome,
 		map[string]any{"deviceId": deviceID})
+	if !approved {
+		if ch, err := h.store.GetMFAChallenge(req.ChallengeID); err == nil && ch != nil && ch.Purpose == "login" {
+			h.auditPushFatigue(r, ch.UserID, "")
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": approved})
@@ -624,18 +733,25 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		stepUpInternalError(w)
 		return
 	}
+	// Codes issued before keyed hashing still work; regenerating replaces them.
+	legacyRecovery, err := h.store.HasLegacyRecoveryCodes(user.ID)
+	if err != nil {
+		stepUpInternalError(w)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"access":      access,
-		"enrollment":  enrollment,
-		"id":          user.ID,
-		"username":    user.Username,
-		"displayName": user.DisplayName,
-		"email":       user.Email,
-		"role":        user.Role,
-		"status":      user.Status,
-		"mfaMethods":  methodTypes,
-		"createdAt":   user.CreatedAt,
+		"access":                        access,
+		"enrollment":                    enrollment,
+		"recoveryCodesNeedRegeneration": legacyRecovery,
+		"id":                            user.ID,
+		"username":                      user.Username,
+		"displayName":                   user.DisplayName,
+		"email":                         user.Email,
+		"role":                          user.Role,
+		"status":                        user.Status,
+		"mfaMethods":                    methodTypes,
+		"createdAt":                     user.CreatedAt,
 	})
 }

@@ -19,7 +19,7 @@ func TestOffboardingViewSurvivesDeletionAndIsAdminOnly(t *testing.T) {
 	admin := newSession(t, db, newUser(t, db, "admin"), exp)
 	plain := newSession(t, db, newUser(t, db, "user"), exp)
 	u := newUser(t, db, "user")
-	if err := db.CreatePairedSystem(&store.PairedSystem{ID: "notes", Name: "KyNotes", SystemType: "scim", CallbackURL: "https://notes.urlxl.com/scim", Status: "active"}); err != nil {
+	if err := db.CreatePairedSystem(&store.PairedSystem{ID: "notes", Name: "KyNotes", SystemType: "scim", CallbackURL: "https://notes.urlxl.com/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SaveSCIMUserLink("notes", u.ID, "remote-1"); err != nil {

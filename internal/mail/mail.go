@@ -18,7 +18,7 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
-const settingKey = "mail_settings_enc"
+const settingKey = store.MailSettingKey
 
 // Settings is the SMTP configuration an administrator enters. Password is write-only
 // on the wire: it is stored here for sending and dropped by View.
@@ -56,22 +56,22 @@ func (s *Settings) View() View {
 func (s *Settings) Validate() error {
 	s.Host, s.Username, s.From = strings.TrimSpace(s.Host), strings.TrimSpace(s.Username), strings.TrimSpace(s.From)
 	if s.Host == "" || strings.ContainsAny(s.Host, " /\\") {
-		return errors.New("host is required")
+		return store.InputError("host is required")
 	}
 	if s.Port < 1 || s.Port > 65535 {
-		return errors.New("port must be between 1 and 65535")
+		return store.InputError("port must be between 1 and 65535")
 	}
 	if _, err := netmail.ParseAddress(s.From); err != nil {
-		return errors.New("from must be a valid email address")
+		return store.InputError("from must be a valid email address")
 	}
 	if s.Security != "tls" && s.Security != "starttls" {
-		return errors.New("security must be tls or starttls")
+		return store.InputError("security must be tls or starttls")
 	}
 	return nil
 }
 
 // Load reads the stored settings; nil means mail delivery is not configured.
-func Load(s *store.Store, key []byte) (*Settings, error) {
+func Load(s store.Settings, key []byte) (*Settings, error) {
 	enc, err := s.GetSetting(settingKey)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
@@ -79,7 +79,7 @@ func Load(s *store.Store, key []byte) (*Settings, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := crypto.DecryptAESGCM(key, enc)
+	raw, err := crypto.Open(key, store.SealMail, settingKey, enc)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func Load(s *store.Store, key []byte) (*Settings, error) {
 // Save stores validated settings. An empty password keeps the stored one only while the
 // relay it authenticates to is unchanged; pointing the settings elsewhere requires the
 // password again, so the stored credential can never be replayed to a chosen host.
-func Save(s *store.Store, key []byte, in *Settings) error {
+func Save(s store.Settings, key []byte, in *Settings) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func Save(s *store.Store, key []byte, in *Settings) error {
 		}
 		if current != nil && current.Password != "" {
 			if current.Host != in.Host || current.Port != in.Port || current.Username != in.Username || current.Security != in.Security {
-				return errors.New("enter the password again when the relay, port, username or transport changes")
+				return store.InputError("enter the password again when the relay, port, username or transport changes")
 			}
 			in.Password = current.Password
 		}
@@ -113,14 +113,14 @@ func Save(s *store.Store, key []byte, in *Settings) error {
 	if err != nil {
 		return err
 	}
-	enc, err := crypto.EncryptAESGCM(key, raw)
+	enc, err := crypto.Seal(key, store.SealMail, settingKey, raw)
 	if err != nil {
 		return err
 	}
 	return s.SetSetting(settingKey, enc)
 }
 
-func Clear(s *store.Store) error { return s.DeleteSetting(settingKey) }
+func Clear(s store.Settings) error { return s.DeleteSetting(settingKey) }
 
 const dialTimeout = 10 * time.Second
 

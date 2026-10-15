@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -163,5 +165,53 @@ func TestInboundSCIMGroupBoundaries(t *testing.T) {
 	groups := call(t, srv, admin, "GET", "/api/admin/groups?q=Own")
 	if !strings.Contains(groups.Body.String(), `"sourceConnectorId":"`+connectorID+`"`) {
 		t.Fatalf("admin listing lacks the source: %s", groups.Body.String())
+	}
+}
+
+// Member deltas apply to the membership under the write lock, with or without If-Match:
+// a "remove X" racing several "add" PATCHes leaves exactly the added members.
+func TestInboundSCIMConcurrentGroupPatchesAllApply(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	connectorID, token := connectorWithToken(t, srv, db, admin, "write")
+	x := provisionedUpstreamUser(t, srv, db, token, "e-x", "xavier")
+	var adds []string
+	for _, n := range []string{"a1", "a2", "a3", "a4", "a5"} {
+		adds = append(adds, provisionedUpstreamUser(t, srv, db, token, "e-"+n, n))
+	}
+	created := scimCall(t, srv, token, "POST", "/scim/v2/Groups", `{"displayName":"Staff","members":[{"value":"`+x+`"}]}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create group: %d %s", created.Code, created.Body.String())
+	}
+	gid, _ := scimUser(t, created.Body.Bytes())["id"].(string)
+	for i := range 7 {
+		recs := make([]*httptest.ResponseRecorder, len(adds)+1)
+		fs := []func(){func() {
+			recs[0] = scimCall(t, srv, token, "PATCH", "/scim/v2/Groups/"+gid, `{"Operations":[{"op":"remove","path":"members[value eq \"`+x+`\"]"}]}`)
+		}}
+		for n, id := range adds {
+			fs = append(fs, func() {
+				recs[n+1] = scimCall(t, srv, token, "PATCH", "/scim/v2/Groups/"+gid, `{"Operations":[{"op":"add","path":"members","value":[{"value":"`+id+`"}]}]}`)
+			})
+		}
+		together(fs...)
+		for _, rec := range recs {
+			if rec.Code != http.StatusOK {
+				t.Fatalf("round %d: %d %s", i, rec.Code, rec.Body.String())
+			}
+		}
+		g, err := db.GetUpstreamGroup(connectorID, gid)
+		if err != nil || g == nil {
+			t.Fatal(err)
+		}
+		slices.Sort(g.Members)
+		want := slices.Sorted(slices.Values(adds))
+		if !slices.Equal(g.Members, want) {
+			t.Fatalf("round %d: members %v, want %v", i, g.Members, want)
+		}
+		if err := db.ReplaceUpstreamGroup(connectorID, gid, nil, func(g *store.UpstreamGroup) error { g.Members = []string{x}; return nil }); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

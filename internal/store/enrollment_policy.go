@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var ErrEnrollmentPolicy = errors.New("invalid or conflicting MFA enrollment policy")
@@ -224,7 +226,9 @@ func preserveCompliantEnrollmentTx(tx *sql.Tx, userID string, wasCompliant bool)
 	return nil
 }
 
-func (s *Store) changeEnrollmentDevice(userID, query string, args ...any) error {
+// changeEnrollmentDevice runs one device write with its audit row, returning
+// sql.ErrNoRows when it matched no device.
+func (s *Store) changeEnrollmentDevice(userID string, audit *AuditEvent, query string, args ...any) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -237,13 +241,35 @@ func (s *Store) changeEnrollmentDevice(userID, query string, args ...any) error 
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(query, args...); err != nil {
+	res, err := tx.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return sql.ErrNoRows
+	}
+	if err = syncPushMethodTx(tx, userID); err != nil {
+		return err
+	}
+	if err = recordAuditTx(tx, audit); err != nil {
 		return err
 	}
 	if err = preserveCompliantEnrollmentTx(tx, userID, wasCompliant); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// syncPushMethodTx makes the mfa_methods push row, which login and step-up offer, follow
+// enrolled_factors: present exactly while an approver device with a key remains.
+func syncPushMethodTx(tx *sql.Tx, userID string) error {
+	if _, err := tx.Exec(`DELETE FROM mfa_methods WHERE user_id=? AND method_type='push' AND NOT EXISTS(SELECT 1 FROM enrolled_factors WHERE user_id=? AND bit=2)`, userID, userID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`INSERT OR IGNORE INTO mfa_methods(id,user_id,method_type,encrypted_secret,created_at) SELECT ?,?,'push','',? WHERE EXISTS(SELECT 1 FROM enrolled_factors WHERE user_id=? AND bit=2)`, uuid.NewString(), userID, time.Now().UTC(), userID)
+	return err
 }
 
 const enrollmentSessionViewSQL = ` CREATE VIEW IF NOT EXISTS mfa_session_access AS

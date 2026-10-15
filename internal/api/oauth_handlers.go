@@ -125,7 +125,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	// Until this passes, the redirect URI is attacker-controlled and errors must not be
 	// sent to it.
 	if !h.oauthEngine.ValidateRedirectURI(client, redirectURI) {
-		h.audit.Record("oauth.authorize", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "denied",
+		h.audit.Observe("oauth.authorize", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "denied",
 			map[string]any{"reason": "redirect_uri_not_registered", "redirectUri": redirectURI})
 		http.Error(w, `{"error":"invalid_redirect_uri","error_description":"Redirect URI does not match a registered URI for this client"}`, http.StatusBadRequest)
 		return
@@ -134,17 +134,13 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	// Validate the callback before rate-limit errors enter the OIDC error channel.
 	// Keep shared limiter keys address-derived: rotating browser identities must
 	// neither reset the source allowance nor allocate additional buckets.
-	if !h.middleware.allowRateLimit("authorize:ip:"+h.middleware.ClientIP(r), 300, 5) {
+	if !h.middleware.allowRateLimit("authorize:ip:"+h.middleware.rateLimitIP(r), 300, 5) {
 		redirectError(w, r, redirectURI, state, "temporarily_unavailable", "Too many authorization requests; try again shortly")
 		return
 	}
 
-	if codeChallenge == "" && client.ClientType == "public" {
-		redirectError(w, r, redirectURI, state, "invalid_request", "PKCE (S256) is required for public clients")
-		return
-	}
-	if codeChallenge != "" && codeChallengeMethod != "S256" {
-		redirectError(w, r, redirectURI, state, "invalid_request", "Only the S256 code_challenge_method is supported")
+	if codeChallenge == "" || codeChallengeMethod != "S256" {
+		redirectError(w, r, redirectURI, state, "invalid_request", "PKCE with code_challenge_method S256 is required")
 		return
 	}
 
@@ -219,7 +215,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.audit.Record("oauth.authorize", user.ID, user.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
+	h.audit.Observe("oauth.authorize", user.ID, user.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
 		"scope":          grantedScope,
 		"requestedScope": scope,
 	})
@@ -250,7 +246,7 @@ func (h *OAuthHandler) deviceSignOn(w http.ResponseWriter, r *http.Request, asse
 		return
 	}
 	ip := h.middleware.ClientIP(r)
-	if !h.middleware.allowRateLimit("device_signon:"+ip, 10, 0.2) {
+	if !h.middleware.allowRateLimit("device_signon:"+rateLimitPrefix(ip), 10, 0.2) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "slow_down"})
 		return
@@ -258,7 +254,7 @@ func (h *OAuthHandler) deviceSignOn(w http.ResponseWriter, r *http.Request, asse
 	tokenResp, who, err := h.oauthEngine.ExchangeDeviceAssertion(assertion, clientID, ip, r.UserAgent())
 	if err != nil {
 		// The precise reason is audit-only; pre-signature failures stay generic.
-		h.audit.Record("device.signon", who.UserID, who.Username, who.DeviceID, "device", ip, r.UserAgent(), "failure", map[string]any{"clientId": clientID, "origin": who.Origin, "error": err.Error()})
+		h.audit.Observe("device.signon", who.UserID, who.Username, who.DeviceID, "device", ip, r.UserAgent(), "failure", map[string]any{"clientId": clientID, "origin": who.Origin, "error": err.Error()})
 		description := "The device assertion is invalid"
 		// Both reasons arise only after the signature verified, so only the key holder learns them.
 		if errors.Is(err, oauth.ErrDeviceSignOnDisabled) {
@@ -270,7 +266,7 @@ func (h *OAuthHandler) deviceSignOn(w http.ResponseWriter, r *http.Request, asse
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": description})
 		return
 	}
-	h.audit.Record("device.signon", who.UserID, who.Username, who.DeviceID, "device", ip, r.UserAgent(), "success", map[string]any{"clientId": clientID, "origin": who.Origin})
+	h.audit.Observe("device.signon", who.UserID, who.Username, who.DeviceID, "device", ip, r.UserAgent(), "success", map[string]any{"clientId": clientID, "origin": who.Origin})
 	_ = json.NewEncoder(w).Encode(tokenResp)
 }
 
@@ -308,7 +304,7 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, oauth.ErrClaimsTooLarge) {
 		// A configuration problem, not a guess about credentials: name it so the app's
 		// administrator can fix the mappings.
-		h.audit.Record("oauth.token_exchange", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"error": err.Error()})
+		h.audit.Observe("oauth.token_exchange", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"error": err.Error()})
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusBadRequest)
@@ -319,7 +315,7 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		// The precise reason goes to the audit log, not to the caller: distinguishing
 		// "client mismatch" from "invalid PKCE verifier" tells an attacker which half of
 		// their guess was right.
-		h.audit.Record("oauth.token_exchange", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{
+		h.audit.Observe("oauth.token_exchange", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{
 			"error": err.Error(),
 		})
 		w.Header().Set("Content-Type", "application/json")
@@ -332,7 +328,7 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.audit.Record("oauth.token_exchange", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	h.audit.Observe("oauth.token_exchange", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -385,13 +381,13 @@ func (h *OAuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.oauthEngine.RevokeToken(token, clientID, clientSecret); err != nil {
-		h.audit.Record("oauth.revoke", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure",
+		h.audit.Observe("oauth.revoke", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure",
 			map[string]any{"error": err.Error()})
 		http.Error(w, `{"error":"invalid_client","error_description":"Client authentication failed"}`, http.StatusUnauthorized)
 		return
 	}
 
-	h.audit.Record("oauth.revoke", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	h.audit.Observe("oauth.revoke", "", "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
 
 	// RFC 7009 §2.2: 200 regardless of whether the token was live, so the response is
 	// not an oracle for token validity.
@@ -411,6 +407,6 @@ func (h *OAuthHandler) denyAccess(w http.ResponseWriter, r *http.Request, user *
 			description += ". You can request it from your KySignOn dashboard"
 		}
 	}
-	h.audit.Record("oauth.authorize", user.ID, user.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "denied", details)
+	h.audit.Observe("oauth.authorize", user.ID, user.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "denied", details)
 	redirectError(w, r, redirectURI, state, "access_denied", description)
 }

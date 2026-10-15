@@ -36,6 +36,18 @@ export function SyncDeliveries({ system, onClose }: { system: PairedSystem; onCl
     } catch (err) { if (!isCancelled(err)) setMessage(errorMessage(err, 'Could not resume delivery')); }
     finally { setBusy(false); }
   }
+  async function resumeAll() {
+    setBusy(true);
+    const path = `${base}/resume`;
+    try {
+      const grant = await requestGrant(`Resume every expired delivery for ${system.name} after confirming their old requests have finished?`, `POST ${path}`);
+      await apiRequest(path, { method: 'POST', stepUpToken: grant, body: JSON.stringify({ confirmedQuiescent: confirmed }) });
+      setConfirmed(false);
+      setMessage('Expired deliveries released for retry. Create guards were kept. Refresh to see whether another attempt is blocked.');
+      await refresh();
+    } catch (err) { if (!isCancelled(err)) setMessage(errorMessage(err, 'Could not resume deliveries')); }
+    finally { setBusy(false); }
+  }
   return <section className="table-card" aria-label={`Deliveries for ${system.name}`} style={{ padding: '1rem', marginBottom: '1rem' }}>
     {stepUpPrompt}
     <h3>In-flight and blocked deliveries — {system.name}</h3>
@@ -47,7 +59,8 @@ export function SyncDeliveries({ system, onClose }: { system: PairedSystem; onCl
     <button className="secondary-btn sm" disabled={busy} onClick={() => void refresh()}>Refresh deliveries</button>{' '}
     <button className="secondary-btn sm" onClick={onClose}>Close deliveries</button>
     {attempts.length === 0 ? <p>No in-flight or blocked deliveries.</p> : <>
-      <p>Showing up to 100 attempts, oldest first.</p>
+      <p>Showing up to 100 attempts, oldest first. Resuming all releases every expired attempt for this system, including ones not shown, and keeps every create guard.</p>
+      <button className="secondary-btn sm" disabled={busy || !confirmed} onClick={() => void resumeAll()}>Resume all expired for this system</button>
       <table className="admin-table"><thead><tr><th>Resource ID</th><th>Event</th><th>Recovery available after</th><th>Actions</th></tr></thead>
         <tbody>{attempts.map(a => <tr key={a.token}><td>{a.userId}</td><td>{a.eventType}</td><td>{new Date(a.recoverAfter).toLocaleString()}</td><td>
           <button className="secondary-btn sm" disabled={busy} onClick={() => void readBack(a.token)}>Read remote state</button>{' '}

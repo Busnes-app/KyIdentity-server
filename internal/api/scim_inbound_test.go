@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,6 +158,56 @@ func TestInboundSCIMUserLifecycle(t *testing.T) {
 	}
 	if got := scimCall(t, srv, token, "GET", "/scim/v2/Users/"+id, ""); got.Code != http.StatusOK || scimUser(t, got.Body.Bytes())["active"] != false {
 		t.Fatalf("deactivated resource still readable with active=false: %d", got.Code)
+	}
+}
+
+// A connector cannot re-address or rename an account promoted to administrator locally, by
+// PUT or PATCH; an ordinary account it owns stays fully updatable.
+func TestInboundSCIMCannotTakeOverAPromotedAdmin(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	_, token := connectorWithToken(t, srv, db, admin, "write")
+	create := func(ext, name string) string {
+		rec := scimCall(t, srv, token, "POST", "/scim/v2/Users", `{"externalId":"`+ext+`","userName":"`+name+`","emails":[{"value":"`+name+`@up.test","primary":true}],"active":true}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", name, rec.Code, rec.Body.String())
+		}
+		id, _ := scimUser(t, rec.Body.Bytes())["id"].(string)
+		return id
+	}
+	promoted := mustUser(t, db, create("ext-a", "dana"))
+	if _, err := db.EditUser(promoted.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	plain := create("ext-b", "erin")
+
+	for _, attempt := range []struct{ method, body string }{
+		{"PATCH", `{"Operations":[{"op":"replace","path":"emails","value":[{"value":"attacker@evil.test","primary":true}]}]}`},
+		{"PATCH", `{"Operations":[{"op":"replace","path":"userName","value":"dana2"}]}`},
+		{"PUT", `{"externalId":"ext-a","userName":"dana","emails":[{"value":"attacker@evil.test","primary":true}],"active":true}`},
+		{"PUT", `{"externalId":"ext-a","userName":"dana2","emails":[{"value":"dana@up.test","primary":true}],"active":true}`},
+	} {
+		got := scimCall(t, srv, token, attempt.method, "/scim/v2/Users/"+promoted.ID, attempt.body)
+		if got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), "mutability") {
+			t.Fatalf("%s %s: %d %s", attempt.method, attempt.body, got.Code, got.Body.String())
+		}
+		if u := mustUser(t, db, promoted.ID); u.Email != "dana@up.test" || u.Username != "dana" || u.Role != "admin" {
+			t.Fatalf("admin changed by %s: %+v", attempt.method, u)
+		}
+	}
+	if !auditContains(t, db, "privileged_identity") {
+		t.Fatal("refusal not audited")
+	}
+
+	if got := scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+plain, `{"Operations":[{"op":"replace","path":"userName","value":"erin2"}]}`); got.Code != http.StatusOK {
+		t.Fatalf("ordinary patch: %d %s", got.Code, got.Body.String())
+	}
+	if got := scimCall(t, srv, token, "PUT", "/scim/v2/Users/"+plain, `{"externalId":"ext-b","userName":"erin2","emails":[{"value":"erin2@up.test","primary":true}],"active":true}`); got.Code != http.StatusOK {
+		t.Fatalf("ordinary put: %d %s", got.Code, got.Body.String())
+	}
+	if u := mustUser(t, db, plain); u.Username != "erin2" || u.Email != "erin2@up.test" {
+		t.Fatalf("ordinary account not updated: %+v", u)
 	}
 }
 
@@ -342,5 +395,77 @@ func TestDisconnectingAConnectorNeedsAChoiceForItsAccounts(t *testing.T) {
 	}
 	if n := countAudit(t, db, "admin.scim_connector_deleted"); n != 1 {
 		t.Fatalf("audit rows = %d", n)
+	}
+}
+
+// together runs every f at once and waits for all of them.
+func together(fs ...func()) {
+	var start, done sync.WaitGroup
+	start.Add(1)
+	done.Add(len(fs))
+	for _, f := range fs {
+		go func() {
+			defer done.Done()
+			start.Wait()
+			f()
+		}()
+	}
+	start.Done()
+	done.Wait()
+}
+
+// PATCH operations apply to the row under the write lock: a displayName PATCH racing an
+// offboarding PATCH never carries a stale active=true back over it.
+func TestInboundSCIMConcurrentPatchesKeepBothChanges(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	connectorID, token := connectorWithToken(t, srv, db, admin, "write")
+	id := provisionedUpstreamUser(t, srv, db, token, "ext-1", "alice")
+	for i := range 25 {
+		name := fmt.Sprintf("Alice %d", i)
+		var off, renamed *httptest.ResponseRecorder
+		together(
+			func() {
+				off = scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+id, `{"Operations":[{"op":"replace","path":"active","value":false}]}`)
+			},
+			func() {
+				renamed = scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+id, `{"Operations":[{"op":"replace","path":"displayName","value":"`+name+`"}]}`)
+			},
+		)
+		if off.Code != http.StatusOK || renamed.Code != http.StatusOK {
+			t.Fatalf("round %d: %d %s / %d %s", i, off.Code, off.Body.String(), renamed.Code, renamed.Body.String())
+		}
+		if u := mustUser(t, db, id); u.SourceActive || u.DisplayName != name {
+			t.Fatalf("round %d lost an update: active=%v name=%q", i, u.SourceActive, u.DisplayName)
+		}
+		if _, err := db.UpdateUpstreamUser(connectorID, id, nil, func(u *store.User) error { u.SourceActive = true; return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// If-Match is compared with the row under the write lock: of two writes carrying the
+// same, then-current version, exactly one lands and the other gets 412.
+func TestInboundSCIMIfMatchIsCheckedUnderTheLock(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	_, token := connectorWithToken(t, srv, db, admin, "write")
+	id := provisionedUpstreamUser(t, srv, db, token, "ext-1", "alice")
+	for i := range 12 {
+		etag := scimCall(t, srv, token, "GET", "/scim/v2/Users/"+id, "").Header().Get("ETag")
+		recs := make([]*httptest.ResponseRecorder, 2)
+		patch := func(n int) func() {
+			return func() {
+				recs[n] = scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+id, fmt.Sprintf(`{"Operations":[{"op":"replace","path":"displayName","value":"Writer %d"}]}`, n), "If-Match", etag)
+			}
+		}
+		together(patch(0), patch(1))
+		codes := []int{recs[0].Code, recs[1].Code}
+		slices.Sort(codes)
+		if codes[0] != http.StatusOK || codes[1] != http.StatusPreconditionFailed {
+			t.Fatalf("round %d: codes %v, want one 200 and one 412", i, codes)
+		}
 	}
 }

@@ -90,7 +90,7 @@ func TestDeleteUserWithSyncEventsMigratesLegacyForeignKey(t *testing.T) {
 	}
 	defer s.Close()
 
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "system", Name: "system", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "system", Name: "system", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision) VALUES('system','deleted-user',1,1,1)`); err != nil {
@@ -186,7 +186,7 @@ func TestLegacyDevicePairingTokensAreRebuiltWithoutPlaintextPINs(t *testing.T) {
 	if strings.Contains(strings.ToUpper(definition), "PIN_CODE") {
 		t.Fatal("legacy plaintext pairing PIN column survived migration")
 	}
-	if err := s.CreateDevicePairingToken(&DevicePairingToken{ID: "new", UserID: "u1", TokenHash: "new-hash", PINHash: "new-pin-hash", ExpiresAt: time.Now().UTC().Add(time.Minute)}); err != nil {
+	if err := s.CreateDevicePairingToken(&DevicePairingToken{ID: "new", UserID: "u1", TokenHash: "new-hash", PINHash: "new-pin-hash", ExpiresAt: time.Now().UTC().Add(time.Minute)}, nil); err != nil {
 		t.Fatalf("new pairing token failed after migration: %v", err)
 	}
 }
@@ -466,7 +466,6 @@ func TestMFAWipesRemovePasskeys(t *testing.T) {
 		wipe func(*Store, string) error
 	}{
 		{"ResetUserMFA", func(s *Store, uid string) error { return s.ResetUserMFA(uid, nil) }},
-		{"DeleteUserMFAMethods", func(s *Store, uid string) error { return s.DeleteUserMFAMethods(uid) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, cleanup := setupTestStore(t)
@@ -548,7 +547,7 @@ func TestSignOnFlagsRoundTrip(t *testing.T) {
 	u := createTestUser(t, s)
 
 	tok := &DevicePairingToken{ID: "t1", UserID: u.ID, TokenHash: "h1", PINHash: "p1", SignOn: true, ExpiresAt: time.Now().UTC().Add(time.Minute)}
-	if err := s.CreateDevicePairingToken(tok); err != nil {
+	if err := s.CreateDevicePairingToken(tok, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.GetValidDevicePairingToken("h1")

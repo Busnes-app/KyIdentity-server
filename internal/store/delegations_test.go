@@ -12,7 +12,7 @@ func TestDelegationsFollowUserAndApp(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := createTestUser(t, s)
-	if err := s.CreateOAuthClient(&OAuthClient{ID: "billing", ClientName: "Billing", ClientType: "public", RedirectURIsJSON: `["https://b/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := s.CreateOAuthClient(&OAuthClient{ID: "billing", ClientName: "Billing", ClientType: "public", RedirectURIsJSON: `["https://b/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, _, _ := s.ListAppRecords("billing", 25, 0)

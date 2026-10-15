@@ -10,7 +10,7 @@ import (
 func seedClient(t *testing.T, s *Store, id string) *OAuthClient {
 	t.Helper()
 	c := &OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://app/cb"]`, AllowedScopesJSON: `["openid"]`, PostLogoutRedirectURIsJSON: `["https://app/bye"]`, Enabled: true}
-	if err := s.CreateOAuthClient(c); err != nil {
+	if err := s.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 	return c

@@ -203,7 +203,7 @@ KyIdentity natively manages mobile push devices and pairing tokens.
 
 - `GET /oauth/authorize`: Interactive login, consent, and authorization-code issuance.
 - `POST /oauth/authorize`: Form submission for authentication and MFA challenge verification.
-- `POST /oauth/token`: Authorization-code exchange for ID token and access token (PKCE required for public clients).
+- `POST /oauth/token`: Authorization-code exchange for ID token and access token (S256 PKCE required for every client).
 - `GET /oauth/userinfo`: Authenticated endpoint returning user profile claims.
 - `POST /oauth/revoke`: Token revocation endpoint.
 - `GET /.well-known/openid-configuration`: Standard OIDC discovery metadata.

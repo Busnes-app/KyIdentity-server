@@ -25,6 +25,21 @@ var ErrExpiryInPast = errors.New("expiry must be in the future")
 // uses it, so an ended administrator the follow-up has not yet processed never counts.
 const activeAdminSQL = `role='admin' AND status='active' AND (ends_at IS NULL OR ends_at>unixepoch())`
 
+// requirePermanentAdminTx refuses with ErrLastActiveAdmin unless an active administrator
+// with no end date matches where. Removing, disabling, demoting or end-dating an
+// administrator needs one: another administrator's future end date would only defer
+// the directory being left with none.
+func requirePermanentAdminTx(tx *sql.Tx, where string, args ...any) error {
+	var ok bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE role='admin' AND status='active' AND ends_at IS NULL AND `+where+`)`, args...).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return ErrLastActiveAdmin
+	}
+	return nil
+}
+
 // ExpiryRun counts what one follow-up pass removed.
 type ExpiryRun struct {
 	Accounts, Memberships, Assignments int

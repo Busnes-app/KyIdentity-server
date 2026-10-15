@@ -340,7 +340,8 @@ func reconcileProvisioningTx(tx *sql.Tx, now time.Time) error {
 	if _, err = tx.Exec(`DELETE FROM account_sync_events WHERE ` + unfenced + ` AND NOT ` + stateless + ` AND revision<>COALESCE(` + current + `,-1)`); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=?,updated_at=? WHERE `+unfenced+` AND (`+stateless+` OR revision=`+current+`)`, now.Add(30*time.Minute), now)
+	_, err = tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=?,updated_at=? WHERE `+unfenced+` AND (`+stateless+` OR revision=`+current+`)
+ AND EXISTS(SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id)`, now.Add(30*time.Minute), now)
 	return err
 }
 
@@ -430,8 +431,9 @@ func (s *Store) ReconcileProvisioning() error {
 }
 
 // ResyncSystem re-sends the desired state of everything in scope for one connector.
-// It never provisions a user outside the connector's effective access.
-func (s *Store) ResyncSystem(systemID string) error {
+// It never provisions a user outside the connector's effective access. The audit row
+// commits with the queued work.
+func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -442,7 +444,7 @@ func (s *Store) ResyncSystem(systemID string) error {
 		return err
 	}
 	if !exists {
-		return errors.New("paired system not found")
+		return ErrNotFound
 	}
 	now := time.Now().UTC()
 	if err := reconcileProvisioningTx(tx, now); err != nil {
@@ -485,6 +487,9 @@ func (s *Store) ResyncSystem(systemID string) error {
 		if err := queueDesiredStateTx(tx, desiredState{systemID: g.systemID, resourceID: g.groupID, kind: "group", active: true, payload: scimGroupPayload(g.groupID), members: hash, force: true}, now); err != nil {
 			return err
 		}
+	}
+	if err := recordAuditTx(tx, audit); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

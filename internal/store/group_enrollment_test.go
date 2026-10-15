@@ -141,7 +141,7 @@ func TestGroupEnrollmentMembershipConflictAndAdministrator(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.Role = "admin"
-	if err := s.UpdateUser(u); err == nil {
+	if err := s.UpdateUserWithSyncEvents(u, false, nil); err == nil {
 		t.Fatal("promotion accepted conflicting factor masks")
 	}
 }

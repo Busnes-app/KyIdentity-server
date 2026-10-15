@@ -65,7 +65,7 @@ func (s *Store) SaveSCIMUserLink(systemID, localID, remoteID string) error {
 // Enabling group delivery queues the connector's assigned groups in the same transaction.
 func (s *Store) ConfigureSystem(id, oldType, newType, encrypted string, groups bool, reconcileHours int, audit *AuditEvent) error {
 	if reconcileHours < 0 || reconcileHours > 24*30 {
-		return errors.New("reconcile interval must be 0 to 720 hours")
+		return InputError("reconcile interval must be 0 to 720 hours")
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -81,7 +81,7 @@ func (s *Store) ConfigureSystem(id, oldType, newType, encrypted string, groups b
 		return err
 	}
 	if n != 1 {
-		return errors.New("system changed; reload and retry")
+		return InputError("system changed; reload and retry")
 	}
 	if err = reconcileProvisioningTx(tx, time.Now().UTC()); err != nil {
 		return err

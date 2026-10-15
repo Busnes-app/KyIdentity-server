@@ -14,7 +14,7 @@ Built in Go with a focus on simplicity, minimal external dependencies, and nativ
    - **TOTP Authenticator Apps**: Standard RFC 6238 time-based one-time passwords with encrypted secrets at rest (AES-256-GCM).
    - **Push Authentication with Number Matching**: 2-digit verification challenges with decoy numbers for mobile pairing. Delivered through the FCM/APNs relay, directly over UnifiedPush, or through the UBports push service to Linux (Ubuntu Touch) devices; UnifiedPush distributors and UBports see when a sign-in happens but not its content (see SECURITY.md).
    - **Passkeys (WebAuthn)**: ES256 platform and roaming authenticators as a second factor, verified with the standard library alone. Works with KyAuth's Android credential provider, and with iCloud Keychain, Windows Hello and hardware keys.
-   - **Emergency Recovery Codes**: Cryptographically hashed single-use recovery codes.
+   - **Emergency Recovery Codes**: Single-use recovery codes stored as HMAC-SHA256 under a key derived from the encryption key, bound to the user. Codes issued by older versions (bare SHA-256) still work until regenerated; `GET /api/auth/me` reports `recoveryCodesNeedRegeneration` while any remain.
 4. **90-Second Ephemeral Pairing**: Frictionless UI-based pairing with QR codes and short PINs for native mobile devices and downstream server applications.
 5. **KySecurity Suite Application Launcher**: Single-pane dashboard themed in KySecurity Patina (dark `#0d0f14`, cyan `#4deeea`, Space Grotesk, IBM Plex Mono) embedding the full React frontend into the standalone binary.
 
@@ -49,7 +49,7 @@ Following the **Ponytail** engineering philosophy (*use the smallest correct cha
 | **HTTP Routing & API** | `net/http` (Go 1.22+ pattern routing), `context`, `net` | *No Gin, Fiber, Chi, or Gorilla Mux* |
 | **OIDC, OAuth 2.0 & JWT** | `crypto/rsa`, `crypto/sha256`, `encoding/base64`, `encoding/json` | *No `golang-jwt`, `go-jose`, or `ory`* |
 | **TOTP / 2FA Engine** | `crypto/hmac`, `crypto/sha1`, `encoding/base32`, `encoding/binary` | *No third-party TOTP libraries* |
-| **At-Rest Encryption** | `crypto/aes` + `crypto/cipher` (AES-256-GCM) | *No third-party encryption packages* |
+| **At-Rest Encryption** | `crypto/aes` + `crypto/cipher` (AES-256-GCM, a per-purpose HMAC-derived key and the row identity as associated data, so a secret copied to another row or purpose does not decrypt) | *No third-party encryption packages* |
 | **Sync Webhooks** | `net/http` client + `crypto/hmac` + `crypto/sha256` | *No webhook frameworks* |
 | **Embedded Frontend** | `embed` + `io/fs` (React SPA served from binary memory) | *No packr or go-bindata* |
 | **Database Access** | `database/sql` | *No GORM, Ent, or ORM frameworks* |
@@ -86,7 +86,9 @@ KYIDENTITY_ISSUER_URL=https://auth.yourdomain.com
 BOOTSTRAP_ADMIN_USER=admin
 BOOTSTRAP_ADMIN_PASS=YourSecurePassword123!
 
-# Optional: Cloudflare Worker native-push relays
+# Optional: Cloudflare Worker native-push relays. Without a *_RELAY_KEY the server
+# self-registers, keeps the key under the data directory, and re-registers once if
+# the relay reports it superseded.
 PUSH_RELAY_URL=https://kysecurity-mobile-push-fcm.<account>.workers.dev
 APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 
@@ -179,16 +181,22 @@ You can verify the status of the server at any time:
 
 ## Command Line Utilities
 
-Create the first admin account directly within the running container:
+Create the first admin account directly within the running container. The password is the
+first line of stdin, never an argument (argv is world-readable and lands in shell history);
+`-password` is refused. An empty line generates one and prints it once.
 ```bash
-docker compose exec kyidentity-server /usr/local/bin/kyidentity bootstrap-admin --username admin --password "NewPassword123!"
+docker compose exec kyidentity-server /usr/local/bin/kyidentity bootstrap-admin -username admin -email admin@example.com
 ```
 
-`bootstrap-admin` only creates a missing account. It will not overwrite the password of an
-account that already exists — change those from the admin UI, so the action is audited.
+`bootstrap-admin` only creates a missing account, as an active administrator, and records
+`admin.user_created` in the audit log in the same transaction. `-email` defaults to
+`<username>@local.kysecurity`. If the name already belongs to an active administrator it
+changes nothing; if it belongs to anyone else (an ordinary or disabled account) it fails
+rather than promote or re-enable them. Change existing passwords from the admin UI, so the
+action is audited.
 
-Restoring from a `.kycap` backup is `kyidentity restore`, with k custodian shares typed on
-stdin. The full procedure, including putting the result back into service and proving it,
+Restoring from a `.kycap` backup is `kyidentity restore`, with the capsule's digest from
+KyRecovery's deposit record as `-expect-digest` and k custodian shares typed on stdin. The full procedure, including putting the result back into service and proving it,
 is [docs/RESTORE.md](docs/RESTORE.md).
 
 ---
@@ -218,6 +226,23 @@ the account exists or mail is configured, is limited per address and per account
 mails a 30-minute reset link when it can. Redeeming a reset link signs the account out
 everywhere and clears the lockout counter; it never removes a second factor. Losing a
 factor is a recovery-code sign-in or an administrator MFA reset, not a password reset.
+
+**Lockout.** Ten consecutive failures lock an account for 15 minutes. Wrong passwords,
+wrong second factors at sign-in and failed step-ups all count; the counter clears only
+when a sign-in fully succeeds, so a known password does not buy fresh TOTP guesses.
+Each sign-in allows five second-factor attempts. A locked, disabled, pending or unknown
+account gets the same `401 invalid_credentials` as a wrong password, at the same hashing
+cost, even with the right password; only the audit row says which. A locked account that
+already passed its password learns it is locked at the second factor (`429
+account_locked`). Password hashing runs at most eight
+at a time; past that, requests wait up to three seconds, then get `503` with
+`Retry-After`, which never counts as a failure.
+
+**Push sign-in limits.** A user has at most one pending login push; a second sign-in
+while it is live sends none (the browser falls back to the other factors) until it is
+answered or expires. Login pushes are capped at five per user per hour. Three login
+pushes denied or left to expire within an hour record `auth.mfa_push_fatigue`, which
+raises the `push_fatigue` alert: someone else may know the password.
 
 **Email verification.** `email_verified` in ID tokens and userinfo is true only after a
 link mailed to the address was redeemed; existing addresses start unverified. Changing
@@ -504,7 +529,8 @@ its own, past ten live login alerts further sources share a single "many sources
 alert, a login alert whose source has been quiet for a whole window resolves itself
 without mail, and login-failure mail is one mailing per four hours however many
 sources appear, so an attacker cycling names or addresses cannot flood the inbox, the
-mail or the table),
+mail or the table), push fatigue (three denied or unanswered sign-in pushes for one
+account within an hour),
 failed or refused scheduled access removal, and outages (a connector whose deliveries are failing
 or given up, a client whose back-channel logouts were given up). Every audit insert
 queues its id through a trigger, the evaluator writes alerts and drains the queue in one
@@ -539,7 +565,8 @@ server did. Running the migrations again changes nothing, which is checked by co
 the schema of a twice-upgraded database with a fresh one.
 
 Restoring is two commands and one deliberate consequence. `kyidentity restore -capsule
-<file> -to <dir>` unpacks a capsule (custodian shares on stdin, never argv) and marks
+<file> -to <dir> -expect-digest <sha256>` checks the capsule against the digest KyRecovery
+recorded at deposit, unpacks it (custodian shares on stdin, never argv) and marks
 the directory as restored. The next start reads that marker once and invalidates what
 the capsule carried: sessions, issued tokens, authorization codes and interactions,
 MFA and step-up challenges and grants, invitation and reset links, device pairing
@@ -588,9 +615,10 @@ slash tolerance, or per-client fallbacks. A client that needs three callback por
 registers three URIs. This is the single control deciding who receives an authorization
 code; anything looser makes registration advisory.
 
-**PKCE (`S256`) is mandatory for public clients**, and `plain` is rejected everywhere. A
-public client presents no secret, so the verifier is the only thing binding a code to the
-party that requested it.
+**PKCE (`S256`) is mandatory for every client**, public and confidential, and `plain` is
+rejected everywhere. A public client presents no secret, so the verifier is the only thing
+binding a code to the party that requested it; for a confidential client it stops an
+injected authorization code (RFC 9700). A code stored without a challenge never redeems.
 
 **Clients are confidential by default.** Registration issues a client secret unless
 `"clientType":"public"` is passed explicitly. Every suite service (KyPost, KyDNS,
@@ -808,8 +836,8 @@ does not refresh the password's age. ID tokens expose these method/context value
 | Password + signed push | `pwd`, `urn:kysignon:amr:push`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + passkey | `pwd`, `urn:kysignon:amr:webauthn`, `mfa` | `urn:kysignon:acr:mfa` |
 | Password + recovery code | `pwd`, `urn:kysignon:amr:recovery` | `urn:kysignon:acr:recovery` |
-| Paired device key, unattested (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
-| Paired device key, hardware-attested (TEE or StrongBox) or App Attest (iOS) | `hwk`, `user`, `mfa` | `urn:kysignon:acr:mfa` |
+| Paired device key, unattested or App Attest (iOS) (device sign-on, single factor) | `pop` | `urn:kysignon:acr:device` |
+| Paired device key, hardware-attested (TEE or StrongBox) | `hwk`, `user`, `mfa` | `urn:kysignon:acr:mfa` |
 
 A device sign-on ID token also carries `signon_method: device`, `device_id`, and `origin`:
 the `https://host[:port]` of the relay address the user typed into the consumer app (KyPost),
@@ -820,11 +848,11 @@ origin (scheme, host, port): relays sharing an origin with different paths are o
 domain. Each consumer server accepts only its own configured base-URL origin, so registering
 extra aliases at KyIdentity does not widen what a consumer accepts.
 
-An attested device's ID token also carries `attested: tee|strongbox|appattest`. At pairing,
+An attested device's ID token also carries `attested: tee|strongbox`. At pairing,
 KyAuth Android uploads its Android Key Attestation chain; KyIdentity verifies it and grades the
 device `none`, `tee` or `strongbox`. KyAuth iOS uploads an App Attest object instead, graded
-`appattest` or `none` (below). Pairing never fails because of attestation, but only attested
-devices earn MFA-grade sign-on; `none` stays single factor. Configuration:
+`appattest` or `none` (below). Pairing never fails because of attestation, but only `tee` and
+`strongbox` devices earn MFA-grade sign-on; `none` and `appattest` stay single factor. Configuration:
 
 - `KYIDENTITY_ATTESTATION_STATUS_URL`: Google's revocation status list (default Google's; empty
   disables the check and logs a startup warning).
@@ -841,8 +869,9 @@ are graded only for `platform: "android"`. The object must chain to the embedded
 Apple App Attestation Root CA at the current time, carry the nonce
 `SHA256(authData || SHA256("kyidentity-appattest-v1|" + credential + "|" + publicKey))`, match the
 `keyId`, a configured App ID, sign count 0 and the accepted AAGUID. This proves a genuine KyAuth
-build on a genuine Apple device, not a statement about the signing key itself, so it is a level
-of its own. A pass is `appattest` with boot state `unknown`; the daily sweep skips these devices
+build on a genuine Apple device, not that the signing key lives in the Secure Enclave or needs
+user presence, so it is a level of its own and grades as one possession factor: an iOS device
+signs on only to apps whose policy is `reuse` + `password` for users without mandatory MFA. A pass is `appattest` with boot state `unknown`; the daily sweep skips these devices
 (no serials, no boot state). Failures grade `none` with the reason in the log and audit row only.
 
 - `KYIDENTITY_APPATTEST_APP_IDS`: comma-separated `<TeamID>.<bundleID>` (KyAuth iOS is
@@ -873,17 +902,25 @@ are listed to their owner and administrators for revocation; ID tokens publish a
 per-client `sid` for RP-initiated and back-channel logout.
 
 **System pairing requires the PIN** shown next to the token, and callback URLs must be
-`https` and resolve off-network unless `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` (the
-compose file sets this, since services on `kypost-net` address each other privately).
+`https` and resolve off-network. `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` admits http and
+private LAN ranges (RFC 1918, ULA, carrier-grade NAT), as services on `kypost-net` need; it is
+off by default and never admits loopback, link-local or cloud metadata addresses.
 Sync events are queued per paired system; a system only receives what was queued for it.
 
 **Device pairing requires a P-256 public key.** A device without one can never approve a
 push, and pairing it previously enrolled push MFA that no response could satisfy.
+Five wrong pairing PINs for one account expire all of its live pairing tokens; generate a
+new code to try again. A paired phone signs in to suite apps only when the pairing request
+sent `signOn: true` (the web UI sends the checkbox value); an omitted field means no.
+Removing a phone or changing whether it approves MFA or signs in spends a step-up grant.
+Push stays offered at sign-in only while some approver phone with a key remains.
 
 **`TRUSTED_PROXY_CIDRS` defaults to empty.** Forwarding headers are ignored unless the
 immediate peer is a CIDR you named. Set it to your proxy's address and nothing wider: every
 host inside a listed range can choose its own rate-limit bucket and its own entry in your
 audit log.
+IPv6 clients share one rate-limit bucket per /64, since one subscriber usually holds the
+whole prefix; the audit log keeps the full address.
 
 **`KYIDENTITY_FORWARDED_HEADER` names the one header that is believed, defaulting to
 `X-Forwarded-For`.** Behind Cloudflare, set it to `CF-Connecting-IP`. Exactly one header is
@@ -901,8 +938,12 @@ when set. Files there are named `<KYIDENTITY_APP_NAME>-<capsule-id>.kycap`; the 
 directory is never listed or deleted. The schedule is set on
 the same screen; `KYIDENTITY_BACKUP_DEPOSIT_INTERVAL` (default 24h, 15m floor, `0` disables)
 is only the default until an admin picks one. Custodian cards come from the KyRecovery
-ceremony, and a restore is `kyidentity restore -capsule <file.kycap> -to <dir>` with k shares
-typed on stdin. A server with no key pinned can run drills but cannot make a capsule.
+ceremony, and a restore is `kyidentity restore -capsule <file.kycap> -to <dir> -expect-digest
+<sha256>` with k shares typed on stdin. The digest is required because the recovery key is
+public: anyone who can write `KYIDENTITY_BACKUP_DIR` can seal a capsule the shares open, and
+only the digest from KyRecovery's deposit record (or printed by `export-capsule`) tells this
+server's capsules apart. A local-only deployment should keep those digests off the server.
+A server with no key pinned can run drills but cannot make a capsule.
 
 **KyRecovery must be reached over HTTPS, and by default at a public address.** TLS is not
 for the capsule, which is sealed anyway; it protects the recovery public key that arrives at
@@ -983,8 +1024,9 @@ retain their signed webhook events, including the existing deletion contract.
 Per connector/user, only the earliest pending event can begin delivery. Backoff holds
 later events for that user; other users and connectors continue. A durable attempt
 survives process restart and local user deletion. Unsent claims may expire, but an
-attempt that might have reached the receiver stays blocked after a transport failure,
-HTTP 408/5xx, or asynchronous acceptance (202). A response acknowledging completion
+attempt whose request was written stays blocked after a lost response, HTTP 408 or
+5xx other than 503, or asynchronous acceptance (202). A request that never left (DNS,
+refused connection, TLS failure) and 429/503 refusals back off without blocking. A response acknowledging completion
 and its event status are persisted atomically. These rules rely on the receiver honoring
 its synchronous success/rejection responses; they cannot fence a nonconforming receiver.
 
@@ -1003,9 +1045,13 @@ To recover an expired attempt:
    confirms no account was created. The separate fresh-create checkbox additionally
    requires an empty externalId lookup before clearing that guard. Otherwise restore
    the account's correct externalId at the target and resume; lookup recovers its ID.
+4. When a receiver outage blocked many users, **Resume all expired for this system**
+   releases every expired attempt of that connector after the same confirmation, with one
+   step-up and one audit (`admin.sync_deliveries_resumed`). It keeps every create guard;
+   clearing one stays a per-attempt decision.
 
 The oldest 100 attempts are shown; resolving them exposes the next page. A definitive
-4xx rejection (except 408) uses ordinary backoff and the five-attempt budget;
+4xx rejection (except 408) or 503 uses ordinary backoff and the five-attempt budget;
 Retry-After extends backoff up to one hour. Do not use resync or disconnect/reconnect
 as an uncertain-write recovery mechanism. Stop old-version workers before upgrading;
 they do not honor the new persisted fences. Existing remote operations must finish

@@ -622,7 +622,7 @@ type ProvisioningRow struct {
 }
 
 func (s *Store) ListProvisioningState(systemID, query string, limit, offset int) ([]ProvisioningRow, int, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.rdb.Begin()
 	if err != nil {
 		return nil, 0, err
 	}

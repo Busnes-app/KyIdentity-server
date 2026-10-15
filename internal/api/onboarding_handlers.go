@@ -77,7 +77,7 @@ func (h *OnboardingHandler) issue(r *http.Request, actor *store.User, u *store.U
 		return out, nil
 	}
 	if err := settings.Send(u.Email, h.subject(kind), h.body(u, kind, raw)); err != nil {
-		h.audit.Record("admin.account_link_delivery", actor.ID, actor.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"kind": kind, "error": err.Error()})
+		h.audit.Observe("admin.account_link_delivery", actor.ID, actor.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"kind": kind, "error": err.Error()})
 		return nil, errMailFailed
 	}
 	return out, nil
@@ -146,8 +146,11 @@ func (h *OnboardingHandler) Redeem(kind string) http.HandlerFunc {
 			return
 		}
 		hash, err := auth.HashPassword(req.Password)
+		if argonBusy(w, err) {
+			return
+		}
 		if err != nil {
-			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			writeInputError(w, "password_policy", err)
 			return
 		}
 		action := "auth.password_reset"
@@ -157,7 +160,7 @@ func (h *OnboardingHandler) Redeem(kind string) http.HandlerFunc {
 		pending := h.audit.Prepare(action, "", "", "", "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"kind": kind})
 		u, err := h.store.RedeemAccountToken(req.Token, kind, hash, pending.Row)
 		if errors.Is(err, store.ErrNotFound) {
-			h.audit.Record(action, "", "", "", "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"kind": kind, "reason": "invalid_link"})
+			h.audit.Observe(action, "", "", "", "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"kind": kind, "reason": "invalid_link"})
 			http.Error(w, `{"error":"invalid_link","error_description":"This link is no longer valid. Ask for a new one."}`, http.StatusBadRequest)
 			return
 		}
@@ -197,13 +200,20 @@ func (h *OnboardingHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.middleware.allowRateLimit("reset:"+u.ID, 3, 1.0/3600) {
-		h.audit.Record("auth.password_reset_requested", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "rate_limited"})
+		h.audit.Observe("auth.password_reset_requested", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "rate_limited"})
+		generic()
+		return
+	}
+	// Only a proven address may receive a reset: an unverified one may belong to whoever
+	// typed it in, or to an upstream that renamed the account.
+	if u.EmailVerifiedAt == nil {
+		h.audit.Observe("auth.password_reset_requested", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "email_unverified"})
 		generic()
 		return
 	}
 	settings, err := mail.Load(h.store, h.encryptionKey)
 	if err != nil || settings == nil {
-		h.audit.Record("auth.password_reset_requested", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "mail_not_configured"})
+		h.audit.Observe("auth.password_reset_requested", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "mail_not_configured"})
 		generic()
 		return
 	}
@@ -221,7 +231,7 @@ func (h *OnboardingHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 	ip, ua := h.middleware.ClientIP(r), r.UserAgent()
 	go func() {
 		if err := settings.Send(u.Email, h.subject("reset"), h.body(u, "reset", raw)); err != nil {
-			h.audit.Record("auth.password_reset_delivery", u.ID, u.Username, u.ID, "user", ip, ua, "failure", map[string]any{"error": err.Error()})
+			h.audit.Observe("auth.password_reset_delivery", u.ID, u.Username, u.ID, "user", ip, ua, "failure", map[string]any{"error": err.Error()})
 		}
 	}()
 }
@@ -239,14 +249,20 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	ok, err := auth.VerifyPassword(req.CurrentPassword, user.PasswordHash)
+	if argonBusy(w, err) {
+		return
+	}
 	if err != nil || !ok {
-		h.audit.Record("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "invalid_password"})
+		h.audit.Observe("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "invalid_password"})
 		http.Error(w, `{"error":"invalid_credentials","error_description":"Current password is incorrect"}`, http.StatusUnauthorized)
 		return
 	}
 	hash, err := auth.HashPassword(req.NewPassword)
+	if argonBusy(w, err) {
+		return
+	}
 	if err != nil {
-		http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeInputError(w, "password_policy", err)
 		return
 	}
 	pending := h.audit.Prepare("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
@@ -278,19 +294,27 @@ func (h *OnboardingHandler) PutMail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(req.Host) == "" {
-		if err := mail.Clear(h.store); err != nil {
+		cleared := h.audit.Prepare("admin.mail_configured", admin.ID, admin.Username, "mail", "settings", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"configured": false})
+		if err := h.store.EditSettings(cleared.Row, func(st store.Settings) error { return mail.Clear(st) }); err != nil {
+			log.Printf("mail settings clear failed: %v", err)
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 			return
 		}
-		h.audit.Record("admin.mail_configured", admin.ID, admin.Username, "mail", "settings", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"configured": false})
+		cleared.Committed()
 		writeGroupJSON(w, (*mail.Settings)(nil).View())
 		return
 	}
-	if err := mail.Save(h.store, h.encryptionKey, &req); err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+	// Validate first: the audit row names the trimmed host.
+	if err := req.Validate(); err != nil {
+		writeInputError(w, "invalid_request", err)
 		return
 	}
-	h.audit.Record("admin.mail_configured", admin.ID, admin.Username, "mail", "settings", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"configured": true, "host": req.Host, "port": req.Port, "security": req.Security})
+	saved := h.audit.Prepare("admin.mail_configured", admin.ID, admin.Username, "mail", "settings", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"configured": true, "host": req.Host, "port": req.Port, "security": req.Security})
+	if err := h.store.EditSettings(saved.Row, func(st store.Settings) error { return mail.Save(st, h.encryptionKey, &req) }); err != nil {
+		writeInputError(w, "invalid_request", err)
+		return
+	}
+	saved.Committed()
 	writeGroupJSON(w, req.View())
 }
 
@@ -310,9 +334,10 @@ func (h *OnboardingHandler) TestMail(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		outcome, details["error"] = "failure", err.Error()
 	}
-	h.audit.Record("admin.mail_tested", admin.ID, admin.Username, "mail", "settings", h.middleware.ClientIP(r), r.UserAgent(), outcome, details)
+	h.audit.Observe("admin.mail_tested", admin.ID, admin.Username, "mail", "settings", h.middleware.ClientIP(r), r.UserAgent(), outcome, details)
 	if err != nil {
-		http.Error(w, `{"error":"mail_failed","error_description":"`+strings.ReplaceAll(err.Error(), `"`, "'")+`"}`, http.StatusBadGateway)
+		// The relay's own refusal is what the administrator needs to fix it.
+		writeAPIError(w, http.StatusBadGateway, "mail_failed", err.Error())
 		return
 	}
 	writeSuccess(w)

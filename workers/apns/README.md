@@ -79,7 +79,7 @@ curl -X POST https://<your-worker>.workers.dev/register \
 # -> {"id":"...","label":"alice-server","key":"<RAW KEY>","expiresAt":null}
 ```
 
-**One active key per IP.** Registering from an IP that already holds a key invalidates the previous one — so a server that loses its key file can re-register and keep working.
+**One active key per IP.** Registering from an IP that already holds a key invalidates the previous one — so a server that loses its key file can re-register and keep working. The displaced key leaves a `superseded:<hash>` tombstone (one year), and `/send` with it answers 401 `{"code":"key_superseded"}`; KyIdentity then re-registers once and retries. A key you delete by hand gets a plain 401 and stays revoked.
 
 ## Managing keys
 
@@ -156,7 +156,7 @@ Body limits, applied before the payload reaches APNs:
 | Field   | Limit                    | Over the limit                |
 | ------- | ------------------------ | ----------------------------- |
 | body    | 16 KiB total             | `413`                         |
-| `token` | 512 chars, string        | `400`                         |
+| `token` | 64-200 hex chars, case-insensitive (pinned lowercase) | `400` |
 | `title` | 256 chars, string        | clipped                       |
 | `body`  | 1024 chars, string       | clipped                       |
 | `data`  | 16 entries, string values; keys 64 chars | `400`         |

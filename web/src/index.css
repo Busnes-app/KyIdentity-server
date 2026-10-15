@@ -1023,25 +1023,33 @@ button {
   z-index: 1000;
 }
 
-/* The step-up prompt is requested from inside a feature modal (Register Client asks for a
-   grant with its own modal still open). At an equal z-index DOM order decides, and every
-   admin page renders the prompt before its own modals, so it has to outrank them. */
-.step-up-backdrop {
-  z-index: 1100;
+/* Modal.tsx: the <dialog> itself is the dimmed full-screen backdrop, stacked in the top layer. */
+dialog.modal-backdrop {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
+}
+
+dialog.modal-backdrop::backdrop {
+  background: transparent;
 }
 
 /* Keep verification controls reachable when a mobile keyboard shortens the viewport. */
-.step-up-backdrop form {
+.step-up-card form {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.step-up-backdrop .modal-body {
+.step-up-card .modal-body {
   min-height: 0;
 }
 
-.step-up-backdrop .modal-footer {
+.step-up-card .modal-footer {
   flex-shrink: 0;
   margin-top: 0;
   padding: 1rem 1.5rem;

@@ -7,7 +7,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
@@ -20,7 +22,7 @@ func testClient(t *testing.T, db *store.Store, id, ctype string, uris, scopes []
 		ID: id, ClientName: id, ClientType: ctype,
 		RedirectURIsJSON: string(u), AllowedScopesJSON: string(s), Enabled: true,
 	}
-	if err := db.CreateOAuthClient(c); err != nil {
+	if err := db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatalf("CreateOAuthClient: %v", err)
 	}
 	allowTestAppAccess(t, db, id)
@@ -113,6 +115,35 @@ func TestPublicClientCannotSkipPKCE(t *testing.T) {
 		return
 	}
 	// Rejecting at code creation is also acceptable, and stricter.
+}
+
+// A client secret does not stop an injected code; confidential clients need S256 PKCE too,
+// and a stored code without a challenge (pre-upgrade) never redeems.
+func TestConfidentialClientCannotSkipPKCE(t *testing.T) {
+	e, db, cleanup := setupTestOAuthEngine(t)
+	defer cleanup()
+	secret := "s3cret-value"
+	c := testClient(t, db, "kypost", "confidential", []string{"https://mail.urlxl.com/callback"}, []string{"openid"})
+	c.ClientSecretHash = hashFor(secret)
+	if err := db.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	u := testUser(t, db)
+
+	for _, method := range []string{"", "plain"} {
+		if _, err := e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.urlxl.com/callback", "openid", "", method); err == nil {
+			t.Errorf("confidential client got a code without PKCE (method %q)", method)
+		}
+	}
+
+	raw := "legacy-code-without-challenge"
+	if err := db.CreateAuthorizationCode(&store.AuthorizationCode{ID: "legacy", CodeHash: crypto.HashSHA256(raw), ClientID: "kypost", UserID: u.ID,
+		SessionID: oauthSession(t, db, u.ID), RedirectURI: "https://mail.urlxl.com/callback", Scope: "openid", ExpiresAt: time.Now().UTC().Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.ExchangeAuthorizationCode(raw, "kypost", secret, "https://mail.urlxl.com/callback", ""); err == nil {
+		t.Error("a confidential client redeemed a code stored without a PKCE challenge")
+	}
 }
 
 func TestPKCEVerifierIsEnforced(t *testing.T) {

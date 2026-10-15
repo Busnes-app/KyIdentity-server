@@ -70,7 +70,10 @@ curl -X POST https://<your-worker>.workers.dev/register \
 **One active key per IP.** Registering again from the same IP mints a new key and
 **invalidates the previous one** — so a server that loses its key file just
 re-registers and keeps working, and a single IP can't accumulate keys. Servers
-behind the same public IP therefore share one key slot (the latest wins).
+behind the same public IP therefore share one key slot (the latest wins). The
+displaced key's `/send` answers 401 `{"code":"key_superseded"}` (a one-year
+`superseded:<hash>` tombstone), and KyIdentity re-registers once and retries; a
+key you delete by hand gets a plain 401 and stays revoked.
 
 Self-registered keys never expire and are tagged `"source":"self"` (with the
 registering IP bucket) in the stored record, so you can audit and revoke abusers
@@ -152,7 +155,7 @@ Body limits, applied before the payload reaches FCM:
 | Field   | Limit                    | Over the limit                |
 | ------- | ------------------------ | ----------------------------- |
 | body    | 16 KiB total             | `413`                         |
-| `token` | 512 chars, string        | `400`                         |
+| `token` | up to 512 chars of `A-Za-z0-9_:-` | `400`                  |
 | `title` | 256 chars, string        | clipped                       |
 | `body`  | 1024 chars, string       | clipped                       |
 | `data`  | 16 entries, string values; keys 64 chars | `400`         |

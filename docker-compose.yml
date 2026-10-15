@@ -93,10 +93,9 @@ services:
       # iOS App Attest grading at pairing: comma-separated <TeamID>.<bundleID>; empty disables.
       KYIDENTITY_APPATTEST_APP_IDS: ${KYIDENTITY_APPATTEST_APP_IDS:-}
       KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT: ${KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT:-false}
-      # Services on kypost-net address each other privately, so pairing callbacks there
-      # are internal by design. Set to false if KyIdentity is reachable from the internet
-      # and paired systems live on public hostnames.
-      KYIDENTITY_ALLOW_PRIVATE_CALLBACKS: ${KYIDENTITY_ALLOW_PRIVATE_CALLBACKS:-true}
+      # Set to true when paired systems call back over kypost-net or another private LAN.
+      # Opens RFC 1918/ULA/CGNAT only; loopback, link-local and metadata stay refused.
+      KYIDENTITY_ALLOW_PRIVATE_CALLBACKS: ${KYIDENTITY_ALLOW_PRIVATE_CALLBACKS:-false}
       # Backups. The schedule is set in the admin UI; this is only its default. A local
       # capsule directory is a second destination (or the only one, with no KyRecovery);
       # mount a volume there. Allow a private KyRecovery only for one on your own network

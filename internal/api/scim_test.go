@@ -88,7 +88,7 @@ func TestSCIMConnectionAdministration(t *testing.T) {
 		t.Fatal("rejected connection change missing from audit")
 	}
 	legacy := &store.PairedSystem{ID: "legacy-custom", Name: "legacy", SystemType: "custom", CallbackURL: "https://example.com/legacy", HMACSecretEncrypted: sys.HMACSecretEncrypted, Status: "active"}
-	if err = db.CreatePairedSystem(legacy); err != nil {
+	if err = db.CreatePairedSystem(legacy, nil); err != nil {
 		t.Fatal(err)
 	}
 	rr = adminRequest(t, srv, "PUT", "/api/admin/systems/legacy-custom/connection", cookie, `{"systemType":"suite_webhook"}`)

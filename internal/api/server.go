@@ -138,7 +138,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /api/auth/password/reset", s.middleware.RateLimit("account_link", 10, 0.2)(onboardH.Redeem("reset")))
 	mux.Handle("POST /api/auth/password/forgot", s.middleware.RateLimit("password_forgot", 5, 0.05)(http.HandlerFunc(onboardH.Forgot)))
 	mux.Handle("POST /api/auth/mfa/totp/verify", s.middleware.RateLimit("mfa", 10, 0.2)(http.HandlerFunc(authH.VerifyTOTP)))
-	mux.Handle("POST /api/auth/mfa/recovery/verify", s.middleware.RateLimit("mfa", 5, 0.1)(http.HandlerFunc(authH.VerifyRecoveryCode)))
+	mux.Handle("POST /api/auth/mfa/recovery/verify", s.middleware.RateLimit("mfa_recovery", 5, 0.1)(http.HandlerFunc(authH.VerifyRecoveryCode)))
 	mux.Handle("POST /api/auth/mfa/push/poll", s.middleware.RateLimit("push_poll", 120, 2.0)(http.HandlerFunc(authH.PollPushChallenge)))
 	mux.Handle("POST /api/auth/mfa/push/finish", s.middleware.RateLimit("mfa", 10, 0.2)(http.HandlerFunc(authH.FinishPushLogin)))
 	mux.Handle("POST /api/mfa/push/respond", s.middleware.RateLimit("push_respond", 15, 0.5)(http.HandlerFunc(authH.RespondPush)))
@@ -248,6 +248,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"GET", "/api/admin/systems/{id}/deliveries", permRead, false, http.HandlerFunc(adminH.ListSyncDeliveries)},
 		{"POST", "/api/admin/systems/{id}/deliveries/{token}/read-back", permAdmin, false, http.HandlerFunc(adminH.ReadBackSyncDelivery)},
 		{"POST", "/api/admin/systems/{id}/deliveries/{token}/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeSyncDelivery)},
+		{"POST", "/api/admin/systems/{id}/deliveries/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeSyncDeliveries)},
 		{"GET", "/api/admin/systems/{id}/provisioning", permRead, false, http.HandlerFunc(adminH.ListProvisioningState)},
 		{"POST", "/api/admin/systems/{id}/provisioning/{userId}/retry", permAdmin, false, http.HandlerFunc(adminH.RetryProvisioning)},
 		{"GET", "/api/admin/systems/{id}/reconcile", permRead, false, http.HandlerFunc(adminH.ListReconcileJobs)},
@@ -412,7 +413,11 @@ func (s *Server) routes() *http.ServeMux {
 	return mux
 }
 
+// Start serves until Shutdown; the limiter sweeper lives exactly as long.
 func (s *Server) Start() error {
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go s.middleware.sweepLimitersEvery(ctx, time.Minute)
 	return s.httpServer.ListenAndServe()
 }
 
@@ -467,7 +472,7 @@ func (s *Server) requireStepUp(next http.Handler) http.Handler {
 			if user != nil {
 				actorID, actorName = user.ID, user.Username
 			}
-			s.audit.Record("admin.step_up_required", actorID, actorName, r.URL.Path, "endpoint",
+			s.audit.Observe("admin.step_up_required", actorID, actorName, r.URL.Path, "endpoint",
 				s.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"method": r.Method})
 			writeStepUpError(w, err)
 			return

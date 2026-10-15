@@ -332,7 +332,7 @@ func TestOIDCAuthorizeAndPKCETokenFlowViaHTTP(t *testing.T) {
 		AllowedScopesJSON: `["openid","profile","email"]`,
 		Enabled:           true,
 	}
-	_ = dbStore.CreateOAuthClient(client)
+	_ = dbStore.CreateOAuthClient(client, nil)
 	allowTestAppAccess(t, dbStore, client.ID)
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"

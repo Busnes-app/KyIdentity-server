@@ -255,7 +255,7 @@ func TestLinksDieWithAccessRevocationAndStateChanges(t *testing.T) {
 	u := pendingUser(t, s)
 	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	// "Revoke everything" on an invited account cancels the invitation.
-	if err := s.RevokeUserAccess(u.ID); err != nil {
+	if err := s.RevokeUserAccess(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); !errors.Is(err, ErrNotFound) {

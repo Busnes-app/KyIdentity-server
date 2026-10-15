@@ -58,7 +58,7 @@ func TestInstallerGroupsThroughNativeSCIMWorker(t *testing.T) {
 		t.Fatal("worker delivery disturbed setup ownership", err)
 	}
 	day.Status = "disabled"
-	if err := s.UpdateUserWithSyncEvents(day, true, nil); err != nil {
+	if _, err := s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)

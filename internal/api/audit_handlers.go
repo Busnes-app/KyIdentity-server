@@ -54,7 +54,7 @@ func auditFilterFrom(r *http.Request) (store.AuditFilter, error) {
 // invalidFilter answers a bad filter with a fixed description: the messages above are
 // constants, never the caller's input.
 func invalidFilter(w http.ResponseWriter, err error) {
-	http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+	writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 }
 
 func (h *AdminHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {

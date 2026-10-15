@@ -46,10 +46,12 @@ import {
   secondsUntilUTCMidnight,
   claimTokenForSend,
   createRelayFetchHandler,
+  denyUnknownKey,
   fail,
   failDelivery,
   isExpired,
   json,
+  apnsToken,
   readSendPayload,
   recordUsageAnalytics,
   resolveLimit,
@@ -126,8 +128,7 @@ async function handleSend(request: Request, rc: RequestContext<Env>): Promise<Re
   const hash = await sha256Hex(presented);
   const record = await env.API_KEYS.get<ApiKeyRecord>(KEY_PREFIX + hash, "json");
   if (!record || !record.enabled) {
-    rc.log({ level: "warn", event: "send.denied", reason: "invalid_key" });
-    return fail(rc, 401, "invalid api key");
+    return denyUnknownKey(rc, hash);
   }
   if (isExpired(record, Date.now())) {
     rc.log({ level: "warn", event: "send.denied", reason: "expired", keyId: record.id });
@@ -138,7 +139,7 @@ async function handleSend(request: Request, rc: RequestContext<Env>): Promise<Re
   // type-checked in the shared reader (see readSendPayload): the body is refused
   // at MAX_SEND_BODY_BYTES before it is parsed, so an authenticated key cannot
   // spend its per-minute quota on multi-megabyte allocations here.
-  const parsed = await readSendPayload(request);
+  const parsed = await readSendPayload(request, apnsToken);
   if (!parsed.ok) {
     return fail(rc, parsed.status, parsed.error);
   }

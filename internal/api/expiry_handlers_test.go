@@ -18,7 +18,7 @@ func TestExpiringAccessAdminAPI(t *testing.T) {
 	me := newUser(t, db, "admin")
 	admin := newSession(t, db, me, exp)
 	u := newUser(t, db, "user")
-	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "app-a", ClientName: "A", ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}); err != nil {
+	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "app-a", ClientName: "A", ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	apps, _, _ := db.ListAppRecords("app-a", 1, 0)

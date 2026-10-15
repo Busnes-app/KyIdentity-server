@@ -32,23 +32,25 @@
  * ../../push-relay-shared/push-relay-common.ts.
  */
 
-import { FcmConfig, FcmMessage, sendFcmMessage } from "./fcm";
+// `import type` so node --test's type stripping can load this module too.
+import type { FcmConfig, FcmMessage } from "./fcm";
+import { sendFcmMessage } from "./fcm";
+import type { ApiKeyRecord, CommonEnv, RequestContext } from "../../../push-relay-shared/push-relay-common";
 import {
-  ApiKeyRecord,
-  CommonEnv,
   DEFAULT_LIMIT_PER_MINUTE,
   KEY_PREFIX,
-  RequestContext,
   bearer,
   checkMinuteLimit,
   checkDailyBudget,
   secondsUntilUTCMidnight,
   claimTokenForSend,
   createRelayFetchHandler,
+  denyUnknownKey,
   fail,
   failDelivery,
   isExpired,
   json,
+  fcmToken,
   readSendPayload,
   recordUsageAnalytics,
   resolveLimit,
@@ -86,8 +88,7 @@ async function handleSend(request: Request, rc: RequestContext<Env>): Promise<Re
   const hash = await sha256Hex(presented);
   const record = await env.API_KEYS.get<ApiKeyRecord>(KEY_PREFIX + hash, "json");
   if (!record || !record.enabled) {
-    rc.log({ level: "warn", event: "send.denied", reason: "invalid_key" });
-    return fail(rc, 401, "invalid api key");
+    return denyUnknownKey(rc, hash);
   }
   if (isExpired(record, Date.now())) {
     rc.log({ level: "warn", event: "send.denied", reason: "expired", keyId: record.id });
@@ -100,7 +101,7 @@ async function handleSend(request: Request, rc: RequestContext<Env>): Promise<Re
   // readSendPayload): the body is refused at MAX_SEND_BODY_BYTES before it is
   // parsed, so an authenticated key cannot spend its per-minute quota on
   // multi-megabyte allocations here.
-  const parsed = await readSendPayload(request);
+  const parsed = await readSendPayload(request, fcmToken);
   if (!parsed.ok) {
     return fail(rc, parsed.status, parsed.error);
   }

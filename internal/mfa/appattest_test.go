@@ -42,12 +42,12 @@ func TestRegisterIOSWithAppAttest(t *testing.T) {
 	engine.SetAppAttestor(appattest.NewVerifierWithRoot(ca.Root, []string{testAppID}, false))
 	android := &fakeAttestor{}
 	engine.SetAttestor(android)
-	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	_, pub := signingKey(t)
 	req := &NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns",
 		Attestation: []string{base64.StdEncoding.EncodeToString([]byte("cert"))}}
 	req.AppAttest = iosEvidence(t, ca, req)
-	dev, err := engine.RegisterNativeDevice(req)
+	dev, err := engine.RegisterNativeDevice(req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,13 +67,13 @@ func TestRegisterIOSAppAttestBoundToPublicKey(t *testing.T) {
 	defer cleanup()
 	ca := appattesttest.NewCA(t)
 	engine.SetAppAttestor(appattest.NewVerifierWithRoot(ca.Root, []string{testAppID}, false))
-	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	_, pub := signingKey(t)
 	_, other := signingKey(t)
 	req := &NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: other, PushToken: "apns"}
 	req.AppAttest = iosEvidence(t, ca, req)
 	req.PublicKey = pub // swapped after attesting
-	dev, err := engine.RegisterNativeDevice(req)
+	dev, err := engine.RegisterNativeDevice(req, nil)
 	if err != nil || dev.AttestedLevel != "none" || dev.AttestationReason == "" {
 		t.Fatalf("%v %+v", err, dev)
 	}
@@ -91,9 +91,9 @@ func TestRegisterIOSGarbageAppAttestStillPairs(t *testing.T) {
 		{KeyID: "k", Attestation: "!!not base64!!"},
 		{KeyID: base64.StdEncoding.EncodeToString(make([]byte, 32)), Attestation: base64.StdEncoding.EncodeToString([]byte("garbage"))},
 	} {
-		token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+		token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 		_, pub := signingKey(t)
-		dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns", AppAttest: ev})
+		dev, err := engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns", AppAttest: ev}, nil)
 		if err != nil || dev.AttestedLevel != "none" || dev.BootState != "unknown" || dev.AttestationReason == "" {
 			t.Fatalf("%v %+v", err, dev)
 		}
@@ -107,17 +107,17 @@ func TestRegisterIOSWithoutAppAttestOrVerifierIsNone(t *testing.T) {
 	engine, _, user, cleanup := setupTestMFAEngine(t)
 	defer cleanup()
 	ca := appattesttest.NewCA(t)
-	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	_, pub := signingKey(t)
 	req := &NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns"}
 	req.AppAttest = iosEvidence(t, ca, req)
-	dev, err := engine.RegisterNativeDevice(req) // no App Attest verifier configured
+	dev, err := engine.RegisterNativeDevice(req, nil) // no App Attest verifier configured
 	if err != nil || dev.AttestedLevel != "none" || dev.AttestationReason != "app attest not configured" {
 		t.Fatalf("%v %+v", err, dev)
 	}
 	engine.SetAppAttestor(appattest.NewVerifierWithRoot(ca.Root, []string{testAppID}, false))
-	token, _, _, _ = engine.GenerateDevicePairingToken(user.ID, true)
-	dev, err = engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns"})
+	token, _, _, _ = engine.GenerateDevicePairingToken(user.ID, true, nil)
+	dev, err = engine.RegisterNativeDevice(&NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns"}, nil)
 	if err != nil || dev.AttestedLevel != "none" || dev.AttestationReason != "" {
 		t.Fatalf("%v %+v", err, dev)
 	}
@@ -131,11 +131,11 @@ func TestRegisterAndroidIgnoresAppAttest(t *testing.T) {
 	fa := &fakeAttestor{}
 	engine.SetAttestor(fa)
 	for _, platform := range []string{"android", ""} {
-		token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+		token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 		_, pub := signingKey(t)
 		req := &NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", Platform: platform, PublicKey: pub, PushToken: "fcm"}
 		req.AppAttest = iosEvidence(t, ca, req)
-		dev, err := engine.RegisterNativeDevice(req)
+		dev, err := engine.RegisterNativeDevice(req, nil)
 		if err != nil || dev.AttestedLevel != "none" || dev.AttestationReason != "" {
 			t.Fatalf("%q: valid app attest graded an android device: %v %+v", platform, err, dev)
 		}
@@ -170,13 +170,13 @@ func TestRegisterIOSDevelopmentEvidenceRefusedWithClassifiedReason(t *testing.T)
 	defer cleanup()
 	ca := appattesttest.NewCA(t)
 	engine.SetAppAttestor(appattest.NewVerifierWithRoot(ca.Root, []string{testAppID}, false))
-	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 	_, pub := signingKey(t)
 	req := &NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns"}
 	sum := sha256.Sum256(AppAttestClientData(req))
 	keyID, obj := ca.Attest(t, appattesttest.Options{AppID: testAppID, ClientDataHash: sum[:], AAGUID: []byte("appattestdevelop")})
 	req.AppAttest = &AppAttestEvidence{KeyID: keyID, Attestation: base64.StdEncoding.EncodeToString(obj)}
-	dev, err := engine.RegisterNativeDevice(req)
+	dev, err := engine.RegisterNativeDevice(req, nil)
 	if err != nil {
 		t.Fatalf("pairing must still succeed: %v", err)
 	}
@@ -196,11 +196,11 @@ func TestRefusedAppAttestLogsStructuredFields(t *testing.T) {
 	register := func(ev func(*NativeDeviceRegisterRequest) *AppAttestEvidence) map[string]string {
 		t.Helper()
 		buf.Reset()
-		token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true)
+		token, _, _, _ := engine.GenerateDevicePairingToken(user.ID, true, nil)
 		_, pub := signingKey(t)
 		req := &NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "iPhone", DeviceIdentifier: "i", Platform: "ios", PublicKey: pub, PushToken: "apns"}
 		req.AppAttest = ev(req)
-		if _, err := engine.RegisterNativeDevice(req); err != nil {
+		if _, err := engine.RegisterNativeDevice(req, nil); err != nil {
 			t.Fatalf("pairing must still succeed: %v", err)
 		}
 		var rec map[string]string

@@ -17,6 +17,16 @@ func upstream(t *testing.T, s *Store, connectorID, external, username string) *U
 	return u
 }
 
+// upstreamWrite sends u as the upstream's whole view of the account: its profile, active
+// flag and external id, plus a role the store must ignore.
+func upstreamWrite(s *Store, u *User) error {
+	_, err := s.UpdateUpstreamUser(u.SourceConnectorID, u.ID, nil, func(n *User) error {
+		n.Username, n.DisplayName, n.Email, n.SourceActive, n.ExternalID, n.Role = u.Username, u.DisplayName, u.Email, u.SourceActive, u.ExternalID, u.Role
+		return nil
+	})
+	return err
+}
+
 func TestSCIMConnectorTokensAreHashedScopedAndRevocable(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
@@ -117,7 +127,7 @@ func TestUpstreamUsersAreKeyedByConnectorAndExternalID(t *testing.T) {
 	}
 	renamed, _ := s.GetUserByID(u.ID)
 	renamed.Username = local.Email
-	if err := s.UpdateUpstreamUser(renamed, nil); !errors.Is(err, ErrUserConflict) {
+	if err := upstreamWrite(s, renamed); !errors.Is(err, ErrUserConflict) {
 		t.Fatalf("rename onto a local email accepted: %v", err)
 	}
 	if got, _ := s.GetUpstreamUser(b.ID, u.ID); got != nil {
@@ -162,7 +172,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	}
 
 	stored.SourceActive = false
-	if err := s.UpdateUpstreamUser(stored, nil); err != nil {
+	if err := upstreamWrite(s, stored); err != nil {
 		t.Fatal(err)
 	}
 	stored, _ = s.GetUserByID(u.ID)
@@ -173,7 +183,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 		t.Fatal("session survived upstream deactivation")
 	}
 	stored.SourceActive = true
-	if err := s.UpdateUpstreamUser(stored, nil); err != nil {
+	if err := upstreamWrite(s, stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored, _ = s.GetUserByID(u.ID); stored.Status != "active" {
@@ -189,7 +199,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	stored, _ = s.GetUserByID(u.ID)
 	stored.SourceActive = true
 	stored.DisplayName = "Alice Renamed"
-	if err := s.UpdateUpstreamUser(stored, nil); err != nil {
+	if err := upstreamWrite(s, stored); err != nil {
 		t.Fatal(err)
 	}
 	stored, _ = s.GetUserByID(u.ID)
@@ -207,12 +217,12 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 
 	// The external id is immutable and local role decisions are not the upstream's.
 	stored.ExternalID = "ext-2"
-	if err := s.UpdateUpstreamUser(stored, nil); err == nil {
+	if err := upstreamWrite(s, stored); err == nil {
 		t.Fatal("external id changed")
 	}
 	stored, _ = s.GetUserByID(u.ID)
 	stored.Role = "admin"
-	if err := s.UpdateUpstreamUser(stored, nil); err != nil {
+	if err := upstreamWrite(s, stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored, _ = s.GetUserByID(u.ID); stored.Role != "user" {
@@ -303,7 +313,7 @@ func TestLocalOverrideSurvivesAConcurrentUpstreamWrite(t *testing.T) {
 	go func() {
 		defer done.Done()
 		start.Wait()
-		errs <- s.UpdateUpstreamUser(fromUpstream, nil)
+		errs <- upstreamWrite(s, fromUpstream)
 	}()
 	go func() {
 		defer done.Done()
@@ -353,7 +363,7 @@ func TestUpstreamDeactivationSurvivesAConcurrentLocalEdit(t *testing.T) {
 	go func() {
 		defer done.Done()
 		start.Wait()
-		errs <- s.UpdateUpstreamUser(fromUpstream, nil)
+		errs <- upstreamWrite(s, fromUpstream)
 	}()
 	go func() {
 		defer done.Done()
@@ -374,8 +384,8 @@ func TestUpstreamDeactivationSurvivesAConcurrentLocalEdit(t *testing.T) {
 	}
 }
 
-// An upstream rename or address change that lands while an administrator edits the role
-// is kept, and the address the upstream just verified stays verified.
+// An upstream rename or address change racing a local promotion is either kept or, once
+// the account is an administrator, refused whole; neither write is lost.
 func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
@@ -405,7 +415,7 @@ func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 	go func() {
 		defer done.Done()
 		start.Wait()
-		errs <- s.UpdateUpstreamUser(fromUpstream, nil)
+		errs <- upstreamWrite(s, fromUpstream)
 	}()
 	go func() {
 		defer done.Done()
@@ -415,14 +425,71 @@ func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 	start.Done()
 	done.Wait()
 	close(errs)
+	refused := false
 	for err := range errs {
-		if err != nil {
+		if errors.Is(err, ErrPrivilegedIdentity) {
+			refused = true
+		} else if err != nil {
 			t.Fatal(err)
 		}
 	}
 	after, _ := s.GetUserByID(u.ID)
-	if after.Username != "alice.moved" || after.DisplayName != "Alice Moved" || after.Email != "alice.moved@up.test" || after.Role != "admin" {
-		t.Fatalf("upstream profile lost to a concurrent local edit: %+v", after)
+	// Promotion first refuses the rename outright; the rename first is kept.
+	want := fromUpstream
+	if refused {
+		want = u
+	}
+	if after.Username != want.Username || after.DisplayName != want.DisplayName || after.Email != want.Email || after.Role != "admin" {
+		t.Fatalf("refused=%v, upstream profile lost to a concurrent local edit: %+v", refused, after)
+	}
+}
+
+// An upstream cannot re-address or rename an account that was made an administrator or
+// given a delegation locally: the address would receive that account's password reset.
+func TestUpstreamCannotChangePrivilegedIdentifiers(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	c, _ := s.CreateSCIMConnector("A", nil)
+	admin := upstream(t, s, c.ID, "ext-1", "alice")
+	admin.Role = "admin"
+	if err := s.UpdateUserWithSyncEvents(admin, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	helpdesk := upstream(t, s, c.ID, "ext-2", "bob")
+	if err := s.SetDelegations(helpdesk.ID, Delegations{Helpdesk: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	plain := upstream(t, s, c.ID, "ext-3", "carol")
+
+	for _, u := range []*User{admin, helpdesk} {
+		for _, change := range []func(*User){
+			func(n *User) { n.Email = "attacker@evil.test" },
+			func(n *User) { n.Username = "renamed" },
+		} {
+			next, _ := s.GetUserByID(u.ID)
+			change(next)
+			if err := upstreamWrite(s, next); !errors.Is(err, ErrPrivilegedIdentity) {
+				t.Fatalf("%s: err = %v, want ErrPrivilegedIdentity", u.Username, err)
+			}
+			if got, _ := s.GetUserByID(u.ID); got.Email != u.Email || got.Username != u.Username {
+				t.Fatalf("%s changed anyway: %+v", u.Username, got)
+			}
+		}
+		// Other upstream fields still flow.
+		next, _ := s.GetUserByID(u.ID)
+		next.DisplayName = "Renamed Display"
+		if err := upstreamWrite(s, next); err != nil {
+			t.Fatalf("%s display name: %v", u.Username, err)
+		}
+	}
+
+	next, _ := s.GetUserByID(plain.ID)
+	next.Email, next.Username = "carol.new@up.test", "carol.new"
+	if err := upstreamWrite(s, next); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetUserByID(plain.ID); got.Email != "carol.new@up.test" || got.Username != "carol.new" {
+		t.Fatalf("ordinary account not updated: %+v", got)
 	}
 }
 

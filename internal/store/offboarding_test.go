@@ -27,13 +27,13 @@ func TestDisablingDeactivatesEveryConnectorHoldingTheAccount(t *testing.T) {
 	defer cleanup()
 	u := createTestUser(t, s)
 	provisionedUser(t, s, u, "assigned")
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "legacy", Name: "legacy", SystemType: "scim", CallbackURL: "https://legacy.example/scim", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "legacy", Name: "legacy", SystemType: "scim", CallbackURL: "https://legacy.example/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SaveSCIMUserLink("legacy", u.ID, "remote-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "stranger", Name: "stranger", SystemType: "scim", CallbackURL: "https://stranger.example/scim", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "stranger", Name: "stranger", SystemType: "scim", CallbackURL: "https://stranger.example/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,7 +231,7 @@ func TestUntrackedHolderKeepsDeletionOutOfComplete(t *testing.T) {
 	defer cleanup()
 	u := createTestUser(t, s)
 	provisionedUser(t, s, u, "tracked")
-	if err := s.CreatePairedSystem(&PairedSystem{ID: "untracked", Name: "untracked", SystemType: "scim", CallbackURL: "https://untracked.example/scim", Status: "active"}); err != nil {
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "untracked", Name: "untracked", SystemType: "scim", CallbackURL: "https://untracked.example/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {

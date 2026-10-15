@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -18,6 +19,9 @@ import (
 
 type Store struct {
 	db *sql.DB
+	// rdb serves read-only snapshot transactions, which must not take the
+	// IMMEDIATE write lock db's transactions begin with.
+	rdb *sql.DB
 }
 
 var ErrLastActiveAdmin = errors.New("cannot remove the last active administrator")
@@ -41,16 +45,30 @@ func New(dbPath string) (*Store, error) {
 	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(time.Hour)
 
-	s := &Store{db: db}
+	s := &Store{db: db, rdb: db}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("schema creation failed: %w", err)
 	}
-
+	// A second :memory: connection would be a different, empty database.
+	if dbPath != ":memory:" {
+		rdb, err := sql.Open("sqlite", fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=query_only(1)", dbPath))
+		if err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("failed to open sqlite read pool: %w", err)
+		}
+		rdb.SetMaxOpenConns(runtime.NumCPU() + 4)
+		rdb.SetMaxIdleConns(4)
+		rdb.SetConnMaxLifetime(time.Hour)
+		s.rdb = rdb
+	}
 	return s, nil
 }
 
 func (s *Store) Close() error {
+	if s.rdb != s.db {
+		_ = s.rdb.Close()
+	}
 	return s.db.Close()
 }
 
@@ -140,6 +158,7 @@ func (s *Store) migrate() error {
 		token_hash TEXT NOT NULL UNIQUE,
 		pin_hash TEXT NOT NULL,
 		sign_on BOOLEAN NOT NULL DEFAULT 0,
+		pin_failures INTEGER NOT NULL DEFAULT 0,
 		expires_at DATETIME NOT NULL,
 		used_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -339,6 +358,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateDevicePairingTokenSignOn(); err != nil {
 		return err
 	}
+	if err := s.migrateDevicePairingTokenPINFailures(); err != nil {
+		return err
+	}
 	if err := s.migrateNativeDeviceAttestation(); err != nil {
 		return err
 	}
@@ -506,6 +528,9 @@ func (s *Store) migratePairedSystemsMetadata() error {
 			hasIcon = true
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	if !hasDesc {
 		if _, err := s.db.Exec(`ALTER TABLE paired_systems ADD COLUMN description TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
@@ -581,6 +606,10 @@ func (s *Store) migrateNativeDeviceCanSignOn() error {
 
 func (s *Store) migrateDevicePairingTokenSignOn() error {
 	return s.addColumnIfMissing("device_pairing_tokens", "sign_on", `ALTER TABLE device_pairing_tokens ADD COLUMN sign_on BOOLEAN NOT NULL DEFAULT 0`)
+}
+
+func (s *Store) migrateDevicePairingTokenPINFailures() error {
+	return s.addColumnIfMissing("device_pairing_tokens", "pin_failures", `ALTER TABLE device_pairing_tokens ADD COLUMN pin_failures INTEGER NOT NULL DEFAULT 0`)
 }
 
 func (s *Store) migrateNativeDeviceAttestation() error {
@@ -713,6 +742,7 @@ func (s *Store) migrateLegacyDevicePairingTokens() error {
 			token_hash TEXT NOT NULL UNIQUE,
 			pin_hash TEXT NOT NULL,
 			sign_on BOOLEAN NOT NULL DEFAULT 0,
+			pin_failures INTEGER NOT NULL DEFAULT 0,
 			expires_at DATETIME NOT NULL,
 			used_at DATETIME,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -806,6 +836,9 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 	now := time.Now().UTC()
 	u.CreatedAt, u.UpdatedAt = now, now
 	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt); err != nil {
+		if isUniqueViolation(err) {
+			return ErrUserConflict
+		}
 		return err
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
@@ -844,52 +877,40 @@ func (s *Store) ListUsers() ([]User, error) {
 		}
 		users = append(users, *u)
 	}
-	return users, nil
+	return users, rows.Err()
 }
 
-func (s *Store) UpdateUser(u *User) error {
-	query := `UPDATE users SET display_name = ?, email = ?, role = ?, status = ?, updated_at = ? WHERE id = ?`
-	u.UpdatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, u.DisplayName, u.Email, u.Role, u.Status, u.UpdatedAt, u.ID)
-	return enrollmentMutationError(err)
+// EditUser applies one request's changes to the row as read under the write lock, so a
+// field the request does not touch keeps whatever a concurrent write left there. edit
+// may refuse; it reports whether the change must revoke the account's access.
+func (s *Store) EditUser(id string, audit *AuditEvent, edit func(u *User) (revokeAccess bool, err error)) (*User, error) {
+	return s.updateUser(id, audit, func(_ *sql.Tx, u *User) (bool, error) { return edit(u) })
 }
 
-// UpdateUserWithSyncEvents preserves the active-admin invariant and writes its outbox event
-// in the same transaction as the account change.
-func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *AuditEvent) error {
-	return s.updateUser(u, revokeAccess, audit, nil)
-}
-
-// updateUser is the one account-update transaction. prepare, when given, runs after the
-// current row is read under the write lock and before anything is written, so a caller
-// can refuse the change or fold local state into u without a lost update.
-func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepare func(tx *sql.Tx, current *User) error) error {
+// updateUser is the one account-update transaction. edit changes a copy of the row read
+// under the write lock, before anything is written, so no caller writes a stale field.
+// A source-owned row's status is then re-derived from its source state.
+func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u *User) (revokeAccess bool, err error)) (*User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
-	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, u.ID))
+	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if current == nil {
-		return sql.ErrNoRows
+		return nil, sql.ErrNoRows
 	}
-	if prepare != nil {
-		if err := prepare(tx, current); err != nil {
-			return err
-		}
-		u.EndsAt = current.EndsAt
-	} else {
-		// A local caller never owns the upstream's fields: take them from the row as it is
-		// now, so an upstream write landing since the caller's read is not undone.
-		u.SourceConnectorID, u.ExternalID, u.SourceActive = current.SourceConnectorID, current.ExternalID, current.SourceActive
-		if current.SourceConnectorID != "" {
-			u.Username, u.DisplayName, u.Email = current.Username, current.DisplayName, current.Email
-		}
-		u.ApplySourceState()
+	next := *current
+	u := &next
+	revokeAccess, err := edit(tx, u)
+	if err != nil {
+		return nil, err
 	}
+	u.ID = current.ID
+	u.ApplySourceState()
 	oldRole, oldStatus, oldEmail := current.Role, current.Status, current.Email
 	// A newly set end date is a schedule: it must lie ahead, and scheduling the last
 	// administrator's end is refused like removing them would be. An end date the row
@@ -897,79 +918,57 @@ func (s *Store) updateUser(u *User, revokeAccess bool, audit *AuditEvent, prepar
 	schedulingEnd := u.EndsAt != nil && (current.EndsAt == nil || !u.EndsAt.Equal(*current.EndsAt))
 	if schedulingEnd {
 		if err := checkExpiry(u.EndsAt, time.Now().UTC()); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if oldRole == "admin" && oldStatus == "active" && (u.Role != "admin" || u.Status != "active" || schedulingEnd) {
-		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
-			return err
-		}
-		if admins <= 1 {
-			return ErrLastActiveAdmin
+		if err := requirePermanentAdminTx(tx, `id<>?`, u.ID); err != nil {
+			return nil, err
 		}
 	}
 	now := time.Now().UTC()
-	u.UpdatedAt = now
 	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
-		return enrollmentMutationError(err)
+		return nil, enrollmentMutationError(err)
 	}
 	if !strings.EqualFold(oldEmail, u.Email) {
 		// A new address is unproven, and a link mailed to the old one must not act on it.
 		if _, err := tx.Exec(`UPDATE users SET email_verified_at = NULL WHERE id = ?`, u.ID); err != nil {
-			return err
+			return nil, err
 		}
 		if err := expireAccountTokensTx(tx, now, `user_id=?`, u.ID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	stored, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, u.ID))
-	if err != nil || stored == nil {
-		return err
+	if err != nil {
+		return nil, err
 	}
 	switch {
 	case oldStatus == "active" && stored.Status == "disabled":
 		if err := offboardUserTx(tx, stored, false, now); err != nil {
-			return err
+			return nil, err
 		}
 	case revokeAccess:
 		if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := queueUserUpdateTx(tx, stored, now); err != nil {
-		return err
+		return nil, err
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
-		return err
+		return nil, err
 	}
 	if err := recordAuditTx(tx, audit); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
-}
-
-func (s *Store) UpdateUserPassword(userID, passwordHash string) error {
-	query := `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.Exec(query, passwordHash, time.Now().UTC(), userID)
-	return err
-}
-
-func (s *Store) UpdateUserStatus(userID, status string) error {
-	query := `UPDATE users SET status = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.Exec(query, status, time.Now().UTC(), userID)
-	return err
+	return stored, tx.Commit()
 }
 
 func (s *Store) CountAdmins() (int, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&count)
 	return count, err
-}
-
-func (s *Store) DeleteUser(userID string) error {
-	_, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, userID)
-	return err
 }
 
 // DeleteUserWithSyncEvents atomically offboards a user and removes the directory row.
@@ -990,12 +989,8 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 		return sql.ErrNoRows
 	}
 	if u.Role == "admin" && u.Status == "active" {
-		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&admins); err != nil {
+		if err := requirePermanentAdminTx(tx, `id<>?`, userID); err != nil {
 			return err
-		}
-		if admins <= 1 {
-			return ErrLastActiveAdmin
 		}
 	}
 	now := time.Now().UTC()
@@ -1168,11 +1163,13 @@ func (s *Store) ClearFailedLogins(userID string) error {
 }
 
 // System Pairing & Sync Management
-func (s *Store) CreatePairedSystem(ps *PairedSystem) error {
+func (s *Store) CreatePairedSystem(ps *PairedSystem, audit *AuditEvent) error {
 	query := `INSERT INTO paired_systems (id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	ps.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, ps.ID, ps.Name, ps.SystemType, ps.Description, ps.IconURL, ps.CallbackURL, ps.HMACSecretEncrypted, ps.Status, ps.CreatedAt)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, ps.ID, ps.Name, ps.SystemType, ps.Description, ps.IconURL, ps.CallbackURL, ps.HMACSecretEncrypted, ps.Status, ps.CreatedAt)
+		return err
+	})
 }
 
 func (s *Store) GetPairedSystemByID(id string) (*PairedSystem, error) {
@@ -1201,32 +1198,7 @@ func (s *Store) ListAllPairedSystems() ([]PairedSystem, error) {
 		}
 		systems = append(systems, ps)
 	}
-	return systems, nil
-}
-
-func (s *Store) ListActivePairedSystems() ([]PairedSystem, error) {
-	query := `SELECT id, name, system_type, description, icon_url, callback_url, hmac_secret_encrypted, status, last_synced_at, created_at, groups_enabled, reconcile_hours, provisioning_hold FROM paired_systems WHERE status != 'disabled' ORDER BY created_at ASC`
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var systems []PairedSystem
-	for rows.Next() {
-		var ps PairedSystem
-		if err := rows.Scan(&ps.ID, &ps.Name, &ps.SystemType, &ps.Description, &ps.IconURL, &ps.CallbackURL, &ps.HMACSecretEncrypted, &ps.Status, &ps.LastSyncedAt, &ps.CreatedAt, &ps.GroupsEnabled, &ps.ReconcileHours, &ps.ProvisioningHold); err != nil {
-			return nil, err
-		}
-		systems = append(systems, ps)
-	}
-	return systems, nil
-}
-
-func (s *Store) UpdatePairedSystemStatus(systemID, status string) error {
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE paired_systems SET status = ?, last_synced_at = ? WHERE id = ?`, status, now, systemID)
-	return err
+	return systems, rows.Err()
 }
 
 // DeletePairedSystem unpairs a downstream system and records the removal in the same
@@ -1248,20 +1220,15 @@ func (s *Store) DeletePairedSystem(systemID string, audit *AuditEvent) (bool, er
 	if n == 0 {
 		return false, nil
 	}
+	// Its attempts go with the delete_sync_delivery_system trigger; queued events
+	// could never be delivered and would otherwise be revived on every reconcile.
+	if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE system_id = ?`, systemID); err != nil {
+		return false, err
+	}
 	if err := recordAuditTx(tx, audit); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
-}
-
-// Account Sync Events
-func (s *Store) CreateAccountSyncEvent(event *AccountSyncEvent) error {
-	query := `INSERT INTO account_sync_events (id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	now := time.Now().UTC()
-	event.CreatedAt = now
-	event.UpdatedAt = now
-	_, err := s.db.Exec(query, event.ID, event.UserID, event.SystemID, event.EventType, event.PayloadJSON, event.Attempts, event.Status, event.CreatedAt, event.UpdatedAt, event.Revision)
-	return err
 }
 
 const syncEventColumns = `id, user_id, system_id, event_type, payload_json, attempts, status, last_error, next_attempt_at, created_at, updated_at, claim_token, revision`
@@ -1394,11 +1361,13 @@ func (s *Store) DeleteDeliveredSyncEvents(olderThan time.Time) error {
 }
 
 // Native Device & MFA Methods
-func (s *Store) CreateDevicePairingToken(token *DevicePairingToken) error {
+func (s *Store) CreateDevicePairingToken(token *DevicePairingToken, audit *AuditEvent) error {
 	query := `INSERT INTO device_pairing_tokens (id, user_id, token_hash, pin_hash, sign_on, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
 	token.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, token.ID, token.UserID, token.TokenHash, token.PINHash, token.SignOn, token.ExpiresAt, token.CreatedAt)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, token.ID, token.UserID, token.TokenHash, token.PINHash, token.SignOn, token.ExpiresAt, token.CreatedAt)
+		return err
+	})
 }
 
 const devicePairingTokenColumns = `id, user_id, token_hash, pin_hash, sign_on, expires_at, used_at, created_at`
@@ -1419,14 +1388,53 @@ func (s *Store) GetValidDevicePairingToken(tokenHash string) (*DevicePairingToke
 		tokenHash, time.Now().UTC()))
 }
 
-// GetDevicePairingTokenByUserPIN resolves a PIN within a single user's pairing tokens.
-// A global PIN lookup would let any live 6-digit PIN in the deployment match, which turns
-// one user's pairing window into everyone's.
-func (s *Store) GetDevicePairingTokenByUserPIN(userID, pinHash string) (*DevicePairingToken, error) {
-	return scanDevicePairingToken(s.db.QueryRow(
+// PairingPINBudget is how many wrong PINs a user's live pairing tokens survive.
+const PairingPINBudget = 5
+
+// MatchDevicePairingPIN resolves a PIN within a single user's live pairing tokens. A global
+// lookup would let any live PIN in the deployment match. Every miss counts against all of
+// the user's live tokens, and the miss that spends PairingPINBudget expires them. Lookup and
+// count share one immediate transaction, so concurrent guesses cannot overspend.
+func (s *Store) MatchDevicePairingPIN(userID, pinHash string) (*DevicePairingToken, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	t, err := scanDevicePairingToken(tx.QueryRow(
 		`SELECT `+devicePairingTokenColumns+` FROM device_pairing_tokens
 		 WHERE user_id = ? AND pin_hash = ? AND pin_hash != '' AND used_at IS NULL AND expires_at > ?`,
-		userID, pinHash, time.Now().UTC()))
+		userID, pinHash, now))
+	if err != nil || t != nil {
+		return t, err
+	}
+
+	rows, err := tx.Query(`UPDATE device_pairing_tokens SET pin_failures = pin_failures + 1
+		WHERE user_id = ? AND used_at IS NULL AND expires_at > ? RETURNING pin_failures`, userID, now)
+	if err != nil {
+		return nil, err
+	}
+	worst := 0
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		worst = max(worst, n)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if worst >= PairingPINBudget {
+		if _, err := tx.Exec(`UPDATE device_pairing_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL AND expires_at > ?`, now, userID, now); err != nil {
+			return nil, err
+		}
+	}
+	return nil, tx.Commit()
 }
 
 // ExpireDevicePairingTokens forces a user's outstanding pairing tokens to expire.
@@ -1458,8 +1466,9 @@ func (s *Store) ConsumeDevicePairingToken(tokenID string) (bool, error) {
 }
 
 // RegisterNativeDeviceWithPairingToken atomically spends a live pairing token and
-// enrols the device as a push MFA approver.
-func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *NativeDevice, method *MFAMethod) (bool, error) {
+// enrols the device as a push MFA approver. audit, when set, builds the audit row from the
+// stored device (a re-pair keeps the stored id) and commits it with the enrolment.
+func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *NativeDevice, method *MFAMethod, audit func(*NativeDevice) *AuditEvent) (bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return false, err
@@ -1509,6 +1518,11 @@ func (s *Store) RegisterNativeDeviceWithPairingToken(tokenID string, dev *Native
 
 	if err = preserveCompliantEnrollmentTx(tx, dev.UserID, wasCompliant); err != nil {
 		return false, err
+	}
+	if audit != nil {
+		if err := recordAuditTx(tx, audit(dev)); err != nil {
+			return false, err
+		}
 	}
 	return true, tx.Commit()
 }
@@ -1589,7 +1603,7 @@ func (s *Store) UpsertNativeDevice(dev *NativeDevice) error {
 	if err != nil {
 		return err
 	}
-	return s.changeEnrollmentDevice(dev.UserID, nativeDeviceUpsert, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.PushTransport, dev.PushP256dh, dev.PushAuth, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt)
+	return s.changeEnrollmentDevice(dev.UserID, nil, nativeDeviceUpsert, dev.ID, dev.UserID, dev.DeviceName, dev.DeviceIdentifier, dev.Platform, dev.PublicKey, dev.PushToken, dev.PushTransport, dev.PushP256dh, dev.PushAuth, dev.IsMFAApprover, dev.CanSignOn, dev.AttestedLevel, attestedAt, dev.BootState, serials, dev.LastSeenAt, dev.CreatedAt)
 }
 
 func (s *Store) ListUserNativeDevices(userID string) ([]NativeDevice, error) {
@@ -1707,8 +1721,9 @@ func (s *Store) UpdateNativeDevicePushToken(deviceID, transport, pushToken, p256
 	return true, tx.Commit()
 }
 
-func (s *Store) SetNativeDeviceMFAApprover(deviceID, userID string, isApprover bool) error {
-	return s.changeEnrollmentDevice(userID, `UPDATE native_devices SET is_mfa_approver = ? WHERE id = ? AND user_id = ?`, isApprover, deviceID, userID)
+// SetNativeDeviceMFAApprover returns sql.ErrNoRows when the device is not the user's.
+func (s *Store) SetNativeDeviceMFAApprover(deviceID, userID string, isApprover bool, audit *AuditEvent) error {
+	return s.changeEnrollmentDevice(userID, audit, `UPDATE native_devices SET is_mfa_approver = ? WHERE id = ? AND user_id = ?`, isApprover, deviceID, userID)
 }
 
 // ErrDeviceNotApprover means sign-on was requested for a device that is not an MFA approver.
@@ -1717,8 +1732,13 @@ var ErrDeviceNotApprover = errors.New("device is not an MFA approver")
 // SetNativeDeviceCanSignOn is not an enrollment change, so it needs none of
 // changeEnrollmentDevice's compliance checks. Enabling needs an approver device;
 // disabling is always allowed.
-func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool) error {
-	res, err := s.db.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (? = 0 OR is_mfa_approver = 1)`, enabled, deviceID, userID, enabled)
+func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool, audit *AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (? = 0 OR is_mfa_approver = 1)`, enabled, deviceID, userID, enabled)
 	if err != nil {
 		return err
 	}
@@ -1727,17 +1747,21 @@ func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool) 
 		return err
 	}
 	if n == 1 {
-		return nil
+		if err := recordAuditTx(tx, audit); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	var exists int
-	if err := s.db.QueryRow(`SELECT 1 FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID).Scan(&exists); err != nil {
+	if err := tx.QueryRow(`SELECT 1 FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID).Scan(&exists); err != nil {
 		return err // sql.ErrNoRows when the device is not the user's
 	}
 	return ErrDeviceNotApprover
 }
 
-func (s *Store) DeleteNativeDevice(deviceID, userID string) error {
-	return s.changeEnrollmentDevice(userID, `DELETE FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID)
+// DeleteNativeDevice returns sql.ErrNoRows when the device is not the user's.
+func (s *Store) DeleteNativeDevice(deviceID, userID string, audit *AuditEvent) error {
+	return s.changeEnrollmentDevice(userID, audit, `DELETE FROM native_devices WHERE id = ? AND user_id = ?`, deviceID, userID)
 }
 
 // ClearNativeDevicePushToken forgets the push target the provider reported gone, unless a
@@ -1824,42 +1848,7 @@ func (s *Store) ListUserMFAMethods(userID string) ([]MFAMethod, error) {
 		}
 		methods = append(methods, m)
 	}
-	return methods, nil
-}
-
-func (s *Store) DeleteUserMFAMethods(userID string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.Exec(`UPDATE users SET id=id WHERE id=?`, userID); err != nil {
-		return err
-	}
-	wasCompliant, err := compliantEnrollmentTx(tx, userID)
-	if err != nil {
-		return err
-	}
-
-	if _, err := tx.Exec(`DELETE FROM mfa_methods WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0, can_sign_on = 0 WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE device_pairing_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL`, time.Now().UTC(), userID); err != nil {
-		return err
-	}
-	if err = preserveCompliantEnrollmentTx(tx, userID, wasCompliant); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return methods, rows.Err()
 }
 
 // MFA Challenges
@@ -1868,6 +1857,37 @@ func (s *Store) CreateMFAChallenge(ch *MFAChallenge) error {
 	ch.CreatedAt = time.Now().UTC()
 	_, err := s.db.Exec(query, ch.ID, ch.UserID, ch.MethodType, ch.MatchDigits, ch.DecoyDigitsJSON, ch.Status, ch.Purpose, ch.ExpiresAt, ch.CreatedAt)
 	return err
+}
+
+// CreateLoginPushChallenge inserts a login push challenge only while the user has no live
+// one, in one statement, so concurrent logins cannot each send a push. False: one is pending.
+func (s *Store) CreateLoginPushChallenge(ch *MFAChallenge) (bool, error) {
+	ch.CreatedAt = time.Now().UTC()
+	res, err := s.db.Exec(`INSERT INTO mfa_challenges (id, user_id, method_type, match_digits, decoy_digits_json, status, purpose, expires_at, created_at)
+		SELECT ?, ?, ?, ?, ?, ?, 'login', ?, ? WHERE NOT EXISTS (
+			SELECT 1 FROM mfa_challenges WHERE user_id = ? AND purpose = 'login' AND status = 'pending' AND expires_at > ?)`,
+		ch.ID, ch.UserID, ch.MethodType, ch.MatchDigits, ch.DecoyDigitsJSON, ch.Status, ch.ExpiresAt, ch.CreatedAt, ch.UserID, ch.CreatedAt)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// HasPendingLoginPush reports a live login push challenge for the user.
+func (s *Store) HasPendingLoginPush(userID string) (bool, error) {
+	var pending bool
+	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mfa_challenges WHERE user_id = ? AND purpose = 'login' AND status = 'pending' AND expires_at > ?)`, userID, time.Now().UTC()).Scan(&pending)
+	return pending, err
+}
+
+// CountUnansweredLoginPushes counts login pushes created since that were denied or left to
+// expire: the shape of someone holding the password and fishing for an approval.
+func (s *Store) CountUnansweredLoginPushes(userID string, since time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM mfa_challenges WHERE user_id = ? AND purpose = 'login' AND created_at > ?
+		AND (status IN ('denied', 'expired') OR (status = 'pending' AND expires_at <= ?))`, userID, since, time.Now().UTC()).Scan(&n)
+	return n, err
 }
 
 func (s *Store) GetMFAChallenge(challengeID string) (*MFAChallenge, error) {
@@ -1900,8 +1920,9 @@ func (s *Store) TransitionMFAChallengeStatus(challengeID, from, to string) (bool
 	return n == 1, nil
 }
 
+// DeleteExpiredMFAChallenges keeps challenges an hour past expiry for CountUnansweredLoginPushes.
 func (s *Store) DeleteExpiredMFAChallenges() error {
-	_, err := s.db.Exec(`DELETE FROM mfa_challenges WHERE expires_at < ?`, time.Now().UTC())
+	_, err := s.db.Exec(`DELETE FROM mfa_challenges WHERE expires_at < ?`, time.Now().UTC().Add(-time.Hour))
 	return err
 }
 
@@ -1937,14 +1958,14 @@ func (s *Store) GetValidMFAToken(tokenHash string, maxAttempts int) (*MFAToken, 
 	return t, nil
 }
 
-// RecordMFAFailure counts a wrong second-factor guess against the token and returns the
-// new total. Without this one token funds unlimited guesses for its whole lifetime.
-func (s *Store) RecordMFAFailure(tokenID string) (int, error) {
-	if _, err := s.db.Exec(`UPDATE mfa_tokens SET attempts = attempts + 1 WHERE id = ?`, tokenID); err != nil {
-		return 0, err
-	}
+// ReserveMFAAttempt spends one of the token's attempts before its proof is checked and
+// returns the new total, or 0 when none is left. Reserving in one statement keeps
+// concurrent guesses within maxAttempts.
+func (s *Store) ReserveMFAAttempt(tokenID string, maxAttempts int) (int, error) {
 	var attempts int
-	err := s.db.QueryRow(`SELECT attempts FROM mfa_tokens WHERE id = ?`, tokenID).Scan(&attempts)
+	err := s.db.QueryRow(`UPDATE mfa_tokens SET attempts = attempts + 1
+		WHERE id = ? AND used_at IS NULL AND expires_at > ? AND attempts < ? RETURNING attempts`,
+		tokenID, time.Now().UTC(), maxAttempts).Scan(&attempts)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}
@@ -2167,30 +2188,55 @@ func (s *Store) GetValidRecoveryCodes(userID string) ([]RecoveryCode, error) {
 		}
 		codes = append(codes, c)
 	}
-	return codes, nil
+	return codes, rows.Err()
 }
 
-// ConsumeRecoveryCode atomically spends a recovery code. A separate lookup and update lets
-// concurrent logins redeem the same code.
-func (s *Store) ConsumeRecoveryCode(userID, codeHash string) (bool, error) {
+// RecoveryCodeHMACPrefix marks a keyed recovery-code hash. Unprefixed rows are legacy
+// unsalted SHA-256, accepted only until the user regenerates.
+const RecoveryCodeHMACPrefix = "hmac:"
+
+// ConsumeRecoveryCode atomically spends the code matching the keyed hash or, for a legacy
+// row, the bare SHA-256 (hex never carries the prefix). A separate lookup and update lets
+// concurrent logins redeem the same code. A spent code commits with its audit row.
+func (s *Store) ConsumeRecoveryCode(userID, keyedHash, legacyHash string, audit *AuditEvent) (bool, error) {
 	now := time.Now().UTC()
-	res, err := s.db.Exec(`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL`, now, userID, codeHash)
-	if err != nil {
-		return false, err
+	err := s.auditedTx(audit, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash IN (?, ?) AND used_at IS NULL`, now, userID, keyedHash, legacyHash)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			return cmp.Or(err, errNoRecoveryCode)
+		}
+		return nil
+	})
+	if errors.Is(err, errNoRecoveryCode) {
+		return false, nil
 	}
-	n, err := res.RowsAffected()
-	return n == 1, err
+	return err == nil, err
+}
+
+var errNoRecoveryCode = errors.New("no unused recovery code matched")
+
+// HasLegacyRecoveryCodes reports unused recovery codes stored as bare SHA-256, which the
+// user should regenerate.
+func (s *Store) HasLegacyRecoveryCodes(userID string) (bool, error) {
+	var legacy bool
+	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM recovery_codes WHERE user_id = ? AND used_at IS NULL AND code_hash NOT LIKE 'hmac:%')`, userID).Scan(&legacy)
+	return legacy, err
 }
 
 // OAuth Clients
-func (s *Store) CreateOAuthClient(c *OAuthClient) error {
+func (s *Store) CreateOAuthClient(c *OAuthClient, audit *AuditEvent) error {
 	query := `INSERT INTO oauth_clients (id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	c.CreatedAt = time.Now().UTC()
 	if c.PostLogoutRedirectURIsJSON == "" {
 		c.PostLogoutRedirectURIsJSON = "[]"
 	}
-	_, err := s.db.Exec(query, c.ID, c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.CreatedAt, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, c.ID, c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.CreatedAt, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI)
+		return err
+	})
 }
 
 func (s *Store) GetOAuthClientByID(id string) (*OAuthClient, error) {
@@ -2235,7 +2281,7 @@ func (s *Store) ListOAuthClients() ([]OAuthClient, error) {
 		}
 		clients = append(clients, c)
 	}
-	return clients, nil
+	return clients, rows.Err()
 }
 
 func (s *Store) UpdateOAuthClient(c *OAuthClient) error {
@@ -2456,11 +2502,13 @@ func (s *Store) DeleteExpiredIssuedTokens() error {
 }
 
 // Applications (Launcher)
-func (s *Store) CreateApplication(app *Application) error {
+func (s *Store) CreateApplication(app *Application, audit *AuditEvent) error {
 	query := `INSERT INTO applications (id, name, url, icon_name, description, sort_order, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	app.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(query, app.ID, app.Name, app.URL, app.IconName, app.Description, app.SortOrder, app.Enabled, app.CreatedAt)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, app.ID, app.Name, app.URL, app.IconName, app.Description, app.SortOrder, app.Enabled, app.CreatedAt)
+		return err
+	})
 }
 
 func (s *Store) GetApplicationByID(id string) (*Application, error) {
@@ -2497,20 +2545,24 @@ func (s *Store) ListApplications() ([]Application, error) {
 		}
 		apps = append(apps, app)
 	}
-	return apps, nil
+	return apps, rows.Err()
 }
 
-func (s *Store) UpdateApplication(app *Application) error {
+func (s *Store) UpdateApplication(app *Application, audit *AuditEvent) error {
 	query := `UPDATE applications SET name = ?, url = ?, icon_name = ?, description = ?, sort_order = ?, enabled = ? WHERE id = ?`
-	_, err := s.db.Exec(query, app.Name, app.URL, app.IconName, app.Description, app.SortOrder, app.Enabled, app.ID)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, app.Name, app.URL, app.IconName, app.Description, app.SortOrder, app.Enabled, app.ID)
+		return err
+	})
 }
 
-func (s *Store) CreateLauncherIcon(icon *LauncherIcon) error {
+func (s *Store) CreateLauncherIcon(icon *LauncherIcon, audit *AuditEvent) error {
 	icon.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO launcher_icons (id, content_type, data, created_at) VALUES (?, ?, ?, ?)`,
-		icon.ID, icon.ContentType, icon.Data, icon.CreatedAt)
-	return err
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO launcher_icons (id, content_type, data, created_at) VALUES (?, ?, ?, ?)`,
+			icon.ID, icon.ContentType, icon.Data, icon.CreatedAt)
+		return err
+	})
 }
 
 func (s *Store) GetLauncherIcon(id string) (*LauncherIcon, error) {
@@ -2621,21 +2673,55 @@ func (s *Store) DeleteAuditEventsOlderThan(cutoff time.Time) error {
 // "unset" from "empty" branch on it; a setting deliberately set to "" is not ErrNotFound.
 var ErrNotFound = errors.New("store: not found")
 
-func (s *Store) GetSetting(key string) (string, error) {
-	var val string
-	err := s.db.QueryRow(`SELECT value FROM system_settings WHERE key = ?`, key).Scan(&val)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrNotFound
-		}
-		return "", err
-	}
-	return val, nil
-}
+// InputError is a refusal of the caller's input. Its text is fixed by the code that refuses,
+// so it is safe to show the caller; any other error is internal and never leaves the server.
+type InputError string
+
+func (e InputError) Error() string { return string(e) }
+
+func (s *Store) GetSetting(key string) (string, error) { return getSetting(s.db, key) }
 
 // SetSetting upserts a key-value pair in system_settings.
-func (s *Store) SetSetting(key, value string) error {
-	_, err := s.db.Exec(`
+func (s *Store) SetSetting(key, value string) error { return setSetting(s.db, key, value) }
+
+// DeleteSetting removes a key; a key that was never written is not an error.
+func (s *Store) DeleteSetting(key string) error { return deleteSetting(s.db, key) }
+
+// Settings is system_settings, read and written directly or inside EditSettings.
+type Settings interface {
+	GetSetting(key string) (string, error)
+	SetSetting(key, value string) error
+	DeleteSetting(key string) error
+}
+
+// EditSettings runs fn over system_settings in one transaction with its audit row, so a
+// multi-key change and the record of who made it commit together or not at all.
+func (s *Store) EditSettings(audit *AuditEvent, fn func(Settings) error) error {
+	return s.auditedTx(audit, func(tx *sql.Tx) error { return fn(settingsTx{tx}) })
+}
+
+type settingsTx struct{ tx *sql.Tx }
+
+func (t settingsTx) GetSetting(key string) (string, error) { return getSetting(t.tx, key) }
+func (t settingsTx) SetSetting(key, value string) error    { return setSetting(t.tx, key, value) }
+func (t settingsTx) DeleteSetting(key string) error        { return deleteSetting(t.tx, key) }
+
+type settingsQuerier interface {
+	execer
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func getSetting(q settingsQuerier, key string) (string, error) {
+	var val string
+	err := q.QueryRow(`SELECT value FROM system_settings WHERE key = ?`, key).Scan(&val)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return val, err
+}
+
+func setSetting(q settingsQuerier, key, value string) error {
+	_, err := q.Exec(`
 		INSERT INTO system_settings (key, value, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(key) DO UPDATE SET
@@ -2645,9 +2731,8 @@ func (s *Store) SetSetting(key, value string) error {
 	return err
 }
 
-// DeleteSetting removes a key; a key that was never written is not an error.
-func (s *Store) DeleteSetting(key string) error {
-	_, err := s.db.Exec(`DELETE FROM system_settings WHERE key = ?`, key)
+func deleteSetting(q settingsQuerier, key string) error {
+	_, err := q.Exec(`DELETE FROM system_settings WHERE key = ?`, key)
 	return err
 }
 
@@ -2714,17 +2799,11 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 
 // RevokeUserAccess deletes browser sessions, revokes issued access tokens and pending
 // codes/interactions, expires unused device pairing tokens, and burns unused step-up
-// tokens, in one transaction.
-func (s *Store) RevokeUserAccess(userID string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := revokeUserAccessTx(tx, userID, time.Now().UTC()); err != nil {
-		return err
-	}
-	return tx.Commit()
+// tokens, in one transaction with its audit row.
+func (s *Store) RevokeUserAccess(userID string, audit *AuditEvent) error {
+	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		return revokeUserAccessTx(tx, userID, time.Now().UTC())
+	})
 }
 
 func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {

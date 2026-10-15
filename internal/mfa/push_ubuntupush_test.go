@@ -208,14 +208,14 @@ func TestLinuxPlatformTransports(t *testing.T) {
 		{"default platform ubuntupush", "", "ubuntupush", "ubports-token", rk.p256dh, rk.a64},
 		{"ios ubuntupush", "ios", "ubuntupush", "ubports-token", rk.p256dh, rk.a64},
 	} {
-		token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+		token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		_, err = e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 			PairingToken: token, DeviceName: tc.name, DeviceIdentifier: tc.name, Platform: tc.platform, PublicKey: pub,
 			PushTransport: tc.transport, PushToken: tc.token, PushP256dh: tc.p256dh, PushAuth: tc.auth,
-		})
+		}, nil)
 		if !errors.Is(err, errInvalidPushTarget) {
 			t.Errorf("%s: err = %v, want invalid push target", tc.name, err)
 		}

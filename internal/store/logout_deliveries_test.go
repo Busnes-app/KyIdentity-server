@@ -11,7 +11,7 @@ import (
 func seedLogoutClient(t *testing.T, s *Store, id, backchannel string) {
 	t.Helper()
 	c := &OAuthClient{ID: id, ClientName: "App " + id, ClientType: "public", RedirectURIsJSON: `["https://app/cb"]`, AllowedScopesJSON: `["openid"]`, BackchannelLogoutURI: backchannel, Enabled: true}
-	if err := s.CreateOAuthClient(c); err != nil {
+	if err := s.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 }

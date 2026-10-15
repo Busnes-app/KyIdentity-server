@@ -69,7 +69,7 @@ func TestRecoveryEvidenceIncludesAcknowledgedLossAndDeletion(t *testing.T) {
 			if len(deliverAll(t, s)) != 1 {
 				t.Fatal("loss acknowledgement missing")
 			}
-			if err := s.ResyncSystem("mail"); err != nil {
+			if err := s.ResyncSystem("mail", nil); err != nil {
 				t.Fatal(err)
 			}
 			if got := pendingFor(t, s, "mail", lost.ID); len(got) != 0 {

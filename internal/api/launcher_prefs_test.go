@@ -44,7 +44,7 @@ func TestLauncherKeysKeepClientAndCustomCardsApart(t *testing.T) {
 	cookie := newSession(t, db, u, time.Now().UTC().Add(time.Hour))
 
 	app := &store.Application{ID: uuid.NewString(), Name: "Wiki", URL: "https://wiki.example.test", IconName: "favicon", Enabled: true}
-	if err := db.CreateApplication(app); err != nil {
+	if err := db.CreateApplication(app, nil); err != nil {
 		t.Fatal(err)
 	}
 	newClient(t, db, app.ID, []string{"https://sso.example.test/cb"}, []string{"openid"})
@@ -100,7 +100,7 @@ func TestLauncherPrefsCannotRevealInaccessibleApps(t *testing.T) {
 	if err := db.CreateOAuthClient(&store.OAuthClient{
 		ID: "secret-app", ClientName: "Secret", ClientType: "public",
 		RedirectURIsJSON: `["https://secret.example.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 

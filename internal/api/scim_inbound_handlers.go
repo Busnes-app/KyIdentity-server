@@ -75,7 +75,7 @@ func (h *SCIMHandler) Authenticate(write bool, next http.HandlerFunc) http.Handl
 		}
 		c, scope, err := h.store.AuthenticateSCIMToken(strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
 		if errors.Is(err, store.ErrNotFound) {
-			if !h.middleware.allowRateLimit("scim_auth:"+h.middleware.ClientIP(r), 10, 0.2) {
+			if !h.middleware.allowRateLimit("scim_auth:"+h.middleware.rateLimitIP(r), 10, 0.2) {
 				scimError(w, http.StatusTooManyRequests, "", "Too many failed authentications")
 				return
 			}
@@ -383,83 +383,86 @@ func (h *SCIMHandler) Create(w http.ResponseWriter, r *http.Request) {
 	h.writeResource(w, http.StatusCreated, u)
 }
 
+// Replace is a full replace of the upstream's attributes, applied to the row as it is
+// under the write lock. An omitted active keeps the current flag, so a body that never
+// mentions it cannot reactivate an account.
 func (h *SCIMHandler) Replace(w http.ResponseWriter, r *http.Request) {
-	c := scimConnector(r)
-	u, err := h.store.GetUpstreamUser(c.ID, r.PathValue("id"))
-	if err != nil {
-		scimError(w, http.StatusInternalServerError, "", "Internal error")
-		return
-	}
-	if u == nil {
-		scimError(w, http.StatusNotFound, "", "Resource not found")
-		return
-	}
-	if !ifMatch(r, u) {
-		scimError(w, http.StatusPreconditionFailed, "", "Resource version does not match If-Match")
-		return
-	}
 	in, hasActive, problem := decodeUser(r)
 	if problem != "" {
 		scimError(w, http.StatusBadRequest, "invalidValue", problem)
-		return
-	}
-	if in.ExternalID != "" && in.ExternalID != u.ExternalID {
-		scimError(w, http.StatusBadRequest, "mutability", "externalId is immutable")
 		return
 	}
 	if in.UserName == "" {
 		scimError(w, http.StatusBadRequest, "invalidValue", "userName is required")
 		return
 	}
-	u.Username, u.DisplayName = in.UserName, displayName(in)
-	if email := primaryEmail(in); email != "" {
-		u.Email = email
+	if stored := h.save(w, r, "scim.user_updated", func(u *store.User) error {
+		if in.ExternalID != "" && in.ExternalID != u.ExternalID {
+			return &scimProblem{http.StatusBadRequest, "mutability", "externalId is immutable"}
+		}
+		u.Username, u.DisplayName = in.UserName, displayName(in)
+		if email := primaryEmail(in); email != "" {
+			u.Email = email
+		}
+		if hasActive {
+			u.SourceActive = in.Active
+		}
+		return nil
+	}); stored != nil {
+		h.writeResource(w, http.StatusOK, stored)
 	}
-	u.SourceActive = in.Active || !hasActive
-	h.save(w, r, c, u)
 }
 
-func (h *SCIMHandler) save(w http.ResponseWriter, r *http.Request, c *store.SCIMConnector, u *store.User) {
-	pending := h.audit.Prepare("scim.user_updated", c.ID, "connector:"+c.Name, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"username": u.Username, "sourceActive": u.SourceActive})
-	err := h.store.UpdateUpstreamUser(u, pending.Row)
+// scimProblem is a refusal decided inside the store transaction, answered as SCIM.
+type scimProblem struct {
+	status           int
+	scimType, detail string
+}
+
+func (p *scimProblem) Error() string { return p.detail }
+
+var errStaleVersion = &scimProblem{http.StatusPreconditionFailed, "", "Resource version does not match If-Match"}
+
+// save runs edit on the owned account as read under the write lock, after If-Match is
+// checked against that same row. It writes the error response and returns nil on failure.
+func (h *SCIMHandler) save(w http.ResponseWriter, r *http.Request, action string, edit func(u *store.User) error) *store.User {
+	c, id := scimConnector(r), r.PathValue("id")
+	pending := h.audit.Prepare(action, c.ID, "connector:"+c.Name, id, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	stored, err := h.store.UpdateUpstreamUser(c.ID, id, pending.Row, func(u *store.User) error {
+		if !ifMatch(r, u) {
+			return errStaleVersion
+		}
+		if err := edit(u); err != nil {
+			return err
+		}
+		details, _ := json.Marshal(map[string]any{"username": u.Username, "sourceActive": u.SourceActive})
+		pending.Row.DetailsJSON = string(details)
+		return nil
+	})
+	var problem *scimProblem
 	switch {
+	case errors.As(err, &problem):
+		scimError(w, problem.status, problem.scimType, problem.detail)
 	case errors.Is(err, store.ErrUserConflict):
 		scimError(w, http.StatusConflict, "uniqueness", "userName or email is already in use")
-		return
+	case errors.Is(err, store.ErrPrivilegedIdentity):
+		h.audit.Observe(action, c.ID, "connector:"+c.Name, id, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "privileged_identity"})
+		scimError(w, http.StatusConflict, "mutability", "userName and email of an administrator or delegated account are managed locally")
 	case errors.Is(err, store.ErrNotFound):
 		scimError(w, http.StatusNotFound, "", "Resource not found")
-		return
 	case err != nil:
-		log.Printf("scim update: %v", err)
+		log.Printf("scim %s: %v", action, err)
 		scimError(w, http.StatusInternalServerError, "", "Internal error")
-		return
+	default:
+		pending.Committed()
+		return stored
 	}
-	pending.Committed()
-	stored, err := h.store.GetUpstreamUser(c.ID, u.ID)
-	if err != nil || stored == nil {
-		scimError(w, http.StatusInternalServerError, "", "Internal error")
-		return
-	}
-	h.writeResource(w, http.StatusOK, stored)
+	return nil
 }
 
 // Patch applies add/replace operations to the supported attributes and remove to
 // nothing; every operation is validated before any is applied.
 func (h *SCIMHandler) Patch(w http.ResponseWriter, r *http.Request) {
-	c := scimConnector(r)
-	u, err := h.store.GetUpstreamUser(c.ID, r.PathValue("id"))
-	if err != nil {
-		scimError(w, http.StatusInternalServerError, "", "Internal error")
-		return
-	}
-	if u == nil {
-		scimError(w, http.StatusNotFound, "", "Resource not found")
-		return
-	}
-	if !ifMatch(r, u) {
-		scimError(w, http.StatusPreconditionFailed, "", "Resource version does not match If-Match")
-		return
-	}
 	var body struct {
 		Schemas    []string              `json:"schemas"`
 		Operations []scim.PatchOperation `json:"Operations"`
@@ -468,14 +471,18 @@ func (h *SCIMHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		scimError(w, http.StatusBadRequest, "invalidSyntax", "PatchOp body with 1 to 50 Operations required")
 		return
 	}
-	next := *u
-	for _, op := range body.Operations {
-		if problem := applyPatch(&next, op); problem != "" {
-			scimError(w, http.StatusBadRequest, "invalidPath", problem)
-			return
+	// The operations apply to the current row, so a concurrent PATCH of another attribute
+	// (say active=false) is never overwritten from a stale copy.
+	if stored := h.save(w, r, "scim.user_updated", func(u *store.User) error {
+		for _, op := range body.Operations {
+			if problem := applyPatch(u, op); problem != "" {
+				return &scimProblem{http.StatusBadRequest, "invalidPath", problem}
+			}
 		}
+		return nil
+	}); stored != nil {
+		h.writeResource(w, http.StatusOK, stored)
 	}
-	h.save(w, r, c, &next)
 }
 
 func applyPatch(u *store.User, op scim.PatchOperation) string {
@@ -575,28 +582,11 @@ func setAttribute(u *store.User, path string, value any) string {
 // Delete deactivates: the account stays for audit, re-provisioning and offboarding, and
 // the upstream can reactivate it later by creating nothing and PATCHing active.
 func (h *SCIMHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	c := scimConnector(r)
-	u, err := h.store.GetUpstreamUser(c.ID, r.PathValue("id"))
-	if err != nil {
-		scimError(w, http.StatusInternalServerError, "", "Internal error")
-		return
+	if h.save(w, r, "scim.user_deactivated", func(u *store.User) error {
+		u.SourceActive = false
+		return nil
+	}) != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusNoContent)
 	}
-	if u == nil {
-		scimError(w, http.StatusNotFound, "", "Resource not found")
-		return
-	}
-	if !ifMatch(r, u) {
-		scimError(w, http.StatusPreconditionFailed, "", "Resource version does not match If-Match")
-		return
-	}
-	u.SourceActive = false
-	pending := h.audit.Prepare("scim.user_deactivated", c.ID, "connector:"+c.Name, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"username": u.Username})
-	if err := h.store.UpdateUpstreamUser(u, pending.Row); err != nil {
-		log.Printf("scim delete: %v", err)
-		scimError(w, http.StatusInternalServerError, "", "Internal error")
-		return
-	}
-	pending.Committed()
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNoContent)
 }

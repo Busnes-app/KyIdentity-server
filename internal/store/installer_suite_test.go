@@ -41,7 +41,7 @@ func TestInstallerSuiteConnectorExtensionAndReadonlyResume(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT s.system_type,a.id,s.hmac_secret_encrypted FROM paired_systems s JOIN app_registry a ON a.system_id=s.id WHERE s.id=?`, id).Scan(&kind, &bound, &encrypted); err != nil {
 		t.Fatal(err)
 	}
-	plain, err := crypto.DecryptAESGCM(p.EncryptionKey, encrypted)
+	plain, err := crypto.Open(p.EncryptionKey, SealConnector, id, encrypted)
 	if err != nil || kind != "suite_webhook" || bound != appID || string(plain) != connector.SigningSecret || strings.Contains(encrypted, connector.SigningSecret) {
 		t.Fatal("suite identity/credential mismatch", err)
 	}

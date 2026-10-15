@@ -7,6 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/base64"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,13 +78,13 @@ func TestDeviceWithoutPublicKeyIsRejected(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "no-key", DeviceIdentifier: "dev-1",
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("a device with no public key was paired and made an MFA approver")
 	}
 
@@ -95,14 +98,14 @@ func TestDeviceWithMalformedPublicKeyIsRejected(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "junk-key", DeviceIdentifier: "dev-2",
 		PublicKey: "not-a-real-key", PushToken: "fcm-token",
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("a device with an unparseable public key was paired")
 	}
 }
@@ -113,14 +116,14 @@ func TestDeviceWithoutPushTokenIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "no-push-token", DeviceIdentifier: "dev-no-push",
 		PublicKey: pub,
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("a device with no push token was paired")
 	}
 	if methods, _ := db.ListUserMFAMethods(u.ID); len(methods) != 0 {
@@ -134,13 +137,13 @@ func TestDeviceWithValidKeyPairsAndCanApprove(t *testing.T) {
 	u := mfaUser(t, db)
 
 	key, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "phone", DeviceIdentifier: "dev-3", PublicKey: pub, PushToken: "fcm-token",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("a device with a valid P-256 key was rejected: %v", err)
 	}
 
@@ -178,10 +181,10 @@ func TestRegeneratingRecoveryCodesRevokesTheOldSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, first[0]); ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, first[0], nil); ok {
 		t.Error("a recovery code from the previous set still works after regeneration")
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, second[0]); !ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, second[0], nil); !ok {
 		t.Error("a freshly generated recovery code did not work")
 	}
 	if codes, _ := db.GetValidRecoveryCodes(u.ID); len(codes) != 7 {
@@ -198,10 +201,10 @@ func TestRecoveryCodeIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0]); !ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0], nil); !ok {
 		t.Fatal("first use of a recovery code failed")
 	}
-	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0]); ok {
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0], nil); ok {
 		t.Error("a recovery code was accepted twice")
 	}
 }
@@ -216,7 +219,7 @@ func TestRecoveryCodeIsSingleUseUnderConcurrency(t *testing.T) {
 	}
 	results := make(chan bool, 2)
 	for range 2 {
-		go func() { ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0]); results <- ok }()
+		go func() { ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, codes[0], nil); results <- ok }()
 	}
 	if (<-results) == (<-results) {
 		t.Fatal("concurrent redemption did not produce exactly one success")
@@ -256,17 +259,17 @@ func TestPairingPINIsHashedAndScopedToItsUser(t *testing.T) {
 	alice := mfaUser(t, db)
 	bob := mfaUser(t, db)
 
-	_, alicePIN, _, err := e.GenerateDevicePairingToken(alice.ID, true)
+	_, alicePIN, _, err := e.GenerateDevicePairingToken(alice.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, bobPIN, _, err := e.GenerateDevicePairingToken(bob.ID, true); err != nil {
+	if _, bobPIN, _, err := e.GenerateDevicePairingToken(bob.ID, true, nil); err != nil {
 		t.Fatal(err)
 	} else if bobPIN == alicePIN {
 		t.Skip("PIN collision between the two users, rerun")
 	}
 
-	stored, err := db.GetDevicePairingTokenByUserPIN(alice.ID, crypto.HashSHA256(alicePIN))
+	stored, err := db.MatchDevicePairingPIN(alice.ID, crypto.HashSHA256(alicePIN))
 	if err != nil || stored == nil {
 		t.Fatalf("alice could not redeem her own PIN: %v", err)
 	}
@@ -278,7 +281,7 @@ func TestPairingPINIsHashedAndScopedToItsUser(t *testing.T) {
 	}
 
 	// Scoping is what stops any live PIN in the deployment matching any pairing attempt.
-	if other, _ := db.GetDevicePairingTokenByUserPIN(bob.ID, crypto.HashSHA256(alicePIN)); other != nil {
+	if other, _ := db.MatchDevicePairingPIN(bob.ID, crypto.HashSHA256(alicePIN)); other != nil {
 		t.Error("alice's PIN was redeemable against bob's account")
 	}
 }
@@ -303,7 +306,7 @@ func TestMFATokenIsSpentAfterTooManyFailures(t *testing.T) {
 		if err != nil {
 			break
 		}
-		if _, err := e.RegisterMFAFailure(token.ID); err != nil {
+		if _, err := e.ReserveMFAAttempt(token.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -326,7 +329,7 @@ func TestMFATokenSurvivesAFewFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.RegisterMFAFailure(token.ID); err != nil {
+	if _, err := e.ReserveMFAAttempt(token.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.ValidateMFAToken(raw); err != nil {
@@ -340,7 +343,7 @@ func TestExpiredPairingTokenIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +352,7 @@ func TestExpiredPairingTokenIsRejected(t *testing.T) {
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "late", DeviceIdentifier: "dev-late", PublicKey: pub, PushToken: "fcm-token",
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("an expired pairing token was accepted")
 	}
 }
@@ -360,16 +363,16 @@ func TestMFAResetExpiresPendingDevicePairingTokens(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeleteUserMFAMethods(u.ID); err != nil {
+	if err := db.ResetUserMFA(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "after-reset", DeviceIdentifier: "dev-reset", PublicKey: pub, PushToken: "fcm-token",
-	}); err == nil {
+	}, nil); err == nil {
 		t.Error("a pending pairing token was accepted after MFA reset")
 	}
 	if devices, _ := db.ListUserNativeDevices(u.ID); len(devices) != 0 {
@@ -382,7 +385,7 @@ func TestPairingTokenCannotBeConsumedAfterExpiry(t *testing.T) {
 	defer cleanup()
 	u := mfaUser(t, db)
 
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,14 +414,14 @@ func TestPushChallengeDispatchesToRegisteredRelayToken(t *testing.T) {
 	u := mfaUser(t, e.store)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "iphone", DeviceIdentifier: "dev-ios", Platform: "ios",
 		PublicKey: pub, PushToken: "apns-token",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -441,14 +444,14 @@ func TestStaleRelayTokenIsClearedWithoutDeletingDevice(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "phone", DeviceIdentifier: "dev-stale",
 		PublicKey: pub, PushToken: "dead-token",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -477,15 +480,152 @@ func TestUnsupportedDevicePlatformIsRejected(t *testing.T) {
 	u := mfaUser(t, db)
 
 	_, pub := signingKey(t)
-	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
 		PairingToken: token, DeviceName: "bad", DeviceIdentifier: "dev-bad",
 		Platform: "windows-phone", PublicKey: pub, PushToken: "token",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("unsupported device platform was accepted")
+	}
+}
+
+// A leaked database must not give up recovery codes: 40 bits under a bare SHA-256 falls
+// to an offline search, so rows hold an HMAC under the server key, bound to the user.
+func TestRecoveryCodesAreKeyedHashes(t *testing.T) {
+	e, db, _, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	u := mfaUser(t, db)
+	codes, err := e.GenerateRecoveryCodes(u.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.GetValidRecoveryCodes(u.ID)
+	if err != nil || len(rows) != len(codes) {
+		t.Fatalf("rows %d %v", len(rows), err)
+	}
+	for _, row := range rows {
+		if !strings.HasPrefix(row.CodeHash, store.RecoveryCodeHMACPrefix) {
+			t.Fatalf("recovery code stored unkeyed: %q", row.CodeHash)
+		}
+		for _, c := range codes {
+			if row.CodeHash == crypto.HashSHA256(strings.ReplaceAll(c, "-", "")) {
+				t.Fatal("recovery code stored as bare SHA-256")
+			}
+		}
+	}
+	if legacy, err := db.HasLegacyRecoveryCodes(u.ID); err != nil || legacy {
+		t.Fatalf("fresh codes reported legacy: %v %v", legacy, err)
+	}
+	otherKey, _ := crypto.GenerateRandomBytes(32)
+	if ok, _ := NewEngine(db, otherKey).VerifyAndConsumeRecoveryCode(u.ID, codes[0], nil); ok {
+		t.Fatal("a recovery code verified without the server key")
+	}
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, strings.ToLower(codes[0]), nil); !ok {
+		t.Fatal("a keyed recovery code did not verify")
+	}
+}
+
+// Rows from before keyed hashing cannot be converted (no plaintext), so they keep working,
+// flagged, until the user regenerates.
+func TestLegacyRecoveryCodesRedeemUntilRegenerated(t *testing.T) {
+	e, db, _, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	u := mfaUser(t, db)
+	legacy := func(code string) {
+		t.Helper()
+		if err := db.ReplaceRecoveryCodes(u.ID, []store.RecoveryCode{{ID: uuid.NewString(), UserID: u.ID, CodeHash: crypto.HashSHA256(strings.ReplaceAll(code, "-", ""))}}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy("ABCD-2345")
+	if flagged, err := db.HasLegacyRecoveryCodes(u.ID); err != nil || !flagged {
+		t.Fatalf("legacy row not flagged: %v %v", flagged, err)
+	}
+	if ok, err := e.VerifyAndConsumeRecoveryCode(u.ID, "abcd-2345", nil); err != nil || !ok {
+		t.Fatalf("legacy code refused: %v %v", ok, err)
+	}
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, "ABCD-2345", nil); ok {
+		t.Fatal("legacy code redeemed twice")
+	}
+	if flagged, _ := db.HasLegacyRecoveryCodes(u.ID); flagged {
+		t.Fatal("a spent legacy code is still flagged")
+	}
+
+	legacy("WXYZ-6789")
+	if _, err := e.GenerateRecoveryCodes(u.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := e.VerifyAndConsumeRecoveryCode(u.ID, "WXYZ-6789", nil); ok {
+		t.Fatal("legacy code survived regeneration")
+	}
+	if flagged, _ := db.HasLegacyRecoveryCodes(u.ID); flagged {
+		t.Fatal("regenerated codes still flagged legacy")
+	}
+}
+
+// Every correct-password login used to push to every device, so a leaked password could
+// bombard the phone until someone tapped approve. One live login push per user, raced too.
+func TestOneLoginPushPerUser(t *testing.T) {
+	e, db, _, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	u := mfaUser(t, db)
+	registerTestDevice(t, e, u.ID, "phone", NativeDeviceRegisterRequest{PushToken: "fcm-token"})
+	fcm := &fakePushSender{}
+	e.SetPushSender(fcm)
+
+	const racers = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var created []*store.MFAChallenge
+	for range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ch, err := e.CreatePushChallenge(u.ID, "login")
+			if err != nil && !errors.Is(err, ErrPushPending) {
+				t.Error(err)
+			}
+			if ch != nil {
+				mu.Lock()
+				created = append(created, ch)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if len(created) != 1 || len(fcm.sent) != 1 {
+		t.Fatalf("%d login challenges and %d pushes from %d concurrent logins, want 1", len(created), len(fcm.sent), racers)
+	}
+	if pending, err := db.HasPendingLoginPush(u.ID); err != nil || !pending {
+		t.Fatalf("pending = %v %v", pending, err)
+	}
+	if _, err := e.CreatePushChallenge(u.ID, "step_up"); err != nil {
+		t.Fatalf("a pending login push blocked step-up: %v", err)
+	}
+
+	// Once the pending push is answered, the next login may push again; denials count.
+	if ok, err := db.TransitionMFAChallengeStatus(created[0].ID, "pending", "denied"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if err := db.CreateMFAChallenge(&store.MFAChallenge{ID: uuid.NewString(), UserID: u.ID, MethodType: "push", MatchDigits: "10", DecoyDigitsJSON: "[]",
+		Status: "pending", Purpose: "login", ExpiresAt: time.Now().UTC().Add(-time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CreatePushChallenge(u.ID, "login"); err != nil {
+		t.Fatalf("an expired login push still blocks: %v", err)
+	}
+	if n, err := db.CountUnansweredLoginPushes(u.ID, time.Now().UTC().Add(-time.Hour)); err != nil || n != 2 {
+		t.Fatalf("unanswered login pushes = %d %v, want 2 (one denied, one expired)", n, err)
+	}
+	// Housekeeping keeps them long enough to be counted.
+	if err := db.DeleteExpiredMFAChallenges(); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := db.CountUnansweredLoginPushes(u.ID, time.Now().UTC().Add(-time.Hour)); n != 2 {
+		t.Fatalf("housekeeping dropped unanswered pushes inside the hour: %d", n)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/scim"
@@ -46,7 +47,7 @@ func (e *Engine) SigningSecret(sys *store.PairedSystem) (string, error) {
 	if sys.HMACSecretEncrypted == "" {
 		return "", errors.New("paired system has no signing secret; re-pair it")
 	}
-	plain, err := crypto.DecryptAESGCM(e.encryptionKey, sys.HMACSecretEncrypted)
+	plain, err := crypto.Open(e.encryptionKey, store.SealConnector, sys.ID, sys.HMACSecretEncrypted)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt signing secret for %s: %w", sys.Name, err)
 	}
@@ -57,10 +58,6 @@ func (e *Engine) SigningSecret(sys *store.PairedSystem) (string, error) {
 // mutation transaction; these wrappers exist so handlers keep one entry point.
 func (e *Engine) CreateUserAndQueueSyncEvents(user *store.User, audit *store.AuditEvent) error {
 	return e.store.CreateUserWithSyncEvents(user, audit)
-}
-
-func (e *Engine) UpdateUserAndQueueSyncEvents(user *store.User, revokeAccess bool, audit *store.AuditEvent) error {
-	return e.store.UpdateUserWithSyncEvents(user, revokeAccess, audit)
 }
 
 // ResetUserMFAAndRevoke atomically strips every factor, revokes everything those factors
@@ -265,32 +262,33 @@ type CreateSystemRequest struct {
 }
 
 // CreateSystem stores a supplied SCIM token or generates a suite webhook signing secret.
-func (e *Engine) CreateSystem(req *CreateSystemRequest) (*store.PairedSystem, string, error) {
+// audit, when set, builds the audit row for the new connector; it commits with it.
+func (e *Engine) CreateSystem(req *CreateSystemRequest, audit func(*store.PairedSystem) *store.AuditEvent) (*store.PairedSystem, string, error) {
 	if req.Name == "" {
 		req.Name = req.SystemType
 	}
 	if req.Name == "" {
-		return nil, "", errors.New("name is required")
+		return nil, "", store.InputError("name is required")
 	}
 	if req.SystemType == "" {
 		req.SystemType = "scim"
 	}
 	if err := ValidateCallbackURL(req.CallbackURL); err != nil {
-		return nil, "", err
+		return nil, "", store.InputError(err.Error())
 	}
 
 	if !supportedSystemType(req.SystemType) {
-		return nil, "", errors.New("select scim or suite_webhook explicitly for a custom service")
+		return nil, "", store.InputError("select scim or suite_webhook explicitly for a custom service")
 	}
 	token := req.BearerToken
 	var err error
 	if req.SystemType == "scim" {
 		if err = validateSCIMConfig(req.CallbackURL, token); err != nil {
-			return nil, "", err
+			return nil, "", store.InputError(err.Error())
 		}
 	} else {
 		if token != "" {
-			return nil, "", errors.New("suite webhooks use a generated signing secret")
+			return nil, "", store.InputError("suite webhooks use a generated signing secret")
 		}
 		token, err = crypto.GenerateRandomHex(32)
 		if err != nil {
@@ -298,13 +296,14 @@ func (e *Engine) CreateSystem(req *CreateSystemRequest) (*store.PairedSystem, st
 		}
 	}
 
-	encrypted, err := crypto.EncryptAESGCM(e.encryptionKey, []byte(token))
+	id := uuid.New().String()
+	encrypted, err := crypto.Seal(e.encryptionKey, store.SealConnector, id, []byte(token))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encrypt bearer token: %w", err)
 	}
 
 	ps := &store.PairedSystem{
-		ID:                  uuid.New().String(),
+		ID:                  id,
 		Name:                req.Name,
 		SystemType:          req.SystemType,
 		Description:         req.Description,
@@ -313,7 +312,11 @@ func (e *Engine) CreateSystem(req *CreateSystemRequest) (*store.PairedSystem, st
 		HMACSecretEncrypted: encrypted,
 		Status:              "active",
 	}
-	if err := e.store.CreatePairedSystem(ps); err != nil {
+	var row *store.AuditEvent
+	if audit != nil {
+		row = audit(ps)
+	}
+	if err := e.store.CreatePairedSystem(ps, row); err != nil {
 		return nil, "", err
 	}
 	if req.SystemType == "scim" {
@@ -346,12 +349,43 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 	if err != nil || len(events) == 0 {
 		return err
 	}
-
-	// Cache systems and their decrypted secrets for this pass.
-	systems := map[string]*store.PairedSystem{}
-	secrets := map[string]string{}
-
+	// A claim holds at most one event per connector/user, so connectors run concurrently
+	// while each keeps claim order. One slow target then costs only its own slot.
+	var order []string
+	bySystem := map[string][]store.AccountSyncEvent{}
 	for _, ev := range events {
+		if bySystem[ev.SystemID] == nil {
+			order = append(order, ev.SystemID)
+		}
+		bySystem[ev.SystemID] = append(bySystem[ev.SystemID], ev)
+	}
+	errs := make([]error, len(order))
+	slots := make(chan struct{}, dispatchConcurrency)
+	var wg stdsync.WaitGroup
+	for i, id := range order {
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			errs[i] = e.dispatchSystem(ctx, bySystem[id])
+		})
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+// dispatchConcurrency bounds connectors delivered at once in one pass.
+const dispatchConcurrency = 4
+
+// dispatchSystem delivers one connector's claimed events in order. A store failure
+// stops this connector only; its unsent claims expire with their leases.
+func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncEvent) error {
+	var sys *store.PairedSystem
+	var secret string
+	loaded, haveSecret := false, false
+	for _, ev := range events {
+		if ctx.Err() != nil {
+			return nil
+		}
 		begun, err := e.store.BeginSyncDelivery(ev, deliveryLease)
 		if err != nil {
 			return err
@@ -360,18 +394,17 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 			continue
 		}
 
-		sys, ok := systems[ev.SystemID]
-		if !ok {
+		if !loaded {
 			sys, err = e.store.GetPairedSystemByID(ev.SystemID)
 			if err != nil {
 				_ = e.store.FinishSyncDelivery(ev, "pending", "", ev.Attempts, ev.NextAttempt)
 				return err
 			}
-			systems[ev.SystemID] = sys
+			loaded = true
 			if sys != nil {
-				if secret, serr := e.SigningSecret(sys); serr == nil {
-					secrets[ev.SystemID] = secret
-				}
+				var serr error
+				secret, serr = e.SigningSecret(sys)
+				haveSecret = serr == nil
 			}
 		}
 
@@ -389,8 +422,7 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 			}
 			continue
 		}
-		secret, ok := secrets[ev.SystemID]
-		if !ok {
+		if !haveSecret {
 			next := time.Now().UTC().Add(retryDelay(ev.Attempts))
 			if err := e.store.FinishSyncDelivery(ev, "pending", "signing secret unavailable", ev.Attempts+1, &next); err != nil {
 				return err
@@ -445,6 +477,10 @@ func (e *Engine) DispatchPendingEvents(ctx context.Context) error {
 					return err
 				}
 				continue
+			}
+			if ctx.Err() != nil {
+				// Shutdown before the request was written spends no attempt.
+				return e.store.FinishSyncDelivery(ev, "pending", "", ev.Attempts, ev.NextAttempt)
 			}
 			attempts := ev.Attempts + 1
 			if attempts >= 5 {
@@ -557,8 +593,8 @@ func (e *Engine) deliver(ctx context.Context, sys *store.PairedSystem, secret, e
 }
 
 // ResyncAllAccounts re-sends every in-scope account and group to one paired system.
-func (e *Engine) ResyncAllAccounts(systemID string) error {
-	return e.store.ResyncSystem(systemID)
+func (e *Engine) ResyncAllAccounts(systemID string, audit *store.AuditEvent) error {
+	return e.store.ResyncSystem(systemID, audit)
 }
 
 // StartWorker runs the background sync dispatcher. The slower reconcile tick catches

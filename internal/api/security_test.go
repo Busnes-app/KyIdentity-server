@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -59,7 +60,7 @@ func newClient(t *testing.T, db *store.Store, id string, uris, scopes []string) 
 	if err := db.CreateOAuthClient(&store.OAuthClient{
 		ID: id, ClientName: id, ClientType: "public",
 		RedirectURIsJSON: string(u), AllowedScopesJSON: string(s), Enabled: true,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("CreateOAuthClient: %v", err)
 	}
 	allowTestAppAccess(t, db, id)
@@ -104,6 +105,38 @@ func TestLiveSessionStillMintsAuthorizationCode(t *testing.T) {
 
 	if loc := rr.Header().Get("Location"); !strings.Contains(loc, "code=") {
 		t.Errorf("a live session failed to get an authorization code: %d %s", rr.Code, loc)
+	}
+}
+
+// Confidential clients get no exemption from S256 PKCE at authorize.
+func TestAuthorizeRequiresS256PKCEForConfidentialClients(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	u := newUser(t, db, "user")
+	cookie := newSession(t, db, u, time.Now().UTC().Add(24*time.Hour))
+	newClient(t, db, "kypost", []string{"https://mail.urlxl.com/callback"}, []string{"openid"})
+	c, err := db.GetOAuthClientByID("kypost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ClientType, c.ClientSecretHash = "confidential", "unused"
+	if err := db.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, pkce := range map[string]string{
+		"none":  "",
+		"plain": "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=plain",
+		"bare":  "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+	} {
+		req := httptest.NewRequest("GET", "/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.urlxl.com%2Fcallback&response_type=code&scope=openid"+pkce, nil)
+		req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
+		rr := httptest.NewRecorder()
+		srv.httpServer.Handler.ServeHTTP(rr, req)
+		if loc := rr.Header().Get("Location"); strings.Contains(loc, "code=") || !strings.Contains(loc, "error=invalid_request") {
+			t.Errorf("%s: confidential client without S256 PKCE: %d %s", name, rr.Code, loc)
+		}
 	}
 }
 
@@ -235,7 +268,7 @@ func TestRateLimiterEvictsIdleEntries(t *testing.T) {
 
 	// Long after every bucket has refilled, they carry no state worth keeping.
 	clock = clock.Add(30 * time.Minute)
-	hit(0)
+	mm.sweepLimiters()
 
 	if got := mm.TrackedLimiters(); got > 10 {
 		t.Errorf("limiter map still holds %d entries 30 minutes after last use; it must be reclaimed", got)
@@ -302,6 +335,62 @@ func TestRateLimiterAtCapacityDoesNotResetActiveOffenders(t *testing.T) {
 	}
 }
 
+// A full map of refilled buckets carries no state, so it must not refuse a new client.
+func TestRateLimiterAtCapacityReplacesRefilledBucket(t *testing.T) {
+	mm := NewMiddlewareManager(nil, []string{"10.0.0.0/8"}, config.DefaultForwardedHeader, testCSRFKey)
+	mm.maxLimiters = 20
+	clock := time.Now()
+	mm.now = func() time.Time { return clock }
+	h := mm.RateLimit("login", 1, 1)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	hit := func(i int) int {
+		req := httptest.NewRequest("POST", "/api/auth/login", nil)
+		req.RemoteAddr = "10.0.0.1:5555"
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i+1))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for i := range 20 {
+		hit(i)
+	}
+	if code := hit(20); code != http.StatusTooManyRequests {
+		t.Fatalf("new client at capacity with only spent buckets: %d, want 429", code)
+	}
+	// One second refills every bucket; well inside the minute the sweep waits for.
+	clock = clock.Add(time.Second)
+	if code := hit(20); code != http.StatusOK {
+		t.Fatalf("new client refused while every bucket was refilled: %d", code)
+	}
+	if got := mm.TrackedLimiters(); got != 20 {
+		t.Fatalf("map holds %d buckets, want the cap of 20", got)
+	}
+}
+
+func TestRateLimiterSweeperStopsWithContext(t *testing.T) {
+	mm := NewMiddlewareManager(nil, []string{"10.0.0.0/8"}, config.DefaultForwardedHeader, testCSRFKey)
+	clock := time.Now()
+	mm.now = func() time.Time { return clock }
+	mm.allowRateLimit("login:198.51.100.1", 5, 1)
+	clock = clock.Add(30 * time.Minute)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { mm.sweepLimitersEvery(ctx, time.Millisecond); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for mm.TrackedLimiters() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("background sweep never reclaimed the idle bucket")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sweeper outlived its context")
+	}
+}
+
 func TestServerHasTimeouts(t *testing.T) {
 	srv, _, _, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
@@ -331,6 +420,30 @@ func TestSensitiveRoutesAreNoStoreAndCSPForbidsInlineScript(t *testing.T) {
 	}
 	if strings.Contains(rec.Header().Get("Content-Security-Policy"), "script-src 'self' 'unsafe-inline'") {
 		t.Fatal("CSP still permits inline scripts")
+	}
+}
+
+// Fonts and styles ship with the binary; nothing third-party may restyle the sign-in page.
+func TestCSPServesStylesAndFontsFromSelfOnly(t *testing.T) {
+	srv, _, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
+	seen := 0
+	for _, directive := range strings.Split(rec.Header().Get("Content-Security-Policy"), ";") {
+		f := strings.Fields(directive)
+		if len(f) == 0 || (f[0] != "style-src" && f[0] != "font-src") {
+			continue
+		}
+		seen++
+		for _, src := range f[1:] {
+			if src != "'self'" && src != "'unsafe-inline'" && src != "data:" {
+				t.Errorf("%s admits %s", f[0], src)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("want style-src and font-src, found %d of them", seen)
 	}
 }
 
@@ -626,7 +739,7 @@ func TestDeletingUserQueuesDeletionSyncEvent(t *testing.T) {
 		Name:        "KyPost",
 		SystemType:  "kypost",
 		CallbackURL: "https://kypost.example.com/scim/v2",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

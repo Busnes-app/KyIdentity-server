@@ -34,7 +34,8 @@ func TestSetDeviceSignOnTogglesOwnDeviceOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	do := func(id, body string) int {
-		return adminRequestNoStepUp(t, srv, http.MethodPut, "/api/notifications/native/devices/"+id+"/sign-on", cookie, body).Code
+		path := "/api/notifications/native/devices/" + id + "/sign-on"
+		return adminRequestWithStepUp(t, srv, http.MethodPut, path, cookie, body, mintStepUp(t, srv, cookie, "PUT "+path)).Code
 	}
 
 	if c := do("dev-1", `{"canSignOn":false}`); c != http.StatusOK {
@@ -91,18 +92,18 @@ func TestTokenEndpointDeviceSignOnGrant(t *testing.T) {
 	defer cleanup()
 	user := newUser(t, dbStore, "user")
 	client := &store.OAuthClient{ID: uuid.NewString(), ClientName: "KyPost", ClientType: "public", RedirectURIsJSON: `["https://kypost.example/cb"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
-	if err := dbStore.CreateOAuthClient(client); err != nil {
+	if err := dbStore.CreateOAuthClient(client, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, dbStore, client.ID)
 
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	spki, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-	token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dev, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: base64.StdEncoding.EncodeToString(spki), PushToken: "fcm"})
+	dev, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: base64.StdEncoding.EncodeToString(spki), PushToken: "fcm"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +156,7 @@ func TestTokenEndpointDeviceSignOnGrant(t *testing.T) {
 		t.Fatal("error response must be no-store")
 	}
 
-	if err := dbStore.SetNativeDeviceCanSignOn(dev.ID, user.ID, false); err != nil {
+	if err := dbStore.SetNativeDeviceCanSignOn(dev.ID, user.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	claims["jti"] = uuid.NewString()
@@ -181,11 +182,11 @@ func newSignOnEnv(t *testing.T) *signOnEnv {
 	user := newUser(t, db, "user")
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	spki, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-	token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true)
+	token, _, _, err := mfaEngine.GenerateDevicePairingToken(user.ID, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dev, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: base64.StdEncoding.EncodeToString(spki), PushToken: "fcm"})
+	dev, err := mfaEngine.RegisterNativeDevice(&mfa.NativeDeviceRegisterRequest{PairingToken: token, DeviceName: "p", DeviceIdentifier: "i", PublicKey: base64.StdEncoding.EncodeToString(spki), PushToken: "fcm"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +196,7 @@ func newSignOnEnv(t *testing.T) *signOnEnv {
 func (e *signOnEnv) client(t *testing.T, clientType, secretHash string) *store.OAuthClient {
 	t.Helper()
 	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "App", ClientType: clientType, ClientSecretHash: secretHash, RedirectURIsJSON: `["https://app.example/cb"]`, AllowedScopesJSON: `["openid","profile","email"]`, Enabled: true}
-	if err := e.db.CreateOAuthClient(c); err != nil {
+	if err := e.db.CreateOAuthClient(c, nil); err != nil {
 		t.Fatal(err)
 	}
 	allowTestAppAccess(t, e.db, c.ID)
@@ -317,7 +318,8 @@ func TestSetDeviceSignOnNeedsApprover(t *testing.T) {
 		t.Fatal(err)
 	}
 	put := func(body string) *httptest.ResponseRecorder {
-		return adminRequestNoStepUp(t, srv, http.MethodPut, "/api/notifications/native/devices/dev-1/sign-on", cookie, body)
+		const path = "/api/notifications/native/devices/dev-1/sign-on"
+		return adminRequestWithStepUp(t, srv, http.MethodPut, path, cookie, body, mintStepUp(t, srv, cookie, "PUT "+path))
 	}
 	rec := put(`{"canSignOn":true}`)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "device_not_approver") {

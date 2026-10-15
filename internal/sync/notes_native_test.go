@@ -49,9 +49,9 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 	}
 	t.Setenv("SSL_CERT_FILE", ca)
 	t.Setenv("SSL_CERT_DIR", t.TempDir())
-	previous := netguard.AllowPrivate
-	netguard.AllowPrivate = true
-	t.Cleanup(func() { netguard.AllowPrivate = previous })
+	previous, previousLoopback := netguard.AllowPrivate, netguard.AllowLoopback
+	netguard.AllowPrivate, netguard.AllowLoopback = true, true
+	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = previous, previousLoopback })
 	s, err := store.New(filepath.Join(t.TempDir(), "identity.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -189,13 +189,11 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 		t.Fatal(err)
 	}
 	phase("reassigned")
-	day.Status = "disabled"
-	if err := s.UpdateUserWithSyncEvents(day, true, nil); err != nil {
+	if _, err := s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	phase("disabled")
-	day.Status = "active"
-	if err := s.UpdateUserWithSyncEvents(day, false, nil); err != nil {
+	if _, err := s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "active"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	phase("reactivated")

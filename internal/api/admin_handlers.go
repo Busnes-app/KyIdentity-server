@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,8 +102,11 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		user.Pending, user.Status = true, "disabled"
 	} else {
 		passHash, err := auth.HashPassword(req.Password)
+		if argonBusy(w, err) {
+			return
+		}
 		if err != nil {
-			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			writeInputError(w, "password_policy", err)
 			return
 		}
 		user.PasswordHash = passHash
@@ -114,7 +118,12 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		"pending":  user.Pending,
 	})
 	if err := h.syncEngine.CreateUserAndQueueSyncEvents(user, created.Row); err != nil {
-		http.Error(w, `{"error":"user_exists","error_description":"Username or email already exists"}`, http.StatusConflict)
+		if errors.Is(err, store.ErrUserConflict) {
+			writeAPIError(w, http.StatusConflict, "user_exists", "Username or email already exists")
+			return
+		}
+		log.Printf("user creation failed: %v", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
 		return
 	}
 	created.Committed()
@@ -147,93 +156,107 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.store.GetUserByID(userID)
-	if err != nil || user == nil {
-		http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
-		return
-	}
-
 	req.DisplayName, req.Email = strings.TrimSpace(req.DisplayName), strings.TrimSpace(req.Email)
-	if user.SourceConnectorID != "" && ((req.DisplayName != "" && req.DisplayName != user.DisplayName) || (req.Email != "" && !strings.EqualFold(req.Email, user.Email))) {
-		http.Error(w, `{"error":"source_owned","error_description":"Name and email of this account are managed by its SCIM connector"}`, http.StatusBadRequest)
-		return
+	var endsAt *time.Time
+	var endsAtErr error
+	if req.EndsAt != nil {
+		endsAt, endsAtErr = parseInstant(*req.EndsAt)
 	}
-	if req.DisplayName != "" {
-		user.DisplayName = req.DisplayName
-	}
-	if req.Email != "" {
-		user.Email = req.Email
-	}
-	wasAdmin, wasRole := user.Role == "admin", user.Role
-	if req.Role == "user" || req.Role == "admin" {
-		user.Role = req.Role
-	}
-	endsAtBefore := user.EndsAt
-	if req.EndsAt != nil && !sameInstant(*req.EndsAt, user.EndsAt) {
-		// The store is the rule; this is the early answer for a changed value.
-		endsAt, err := parseInstant(*req.EndsAt)
-		if err != nil {
-			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
-			return
-		}
-		user.EndsAt = endsAt
-	}
-	wasActive := user.Status == "active"
-	if req.Status == "active" || req.Status == "disabled" {
-		user.Status = req.Status
-		if user.SourceConnectorID != "" {
-			// A local disable is an override the upstream cannot lift; enabling lifts it
-			// but only takes effect if the upstream also wants the account active.
-			user.LocallyDisabled = req.Status == "disabled"
-			user.ApplySourceState()
-		}
-	}
-
-	passwordChanged := req.Password != ""
+	// Hashing is slow, so it happens before the write lock is taken.
+	var passHash string
 	if req.Password != "" {
-		passHash, err := auth.HashPassword(req.Password)
-		if err != nil {
-			http.Error(w, `{"error":"password_policy","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		var err error
+		passHash, err = auth.HashPassword(req.Password)
+		if argonBusy(w, err) {
 			return
 		}
-		user.PasswordHash = passHash
-		// An administrator setting the password is the manual activation path.
-		user.Pending = false
-	}
-	if user.Pending && user.Status == "active" {
-		http.Error(w, `{"error":"account_pending","error_description":"A pending account activates through its link or by setting a password"}`, http.StatusBadRequest)
-		return
+		if err != nil {
+			writeInputError(w, "password_policy", err)
+			return
+		}
 	}
 
-	// Demotion is a revocation. An issued ID token carries "role":"admin" as a signed claim,
-	// so a relying party keeps granting administrator access for the life of that token
-	// unless the tokens behind it are revoked along with the row.
-	demoted := wasAdmin && user.Role != "admin"
-	revokeAccess := passwordChanged || (wasActive && user.Status == "disabled") || demoted
-
-	updated := h.audit.Prepare("admin.user_updated", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"username":      user.Username,
-		"role":          user.Role,
-		"status":        user.Status,
-		"endsAt":        user.EndsAt,
-		"endsAtBefore":  endsAtBefore,
-		"demoted":       demoted,
-		"roleChanged":   user.Role != wasRole,
-		"accessRevoked": revokeAccess,
+	// The edit runs on the row as read under the write lock and sets only what this
+	// request names, so a concurrent password reset or role change is never reverted.
+	updated := h.audit.Prepare("admin.user_updated", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	user, err := h.store.EditUser(userID, updated.Row, func(user *store.User) (bool, error) {
+		if user.SourceConnectorID != "" && ((req.DisplayName != "" && req.DisplayName != user.DisplayName) || (req.Email != "" && !strings.EqualFold(req.Email, user.Email))) {
+			return false, errSourceOwned
+		}
+		if req.DisplayName != "" {
+			user.DisplayName = req.DisplayName
+		}
+		if req.Email != "" {
+			user.Email = req.Email
+		}
+		wasAdmin, wasRole := user.Role == "admin", user.Role
+		if req.Role == "user" || req.Role == "admin" {
+			user.Role = req.Role
+		}
+		endsAtBefore := user.EndsAt
+		if req.EndsAt != nil && !sameInstant(*req.EndsAt, user.EndsAt) {
+			// Only a changed value must be a future instant; echoing the current one is fine.
+			if endsAtErr != nil {
+				return false, endsAtErr
+			}
+			user.EndsAt = endsAt
+		}
+		wasActive := user.Status == "active"
+		if req.Status == "active" || req.Status == "disabled" {
+			user.Status = req.Status
+			if user.SourceConnectorID != "" {
+				// A local disable is an override the upstream cannot lift; enabling lifts it
+				// but only takes effect if the upstream also wants the account active.
+				user.LocallyDisabled = req.Status == "disabled"
+				user.ApplySourceState()
+			}
+		}
+		if passHash != "" {
+			user.PasswordHash = passHash
+			// An administrator setting the password is the manual activation path.
+			user.Pending = false
+		}
+		if user.Pending && user.Status == "active" {
+			return false, errAccountPending
+		}
+		// Demotion is a revocation. An issued ID token carries "role":"admin" as a signed
+		// claim, so a relying party keeps granting administrator access for the life of
+		// that token unless the tokens behind it are revoked along with the row.
+		demoted := wasAdmin && user.Role != "admin"
+		revokeAccess := passHash != "" || (wasActive && user.Status == "disabled") || demoted
+		details, _ := json.Marshal(map[string]any{
+			"username":      user.Username,
+			"role":          user.Role,
+			"status":        user.Status,
+			"endsAt":        user.EndsAt,
+			"endsAtBefore":  endsAtBefore,
+			"demoted":       demoted,
+			"roleChanged":   user.Role != wasRole,
+			"accessRevoked": revokeAccess,
+		})
+		updated.Row.DetailsJSON = string(details)
+		return revokeAccess, nil
 	})
-	if err := h.syncEngine.UpdateUserAndQueueSyncEvents(user, revokeAccess, updated.Row); err != nil {
-		if errors.Is(err, store.ErrEnrollmentPolicy) {
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
+		case errors.Is(err, errSourceOwned):
+			http.Error(w, `{"error":"source_owned","error_description":"Name and email of this account are managed by its SCIM connector"}`, http.StatusBadRequest)
+		case errors.Is(err, errAccountPending):
+			http.Error(w, `{"error":"account_pending","error_description":"A pending account activates through its link or by setting a password"}`, http.StatusBadRequest)
+		case errors.Is(err, store.ErrEnrollmentPolicy):
 			enrollmentError(w, err)
-		} else if errors.Is(err, store.ErrLastActiveAdmin) {
+		case errors.Is(err, store.ErrLastActiveAdmin):
 			http.Error(w, `{"error":"cannot_remove_last_admin"}`, http.StatusBadRequest)
-		} else if errors.Is(err, store.ErrExpiryInPast) {
+		case errors.Is(err, store.ErrExpiryInPast):
 			http.Error(w, `{"error":"expiry_in_past","error_description":"The end date must be a future RFC 3339 instant"}`, http.StatusBadRequest)
-		} else {
+		default:
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		}
 		return
 	}
-	if passwordChanged {
+	if passHash != "" {
 		if err := h.store.ClearFailedLogins(user.ID); err != nil {
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 			return
@@ -248,6 +271,11 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		"user":    user,
 	})
 }
+
+var (
+	errSourceOwned    = errors.New("name and email are managed by the account's connector")
+	errAccountPending = errors.New("a pending account cannot be activated directly")
+)
 
 // ResetUserMFA clears MFA methods/devices, revokes active sessions, and dispatches sync event.
 func (h *AdminHandler) ResetUserMFA(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +297,7 @@ func (h *AdminHandler) ResetUserMFA(w http.ResponseWriter, r *http.Request) {
 	})
 	if err := h.syncEngine.ResetUserMFAAndRevoke(user.ID, reset.Row); err != nil {
 		log.Printf("MFA reset for user %s failed: %v", user.ID, err)
-		h.audit.Record("admin.user_mfa_reset", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{
+		h.audit.Observe("admin.user_mfa_reset", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{
 			"username": user.Username,
 			"error":    err.Error(),
 		})
@@ -290,15 +318,16 @@ func (h *AdminHandler) RevokeUserSessions(w http.ResponseWriter, r *http.Request
 
 	// Revocation is the one place where reporting an unearned success is worse than
 	// reporting failure: the admin stops looking.
-	if err := h.store.RevokeUserAccess(userID); err != nil {
+	revoked := h.audit.Prepare("admin.sessions_revoked", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if err := h.store.RevokeUserAccess(userID, revoked.Row); err != nil {
 		log.Printf("session revocation for user %s failed: %v", userID, err)
-		h.audit.Record("admin.sessions_revoked", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{
+		h.audit.Observe("admin.sessions_revoked", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{
 			"error": err.Error(),
 		})
 		http.Error(w, `{"error":"internal_error","error_description":"Revocation failed; sessions may still be active"}`, http.StatusInternalServerError)
 		return
 	}
-	h.audit.Record("admin.sessions_revoked", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	revoked.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -343,16 +372,19 @@ func (h *AdminHandler) CreatePairedSystem(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ps, token, err := h.syncEngine.CreateSystem(&req)
+	var created *audit.Pending
+	ps, token, err := h.syncEngine.CreateSystem(&req, func(ps *store.PairedSystem) *store.AuditEvent {
+		created = h.audit.Prepare("admin.system_created", admin.ID, admin.Username, ps.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
+			"systemName": ps.Name,
+			"systemType": ps.SystemType,
+		})
+		return created.Row
+	})
 	if err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeInputError(w, "invalid_request", err)
 		return
 	}
-
-	h.audit.Record("admin.system_created", admin.ID, admin.Username, ps.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"systemName": ps.Name,
-		"systemType": ps.SystemType,
-	})
+	created.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -381,12 +413,17 @@ func (h *AdminHandler) ResyncSystem(w http.ResponseWriter, r *http.Request) {
 	admin := GetUserFromContext(r.Context())
 	systemID := r.PathValue("id")
 
-	if err := h.syncEngine.ResyncAllAccounts(systemID); err != nil {
-		http.Error(w, `{"error":"resync_failed","error_description":"`+err.Error()+`"}`, http.StatusInternalServerError)
+	resynced := h.audit.Prepare("admin.system_resynced", admin.ID, admin.Username, systemID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if err := h.syncEngine.ResyncAllAccounts(systemID, resynced.Row); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeAPIError(w, http.StatusNotFound, "system_not_found", "")
+			return
+		}
+		log.Printf("resync of system %s failed: %v", systemID, err)
+		writeAPIError(w, http.StatusInternalServerError, "resync_failed", "")
 		return
 	}
-
-	h.audit.Record("admin.system_resynced", admin.ID, admin.Username, systemID, "system", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	resynced.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -492,7 +529,7 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		req.ClientType = "confidential"
 	}
 	if req.ClientType == "public" && requireConfidential(req.ClientID) {
-		h.audit.Record("admin.oauth_client_created", admin.ID, admin.Username, req.ClientID, "client",
+		h.audit.Observe("admin.oauth_client_created", admin.ID, admin.Username, req.ClientID, "client",
 			h.middleware.ClientIP(r), r.UserAgent(), "denied",
 			map[string]any{"reason": "suite_client_must_be_confidential"})
 		http.Error(w, suitePublicRejection, http.StatusBadRequest)
@@ -521,18 +558,18 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := validateRegisteredURLs(req.RedirectURIs, req.LaunchURL); err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	postLogoutJSON, err := encodePostLogoutURIs(req.PostLogoutRedirectURIs)
 	if err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	req.BackchannelLogoutURI = strings.TrimSpace(req.BackchannelLogoutURI)
 	if req.BackchannelLogoutURI != "" {
 		if err := netguard.ValidateURL(req.BackchannelLogoutURI, "backchannelLogoutUri"); err != nil {
-			http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 	}
@@ -558,15 +595,16 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		BackchannelLogoutURI:       req.BackchannelLogoutURI,
 	}
 
-	if err := h.store.CreateOAuthClient(client); err != nil {
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
-	}
-
-	h.audit.Record("admin.oauth_client_created", admin.ID, admin.Username, client.ID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
+	created := h.audit.Prepare("admin.oauth_client_created", admin.ID, admin.Username, client.ID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
 		"clientName": client.ClientName,
 		"clientType": client.ClientType,
 	})
+	if err := h.store.CreateOAuthClient(client, created.Row); err != nil {
+		log.Printf("client %s creation failed: %v", client.ID, err)
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	created.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -622,7 +660,7 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 	}
 	if req.LaunchURL != nil {
 		if err := validateExternalURL(*req.LaunchURL); err != nil {
-			http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		client.LaunchURL = strings.TrimSpace(*req.LaunchURL)
@@ -636,7 +674,7 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if err := validateRegisteredURLs(*req.RedirectURIs, ""); err != nil {
-			http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		encoded, err := json.Marshal(*req.RedirectURIs)
@@ -650,7 +688,7 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 		uri := strings.TrimSpace(*req.BackchannelLogoutURI)
 		if uri != "" {
 			if err := netguard.ValidateURL(uri, "backchannelLogoutUri"); err != nil {
-				http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 				return
 			}
 		}
@@ -659,7 +697,7 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 	if req.PostLogoutRedirectURIs != nil {
 		encoded, err := encodePostLogoutURIs(*req.PostLogoutRedirectURIs)
 		if err != nil {
-			http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		client.PostLogoutRedirectURIsJSON = encoded
@@ -692,7 +730,7 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 			// The rule has to hold on the edit path too, or it is only a speed bump on
 			// the create form.
 			if requireConfidential(client.ID) {
-				h.audit.Record("admin.oauth_client_updated", admin.ID, admin.Username, client.ID, "client",
+				h.audit.Observe("admin.oauth_client_updated", admin.ID, admin.Username, client.ID, "client",
 					h.middleware.ClientIP(r), r.UserAgent(), "denied",
 					map[string]any{"reason": "suite_client_must_be_confidential"})
 				http.Error(w, suitePublicRejection, http.StatusBadRequest)
@@ -830,7 +868,7 @@ func (h *AdminHandler) CreateApplication(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := validateExternalURL(req.URL); err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if req.IconName == "" {
@@ -851,12 +889,13 @@ func (h *AdminHandler) CreateApplication(w http.ResponseWriter, r *http.Request)
 		Enabled:     true,
 	}
 
-	if err := h.store.CreateApplication(app); err != nil {
+	created := h.audit.Prepare("admin.application_created", admin.ID, admin.Username, app.ID, "application", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if err := h.store.CreateApplication(app, created.Row); err != nil {
+		log.Printf("application creation failed: %v", err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-
-	h.audit.Record("admin.application_created", admin.ID, admin.Username, app.ID, "application", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	created.Committed()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "application": app})
@@ -929,7 +968,7 @@ func (h *AdminHandler) UpdateApplication(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := validateExternalURL(req.URL); err != nil {
-		http.Error(w, `{"error":"invalid_request","error_description":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if req.IconName == "" {
@@ -965,12 +1004,13 @@ func (h *AdminHandler) UpdateApplication(w http.ResponseWriter, r *http.Request)
 		app.Enabled = *req.Enabled
 	}
 
-	if err := h.store.UpdateApplication(app); err != nil {
+	updated := h.audit.Prepare("admin.application_updated", admin.ID, admin.Username, app.ID, "application", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if err := h.store.UpdateApplication(app, updated.Row); err != nil {
+		log.Printf("application %s update failed: %v", app.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-
-	h.audit.Record("admin.application_updated", admin.ID, admin.Username, app.ID, "application", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	updated.Committed()
 	h.dropIcon(previousIcon)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1102,10 +1142,8 @@ func (h *AdminHandler) ConfigureSystem(w http.ResponseWriter, r *http.Request) {
 		if protocol != "scim" && protocol != "suite_webhook" {
 			protocol = "invalid"
 		}
-		h.audit.Record("admin.system_configured", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"systemName": sys.Name, "systemType": protocol})
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_connection", "error_description": err.Error()})
+		h.audit.Observe("admin.system_configured", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"systemName": sys.Name, "systemType": protocol})
+		writeInputError(w, "invalid_connection", err)
 		return
 	}
 	event.Committed()
@@ -1129,7 +1167,7 @@ func (h *AdminHandler) TestSystem(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		result = "failure"
 	}
-	h.audit.Record("admin.system_tested", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), result, nil)
+	h.audit.Observe("admin.system_tested", admin.ID, admin.Username, sys.ID, "system", h.middleware.ClientIP(r), r.UserAgent(), result, nil)
 	if err != nil {
 		http.Error(w, `{"error":"connection_test_failed","error_description":"Check the SCIM base URL, bearer token, network access and externalId filtering."}`, 400)
 		return
