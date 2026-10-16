@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.4.2 — 2026-10-16
+
+### Upgrading from 0.4.x
+
+- Pairing clients that call `POST /api/user/devices/pairing-token` directly: send `signOn: true` for phones that should sign in to apps. The web UI already does.
+- If paired systems call back over `kypost-net`, a LAN or a tailnet, set `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` in `.env`; compose no longer turns it on. Callbacks to loopback, link-local or metadata addresses are refused regardless and must move.
+- Inbound SCIM: a connector that renames or re-addresses a locally made administrator or delegated account now gets `409 mutability`. Change those accounts in KyIdentity instead.
+- Push token refresh v1 is refused. Update authenticator apps that still send v1.
+- Users with an unverified email no longer get forgot-password mail; an administrator sends them a reset link.
+
+### Changes
+
 - Five wrong pairing PINs for an account now expire all its live pairing tokens. IPv6 clients share one rate-limit bucket per /64.
 - `POST /api/user/devices/pairing-token` without `signOn` now pairs a phone that cannot sign in to apps (was: can). Clients wanting sign-on must send `signOn: true`; the web UI already does.
 - Removing a phone, and changing whether it approves MFA or signs in, now spend a step-up grant and are audited atomically. Deleting or changing an unknown device answers 404.

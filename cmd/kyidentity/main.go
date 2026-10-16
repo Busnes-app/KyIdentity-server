@@ -44,7 +44,7 @@ import (
 // grows fastest and never stops.
 const auditRetention = 180 * 24 * time.Hour
 
-const appVersion = "0.4.1"
+const appVersion = "0.4.2"
 
 func main() {
 	if len(os.Args) > 1 {

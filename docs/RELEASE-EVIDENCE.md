@@ -9,7 +9,7 @@ standing in for a third party.
 
 | Component | Version |
 |---|---|
-| Server (`appVersion`) | 1.0.0 |
+| Server (`appVersion`) | 0.4.2 |
 | Go toolchain (`go.mod`, CI) | 1.26.6 |
 | `ky-primitives` | v0.6.0 |
 | Node (web and relay CI jobs) | 22 |
