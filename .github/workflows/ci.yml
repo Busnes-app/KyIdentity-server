@@ -18,6 +18,7 @@ jobs:
           set -euo pipefail
           img="ghcr.io/${GITHUB_REPOSITORY,,}"
           ident="https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/master"
+          rident="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release-image.yml@refs/tags/v\$v"
           # the retired owner is claimable by anyone. It may appear only in the README's two warning
           # lines, or in a file that opens with the "Retired owner:" annotation (a dated record), and
           # never as a fetchable coordinate or a fetch instruction, annotated or not
@@ -47,9 +48,10 @@ jobs:
           repos=$(grep -ohE -- '--repo [^ ]+' "${files[@]}" | sed 's/^--repo //' | sort -u || true)
           [ -n "$repos" ] || { echo "no --repo found"; exit 1; }
           bad=$(printf '%s\n' "$repos" | grep -vxF "$GITHUB_REPOSITORY" || true); [ -z "$bad" ] || { echo "--repo outside $GITHUB_REPOSITORY:"; echo "$bad"; exit 1; }
+          if bad=$(grep -nE -- '--(cert-identity-regex|signer-workflow|signer-repo)' "${files[@]}"); then echo "pattern signer flags, use the exact --cert-identity:"; echo "$bad"; exit 1; fi
           certs=$(grep -ohE -- '--cert-identity [^ ]+' "${files[@]}" | sed 's/^--cert-identity //' | sort -u || true)
           [ -n "$certs" ] || { echo "no --cert-identity found"; exit 1; }
-          bad=$(printf '%s\n' "$certs" | grep -vxF "$ident" || true); [ -z "$bad" ] || { echo "--cert-identity outside $ident:"; echo "$bad"; exit 1; }
+          bad=$(printf '%s\n' "$certs" | grep -vxF -e "$ident" -e "$rident" || true); [ -z "$bad" ] || { echo "--cert-identity outside $ident and $rident:"; echo "$bad"; exit 1; }
           # README may only point at docs that exist
           (grep -ohE 'docs/[A-Za-z0-9._/-]+\.md' README.md || true) | sort -u | xargs -r -I{} test -f {}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
