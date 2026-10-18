@@ -8,6 +8,10 @@ import (
 
 var ErrAppAuthentication = errors.New("application authentication requirements not met")
 
+// ErrRefreshNeedsConfidential refuses refresh tokens for a client with no secret to
+// protect them.
+var ErrRefreshNeedsConfidential = errors.New("refresh tokens require a confidential client")
+
 // Zero factor age means no additional age limit. Fresh mode requires a new bound
 // login for each authorization; it does not give the resulting code a zero TTL.
 type AppAuthenticationPolicy struct {
@@ -15,14 +19,31 @@ type AppAuthenticationPolicy struct {
 	PrimaryMaxAge int64  `json:"primaryMaxAge"`
 	Factor        string `json:"factor"`
 	FactorMaxAge  int64  `json:"factorMaxAge"`
+	// Refresh tokens (seconds, both zero when off): each must be used within
+	// RefreshIdle of the last, and the family ends RefreshLifetime after sign-in.
+	RefreshIdle     int64 `json:"refreshIdle"`
+	RefreshLifetime int64 `json:"refreshLifetime"`
 }
+
+// Refresh token bounds: an administrator cannot set an absurd lifetime.
+const (
+	MinRefreshIdle     = 5 * 60
+	MaxRefreshIdle     = 24 * 60 * 60
+	MinRefreshLifetime = 15 * 60
+	MaxRefreshLifetime = 7 * 24 * 60 * 60
+)
+
+func (p AppAuthenticationPolicy) RefreshEnabled() bool { return p.RefreshLifetime > 0 }
 
 func (p AppAuthenticationPolicy) Valid() bool {
 	return (p.Mode == "reuse" || p.Mode == "fresh" || p.Mode == "max_age") &&
 		(p.Factor == "password" || p.Factor == "mfa" || p.Factor == "passkey") &&
 		p.PrimaryMaxAge >= 0 && p.PrimaryMaxAge <= 2147483647 && p.FactorMaxAge >= 0 && p.FactorMaxAge <= 2147483647 &&
 		((p.Mode == "max_age" && p.PrimaryMaxAge > 0) || (p.Mode != "max_age" && p.PrimaryMaxAge == 0)) &&
-		(p.Factor != "password" || p.FactorMaxAge == 0)
+		(p.Factor != "password" || p.FactorMaxAge == 0) &&
+		((p.RefreshIdle == 0 && p.RefreshLifetime == 0) ||
+			(p.RefreshIdle >= MinRefreshIdle && p.RefreshIdle <= MaxRefreshIdle && p.RefreshLifetime >= MinRefreshLifetime &&
+				p.RefreshLifetime <= MaxRefreshLifetime && p.RefreshIdle <= p.RefreshLifetime))
 }
 
 // EvidenceReason checks only proof, not whether the request completed a fresh
@@ -80,6 +101,9 @@ func (s *Store) migrateAppAuthentication() error {
  ALTER TABLE app_registry ADD COLUMN auth_factor TEXT NOT NULL DEFAULT 'password' CHECK(auth_factor IN ('password','mfa','passkey'));
  ALTER TABLE app_registry ADD COLUMN auth_factor_max_age INTEGER NOT NULL DEFAULT 0 CHECK(auth_factor_max_age BETWEEN 0 AND 2147483647);
  ALTER TABLE app_registry ADD COLUMN auth_revision INTEGER NOT NULL DEFAULT 1;`},
+		// Refresh lifetimes are part of the policy, so every reader of it sees them.
+		{"app_registry", "auth_refresh_idle", `ALTER TABLE app_registry ADD COLUMN auth_refresh_idle INTEGER NOT NULL DEFAULT 0 CHECK(auth_refresh_idle BETWEEN 0 AND 86400);
+ ALTER TABLE app_registry ADD COLUMN auth_refresh_lifetime INTEGER NOT NULL DEFAULT 0 CHECK(auth_refresh_lifetime BETWEEN 0 AND 604800);`},
 		{"authorization_codes", "auth_app_id", `ALTER TABLE authorization_codes ADD COLUMN auth_app_id TEXT NOT NULL DEFAULT '';
  ALTER TABLE authorization_codes ADD COLUMN auth_policy_revision INTEGER NOT NULL DEFAULT 0;
  DELETE FROM authorization_codes;`},
@@ -113,7 +137,7 @@ type AppPolicyBinding struct {
 func (s *Store) ClientAuthenticationPolicyBinding(clientID string) (AppAuthenticationPolicy, AppPolicyBinding, error) {
 	var p AppAuthenticationPolicy
 	var b AppPolicyBinding
-	err := s.db.QueryRow(`SELECT id,auth_revision,role_revision,auth_mode,auth_primary_max_age,auth_factor,auth_factor_max_age FROM app_registry WHERE client_id=?`, clientID).Scan(&b.AppID, &b.AuthRevision, &b.RoleRevision, &p.Mode, &p.PrimaryMaxAge, &p.Factor, &p.FactorMaxAge)
+	err := s.db.QueryRow(`SELECT id,auth_revision,role_revision,auth_mode,auth_primary_max_age,auth_factor,auth_factor_max_age,auth_refresh_idle,auth_refresh_lifetime FROM app_registry WHERE client_id=?`, clientID).Scan(&b.AppID, &b.AuthRevision, &b.RoleRevision, &p.Mode, &p.PrimaryMaxAge, &p.Factor, &p.FactorMaxAge, &p.RefreshIdle, &p.RefreshLifetime)
 	return p, b, err
 }
 
@@ -133,6 +157,15 @@ func (s *Store) SetAppAuthenticationPolicy(id string, p AppAuthenticationPolicy,
 	if a.ClientID == "" {
 		return ErrAppAuthentication
 	}
+	if p.RefreshEnabled() {
+		var clientType string
+		if err = tx.QueryRow(`SELECT client_type FROM oauth_clients WHERE id=?`, a.ClientID).Scan(&clientType); err != nil {
+			return err
+		}
+		if clientType != "confidential" {
+			return ErrRefreshNeedsConfidential
+		}
+	}
 	if a.Authentication == p {
 		if err = appRegistryAudit(audit, map[string]any{"app": a, "authentication": p, "unchanged": true}); err != nil {
 			return err
@@ -142,7 +175,7 @@ func (s *Store) SetAppAuthenticationPolicy(id string, p AppAuthenticationPolicy,
 		}
 		return tx.Commit()
 	}
-	if _, err = tx.Exec(`UPDATE app_registry SET auth_mode=?,auth_primary_max_age=?,auth_factor=?,auth_factor_max_age=?,auth_revision=auth_revision+1,revision=revision+1 WHERE id=?`, p.Mode, p.PrimaryMaxAge, p.Factor, p.FactorMaxAge, id); err != nil {
+	if _, err = tx.Exec(`UPDATE app_registry SET auth_mode=?,auth_primary_max_age=?,auth_factor=?,auth_factor_max_age=?,auth_refresh_idle=?,auth_refresh_lifetime=?,auth_revision=auth_revision+1,revision=revision+1 WHERE id=?`, p.Mode, p.PrimaryMaxAge, p.Factor, p.FactorMaxAge, p.RefreshIdle, p.RefreshLifetime, id); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`DELETE FROM authorization_interactions WHERE client_id=?`, a.ClientID); err != nil {
@@ -168,7 +201,7 @@ func (s *Store) SetAppAuthenticationPolicy(id string, p AppAuthenticationPolicy,
 // Called under the code transaction's writer lock, before consuming an interaction.
 func checkCodeAppAuthenticationTx(tx *sql.Tx, code *AuthorizationCode) error {
 	var p AppAuthenticationPolicy
-	if err := tx.QueryRow(`SELECT id,auth_revision,role_revision,auth_mode,auth_primary_max_age,auth_factor,auth_factor_max_age FROM app_registry WHERE client_id=?`, code.ClientID).Scan(&code.AuthenticationAppID, &code.AuthenticationPolicyRevision, &code.RoleRevision, &p.Mode, &p.PrimaryMaxAge, &p.Factor, &p.FactorMaxAge); err != nil {
+	if err := tx.QueryRow(`SELECT id,auth_revision,role_revision,auth_mode,auth_primary_max_age,auth_factor,auth_factor_max_age,auth_refresh_idle,auth_refresh_lifetime FROM app_registry WHERE client_id=?`, code.ClientID).Scan(&code.AuthenticationAppID, &code.AuthenticationPolicyRevision, &code.RoleRevision, &p.Mode, &p.PrimaryMaxAge, &p.Factor, &p.FactorMaxAge, &p.RefreshIdle, &p.RefreshLifetime); err != nil {
 		return err
 	}
 	if !p.Valid() || p.EvidenceReason(code.AuthenticationEvidence, time.Now().UTC()) != "" {

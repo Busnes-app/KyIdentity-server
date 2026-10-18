@@ -576,6 +576,15 @@ export function parseGroupUserPage(value: unknown): DirectoryPage<GroupUser> {
   });
 }
 
+// Mirrors store.AppAuthenticationPolicy.Valid: both zero (off), or idle 5m–24h and
+// lifetime 15m–7d with idle no longer than lifetime.
+export const refreshBounds = { minIdle: 300, maxIdle: 86400, minLifetime: 900, maxLifetime: 604800 } as const;
+export function validRefresh(idle: number, lifetime: number): boolean {
+ const b = refreshBounds;
+ return (idle === 0 && lifetime === 0) ||
+  (idle >= b.minIdle && idle <= b.maxIdle && lifetime >= b.minLifetime && lifetime <= b.maxLifetime && idle <= lifetime);
+}
+
 export function parseAppAuthenticationPolicy(value: unknown): AppAuthenticationPolicy {
  const p = obj(value, 'an authentication policy');
  const policy = {
@@ -583,10 +592,13 @@ export function parseAppAuthenticationPolicy(value: unknown): AppAuthenticationP
   primaryMaxAge: directoryCount(p, 'primaryMaxAge'),
   factor: oneOf(p, 'factor', ['password', 'mfa', 'passkey']),
   factorMaxAge: directoryCount(p, 'factorMaxAge'),
+  refreshIdle: directoryCount(p, 'refreshIdle'),
+  refreshLifetime: directoryCount(p, 'refreshLifetime'),
  };
  if (policy.primaryMaxAge > 2147483647 || policy.factorMaxAge > 2147483647 ||
      (policy.mode === 'max_age' ? policy.primaryMaxAge === 0 : policy.primaryMaxAge !== 0) ||
      (policy.factor === 'password' && policy.factorMaxAge !== 0)) return fail('valid authentication ages');
+ if (!validRefresh(policy.refreshIdle, policy.refreshLifetime)) return fail('valid refresh token lifetimes');
  return policy;
 }
 

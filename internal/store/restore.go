@@ -26,6 +26,8 @@ const restoredRevision = -1
 // and nothing would re-derive them.
 var restoredCleared = []string{
 	"sessions", // cascades oidc_client_sessions
+	"refresh_tokens",
+	"refresh_families",
 	"issued_tokens",
 	"authorization_codes",
 	"authorization_interactions",

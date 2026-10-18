@@ -26,6 +26,8 @@ func seedEphemeral(t *testing.T, s *Store, userID, clientID string) {
 		{`INSERT INTO sessions(id,user_id,session_token_hash,ip_address,user_agent,expires_at) VALUES('sess-2',?,'hash-2','::1','ua',?)`, []any{userID, soon}},
 		{`INSERT INTO oidc_client_sessions(sid,client_id,session_id,user_id,created_at) VALUES('sid-2','client-2','sess-2',?,?)`, []any{userID, now}},
 		{`INSERT INTO issued_tokens(jti,user_id,client_id,expires_at) VALUES('jti-1',?,?,?)`, []any{userID, clientID, soon}},
+		{`INSERT INTO refresh_families(jti,scope,auth_app_id,auth_revision,role_revision,idle_seconds) VALUES('jti-1','openid','app',1,0,3600)`, nil},
+		{`INSERT INTO refresh_tokens(token_hash,family_jti,expires_at,created_at) VALUES('rth-1','jti-1',?,?)`, []any{soon, now}},
 		{`INSERT INTO authorization_codes(id,code_hash,client_id,user_id,redirect_uri,scope,code_challenge,code_challenge_method,expires_at) VALUES('code-1','ch-1',?,?,'https://app.test/cb','openid','c','S256',?)`, []any{clientID, userID, soon}},
 		{`INSERT INTO authorization_interactions(hash,browser_hash,user_id,request,created_at,expires_at) VALUES('int-1','bh-1',?,'{}',?,?)`, []any{userID, now, soon}},
 		{`INSERT INTO mfa_tokens(id,user_id,token_hash,expires_at) VALUES('mt-1',?,'mth-1',?)`, []any{userID, soon}},
@@ -88,11 +90,12 @@ func TestRestoreInvalidatesEphemeralCredentialsAndHoldsProvisioning(t *testing.T
 			t.Errorf("%s survived the restore with %d row(s)", table, n)
 		}
 	}
-	// Twelve of the fourteen seeded rows are deleted directly; the client session and
-	// the step-up challenge hang off the session and go with it by cascade. Two
+	// Fourteen credential rows are deleted directly, the refresh family and its token
+	// included; the client sessions and the step-up challenge hang off the sessions and
+	// go with them by cascade. Two
 	// deliveries are queued: the assignment's own and the one standing in for the
 	// capsule's.
-	if report.Credentials != 12 || report.QueuedDeliveries != 2 || report.HeldConnectors != 1 {
+	if report.Credentials != 14 || report.QueuedDeliveries != 2 || report.HeldConnectors != 1 {
 		t.Fatalf("report: %+v", report)
 	}
 	if len(report.Connectors) != 1 || report.Connectors[0] != "hr" {

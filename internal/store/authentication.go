@@ -67,9 +67,9 @@ func (s *Store) migrateAuthenticationEvidence() error {
 // GetSessionByID resolves server-side authorization context, never a browser credential.
 func (s *Store) GetSessionByID(id string) (*Session, error) {
 	sess := &Session{}
-	err := s.db.QueryRow(`SELECT id, user_id, primary_authenticated_at, factor_authenticated_at, factor_method
+	err := s.db.QueryRow(`SELECT id, user_id, expires_at, primary_authenticated_at, factor_authenticated_at, factor_method
  FROM sessions WHERE id = ? AND expires_at > ?`, id, time.Now().UTC()).Scan(
-		&sess.ID, &sess.UserID, &sess.PrimaryAuthenticatedAt, &sess.FactorAuthenticatedAt, &sess.FactorMethod)
+		&sess.ID, &sess.UserID, &sess.ExpiresAt, &sess.PrimaryAuthenticatedAt, &sess.FactorAuthenticatedAt, &sess.FactorMethod)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

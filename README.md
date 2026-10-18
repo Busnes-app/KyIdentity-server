@@ -639,6 +639,22 @@ disabling a user, resetting their MFA, changing their password, or revoking thei
 invalidates all of theirs. Services that validate tokens offline against JWKS cannot see a
 revocation until expiry — call `/oauth/userinfo` where revocation must take effect at once.
 
+**Refresh tokens** are off until an administrator turns them on for an app under
+**Authentication** (confidential clients only; a public client has no secret to protect
+them). The app then receives a `refresh_token` at code exchange and calls
+`POST /oauth/token` with `grant_type=refresh_token` and its client credentials. Each token
+works once: the response carries the next one, and presenting a spent token again ends the
+whole family and every access token it minted (audited `oauth.refresh_reuse`). A family
+lasts no longer than the browser session that signed in, the app's refresh lifetime
+(15 minutes to 7 days), its re-authentication ages and the user's access; each token must
+be used within the app's refresh idle limit (5 minutes to 24 hours). Logout, session
+revocation, disabling the user, SCIM deprovisioning, access or role changes, policy edits
+and client-secret rotation end it, as they end access tokens. A refresh counts as session
+activity, so a user working in one app stays signed in for the others. Refreshed ID tokens
+keep the original `auth_time`, `amr` and `acr` and carry no `nonce`; `scope` may narrow but
+never widen. Tokens are stored hashed. `POST /oauth/revoke` accepts a refresh token and
+ends its family. Design and threat model: `docs/refresh-tokens-and-reauth.md`.
+
 **Sessions.** A browser session lasts 24 hours and ends after 8 hours with no request to
 KyIdentity (`KYIDENTITY_SESSION_TTL`, `KYIDENTITY_SESSION_IDLE_TTL`). Apps keep their own
 sessions and come back only to sign in, so an app sign-in is the activity that counts; a
