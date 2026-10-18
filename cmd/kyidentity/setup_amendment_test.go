@@ -183,3 +183,13 @@ func TestSetupAmendmentRefusals(t *testing.T) {
 		})
 	}
 }
+
+// Retained intent is compared byte for byte, so a base bundle must encode as before amendments.
+func TestSetupBaseBundleEncodingUnchanged(t *testing.T) {
+	b := setupBundle{Schema: "kyidentity.setup/1", ID: "271333e2-c221-4601-b249-563b3d828530", Admin: setupAccount{"a", "a@x.test", "/p/a"}, Everyday: setupAccount{"e", "e@x.test", "/p/e"}, Clients: []setupClient{{ID: "c", Name: "C", SecretFile: "/p/c", RedirectURIs: []string{"https://c.test/cb"}}}}
+	raw, _ := json.Marshal(b)
+	want := `{"schema":"kyidentity.setup/1","setupId":"271333e2-c221-4601-b249-563b3d828530","admin":{"username":"a","email":"a@x.test","passwordFile":"/p/a"},"everyday":{"username":"e","email":"e@x.test","passwordFile":"/p/e"},"clients":[{"id":"c","name":"C","secretFile":"/p/c","redirectUris":["https://c.test/cb"],"postLogoutUris":null}]}`
+	if string(raw) != want {
+		t.Fatalf("base bundle encoding changed:\n%s", raw)
+	}
+}
