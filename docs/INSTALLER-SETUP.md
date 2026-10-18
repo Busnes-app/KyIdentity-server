@@ -47,6 +47,7 @@ native administration rather than deleting preparation files. Keep these files i
 `--stage --check` compares retained intent, files and both receipts without writing
 preparation files, accounts or audit rows.
 Preparation returns only `kyidentity.setup-preparation/1` and status `created` or `present`.
+Clients added after setup use an amendment (see Adding clients later).
 Ordinary apply/check at this reserved UUID path also verifies the preparation receipt;
 staging success alone does not imply configured accounts, downstream access or backups.
 Capabilities include `bundle-preparation`, `target-credentials` and `protected-setup-files`.
@@ -227,6 +228,47 @@ The opt-in real KyNotes worker fixture now qualifies this setup-owned app/connec
 linkage, exact-role delivery and downstream native session/device revocation on disposable
 state (KyNotes `docs/SSO.md`). It does not prove full OAuth issuance or installer secret
 transfer between separate targets. Those remain full-stack acceptance gates.
+
+## Adding clients later
+
+Setup intent is immutable, so a product installed after the first setup comes in an
+amendment: a new bundle with its own `setupId` and `"extends": "<parent setupId>"`. Require
+capability `setup-amendments`. An amendment has no `admin`, `everyday` or top-level `groups`
+block and at least one client. A client's `groups` names groups the parent owns, exactly.
+
+```json
+{
+  "schema": "kyidentity.setup/1",
+  "setupId": "9b0c6d1e-5f43-4c1a-8f0e-2d7a6b3c4e51",
+  "extends": "271333e2-c221-4601-b249-563b3d828530",
+  "clients": [{
+    "id": "kyrecovery",
+    "name": "KyRecovery",
+    "redirectUris": ["https://recovery.example.com/REPLACE-WITH-PRODUCT-CALLBACK"],
+    "administratorRole": "admin",
+    "suiteWebhook": {"url": "https://recovery.example.com/REPLACE-WITH-SYNC-ENDPOINT"}
+  }]
+}
+```
+
+Prepare it like any bundle, at `/data/installer/<amendment setupId>/setup.json`. Preparation
+refuses a parent with no native ownership and generates only `client-<id>.secret` and
+`client-<id>.webhook`; intent and credential receipt are immutable as before.
+
+Apply reads the parent's owned administrator and everyday accounts (and the named groups)
+from native ownership and runs the parent's account and group inspection first: present,
+active, unchanged, no end date or delegation. Any drift refuses the whole amendment.
+Assignments and roles bind to those accounts, as in the parent. An amendment never creates
+or changes an account or group. Any client ID already in the database is refused, whether
+foreign or owned by another setup; rerunning the same amendment is a no-op. Clients, roles
+and connectors are owned by the amendment ID and each client receipt records the parent ID.
+Everything commits in one transaction with the usual audits, which also carry `extends`.
+
+`--check` on the amendment inspects the parent's accounts and its own clients, roles and
+connectors. The parent's `--check` is unchanged and does not look at amendments.
+`--export-client` at the amendment's path exports only that amendment's clients, bound to
+the parent's administrator. Amendments do not chain: the parent must be an initial setup.
+Changing or removing a client added this way still needs native administration.
 
 ## Run and verify
 

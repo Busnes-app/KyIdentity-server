@@ -57,8 +57,9 @@ type setupGroup struct {
 type setupBundle struct {
 	Schema   string        `json:"schema"`
 	ID       string        `json:"setupId"`
-	Admin    setupAccount  `json:"admin"`
-	Everyday setupAccount  `json:"everyday"`
+	Extends  string        `json:"extends,omitempty"`
+	Admin    setupAccount  `json:"admin,omitzero"`
+	Everyday setupAccount  `json:"everyday,omitzero"`
 	Clients  []setupClient `json:"clients"`
 	Groups   []setupGroup  `json:"groups,omitempty"`
 }
@@ -126,7 +127,10 @@ func scimTokenAllowed(path string, own []string) error {
 }
 
 func setupCredentialFiles(b setupBundle) []string {
-	files := []string{b.Admin.PasswordFile, b.Everyday.PasswordFile}
+	files := []string{}
+	if b.Extends == "" {
+		files = append(files, b.Admin.PasswordFile, b.Everyday.PasswordFile)
+	}
 	for _, c := range b.Clients {
 		files = append(files, c.SecretFile)
 		if c.SuiteWebhook != nil {
@@ -157,12 +161,23 @@ func setupMetadata(b []byte) (setupBundle, store.InstallerSetup, error) {
 	if err != nil || id.String() != bundle.ID {
 		return bundle, store.InstallerSetup{}, errors.New("setupId must be a canonical UUID")
 	}
-	if strings.EqualFold(bundle.Admin.Username, bundle.Everyday.Username) || strings.EqualFold(bundle.Admin.Email, bundle.Everyday.Email) {
-		return bundle, store.InstallerSetup{}, errors.New("administrator and everyday identities must be distinct")
+	p := store.InstallerSetup{ID: bundle.ID, Extends: bundle.Extends}
+	accounts := []setupAccount{bundle.Admin, bundle.Everyday}
+	// An amendment adds clients to the accounts and groups of the setup it extends.
+	if bundle.Extends != "" {
+		parent, err := uuid.Parse(bundle.Extends)
+		if err != nil || parent.String() != bundle.Extends || bundle.Extends == bundle.ID {
+			return bundle, p, errors.New("extends must be another setup's canonical UUID")
+		}
+		if bundle.Admin != (setupAccount{}) || bundle.Everyday != (setupAccount{}) || len(bundle.Groups) > 0 || len(bundle.Clients) == 0 {
+			return bundle, p, errors.New("an amendment declares clients only, never accounts or groups")
+		}
+		accounts = nil
+	} else if strings.EqualFold(bundle.Admin.Username, bundle.Everyday.Username) || strings.EqualFold(bundle.Admin.Email, bundle.Everyday.Email) {
+		return bundle, p, errors.New("administrator and everyday identities must be distinct")
 	}
-	p := store.InstallerSetup{ID: bundle.ID}
 	// Validate the whole bundle before opening credentials or mutating the database.
-	for _, u := range []setupAccount{bundle.Admin, bundle.Everyday} {
+	for _, u := range accounts {
 		addr, err := mail.ParseAddress(u.Email)
 		if !setupName.MatchString(u.Username) || err != nil || addr.Address != u.Email || len(u.Email) > 254 {
 			return bundle, p, errors.New("invalid setup account name or email")
@@ -193,7 +208,8 @@ func setupMetadata(b []byte) (setupBundle, store.InstallerSetup, error) {
 		}
 		seenGroups := map[string]bool{}
 		for _, group := range c.Groups {
-			if !groups[group] || seenGroups[group] {
+			// An amendment's groups must be the parent's; the store resolves them.
+			if !(groups[group] || bundle.Extends != "" && setupGroupName.MatchString(group)) || seenGroups[group] {
 				return bundle, p, errors.New("client group must name a distinct bundle-owned group")
 			}
 			seenGroups[group] = true
@@ -232,6 +248,9 @@ func prepareSetup(raw []byte) (store.InstallerSetup, error) {
 		return p, err
 	}
 	for i, u := range []setupAccount{bundle.Admin, bundle.Everyday} {
+		if bundle.Extends != "" {
+			break
+		}
 		raw, err := readSetupFile(u.PasswordFile, 1024)
 		if err != nil {
 			return p, err
@@ -354,7 +373,7 @@ func runSetupInput(args []string, input io.Reader, out io.Writer) error {
 		if *file != "" || *db != "" || *check || *stage || *exportClient != "" {
 			return errors.New("capabilities cannot be combined with setup arguments")
 		}
-		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user"}})
+		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments"}})
 	}
 	if *exportClient != "" {
 		if *stage || *check {

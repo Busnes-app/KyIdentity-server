@@ -34,6 +34,7 @@ type InstallerGroup struct {
 }
 type InstallerSetup struct {
 	ID              string
+	Extends         string // parent setup ID of an amendment; accounts and groups stay the parent's
 	Admin, Everyday InstallerUser
 	Clients         []InstallerClient
 	Groups          []InstallerGroup
@@ -168,6 +169,64 @@ func (s *Store) InstallerSetupAdministrator(setupID string) (*User, error) {
 	return u, nil
 }
 
+// installerParentTx binds an amendment to its parent's owned accounts and the groups its
+// clients name, from native ownership only. The caller's inspection then proves them current.
+func installerParentTx(tx *sql.Tx, p *InstallerSetup) error {
+	if p.Extends == "" || p.Extends == p.ID || p.Admin != (InstallerUser{}) || p.Everyday != (InstallerUser{}) || len(p.Groups) > 0 || len(p.Clients) == 0 {
+		return errors.New("an amendment adds clients only and must extend another setup")
+	}
+	rows, err := tx.Query(`SELECT contract FROM installer_setup_resources WHERE kind='user' AND setup_id=?`, p.Extends)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var contract string
+		var f []string
+		if err := rows.Scan(&contract); err != nil {
+			return err
+		}
+		if json.Unmarshal([]byte(contract), &f) != nil || len(f) != 3 {
+			return errors.New("parent setup account ownership is malformed")
+		}
+		u := InstallerUser{Username: f[0], Email: f[1], Role: f[2]}
+		switch {
+		case u.Role == "admin" && p.Admin.Username == "":
+			p.Admin = u
+		case u.Role == "user" && p.Everyday.Username == "":
+			p.Everyday = u
+		default:
+			return errors.New("parent setup account ownership is malformed")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if p.Admin.Username == "" || p.Everyday.Username == "" {
+		return errors.New("parent setup has no owned administrator and everyday accounts")
+	}
+	seen := map[string]bool{}
+	for _, c := range p.Clients {
+		for _, name := range c.Groups {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			var contract string
+			var g InstallerGroup
+			err := tx.QueryRow(`SELECT contract FROM installer_setup_resources WHERE kind='group' AND name=? AND setup_id=?`, name, p.Extends).Scan(&contract)
+			if errors.Is(err, sql.ErrNoRows) || err == nil && (json.Unmarshal([]byte(contract), &g) != nil || g.Name != name) {
+				return fmt.Errorf("group %s is not owned by the parent setup", name)
+			}
+			if err != nil {
+				return err
+			}
+			p.Groups = append(p.Groups, g)
+		}
+	}
+	return nil
+}
+
 // ApplyInstallerSetup commits the complete bundle and one audit row per creation together.
 // Existing foreign objects are never adopted. Managed drift fails instead of overwriting it.
 func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerReport, error) {
@@ -178,8 +237,20 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 	defer tx.Rollback()
 	report := &InstallerReport{Schema: "kyidentity.setup/1", Created: []InstallerObject{}, Reused: []InstallerObject{}}
 	now := time.Now().UTC()
+	// An amendment inspects the parent's accounts and groups and never creates or changes them.
+	amendment := p.Extends != ""
+	accountOwner := p.ID
+	if amendment {
+		if err := installerParentTx(tx, &p); err != nil {
+			return nil, err
+		}
+		accountOwner = p.Extends
+	}
 	audit := func(kind, name, id string) error {
 		fields := map[string]string{"setupId": p.ID, "name": name}
+		if amendment {
+			fields["extends"] = p.Extends
+		}
 		action := "installer." + kind + "_created"
 		if kind == "connector" {
 			action = "admin.system_created"
@@ -213,7 +284,11 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		if err != nil {
 			return false, err
 		}
-		if owner != p.ID || storedID != id || storedContract != contract {
+		want := p.ID
+		if kind == "user" || kind == "group" {
+			want = accountOwner
+		}
+		if owner != want || storedID != id || storedContract != contract {
 			return false, fmt.Errorf("%s %s has conflicting ownership or setup configuration", kind, name)
 		}
 		return true, nil
@@ -251,7 +326,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 			report.Reused = append(report.Reused, InstallerObject{"user", u.Username, id})
 			continue
 		}
-		if inspect {
+		if inspect || amendment {
 			return nil, fmt.Errorf("user %s is not configured", u.Username)
 		}
 		id = uuid.NewString()
@@ -270,7 +345,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 	if err := tx.QueryRow(`SELECT id FROM users WHERE username=? COLLATE NOCASE`, p.Admin.Username).Scan(&adminID); err != nil {
 		return nil, err
 	}
-	groupIDs, err := configureInstallerGroups(tx, p, everydayID, inspect, report, ownership, remember, audit, now)
+	groupIDs, err := configureInstallerGroups(tx, p, everydayID, inspect || amendment, report, ownership, remember, audit, now)
 	if err != nil {
 		return nil, err
 	}
@@ -352,6 +427,9 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		if len(c.Groups) > 0 {
 			groupJSON, _ := json.Marshal(c.Groups)
 			contractFields = append(contractFields, "groups", string(groupJSON))
+		}
+		if amendment {
+			contractFields = append(contractFields, "extends", p.Extends)
 		}
 		contractBytes, _ := json.Marshal(contractFields)
 		contract := string(contractBytes)

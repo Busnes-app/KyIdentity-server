@@ -61,6 +61,10 @@ KyIdentity Server is the single-organization SSO provider and central identity a
   transaction. Inspection/resume refuses changed memberships or foreign group grants
   without overwriting them; native MFA policies remain untouched. Full downstream group
   lifecycle, account migration and suite-wide administrator separation remain gates.
+  An amendment (`extends`: parent setup ID; clients only) inspects the parent's owned accounts
+  and named groups through the same checks with ownership expected under the parent, never
+  creates or changes them, refuses every existing client ID, and owns only its clients, roles
+  and connectors. The parent's own inspection is unchanged. Amendments do not chain.
 
 - Public `GET /healthz` uses `ky-primitives/health` with service `kyidentity`, checks database, signing key, encryption key, and audit persistence, and caches the safe `ky.health/1` response for five seconds. `GET /livez` retains dependency-free `{"status":"alive"}`; `/readyz` remains an uncached readiness check and Docker probe.
 
@@ -185,6 +189,10 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
   `internal/store/installer_preparation_test.go` proves receipt/audit rollback, drift refusal,
   idempotent inspection and absence of account creation.
 - Installer setup regressions cover atomic rollback on conflicts/audit failure, ownership refusal, password preservation, explicit per-app roles and management-only access, mapping/policy drift refusal, protected input files and credential-free reports.
+- `TestSetupAmendmentAddsClientAndScopesExport`, `TestSetupAmendmentRefusals` and
+  `internal/store/installer_amendment_test.go` cover amendment preparation, scoped export,
+  no-op reruns, unchanged parent check, and refusal of missing/drifted parents, existing
+  clients, account/group blocks, foreign groups and changed intent, with no partial writes.
 - `TestSetupClientExportScopeAndReadOnly` verifies scoped native export, applied ownership,
   credential/issuer/flag refusal, repeatable bytes and unchanged audits. It does not prove
   installer cross-target delivery or downstream setup.
