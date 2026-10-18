@@ -9,10 +9,11 @@ standing in for a third party.
 
 | Component | Version |
 |---|---|
-| Server (`appVersion`) | 0.4.2 |
-| Go toolchain (`go.mod`, CI) | 1.26.6 |
-| `ky-primitives` | v0.6.0 |
-| Node (web and relay CI jobs) | 22 |
+| Server (`appVersion`) | 0.4.3 |
+| Go (`go.mod` minimum) | 1.26.9 |
+| Go (image build; CI uses latest `stable`) | 1.27.2 |
+| `ky-primitives` | v0.10.0 |
+| Node (image build, web and relay CI jobs) | 26 |
 
 ## Automated evidence
 

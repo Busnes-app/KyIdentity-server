@@ -103,7 +103,7 @@ The attestation must come from `release-image.yml` at that tag and record the co
 points to.
 
 ```bash
-v=<release version you intend to run, e.g. 0.4.2>
+v=<release version you intend to run, e.g. 0.4.3>
 sha=$(gh api repos/Busnes-app/KyIdentity-server/commits/refs/tags/v$v --jq .sha) \
   && d=$(docker buildx imagetools inspect ghcr.io/busnes-app/kyidentity-server:$v --format '{{.Manifest.Digest}}') \
   && gh attestation verify "oci://ghcr.io/busnes-app/kyidentity-server@$d" --repo Busnes-app/KyIdentity-server \
