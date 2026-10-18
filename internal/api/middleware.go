@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
@@ -70,7 +71,7 @@ func NewMiddlewareManager(s *store.Store, trustedCIDRs []string, forwardedHeader
 		rateLimiters:    make(map[string]*RateLimiter),
 		maxLimiters:     defaultMaxLimiters,
 		csrfKey:         csrfKey,
-		sessionIdleTTL:  30 * time.Minute,
+		sessionIdleTTL:  config.DefaultSessionIdleTTL,
 		now:             time.Now,
 	}
 }

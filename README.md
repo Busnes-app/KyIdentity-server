@@ -639,7 +639,10 @@ disabling a user, resetting their MFA, changing their password, or revoking thei
 invalidates all of theirs. Services that validate tokens offline against JWKS cannot see a
 revocation until expiry — call `/oauth/userinfo` where revocation must take effect at once.
 
-**Sessions.** Security and devices lists where an account is signed in: each live browser
+**Sessions.** A browser session lasts 24 hours and ends after 8 hours with no request to
+KyIdentity (`KYIDENTITY_SESSION_TTL`, `KYIDENTITY_SESSION_IDLE_TTL`). Apps keep their own
+sessions and come back only to sign in, so an app sign-in is the activity that counts; a
+short idle limit asks for the password at nearly every app sign-in. Security and devices lists where an account is signed in: each live browser
 session with its address, browser, sign-in and last-activity times, expiry and the factor
 used, plus the apps currently holding access tokens. `GET /api/user/sessions`,
 `DELETE /api/user/sessions/{id}` and `POST /api/user/sessions/revoke-others` act on the

@@ -439,7 +439,7 @@ The frontend follows the existing KySecurity visual system and conventions:
   - `KYIDENTITY_SECRET_KEY`: Master secret for session and cookie signing.
   - `KYIDENTITY_ENCRYPTION_KEY`: Master key for AES-GCM secret encryption at rest.
   - `KYIDENTITY_RSA_KEY_PATH`: Path to private RSA signing key for OIDC JWTs.
-  - `KYIDENTITY_SESSION_TTL` / `KYIDENTITY_SESSION_IDLE_TTL`: Absolute and inactivity limits for browser sessions (defaults: `24h` / `30m`).
+  - `KYIDENTITY_SESSION_TTL` / `KYIDENTITY_SESSION_IDLE_TTL`: Absolute and inactivity limits for browser sessions (defaults: `24h` / `8h`).
   - `TRUSTED_PROXY_CIDRS`: Trusted upstream reverse proxy CIDRs for real client IP extraction.
 - **Bootstrap CLI**: Initial administrator account created via CLI flag (e.g., `kyidentity bootstrap-admin --username admin`) or environment variables on first start without logging credentials.
 
