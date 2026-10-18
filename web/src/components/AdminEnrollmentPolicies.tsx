@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiJson, apiRequest, errorMessage } from '../api';
+import { AdminSessionSettings } from './AdminSessionSettings';
 import { parseAttestationSettings, parseEnrollmentPolicies, parseEnrollmentPreview } from '../parsers';
 import type { DirectoryGroup, EnrollmentPolicy, EnrollmentPreview } from '../types';
 import { isCancelled, useStepUp } from './StepUpPrompt';
@@ -35,7 +36,7 @@ export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup;
    await apiRequest(path,{method:'PUT',stepUpToken,body:JSON.stringify(draft)});setDraft(null);setPreview(null);await reload();
   }catch(err){if(!isCancelled(err))setError(errorMessage(err,'Could not apply policy; reload before retrying.'));}finally{setBusy(false);}
  };
- return <div className="admin-page"><div className="page-header"><h1 className="page-title">{group ? `MFA policy for ${group.name}` : 'MFA enrollment policies'}</h1>{onBack&&<button className="secondary-btn" disabled={busy} onClick={onBack}>Back to groups</button>}<button className="secondary-btn" disabled={busy} onClick={()=>{setDraft(null);setPreview(null);void reload();}}>Reload policies</button></div>
+ return <div className="admin-page"><div className="page-header"><h1 className="page-title">{group ? `MFA policy for ${group.name}` : 'Sign-in policies'}</h1>{onBack&&<button className="secondary-btn" disabled={busy} onClick={onBack}>Back to groups</button>}<button className="secondary-btn" disabled={busy} onClick={()=>{setDraft(null);setPreview(null);void reload();}}>Reload policies</button></div>
   <p>Organization, administrator and group requirements combine: permitted factors must overlap, and the earliest enrollment deadline applies. App-specific authentication can remain stricter during grace.</p>
   <p>If the resulting policies require MFA for your account, sign in with a permitted administrator factor within the last five minutes before applying them. This verifies a local administrator can still sign in; there is no policy bypass.</p>
   {error&&<div className="alert-box error" role="alert">{error}</div>}
@@ -56,6 +57,7 @@ export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup;
    <div className="form-group"><label><input type="checkbox" checked={lockedBootloader??false} disabled={busy||lockedBootloader===null} onChange={e=>void saveBootloader(e.target.checked)}/> Require a locked bootloader for MFA-grade device sign-on</label></div>
    <p>Off: the bootloader state is recorded but not enforced. On: new pairings and the daily sweep refuse MFA grade for unlocked bootloaders.</p>
   </div></div>}
+  {!group&&<AdminSessionSettings/>}
   {stepUpPrompt}
  </div>;
 }

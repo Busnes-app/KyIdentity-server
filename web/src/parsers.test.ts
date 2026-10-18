@@ -1,4 +1,4 @@
-import { parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseDevice, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage } from './parsers';
+import { parseSessionLimits, parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseDevice, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseAccessExplanation,
@@ -702,4 +702,13 @@ describe('parseAttestationSettings', () => {
     expect(parseAttestationSettings({ requireLockedBootloader: true }).requireLockedBootloader).toBe(true);
     expect(() => parseAttestationSettings({ requireLockedBootloader: 'yes' })).toThrow();
   });
+});
+
+describe('session limits boundary', () => {
+ it('accepts only limits inside the server bounds', () => {
+  expect(parseSessionLimits({ absolute: 86400, idle: 28800 })).toEqual({ absolute: 86400, idle: 28800 });
+  for (const bad of [{ absolute: 60, idle: 60 }, { absolute: 2592000, idle: 3600 }, { absolute: 3600, idle: 60 }, { absolute: 3600, idle: 7200 }, { absolute: 3600 }]) {
+   expect(() => parseSessionLimits(bad)).toThrow();
+  }
+ });
 });

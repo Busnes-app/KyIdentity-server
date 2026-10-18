@@ -20,7 +20,7 @@ type AppGrant struct {
 // recently active first. The token hash is never loaded.
 func (s *Store) ListUserSessions(userID string, idleTTL time.Duration) ([]Session, error) {
 	now := time.Now().UTC()
-	rows, err := s.db.Query(`SELECT id, user_id, ip_address, user_agent, expires_at, created_at, last_active_at, factor_method FROM sessions WHERE user_id=? AND expires_at>? AND last_active_at>? ORDER BY last_active_at DESC`, userID, now, now.Add(-idleTTL))
+	rows, err := s.db.Query(`SELECT id, user_id, ip_address, user_agent, expires_at, created_at, last_active_at, factor_method FROM sessions WHERE user_id=? AND expires_at>? AND last_active_at>? AND created_at>? ORDER BY last_active_at DESC`, userID, now, now.Add(-idleTTL), now.Add(-s.SessionLimits().AbsoluteTTL()))
 	if err != nil {
 		return nil, err
 	}

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
@@ -29,19 +28,13 @@ type Engine struct {
 	store      *store.Store
 	keyManager *crypto.JWTKeyManager
 	issuerURL  string
-	// sessionIdle is the browser session idle limit a refresh must fall within.
-	sessionIdle time.Duration
 }
-
-// SetSessionIdleTTL tells the refresh grant the configured session idle limit.
-func (e *Engine) SetSessionIdleTTL(d time.Duration) { e.sessionIdle = d }
 
 func NewEngine(s *store.Store, km *crypto.JWTKeyManager, issuerURL string) *Engine {
 	return &Engine{
-		store:       s,
-		keyManager:  km,
-		issuerURL:   issuerURL,
-		sessionIdle: config.DefaultSessionIdleTTL,
+		store:      s,
+		keyManager: km,
+		issuerURL:  issuerURL,
 	}
 }
 
@@ -469,7 +462,7 @@ func (e *Engine) ExchangeRefreshToken(raw, clientID, clientSecret, scope string)
 		return nil, userID, err
 	}
 	access := &store.IssuedToken{JTI: uuid.New().String(), ExpiresAt: exp}
-	family, err := e.store.RotateRefreshToken(oldHash, clientID, crypto.HashSHA256(next), access, e.sessionIdle)
+	family, err := e.store.RotateRefreshToken(oldHash, clientID, crypto.HashSHA256(next), access)
 	if err != nil {
 		return nil, userID, err
 	}

@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
@@ -43,7 +42,6 @@ type MiddlewareManager struct {
 	rateLimitersMutex sync.Mutex
 	maxLimiters       int
 	csrfKey           []byte
-	sessionIdleTTL    time.Duration
 	// now is injectable so eviction behaviour can be tested without waiting real minutes.
 	now func() time.Time
 }
@@ -71,7 +69,6 @@ func NewMiddlewareManager(s *store.Store, trustedCIDRs []string, forwardedHeader
 		rateLimiters:    make(map[string]*RateLimiter),
 		maxLimiters:     defaultMaxLimiters,
 		csrfKey:         csrfKey,
-		sessionIdleTTL:  config.DefaultSessionIdleTTL,
 		now:             time.Now,
 	}
 }
@@ -303,7 +300,7 @@ func (m *MiddlewareManager) authenticate(r *http.Request) (*store.User, *store.S
 	}
 
 	// GetSessionByTokenHash filters on expires_at, so an expired session is never returned.
-	sess, err := m.store.GetSessionByTokenHash(crypto.HashSHA256(cookie.Value), m.sessionIdleTTL)
+	sess, err := m.store.GetSessionByTokenHash(crypto.HashSHA256(cookie.Value), m.store.SessionLimits().IdleTTL())
 	if err != nil || sess == nil {
 		return nil, nil
 	}

@@ -132,7 +132,7 @@ func (s *Store) LookupRefreshFamily(tokenHash string) (*RefreshFamily, error) {
 // access token through the issuance guard, stores the next token and counts the refresh
 // as session activity. A spent token, or one presented by another client, revokes the
 // family and every access token it minted and returns ErrRefreshReuse.
-func (s *Store) RotateRefreshToken(oldHash, clientID, newHash string, access *IssuedToken, sessionIdle time.Duration) (*RefreshFamily, error) {
+func (s *Store) RotateRefreshToken(oldHash, clientID, newHash string, access *IssuedToken) (*RefreshFamily, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
@@ -158,8 +158,9 @@ func (s *Store) RotateRefreshToken(oldHash, clientID, newHash string, access *Is
 	if revoked || !tokenExpires.After(now) || !f.ExpiresAt.After(now) {
 		return nil, ErrRefreshInvalid
 	}
-	// The session's own idle limit applies; a refresh then counts as activity.
-	res, err := tx.Exec(`UPDATE sessions SET last_active_at=? WHERE id=? AND last_active_at>?`, now, f.SessionID, now.Add(-sessionIdle))
+	// The session's current limits apply; a refresh then counts as activity.
+	limits := s.SessionLimits()
+	res, err := tx.Exec(`UPDATE sessions SET last_active_at=? WHERE id=? AND last_active_at>? AND created_at>?`, now, f.SessionID, now.Add(-limits.IdleTTL()), now.Add(-limits.AbsoluteTTL()))
 	if err != nil {
 		return nil, err
 	}

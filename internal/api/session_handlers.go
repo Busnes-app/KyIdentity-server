@@ -40,7 +40,7 @@ type sessionView struct {
 // not a complete inventory of downstream app sessions. Delivery errors name receiver
 // hosts, so only an administrator's view carries them.
 func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSessionID string, admin bool) {
-	sessions, err := h.store.ListUserSessions(userID, h.middleware.sessionIdleTTL)
+	sessions, err := h.store.ListUserSessions(userID, h.store.SessionLimits().IdleTTL())
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

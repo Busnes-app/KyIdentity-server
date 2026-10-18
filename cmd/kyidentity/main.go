@@ -85,6 +85,10 @@ func main() {
 		log.Fatalf("Failed to initialize database store: %v", err)
 	}
 	defer dbStore.Close()
+	// The environment seeds session limits until an administrator stores their own.
+	if err := dbStore.LoadSessionLimits(store.SessionLimits{Absolute: int64(cfg.SessionTTL / time.Second), Idle: int64(cfg.SessionIdleTTL / time.Second)}); err != nil {
+		log.Fatalf("Session limits: %v", err)
+	}
 	// Before anything reads a secret: the read path refuses legacy ciphertext.
 	if err := dbStore.SealLegacySecrets(cfg.EncryptionKey); err != nil {
 		log.Fatalf("Sealing legacy secrets failed, refusing to start: %v", err)

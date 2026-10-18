@@ -656,9 +656,27 @@ never widen. Tokens are stored hashed. `POST /oauth/revoke` accepts a refresh to
 ends its family. Design and threat model: `docs/refresh-tokens-and-reauth.md`.
 
 **Sessions.** A browser session lasts 24 hours and ends after 8 hours with no request to
-KyIdentity (`KYIDENTITY_SESSION_TTL`, `KYIDENTITY_SESSION_IDLE_TTL`). Apps keep their own
-sessions and come back only to sign in, so an app sign-in is the activity that counts; a
-short idle limit asks for the password at nearly every app sign-in. Security and devices lists where an account is signed in: each live browser
+KyIdentity. Apps keep their own sessions and come back only to sign in or refresh, so that
+is the activity that counts; a short idle limit asks for the password at nearly every app
+sign-in. Administrators change both under **Sign-in policies → Sign-in sessions**
+(`GET`/`PUT /api/admin/session-settings`, `{absolute, idle}` in seconds, step-up, audited
+`admin.session_limits_configured`): lifetime 1 hour to 7 days, idle 5 minutes to 24 hours
+and no longer than the lifetime. Saving ends, for good, every session beyond the stricter
+of the old and new limits, with its tokens and refresh families, and queues back-channel
+logout for them (`sessionsEnded` in the audit row), so relaxing the limits later revives
+nothing; a longer limit never extends a session past the expiry it was given.
+`KYIDENTITY_SESSION_TTL` and `KYIDENTITY_SESSION_IDLE_TTL` seed the values until an
+administrator saves them, and startup refuses values outside the same bounds.
+
+**Step-up for sensitive actions** is standard OIDC. The app sends a new authorization
+request with `acr_values=urn:kysignon:acr:mfa` and `max_age=N` (or `prompt=login`), then
+checks the ID token: `auth_time` within N seconds and `acr` `urn:kysignon:acr:mfa` means
+the user proved their password and a second factor within N seconds, because the factor
+is always verified after the password in the same sign-in. With `prompt=none` an
+insufficient sign-in answers `login_required` instead of showing a page. Refresh never
+updates `auth_time` or `acr`, so a refreshed ID token cannot pass a step-up check its
+sign-in did not. An administrator can impose the same per app (Authentication: maximum
+password age, required factor and its age). Security and devices lists where an account is signed in: each live browser
 session with its address, browser, sign-in and last-activity times, expiry and the factor
 used, plus the apps currently holding access tokens. `GET /api/user/sessions`,
 `DELETE /api/user/sessions/{id}` and `POST /api/user/sessions/revoke-others` act on the
@@ -804,7 +822,7 @@ On first upgrade, old pending codes and interactions restart without deleting ex
 sessions or already-issued tokens. Subsequent startups preserve live requests.
 
 **Required MFA enrollment.** Administrators can preview and apply organization
-and administrator requirements under **MFA policies**, and each group's requirement
+and administrator requirements under **Sign-in policies**, and each group's requirement
 under **Groups → MFA policy**. Allowed TOTP, signed push and passkey methods intersect
 across every applicable policy. Grace is 0–90 days; each user's scope
 obligation stores an epoch-second deadline when it first applies, including account
