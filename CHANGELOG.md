@@ -2,9 +2,29 @@
 
 ## Unreleased
 
+## 0.4.3 — 2026-10-18
+
+### Upgrading from 0.4.2
+
+- Browser sessions now end after 8 idle hours, not 30 minutes. A value in `.env` is kept; set `KYIDENTITY_SESSION_IDLE_TTL=30m` to keep the old limit.
+- Startup refuses `KYIDENTITY_SESSION_TTL` outside 1 hour to 7 days and `KYIDENTITY_SESSION_IDLE_TTL` outside 5 minutes to 24 hours. Check `.env` before upgrading.
+- `KYIDENTITY_SESSION_TTL` and `KYIDENTITY_SESSION_IDLE_TTL` now only seed the session limits. Once an administrator saves them under **Sign-in policies**, the environment is ignored.
+- Refresh tokens stay off for every app until an administrator turns them on. Before turning them on, check the app stores the new `refresh_token` from every refresh response and never sends one twice: a reused token, including a concurrent refresh or a retry after a lost response, revokes the family and every access token it minted, and the user signs in again. Refresh also stops when the user's KyIdentity browser session ends.
+- Installers: `apply-setup --export-client` refuses once the setup's administrator has been renamed, disabled or is no longer an administrator.
+- The **MFA policies** page is now **Sign-in policies**.
+
 ### Changes
 
 - `apply-setup` accepts setup amendments: a bundle with `"extends": "<parent setupId>"` and only `clients` adds OIDC clients to an applied setup without touching its accounts. The parent's owned accounts must pass inspection; existing client IDs are refused. Advertised as capability `setup-amendments`. See [Adding clients later](docs/INSTALLER-SETUP.md#adding-clients-later).
+- Add `kyidentity disable-user --username U --require-active-admin G` to retire an account from inside the container without a step-up grant, such as the bootstrap administrator after setup. It runs the administrator disable transaction (sessions, tokens, app access, connector inactive state, `admin.user_updated` audit as `kyidentity-cli`) and refuses unless G is a different active administrator with no end date. An upstream-owned account gets the local override; a pending invitation's activation link is expired. Removes `first-run-password.txt` when it names U. Advertised as capability `disable-user`. See [Retiring the bootstrap administrator](docs/INSTALLER-SETUP.md#retiring-the-bootstrap-administrator).
+- Security: an activation or reset link redeemed while a revocation of it was committing (a disable, a password or email change, a newer link) could pass the expiry that revocation set and reactivate the account. Redemption now checks expiry under the write lock.
+- Security: `apply-setup --export-client` reads the setup's administrator by ID from its ownership record and refuses unless it keeps the owned username and is an active administrator. It looked the username up again, so a rename in between could bind the client to another account, and a deleted account crashed the export.
+- Single sign-on across apps: the default session idle limit is 8 hours (was 30 minutes); the lifetime stays 24 hours. Apps return to KyIdentity only to sign in, so 30 minutes asked for the password at almost every sign-in to a second app (#77).
+- Administrators set the browser session lifetime (1 hour to 7 days) and idle limit (5 minutes to 24 hours, no longer than the lifetime) under **Sign-in policies → Sign-in sessions** (`GET`/`PUT /api/admin/session-settings`), with step-up and audit `admin.session_limits_configured`. A shorter limit ends the sessions beyond it, with their tokens, refresh families and back-channel logouts, and relaxing it later revives none. A longer limit extends no existing session.
+- Add rotating refresh tokens for confidential clients, turned on per app in its authentication policy (idle 5 minutes to 24 hours, lifetime 15 minutes to 7 days; off by default, refused for public clients). Each token works once; a reused token, or one presented by another client, revokes the family and every access token it minted (audit `oauth.refresh_reuse`). A family never outlives its browser session, the app's re-authentication ages or the user's access; logout, disable, SCIM deprovisioning, access, role and policy changes, secret rotation and restore end it. Each refresh counts as session activity. Refreshed ID tokens keep the original `auth_time`, `amr` and `acr`; scope may only narrow. `POST /oauth/revoke` accepts a refresh token. Discovery adds `grant_types_supported`. See [the design](docs/refresh-tokens-and-reauth.md).
+- Document OIDC step-up for sensitive app actions: `acr_values=urn:kysignon:acr:mfa` with `max_age=N` admits only an MFA sign-in within N seconds, and `prompt=none` answers `login_required`. Now covered by a test.
+- The documented image verification in `docker-compose.yml` and `docs/RESTORE.md` now accepts the `release-image.yml` signer at the version tag, so `:X.Y.Z` and `:stable` images verify. It accepted only the `ci.yml` signer.
+- Dependencies: Go image 1.27.2, `golang.org/x/crypto` 0.58.0, React 19.3.1, lucide-react 1.57.0, vitest 5.0.4, wrangler 4.151.0, Scorecard action 2.5.0.
 
 ## 0.4.2 — 2026-10-16
 
