@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -113,6 +114,58 @@ func (s *Store) RecordInstallerPreparation(id, contract string, inspect bool) er
 		return err
 	}
 	return tx.Commit()
+}
+
+// InstallerSetupAdministrator returns the administrator account setupID owns, found by
+// the ID its ownership row recorded rather than by a username that may since name another
+// account. It refuses unless that account still has the owned username and is an active
+// administrator. Both reads share one snapshot.
+func (s *Store) InstallerSetupAdministrator(setupID string) (*User, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT name,object_id,contract FROM installer_setup_resources WHERE kind='user' AND setup_id=?`, setupID)
+	if err != nil {
+		return nil, err
+	}
+	var name, id string
+	for rows.Next() {
+		var n, o, contract string
+		var f []string
+		if err := rows.Scan(&n, &o, &contract); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if json.Unmarshal([]byte(contract), &f) != nil || len(f) != 3 {
+			rows.Close()
+			return nil, errors.New("setup account ownership is malformed")
+		}
+		if f[2] == "admin" {
+			if id != "" {
+				rows.Close()
+				return nil, errors.New("setup owns more than one administrator")
+			}
+			name, id = n, o
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if id == "" {
+		return nil, errors.New("setup owns no administrator")
+	}
+	u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if u == nil || !strings.EqualFold(u.Username, name) || u.Role != "admin" || u.Status != "active" {
+		return nil, errors.New("setup administrator no longer matches its ownership")
+	}
+	return u, nil
 }
 
 // ApplyInstallerSetup commits the complete bundle and one audit row per creation together.

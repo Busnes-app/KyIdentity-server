@@ -77,7 +77,10 @@ The command inherits the running container's explicit HTTPS `KYIDENTITY_ISSUER_U
 Its stdout is a private, at-most-64-KiB `kyidentity.client-credentials/1` JSON frame.
 Fields are `setupId`, `issuerUrl`, `clientId`, `redirectUris`, `clientSecret`, optional
 `directoryUrl`/`directorySecret`, and `administrator` with the native `subject`, `username`
-and exact declared client `role`. Only the selected client is exported. Account passwords,
+and exact declared client `role`. The administrator is the account the setup's ownership
+row recorded, by ID; export refuses if it no longer has the bundle's username or is not an
+active administrator, so a username moved to another account is never exported.
+Only the selected client is exported. Account passwords,
 other clients' credentials, SCIM tokens, encryption keys and recovery material are excluded.
 An administrator binding without an app role grants no downstream administrator authority.
 

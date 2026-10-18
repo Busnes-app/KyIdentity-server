@@ -70,9 +70,11 @@ func exportSetupClient(file, db, clientID string, out io.Writer) error {
 	if _, err := s.ApplyInstallerSetup(p, true); err != nil {
 		return errors.New("credential export requires verified applied native ownership")
 	}
-	admin, err := s.GetUserByUsername(b.Admin.Username)
-	if err != nil {
-		return errors.New("cannot inspect credential export owner")
+	// By owned ID, never by username: a rename after inspection must not hand the
+	// installer another account as this client's administrator.
+	admin, err := s.InstallerSetupAdministrator(b.ID)
+	if err != nil || !strings.EqualFold(admin.Username, b.Admin.Username) {
+		return errors.New("credential export owner no longer matches setup ownership")
 	}
 	c := b.Clients[selected]
 	secret, err := readSetupFile(c.SecretFile, 43)
