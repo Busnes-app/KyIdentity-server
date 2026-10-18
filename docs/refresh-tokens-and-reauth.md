@@ -5,7 +5,8 @@ by raising the session idle default (see "Issue #77" below). Delivered as stacke
 
 1. #77: session idle default 30m → 8h.
 2. Refresh tokens: everything below except the admin-adjustable session timers.
-3. Session timers in the admin UI with the bounds below, and step-up verification.
+3. Session timers in the admin UI (Sign-in policies → Sign-in sessions) with the bounds
+   below, and a test proving the step-up semantics (`internal/api/stepup_oidc_test.go`).
 
 ## Why refresh tokens were left out, and what changed
 
@@ -89,7 +90,8 @@ fresh or stronger proof for a sensitive action sends a new authorization request
 `max_age` and/or `acr_values=urn:kysignon:acr:mfa` (or `prompt=login`), then checks
 `auth_time` and `acr`/`amr` in the returned ID token against the action. `max_age=N` bounds
 the password proof; because a second factor is always verified after the password in the
-same login, `acr_values=urn:kysignon:acr:mfa` plus `max_age=N` means "MFA within N
+same login (every factor path in `auth_handlers.go` and `webauthn_handlers.go` stamps the
+factor time at verification on top of the password time carried by the MFA token), `acr_values=urn:kysignon:acr:mfa` plus `max_age=N` means "MFA within N
 seconds". An administrator can impose the same as an app policy (`max_age` mode, factor
 `mfa` or `passkey`, factor age). Step-up results are ordinary new sessions and codes; a
 refresh token from an older, weaker login keeps its weaker claims.

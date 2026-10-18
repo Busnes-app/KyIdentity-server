@@ -273,9 +273,15 @@ func TestRefreshExpiry(t *testing.T) {
 			f.exec(`UPDATE issued_tokens SET expires_at=? WHERE jti IN (SELECT jti FROM refresh_families)`, past)
 		},
 		"session idle": func(f *refreshFixture) {
-			f.exec(`UPDATE sessions SET last_active_at=?`, time.Now().UTC().Add(-f.e.sessionIdle-time.Minute))
+			f.exec(`UPDATE sessions SET last_active_at=?`, time.Now().UTC().Add(-f.db.SessionLimits().IdleTTL()-time.Minute))
 		},
 		"session absolute": func(f *refreshFixture) { f.exec(`UPDATE sessions SET expires_at=?`, past) },
+		"session limit shortened": func(f *refreshFixture) {
+			if err := f.db.SetSessionLimits(store.SessionLimits{Absolute: 3600, Idle: 600}, nil); err != nil {
+				f.t.Fatal(err)
+			}
+			f.exec(`UPDATE sessions SET created_at=?`, time.Now().UTC().Add(-2*time.Hour))
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newRefreshFixture(t)

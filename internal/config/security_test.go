@@ -258,6 +258,12 @@ func TestSessionTimeoutConfiguration(t *testing.T) {
 	if _, err := Load(); err == nil {
 		t.Fatal("idle timeout longer than absolute timeout was accepted")
 	}
+	for _, absurd := range [][2]string{{"720h", "1h"}, {"24h", "1m"}, {"30m", "10m"}, {"168h", "48h"}} {
+		withEnv(t, map[string]string{"KYIDENTITY_DATA_DIR": t.TempDir(), "KYIDENTITY_SESSION_TTL": absurd[0], "KYIDENTITY_SESSION_IDLE_TTL": absurd[1]})
+		if _, err := Load(); err == nil {
+			t.Fatalf("out-of-bounds session timeouts %v accepted", absurd)
+		}
+	}
 }
 
 func TestLoadDerivesWebAuthnRelyingParty(t *testing.T) {

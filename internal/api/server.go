@@ -47,10 +47,6 @@ func NewServer(
 	staticFS fs.FS,
 ) *Server {
 	mm := NewMiddlewareManager(s, cfg.TrustedProxyCIDRs, cfg.ForwardedHeader, cfg.SecretKey)
-	if cfg.SessionIdleTTL > 0 {
-		mm.sessionIdleTTL = cfg.SessionIdleTTL
-		oauthEngine.SetSessionIdleTTL(cfg.SessionIdleTTL)
-	}
 
 	srv := &Server{
 		cfg:         cfg,
@@ -99,15 +95,13 @@ func (s *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	authH := NewAuthHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.SecureCookies)
-	if s.cfg.SessionTTL > 0 {
-		authH.sessionTTL = s.cfg.SessionTTL
-	}
 	devH := NewDeviceHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	adminH := NewAdminHandler(s.store, s.syncEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	onboardH := NewOnboardingHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL, s.cfg.EncryptionKey)
 	requestH := NewAccessRequestHandler(s.store, s.audit, s.middleware, s.cfg.EncryptionKey)
 	alertH := NewAlertHandler(s.store, s.audit, s.middleware)
 	attestationH := NewAttestationHandler(s.store, s.audit, s.middleware)
+	sessionSettingsH := &SessionSettingsHandler{store: s.store, audit: s.audit, middleware: s.middleware}
 	scimH := NewSCIMHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
 	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
@@ -290,6 +284,8 @@ func (s *Server) routes() *http.ServeMux {
 		{"PUT", "/api/admin/alerts/settings", permAdmin, true, http.HandlerFunc(alertH.PutSettings)},
 		{"GET", "/api/admin/attestation/settings", permRead, false, http.HandlerFunc(attestationH.GetSettings)},
 		{"PUT", "/api/admin/attestation/settings", permAdmin, true, http.HandlerFunc(attestationH.PutSettings)},
+		{"GET", "/api/admin/session-settings", permRead, false, http.HandlerFunc(sessionSettingsH.Get)},
+		{"PUT", "/api/admin/session-settings", permAdmin, true, http.HandlerFunc(sessionSettingsH.Put)},
 		{"POST", "/api/admin/backup/drill", permAdmin, false, http.HandlerFunc(backupH.RunDrill)},
 		{"GET", "/api/admin/backup/export-capsule", permAdmin, true, http.HandlerFunc(backupH.ExportCapsule)},
 		{"POST", "/api/admin/backup/pair-remote", permAdmin, true, http.HandlerFunc(backupH.PairRemote)},

@@ -27,7 +27,18 @@ const KeyLength = 32
 const (
 	DefaultSessionTTL     = 24 * time.Hour
 	DefaultSessionIdleTTL = 8 * time.Hour
+	// Bounds an administrator or environment cannot exceed.
+	MinSessionTTL     = time.Hour
+	MaxSessionTTL     = 7 * 24 * time.Hour
+	MinSessionIdleTTL = 5 * time.Minute
+	MaxSessionIdleTTL = 24 * time.Hour
 )
+
+// ValidSessionLimits reports whether absolute and idle are within bounds, idle no longer
+// than absolute.
+func ValidSessionLimits(absolute, idle time.Duration) bool {
+	return absolute >= MinSessionTTL && absolute <= MaxSessionTTL && idle >= MinSessionIdleTTL && idle <= MaxSessionIdleTTL && idle <= absolute
+}
 
 // MinBackupDepositInterval is the shortest deposit schedule accepted: each run snapshots the
 // whole database and uploads it, and KyRecovery admits 60 deposits per token per 15 minutes.
@@ -175,6 +186,9 @@ func Load() (*Config, error) {
 	}
 	if sessionIdleTTL > sessionTTL {
 		return nil, fmt.Errorf("KYIDENTITY_SESSION_IDLE_TTL must not exceed KYIDENTITY_SESSION_TTL")
+	}
+	if !ValidSessionLimits(sessionTTL, sessionIdleTTL) {
+		return nil, fmt.Errorf("KYIDENTITY_SESSION_TTL must be %v to %v and KYIDENTITY_SESSION_IDLE_TTL %v to %v", MinSessionTTL, MaxSessionTTL, MinSessionIdleTTL, MaxSessionIdleTTL)
 	}
 	pushRelayURL, err := loadRelayURL("PUSH_RELAY_URL")
 	if err != nil {

@@ -24,7 +24,6 @@ type AuthHandler struct {
 	audit         *audit.Logger
 	middleware    *MiddlewareManager
 	secureCookies bool
-	sessionTTL    time.Duration
 }
 
 func NewAuthHandler(s *store.Store, mfaEngine *mfa.Engine, audit *audit.Logger, mm *MiddlewareManager, secureCookies bool) *AuthHandler {
@@ -34,7 +33,6 @@ func NewAuthHandler(s *store.Store, mfaEngine *mfa.Engine, audit *audit.Logger, 
 		audit:         audit,
 		middleware:    mm,
 		secureCookies: secureCookies,
-		sessionTTL:    24 * time.Hour,
 	}
 }
 
@@ -297,7 +295,7 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 	tokenHash := crypto.HashSHA256(rawToken)
 	ip := h.middleware.ClientIP(r)
 	ua := r.UserAgent()
-	expiresAt := time.Now().UTC().Add(h.sessionTTL)
+	expiresAt := time.Now().UTC().Add(h.store.SessionLimits().AbsoluteTTL())
 
 	sess := &store.Session{
 		AuthenticationEvidence: evidence,

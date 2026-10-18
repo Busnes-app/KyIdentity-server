@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, OwnAccessRequests, AccessExplanation } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, OwnAccessRequests, AccessExplanation } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -663,6 +663,17 @@ export function parseAlertSettings(value: unknown): AlertSettings {
     loginFailureThreshold: directoryCount(o, 'loginFailureThreshold'), loginFailureWindowSeconds: directoryCount(o, 'loginFailureWindowSeconds'),
     recipients: list(o.recipients, item => { const r = obj(item, 'an alert recipient'); return { id: str(r, 'id'), username: str(r, 'username') }; }),
   };
+}
+// Mirrors config.ValidSessionLimits: lifetime 1h–7d, idle 5m–24h and no longer than it.
+export const sessionBounds = { minAbsolute: 3600, maxAbsolute: 604800, minIdle: 300, maxIdle: 86400 } as const;
+export function validSessionLimits(l: SessionLimits): boolean {
+  const b = sessionBounds;
+  return l.absolute >= b.minAbsolute && l.absolute <= b.maxAbsolute && l.idle >= b.minIdle && l.idle <= b.maxIdle && l.idle <= l.absolute;
+}
+export function parseSessionLimits(value: unknown): SessionLimits {
+  const o = obj(value, 'session limits');
+  const limits = { absolute: directoryCount(o, 'absolute'), idle: directoryCount(o, 'idle') };
+  return validSessionLimits(limits) ? limits : fail('valid session limits');
 }
 export function parseAttestationSettings(value: unknown): AttestationSettings {
   return { requireLockedBootloader: requiredBool(obj(value, 'attestation settings'), 'requireLockedBootloader') };
