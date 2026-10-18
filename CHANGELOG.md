@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changes
+
+- `apply-setup` accepts setup amendments: a bundle with `"extends": "<parent setupId>"` and only `clients` adds OIDC clients to an applied setup without touching its accounts. The parent's owned accounts must pass inspection; existing client IDs are refused. Advertised as capability `setup-amendments`. See [Adding clients later](docs/INSTALLER-SETUP.md#adding-clients-later).
+
 ## 0.4.2 — 2026-10-16
 
 ### Upgrading from 0.4.x
