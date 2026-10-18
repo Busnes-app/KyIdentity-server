@@ -159,7 +159,8 @@ func stageSetup(file, db string, raw []byte, check bool) (string, error) {
 		generated = append(generated, path)
 		return nil
 	}
-	if bind(&b.Admin.PasswordFile, "admin.password") != nil || bind(&b.Everyday.PasswordFile, "everyday.password") != nil {
+	// An amendment holds no account blocks, so it never generates passwords.
+	if b.Extends == "" && (bind(&b.Admin.PasswordFile, "admin.password") != nil || bind(&b.Everyday.PasswordFile, "everyday.password") != nil) {
 		return "", errors.New("invalid account credential preparation paths")
 	}
 	for i := range b.Clients {
@@ -227,6 +228,13 @@ func stageSetup(file, db string, raw []byte, check bool) (string, error) {
 	applied, err := s.InstallerSetupExists(b.ID)
 	if err != nil {
 		return "", errors.New("cannot inspect native setup ownership")
+	}
+	if b.Extends != "" {
+		// Mint nothing for a parent that was never applied; apply inspects it fully.
+		parent, err := s.InstallerSetupExists(b.Extends)
+		if err != nil || !parent {
+			return "", errors.New("amendment requires its applied parent setup")
+		}
 	}
 	for _, dir := range []string{filepath.Dir(scope), scope} {
 		if !check && !applied {

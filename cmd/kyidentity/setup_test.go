@@ -178,7 +178,7 @@ func TestSetupFileAndBundleBoundary(t *testing.T) {
 		t.Fatal("URI boundary")
 	}
 	var out bytes.Buffer
-	if err := runSetup([]string{"--capabilities"}, &out); err != nil || !strings.Contains(out.String(), "assigned-only") {
+	if err := runSetup([]string{"--capabilities"}, &out); err != nil || !strings.Contains(out.String(), "assigned-only") || !strings.Contains(out.String(), `"setup-amendments"`) {
 		t.Fatal("capabilities", err)
 	}
 	if !strings.Contains(out.String(), "suite-webhook-connectors") {
