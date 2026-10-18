@@ -22,6 +22,13 @@ import (
 // KeyLength is the required size, in bytes, of the secret and encryption keys.
 const KeyLength = 32
 
+// Browser session limits. Apps keep their own sessions and return here only to sign in,
+// so the idle limit must outlast the gap between app sign-ins (issue #77).
+const (
+	DefaultSessionTTL     = 24 * time.Hour
+	DefaultSessionIdleTTL = 8 * time.Hour
+)
+
 // MinBackupDepositInterval is the shortest deposit schedule accepted: each run snapshots the
 // whole database and uploads it, and KyRecovery admits 60 deposits per token per 15 minutes.
 const MinBackupDepositInterval = 15 * time.Minute
@@ -62,7 +69,7 @@ type Config struct {
 	SecureCookies bool
 	// SessionTTL caps a browser login even if it remains active.
 	SessionTTL time.Duration
-	// SessionIdleTTL requires a fresh login after inactivity.
+	// SessionIdleTTL requires a fresh login after inactivity anywhere in the suite.
 	SessionIdleTTL time.Duration
 	// AllowPrivateCallbacks permits operator-supplied URLs on private LAN ranges (never
 	// loopback, link-local or metadata). Needed for single-host deployments where every
@@ -158,11 +165,11 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	sessionTTL, err := loadPositiveDuration("KYIDENTITY_SESSION_TTL", 24*time.Hour)
+	sessionTTL, err := loadPositiveDuration("KYIDENTITY_SESSION_TTL", DefaultSessionTTL)
 	if err != nil {
 		return nil, err
 	}
-	sessionIdleTTL, err := loadPositiveDuration("KYIDENTITY_SESSION_IDLE_TTL", 30*time.Minute)
+	sessionIdleTTL, err := loadPositiveDuration("KYIDENTITY_SESSION_IDLE_TTL", DefaultSessionIdleTTL)
 	if err != nil {
 		return nil, err
 	}
