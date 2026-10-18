@@ -54,6 +54,11 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "disable-user":
+			if err := runDisableUser(os.Args[2:], os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "bootstrap-admin":
 			runBootstrap(os.Args[2:])
 			return

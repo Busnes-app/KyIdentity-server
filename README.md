@@ -193,7 +193,9 @@ docker compose exec kyidentity-server /usr/local/bin/kyidentity bootstrap-admin 
 `<username>@local.kysecurity`. If the name already belongs to an active administrator it
 changes nothing; if it belongs to anyone else (an ordinary or disabled account) it fails
 rather than promote or re-enable them. Change existing passwords from the admin UI, so the
-action is audited.
+action is audited. To retire a bootstrap administrator once another exists, use
+`kyidentity disable-user --username admin --require-active-admin <other admin>`
+([docs/INSTALLER-SETUP.md](docs/INSTALLER-SETUP.md#retiring-the-bootstrap-administrator)).
 
 Restoring from a `.kycap` backup is `kyidentity restore`, with the capsule's digest from
 KyRecovery's deposit record as `-expect-digest` and k custodian shares typed on stdin. The full procedure, including putting the result back into service and proving it,

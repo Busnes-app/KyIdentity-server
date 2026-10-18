@@ -85,9 +85,11 @@ func expireAccountTokensTx(tx *sql.Tx, now time.Time, where string, args ...any)
 // remaining link ends, so a reset also evicts whoever held the old password. Anything
 // but a live link for an eligible account is ErrNotFound.
 func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditEvent) (*User, error) {
-	now := time.Now().UTC()
 	var user *User
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
+		// Read the clock under the write lock: a time taken while waiting behind a
+		// revocation would pass the expiry that revocation just set.
+		now := time.Now().UTC()
 		var id, userID, delivery string
 		err := tx.QueryRow(`SELECT id, user_id, delivery FROM account_tokens WHERE token_hash=? AND kind=? AND used_at IS NULL AND expires_at>?`, crypto.HashSHA256(raw), kind, now).Scan(&id, &userID, &delivery)
 		if errors.Is(err, sql.ErrNoRows) {

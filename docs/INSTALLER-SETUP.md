@@ -256,3 +256,24 @@ Ordinary-only clients refuse administrator access; management-only clients refus
 access. Inspection never repairs changed role mappings or claims.
 It verifies stored configuration; it does not prove a downstream application's
 administrator authorization, browser sign-on or offboarding behavior.
+
+## Retiring the bootstrap administrator
+
+An installer that started KyIdentity with `BOOTSTRAP_ADMIN_USER` is left with that account
+after setup creates the owner's administrator. Retire it from inside the container, without
+a step-up grant, once `--check` has passed (requires the `disable-user` capability):
+
+```sh
+kyidentity disable-user --username kyq-bootstrap --require-active-admin <owner admin>
+```
+
+It disables only that account, through the same transaction as an administrator's disable:
+sessions, tokens and app access are revoked, connectors receive the inactive state, and an
+`admin.user_updated` audit row (actor `kyidentity-cli`, `via: cli`) commits with it. Role and
+password are untouched. It refuses unless `--require-active-admin` names a different active
+administrator with no end date. An already-disabled account answers `unchanged` and writes
+nothing, but only when nothing could revive it: an upstream (SCIM) account needs its local
+override set, and a pending invitation must have no live activation link. Otherwise the
+override is recorded or the link expired, with the same revocation and audit. `<data>/first-run-password.txt` is removed when it names the disabled account. The
+only output is `{"schema":"kyidentity.disable-user/1","username":"…","status":"disabled|unchanged"}`;
+refusals exit non-zero with nothing on stdout. It works while the server runs.
