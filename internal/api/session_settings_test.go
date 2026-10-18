@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 )
 
 func TestSessionSettings(t *testing.T) {
@@ -57,7 +59,7 @@ func TestSessionSettings(t *testing.T) {
 	if me(user) != http.StatusOK {
 		t.Fatal("fresh session refused")
 	}
-	if _, err := raw.Exec(`UPDATE sessions SET last_active_at=? WHERE session_token_hash<>''`, time.Now().UTC().Add(-11*time.Minute)); err != nil {
+	if _, err := raw.Exec(`UPDATE sessions SET last_active_at=? WHERE session_token_hash=?`, time.Now().UTC().Add(-11*time.Minute), crypto.HashSHA256(user)); err != nil {
 		t.Fatal(err)
 	}
 	if me(user) != http.StatusUnauthorized {
@@ -67,10 +69,21 @@ func TestSessionSettings(t *testing.T) {
 	if me(fresh) != http.StatusOK {
 		t.Fatal("fresh session refused")
 	}
-	if _, err := raw.Exec(`UPDATE sessions SET created_at=?`, time.Now().UTC().Add(-2*time.Hour)); err != nil {
+	if _, err := raw.Exec(`UPDATE sessions SET created_at=? WHERE session_token_hash=?`, time.Now().UTC().Add(-2*time.Hour), crypto.HashSHA256(fresh)); err != nil {
 		t.Fatal(err)
 	}
 	if me(fresh) != http.StatusUnauthorized {
 		t.Fatal("shorter absolute limit did not end an older session")
+	}
+	// Relaxing again must not revive either: the tighter limits are applied first and
+	// end those sessions for good.
+	if res := adminRequest(t, srv, "PUT", path, admin, `{"absolute":86400,"idle":28800}`); res.Code != http.StatusOK {
+		t.Fatalf("relax: %d %s", res.Code, res.Body.String())
+	}
+	if me(user) != http.StatusUnauthorized || me(fresh) != http.StatusUnauthorized {
+		t.Fatal("relaxing the limits revived an ended session")
+	}
+	if rows := auditRows(t, db, "admin.session_limits_configured"); len(rows) != 2 || !strings.Contains(rows[0].DetailsJSON+rows[1].DetailsJSON, `"sessionsEnded":2`) {
+		t.Fatalf("relax audit: %+v", rows)
 	}
 }

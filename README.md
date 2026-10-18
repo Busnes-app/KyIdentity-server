@@ -661,8 +661,10 @@ is the activity that counts; a short idle limit asks for the password at nearly 
 sign-in. Administrators change both under **Sign-in policies → Sign-in sessions**
 (`GET`/`PUT /api/admin/session-settings`, `{absolute, idle}` in seconds, step-up, audited
 `admin.session_limits_configured`): lifetime 1 hour to 7 days, idle 5 minutes to 24 hours
-and no longer than the lifetime. A shorter limit ends existing sessions (and their refresh
-tokens) that exceed it; a longer one never extends a session past the expiry it was given.
+and no longer than the lifetime. Saving ends, for good, every session beyond the stricter
+of the old and new limits, with its tokens and refresh families, and queues back-channel
+logout for them (`sessionsEnded` in the audit row), so relaxing the limits later revives
+nothing; a longer limit never extends a session past the expiry it was given.
 `KYIDENTITY_SESSION_TTL` and `KYIDENTITY_SESSION_IDLE_TTL` seed the values until an
 administrator saves them, and startup refuses values outside the same bounds.
 

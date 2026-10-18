@@ -27,11 +27,10 @@ func (h *SessionSettingsHandler) Put(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid_request","error_description":"Session lifetime must be 1 hour to 7 days and idle limit 5 minutes to 24 hours, no longer than the lifetime"}`, http.StatusBadRequest)
 		return
 	}
-	old := h.store.SessionLimits()
 	actor := GetUserFromContext(r.Context())
-	event := h.audit.Prepare("admin.session_limits_configured", actor.ID, actor.Username, "session_limits", "settings", h.middleware.ClientIP(r), r.UserAgent(), "success",
-		map[string]any{"old": old, "new": req})
-	if err := h.store.SetSessionLimits(req, event.Row); err != nil {
+	// The store fills in old, new and sessionsEnded inside its transaction.
+	event := h.audit.Prepare("admin.session_limits_configured", actor.ID, actor.Username, "session_limits", "settings", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if _, err := h.store.SetSessionLimits(req, event.Row); err != nil {
 		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
 		return
 	}

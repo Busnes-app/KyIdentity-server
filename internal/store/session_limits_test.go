@@ -11,10 +11,10 @@ func TestSessionLimitsStoredOverrideSeed(t *testing.T) {
 	if err := s.LoadSessionLimits(SessionLimits{Absolute: 86400, Idle: 3600}); err != nil || s.SessionLimits().Idle != 3600 {
 		t.Fatalf("seed: %+v %v", s.SessionLimits(), err)
 	}
-	if err := s.SetSessionLimits(SessionLimits{Absolute: 3600, Idle: 7200}, nil); err == nil {
+	if _, err := s.SetSessionLimits(SessionLimits{Absolute: 3600, Idle: 7200}, nil); err == nil {
 		t.Fatal("idle longer than lifetime accepted")
 	}
-	if err := s.SetSessionLimits(SessionLimits{Absolute: 7200, Idle: 900}, nil); err != nil {
+	if _, err := s.SetSessionLimits(SessionLimits{Absolute: 7200, Idle: 900}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// After a restart the administrator's choice wins over the environment.

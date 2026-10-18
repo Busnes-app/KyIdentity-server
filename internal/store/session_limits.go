@@ -50,21 +50,41 @@ func (s *Store) SessionLimits() SessionLimits {
 	return SessionLimits{Absolute: int64(config.DefaultSessionTTL / time.Second), Idle: int64(config.DefaultSessionIdleTTL / time.Second)}
 }
 
-func (s *Store) SetSessionLimits(l SessionLimits, audit *AuditEvent) error {
+// SetSessionLimits stores new limits and, in the same audited transaction, ends every
+// session beyond the stricter of the old and new limits, with its tokens and refresh
+// families, so relaxing the limits later can never revive one. It reports how many
+// sessions it ended.
+func (s *Store) SetSessionLimits(l SessionLimits, audit *AuditEvent) (int64, error) {
 	if !l.Valid() {
-		return errors.New("session limits are out of bounds")
+		return 0, errors.New("session limits are out of bounds")
 	}
 	raw, err := json.Marshal(l)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	old := s.SessionLimits()
+	strict := SessionLimits{Absolute: min(old.Absolute, l.Absolute), Idle: min(old.Idle, l.Idle)}
+	var ended int64
 	if err := s.auditedTx(audit, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
- ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`, sessionLimitsKey, string(raw))
-		return err
+		if _, err := tx.Exec(`INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+ ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`, sessionLimitsKey, string(raw)); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if ended, err = revokeSessionsTx(tx, now, `last_active_at<=? OR created_at<=?`, now.Add(-strict.IdleTTL()), now.Add(-strict.AbsoluteTTL())); err != nil {
+			return err
+		}
+		if audit != nil {
+			details, err := json.Marshal(map[string]any{"old": old, "new": l, "sessionsEnded": ended})
+			if err != nil {
+				return err
+			}
+			audit.DetailsJSON = string(details)
+		}
+		return nil
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	s.limits.Store(&l)
-	return nil
+	return ended, nil
 }

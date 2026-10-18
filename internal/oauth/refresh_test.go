@@ -277,10 +277,10 @@ func TestRefreshExpiry(t *testing.T) {
 		},
 		"session absolute": func(f *refreshFixture) { f.exec(`UPDATE sessions SET expires_at=?`, past) },
 		"session limit shortened": func(f *refreshFixture) {
-			if err := f.db.SetSessionLimits(store.SessionLimits{Absolute: 3600, Idle: 600}, nil); err != nil {
+			f.exec(`UPDATE sessions SET created_at=?`, time.Now().UTC().Add(-2*time.Hour))
+			if _, err := f.db.SetSessionLimits(store.SessionLimits{Absolute: 3600, Idle: 600}, nil); err != nil {
 				f.t.Fatal(err)
 			}
-			f.exec(`UPDATE sessions SET created_at=?`, time.Now().UTC().Add(-2*time.Hour))
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -381,5 +381,26 @@ func TestRefreshPolicyBounds(t *testing.T) {
 	}
 	if !refreshPolicy.Valid() {
 		t.Fatal("default refresh timers refused")
+	}
+}
+
+// Relaxing the limits again must not revive a session, or its refresh family, that
+// tighter limits ended.
+func TestRefreshStaysDeadAfterLimitsRelax(t *testing.T) {
+	f := newRefreshFixture(t)
+	live, err := f.refresh(f.login("openid").RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := f.db.SessionLimits()
+	f.exec(`UPDATE sessions SET created_at=?`, time.Now().UTC().Add(-2*time.Hour))
+	if ended, err := f.db.SetSessionLimits(store.SessionLimits{Absolute: 3600, Idle: 600}, nil); err != nil || ended != 1 {
+		t.Fatalf("tighten ended %d sessions: %v", ended, err)
+	}
+	if _, err := f.db.SetSessionLimits(defaults, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.refresh(live.RefreshToken); err == nil {
+		t.Fatal("relaxing the limits revived a refresh family")
 	}
 }
