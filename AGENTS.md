@@ -32,7 +32,8 @@ KyIdentity Server is the single-organization SSO provider and central identity a
   `--export-client ID` is a private machine wire, not a setup report: verify the prepared
   receipt and applied native ownership read-only, then export only that exact client's
   OIDC/signing credentials, configured HTTPS issuer, callbacks and native administrator
-  binding. Consume its bounded stdout in memory; never log it or persist it on the
+  binding (`InstallerSetupAdministrator`: the owned ID, refused unless it still has the
+  bundle username and is an active administrator; never a username lookup). Consume its bounded stdout in memory; never log it or persist it on the
   workstation. Other client secrets, passwords and recovery material stay on target.
   SCIM tokens remain destination-issued protected references; the existing encryption key
   is required for connectors and is never created by preparation. Parent symlinks and
