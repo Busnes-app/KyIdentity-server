@@ -78,7 +78,10 @@ func configureInstallerAppGroups(tx *sql.Tx, c InstallerClient, appID string, gr
 		}
 	}
 	for _, name := range c.Groups {
-		id := groups[name]
+		id, ok := groups[name]
+		if !ok {
+			return errors.New("client group is not owned by this setup")
+		}
 		if reused {
 			var present bool
 			if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM app_group_assignments WHERE app_id=? AND group_id=?)`, appID, id).Scan(&present); err != nil {
