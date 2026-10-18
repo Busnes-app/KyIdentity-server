@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
@@ -28,13 +29,19 @@ type Engine struct {
 	store      *store.Store
 	keyManager *crypto.JWTKeyManager
 	issuerURL  string
+	// sessionIdle is the browser session idle limit a refresh must fall within.
+	sessionIdle time.Duration
 }
+
+// SetSessionIdleTTL tells the refresh grant the configured session idle limit.
+func (e *Engine) SetSessionIdleTTL(d time.Duration) { e.sessionIdle = d }
 
 func NewEngine(s *store.Store, km *crypto.JWTKeyManager, issuerURL string) *Engine {
 	return &Engine{
-		store:      s,
-		keyManager: km,
-		issuerURL:  issuerURL,
+		store:       s,
+		keyManager:  km,
+		issuerURL:   issuerURL,
+		sessionIdle: config.DefaultSessionIdleTTL,
 	}
 }
 
@@ -57,6 +64,7 @@ type OIDCConfiguration struct {
 	TokenEndpointAuthMethods          []string `json:"token_endpoint_auth_methods_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
 	ClaimsSupported                   []string `json:"claims_supported"`
+	GrantTypesSupported               []string `json:"grant_types_supported"`
 }
 
 // SupportsRevocation reports whether /oauth/revoke actually invalidates a token. Discovery
@@ -77,6 +85,7 @@ func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 		ScopesSupported:                   []string{"openid", "profile", "email"},
 		TokenEndpointAuthMethods:          []string{"client_secret_post", "client_secret_basic", "none"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"},
 		EndSessionEndpoint:                e.issuerURL + "/oauth/logout",
 		BackchannelLogoutSupported:        true,
 		BackchannelLogoutSessionSupported: true,
@@ -257,11 +266,12 @@ func (e *Engine) CreateAuthorizationCodeForInteraction(clientID, sessionID, redi
 }
 
 type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"`
-	IDToken     string `json:"id_token,omitempty"`
-	Scope       string `json:"scope,omitempty"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	IDToken      string `json:"id_token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Scope        string `json:"scope,omitempty"`
 }
 
 // authenticateClient verifies the caller is entitled to act as clientID.
@@ -349,14 +359,138 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 		exp = *end
 	}
 	accessJTI := uuid.New().String()
-
+	policy, _, err := e.store.ClientAuthenticationPolicyBinding(clientID)
+	if err != nil {
+		return nil, err
+	}
+	var family *store.RefreshFamily
+	if policy.RefreshEnabled() && client.ClientType == "confidential" {
+		if family, err = e.newRefreshFamily(authCode, policy, now); err != nil {
+			return nil, err
+		}
+	}
+	issued := &store.IssuedToken{AuthorizationCodeID: authCode.ID, JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: authCode.SessionID}
+	if family != nil {
+		issued.FamilyJTI = family.JTI
+	}
 	// Register the token before handing it out, so revocation has something to revoke.
-	if err := e.store.RecordIssuedToken(&store.IssuedToken{
-		AuthorizationCodeID: authCode.ID, JTI: accessJTI, UserID: user.ID, ClientID: clientID, ExpiresAt: exp, SessionID: authCode.SessionID,
-	}); err != nil {
+	if err := e.store.RecordIssuedToken(issued); err != nil {
 		return nil, fmt.Errorf("failed to record issued token: %w", err)
 	}
+	resp, err := e.tokenResponse(user, clientID, authCode.SessionID, authCode.Scope, authCode.AuthenticationEvidence, authCode.Nonce, accessJTI, exp, now)
+	if err != nil {
+		return nil, err
+	}
+	if family != nil {
+		raw, err := crypto.GenerateRandomHex(32)
+		if err != nil {
+			return nil, err
+		}
+		if err := e.store.CreateRefreshFamily(family, authCode.ID, crypto.HashSHA256(raw)); err != nil {
+			return nil, fmt.Errorf("failed to record refresh token: %w", err)
+		}
+		resp.RefreshToken = raw
+	}
+	return resp, nil
+}
 
+// newRefreshFamily ends a family at the earliest of the app's refresh lifetime, the
+// browser session's end, the login's re-auth deadline and the user's access end.
+func (e *Engine) newRefreshFamily(code *store.AuthorizationCode, policy store.AppAuthenticationPolicy, now time.Time) (*store.RefreshFamily, error) {
+	session, err := e.store.GetSessionByID(code.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, errors.New("active session required")
+	}
+	end := now.Add(time.Duration(policy.RefreshLifetime) * time.Second)
+	for _, at := range []*time.Time{&session.ExpiresAt, code.AuthenticationExpiresAt} {
+		if at != nil && at.Before(end) {
+			end = *at
+		}
+	}
+	if until, err := e.store.AccessEndsAt(code.UserID, code.ClientID); err != nil {
+		return nil, err
+	} else if until != nil && until.Before(end) {
+		end = *until
+	}
+	return &store.RefreshFamily{
+		JTI: uuid.New().String(), UserID: code.UserID, ClientID: code.ClientID, SessionID: code.SessionID, Scope: code.Scope,
+		AuthenticationEvidence: code.AuthenticationEvidence,
+		Policy:                 store.AppPolicyBinding{AppID: code.AuthenticationAppID, AuthRevision: code.AuthenticationPolicyRevision, RoleRevision: code.RoleRevision},
+		Idle:                   time.Duration(policy.RefreshIdle) * time.Second, ExpiresAt: end,
+	}, nil
+}
+
+// ErrRefreshReuse reports a replayed refresh token; the family has been revoked.
+var ErrRefreshReuse = store.ErrRefreshReuse
+
+// ExchangeRefreshToken rotates a refresh token for a confidential client and reports the
+// token's user when known, for the audit. Every check
+// runs again in the store transaction; the ID token keeps the original login's
+// auth_time, amr and acr, and carries no nonce (OIDC Core 12.2). scope may narrow only.
+func (e *Engine) ExchangeRefreshToken(raw, clientID, clientSecret, scope string) (*TokenResponse, string, error) {
+	userID := ""
+	client, err := e.store.GetOAuthClientByID(clientID)
+	if err != nil {
+		return nil, userID, err
+	}
+	if client == nil || !client.Enabled || client.ClientType != "confidential" {
+		return nil, userID, errors.New("refresh requires an enabled confidential client")
+	}
+	if err := e.authenticateClient(client, clientSecret); err != nil {
+		return nil, userID, err
+	}
+	oldHash := crypto.HashSHA256(raw)
+	peek, err := e.store.LookupRefreshFamily(oldHash)
+	if err != nil {
+		return nil, userID, err
+	}
+	userID = peek.UserID
+	granted := peek.Scope
+	if requested := strings.Fields(scope); len(requested) > 0 {
+		for _, s := range requested {
+			if !hasScope(peek.Scope, s) {
+				return nil, userID, errors.New("refresh scope exceeds the original grant")
+			}
+		}
+		granted = strings.Join(requested, " ")
+	}
+	now := time.Now().UTC()
+	exp := now.Add(AccessTokenTTL)
+	if end, err := e.store.AccessEndsAt(peek.UserID, clientID); err != nil {
+		return nil, userID, err
+	} else if end != nil && end.Before(exp) {
+		exp = *end
+	}
+	next, err := crypto.GenerateRandomHex(32)
+	if err != nil {
+		return nil, userID, err
+	}
+	access := &store.IssuedToken{JTI: uuid.New().String(), ExpiresAt: exp}
+	family, err := e.store.RotateRefreshToken(oldHash, clientID, crypto.HashSHA256(next), access, e.sessionIdle)
+	if err != nil {
+		return nil, userID, err
+	}
+	user, err := e.store.GetUserByID(family.UserID)
+	if err != nil {
+		return nil, userID, err
+	}
+	if user == nil || user.Status != "active" {
+		return nil, userID, errors.New("user not found or inactive")
+	}
+	resp, err := e.tokenResponse(user, clientID, family.SessionID, granted, family.AuthenticationEvidence, "", access.JTI, access.ExpiresAt, now)
+	if err != nil {
+		return nil, userID, err
+	}
+	resp.RefreshToken = next
+	return resp, userID, nil
+}
+
+// tokenResponse signs an access token already registered under accessJTI and, for the
+// openid scope, an ID token describing the login that established sessionID.
+func (e *Engine) tokenResponse(user *store.User, clientID, sessionID, scope string, evidence store.AuthenticationEvidence, nonce, accessJTI string, exp, now time.Time) (*TokenResponse, error) {
 	accessToken, err := e.keyManager.SignJWT(map[string]any{
 		"iss":       e.issuerURL,
 		"sub":       user.ID,
@@ -364,7 +498,7 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 		"exp":       exp.Unix(),
 		"iat":       now.Unix(),
 		"jti":       accessJTI,
-		"scope":     authCode.Scope,
+		"scope":     scope,
 		"token_use": "access_token",
 	})
 	if err != nil {
@@ -372,12 +506,12 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 	}
 
 	var idToken string
-	if hasScope(authCode.Scope, "openid") {
-		sid, err := e.store.EnsureClientSession(clientID, authCode.SessionID, user.ID)
+	if hasScope(scope, "openid") {
+		sid, err := e.store.EnsureClientSession(clientID, sessionID, user.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to bind session to client: %w", err)
 		}
-		claims, err := e.identityClaims(user, clientID, authCode.Scope)
+		claims, err := e.identityClaims(user, clientID, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -388,9 +522,9 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 		claims["iat"] = now.Unix()
 		claims["jti"] = uuid.New().String()
 		claims["token_use"] = "id_token"
-		addAuthenticationClaims(claims, authCode.AuthenticationEvidence)
-		if authCode.Nonce != "" {
-			claims["nonce"] = authCode.Nonce
+		addAuthenticationClaims(claims, evidence)
+		if nonce != "" {
+			claims["nonce"] = nonce
 		}
 		idToken, err = e.keyManager.SignJWT(claims)
 		if err != nil {
@@ -403,7 +537,7 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 		TokenType:   "Bearer",
 		ExpiresIn:   int(exp.Sub(now).Seconds()),
 		IDToken:     idToken,
-		Scope:       authCode.Scope,
+		Scope:       scope,
 	}, nil
 }
 
@@ -536,7 +670,8 @@ func (e *Engine) RevokeToken(tokenString, clientID, clientSecret string) error {
 	// unauthenticated caller is rejected, and that already happened above.
 	claims, err := e.keyManager.VerifyJWT(tokenString)
 	if err != nil {
-		return nil
+		// Not a JWT: perhaps a refresh token, which ends its whole family.
+		return e.store.RevokeRefreshFamily(crypto.HashSHA256(tokenString), clientID)
 	}
 	if claims["aud"] != clientID {
 		return nil

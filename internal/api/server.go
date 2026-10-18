@@ -49,6 +49,7 @@ func NewServer(
 	mm := NewMiddlewareManager(s, cfg.TrustedProxyCIDRs, cfg.ForwardedHeader, cfg.SecretKey)
 	if cfg.SessionIdleTTL > 0 {
 		mm.sessionIdleTTL = cfg.SessionIdleTTL
+		oauthEngine.SetSessionIdleTTL(cfg.SessionIdleTTL)
 	}
 
 	srv := &Server{

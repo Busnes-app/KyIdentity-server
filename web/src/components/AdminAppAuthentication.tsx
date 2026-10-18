@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiRequest, errorMessage } from '../api';
+import { refreshBounds, validRefresh } from '../parsers';
 import type { AppRecord, AppAuthenticationPolicy } from '../types';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 
@@ -35,10 +36,19 @@ export function AdminAppAuthentication({ app, onClose }: { app: AppRecord; onClo
     <option value="password">Password and any already-enrolled second factor</option><option value="mfa">Password plus MFA</option><option value="passkey">Password plus passkey</option>
    </select></div>
    {policy.factor !== 'password' && <div className="form-group"><label className="form-label" htmlFor="factor-age">Maximum second-factor age (seconds; 0 means no additional age limit)</label><input id="factor-age" className="form-input" type="number" min="0" max="2147483647" step="1" required disabled={busy} value={policy.factorMaxAge} onChange={e => setPolicy(p => ({ ...p, factorMaxAge: e.target.valueAsNumber }))}/></div>}
-   <p>Preview: {policy.mode === 'fresh' ? 'A new password and any required second factor on each authorization.' : policy.mode === 'max_age' ? `Password proof no older than ${policy.primaryMaxAge} seconds.` : 'Reuse the existing SSO session.'} {policy.factor === 'passkey' ? 'A passkey is required; TOTP, push and recovery do not qualify.' : policy.factor === 'mfa' ? 'TOTP, push or a passkey is required; recovery does not qualify.' : 'Existing enrollment rules still apply.'} {policy.factorMaxAge > 0 && `Second-factor proof must be no older than ${policy.factorMaxAge} seconds.`}</p>
+   <fieldset className="form-group"><legend className="form-label">Refresh tokens</legend>
+    <label><input type="checkbox" checked={policy.refreshLifetime > 0} disabled={busy} onChange={e => setPolicy(p => ({ ...p, refreshIdle: e.target.checked ? 3600 : 0, refreshLifetime: e.target.checked ? 86400 : 0 }))}/> Issue rotating refresh tokens (confidential clients only)</label>
+    {policy.refreshLifetime > 0 && <>
+     <label className="form-label" htmlFor="refresh-idle">Unused refresh token expires after (seconds, {refreshBounds.minIdle}–{refreshBounds.maxIdle})</label>
+     <input id="refresh-idle" className="form-input" type="number" min={refreshBounds.minIdle} max={Math.min(refreshBounds.maxIdle, policy.refreshLifetime)} step="1" required disabled={busy} value={policy.refreshIdle} onChange={e => setPolicy(p => ({ ...p, refreshIdle: e.target.valueAsNumber }))}/>
+     <label className="form-label" htmlFor="refresh-lifetime">Sign-in lasts at most (seconds, {refreshBounds.minLifetime}–{refreshBounds.maxLifetime})</label>
+     <input id="refresh-lifetime" className="form-input" type="number" min={refreshBounds.minLifetime} max={refreshBounds.maxLifetime} step="1" required disabled={busy} value={policy.refreshLifetime} onChange={e => setPolicy(p => ({ ...p, refreshLifetime: e.target.valueAsNumber }))}/>
+    </>}
+   </fieldset>
+   <p>Preview: {policy.mode === 'fresh' ? 'A new password and any required second factor on each authorization.' : policy.mode === 'max_age' ? `Password proof no older than ${policy.primaryMaxAge} seconds.` : 'Reuse the existing SSO session.'} {policy.factor === 'passkey' ? 'A passkey is required; TOTP, push and recovery do not qualify.' : policy.factor === 'mfa' ? 'TOTP, push or a passkey is required; recovery does not qualify.' : 'Existing enrollment rules still apply.'} {policy.factorMaxAge > 0 && `Second-factor proof must be no older than ${policy.factorMaxAge} seconds.`} {policy.refreshLifetime > 0 ? `The app may stay signed in by refreshing at least every ${policy.refreshIdle} seconds, for at most ${policy.refreshLifetime} seconds, never past the browser session or the ages above.` : 'No refresh tokens; the app keeps its own session.'}</p>
    <p>Users without a required factor must enroll from their dashboard before accessing this app. Fresh sign-in verifies the password and second factor together.</p>
    <p className="text-muted">Saving a changed policy cancels outstanding app sign-ins and revokes its registered tokens. Offline tokens may remain valid for up to 15 minutes, and the app's own session may last longer. Launcher links and downstream provisioning are unaffected.</p>
-   <button className="primary-btn" disabled={busy || JSON.stringify(policy) === JSON.stringify(app.authentication)}>Apply authentication policy</button>
+   <button className="primary-btn" disabled={busy || !validRefresh(policy.refreshIdle, policy.refreshLifetime) || JSON.stringify(policy) === JSON.stringify(app.authentication)}>Apply authentication policy</button>
   </div></form>
   {stepUpPrompt}
  </div>;

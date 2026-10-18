@@ -224,6 +224,7 @@ type IssuedToken struct {
 	AuthorizationCodeID string           `json:"-"` // Checked at registration, not stored.
 	Policy              AppPolicyBinding `json:"-"` // Code-less grants: checked at registration, not stored.
 	Device              DeviceBinding    `json:"-"` // Device sign-on: checked at registration, not stored.
+	FamilyJTI           string           `json:"-"` // Refresh family the token belongs to; revoked with it.
 	SessionID           string           `json:"-"`
 	JTI                 string           `json:"jti"`
 	UserID              string           `json:"userId"`

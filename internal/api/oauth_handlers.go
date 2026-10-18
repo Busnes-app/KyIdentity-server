@@ -295,6 +295,10 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		h.deviceSignOn(w, r, r.FormValue("assertion"), clientID)
 		return
 	}
+	if grantType == "refresh_token" {
+		h.refresh(w, r, r.FormValue("refresh_token"), clientID, clientSecret, r.FormValue("scope"))
+		return
+	}
 	if grantType != "authorization_code" || code == "" || clientID == "" {
 		http.Error(w, `{"error":"invalid_request","error_description":"grant_type=authorization_code, code, and client_id are required"}`, http.StatusBadRequest)
 		return
@@ -333,6 +337,32 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
+	_ = json.NewEncoder(w).Encode(tokenResp)
+}
+
+// refresh answers the refresh_token grant. Every failure is the same invalid_grant;
+// the reason, and a detected replay, go to the audit log.
+func (h *OAuthHandler) refresh(w http.ResponseWriter, r *http.Request, token, clientID, clientSecret, scope string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	if token == "" || clientID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request", "error_description": "refresh_token and client_id are required"})
+		return
+	}
+	tokenResp, userID, err := h.oauthEngine.ExchangeRefreshToken(token, clientID, clientSecret, scope)
+	if err != nil {
+		action := "oauth.token_refresh"
+		if errors.Is(err, oauth.ErrRefreshReuse) {
+			action = "oauth.refresh_reuse"
+		}
+		h.audit.Observe(action, userID, "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"error": err.Error()})
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "The refresh token or client credentials are invalid"})
+		return
+	}
+	h.audit.Observe("oauth.token_refresh", userID, "", clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
 	_ = json.NewEncoder(w).Encode(tokenResp)
 }
 

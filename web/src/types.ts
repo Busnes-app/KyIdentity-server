@@ -255,6 +255,8 @@ export interface AppAuthenticationPolicy {
  primaryMaxAge: number;
  factor: 'password' | 'mfa' | 'passkey';
  factorMaxAge: number;
+ refreshIdle: number;
+ refreshLifetime: number;
 }
 
 export interface RequestableApp { appId: string; name: string; pending: boolean }
