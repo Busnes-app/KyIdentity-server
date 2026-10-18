@@ -81,7 +81,11 @@ func TestInstallerAmendmentAddsClientToParentAccounts(t *testing.T) {
 }
 
 func TestInstallerAmendmentRefusals(t *testing.T) {
-	for _, kind := range []string{"missing-parent", "admin-disabled", "admin-renamed", "everyday-delegated", "parent-client", "foreign-client", "foreign-group", "accounts", "self"} {
+	// Each refusal must come from its own guard, not a later constraint.
+	reasons := map[string]string{"missing-parent": "parent setup has no owned", "admin-disabled": "no longer matches", "admin-renamed": "conflicting ownership",
+		"everyday-delegated": "delegated privileges", "parent-client": "client kydrive has conflicting ownership", "foreign-client": "already exists without this installer's ownership",
+		"foreign-group": "not owned by the parent setup", "accounts": "adds clients only", "self": "adds clients only"}
+	for kind, reason := range reasons {
 		t.Run(kind, func(t *testing.T) {
 			s, close := setupTestStore(t)
 			defer close()
@@ -116,10 +120,9 @@ func TestInstallerAmendmentRefusals(t *testing.T) {
 			s.db.QueryRow(`SELECT count(*) FROM oauth_clients`).Scan(&clients)
 			for _, inspect := range []bool{false, true} {
 				_, err := s.ApplyInstallerSetup(a, inspect)
-				if err == nil {
-					t.Fatal("amendment accepted")
+				if err == nil || !strings.Contains(err.Error(), reason) {
+					t.Fatalf("amendment refusal %v, want %q", err, reason)
 				}
-				t.Log(err)
 			}
 			var after int
 			s.db.QueryRow(`SELECT count(*) FROM oauth_clients`).Scan(&after)
