@@ -192,6 +192,30 @@ func TestDisableUser(t *testing.T) {
 	if result, err := run("--username", "paused", "--require-active-admin", "owner-admin"); err != nil || result["status"] != "unchanged" {
 		t.Fatalf("rerun after override: %v %v", result, err)
 	}
+
+	// A pending invitation is already "disabled", but its live activation link must not
+	// outlive the retirement.
+	invited := &store.User{ID: uuid.NewString(), Username: "invited", DisplayName: "invited", Email: "invited@example.test", Role: "user", Status: "disabled", Pending: true}
+	if err := s.CreateUser(invited); err != nil {
+		t.Fatal(err)
+	}
+	link, err := s.IssueAccountToken(invited.ID, "activation", "manual", time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run("--username", "invited", "--require-active-admin", "owner-admin")
+	if err != nil || result["status"] != "disabled" {
+		t.Fatalf("pending account with a live link: %v %v", result, err)
+	}
+	if _, err := s.RedeemAccountToken(link, "activation", "new-hash", nil); err == nil {
+		t.Fatal("activation link redeemed after retirement")
+	}
+	if status(invited) != "disabled" {
+		t.Fatal("retired invitation activated")
+	}
+	if result, err := run("--username", "invited", "--require-active-admin", "owner-admin"); err != nil || result["status"] != "unchanged" {
+		t.Fatalf("rerun after revoking the link: %v %v", result, err)
+	}
 }
 
 func TestDisableUserIsAdvertised(t *testing.T) {

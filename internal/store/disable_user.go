@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 )
 
 // ErrGuardAdministrator means the named guard is not another active, permanent
@@ -18,7 +19,9 @@ var errAlreadyDisabled = errors.New("account already disabled")
 // in the same transaction as the audit row. It never changes role, password or anything
 // but status. Guard must name a different active administrator with no end date, checked
 // under the same write lock. It reports false, writing nothing, when the account is
-// already disabled (for a source-owned account, already locally disabled). audit's TargetID and DetailsJSON are filled in here.
+// already disabled with nothing left to revoke: no live account link and, for a
+// source-owned account, the local override set. audit's TargetID and DetailsJSON are
+// filled in here.
 func (s *Store) DisableUserByName(username, guard string, audit *AuditEvent) (bool, error) {
 	if strings.EqualFold(username, guard) {
 		return false, ErrGuardAdministrator
@@ -34,10 +37,16 @@ func (s *Store) DisableUserByName(username, guard string, audit *AuditEvent) (bo
 		if !strings.EqualFold(u.Username, username) {
 			return false, ErrNotFound // renamed since the lookup
 		}
-		// An upstream-disabled account still needs the local override, or a later
-		// upstream activation would undo the retirement.
+		// Already retired means nothing left could revive it: an upstream-disabled account
+		// still needs the local override, and a pending one may hold a live activation link.
 		if u.Status == "disabled" && (u.SourceConnectorID == "" || u.LocallyDisabled) {
-			return false, errAlreadyDisabled
+			var live bool
+			if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM account_tokens WHERE user_id=? AND used_at IS NULL AND expires_at>?)`, u.ID, time.Now().UTC()).Scan(&live); err != nil {
+				return false, err
+			}
+			if !live {
+				return false, errAlreadyDisabled
+			}
 		}
 		if err := requirePermanentAdminTx(tx, `username=? COLLATE NOCASE AND id<>?`, guard, u.ID); err != nil {
 			if errors.Is(err, ErrLastActiveAdmin) {
