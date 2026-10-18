@@ -18,7 +18,7 @@ var errAlreadyDisabled = errors.New("account already disabled")
 // in the same transaction as the audit row. It never changes role, password or anything
 // but status. Guard must name a different active administrator with no end date, checked
 // under the same write lock. It reports false, writing nothing, when the account is
-// already disabled. audit's TargetID and DetailsJSON are filled in here.
+// already disabled (for a source-owned account, already locally disabled). audit's TargetID and DetailsJSON are filled in here.
 func (s *Store) DisableUserByName(username, guard string, audit *AuditEvent) (bool, error) {
 	if strings.EqualFold(username, guard) {
 		return false, ErrGuardAdministrator
@@ -34,7 +34,9 @@ func (s *Store) DisableUserByName(username, guard string, audit *AuditEvent) (bo
 		if !strings.EqualFold(u.Username, username) {
 			return false, ErrNotFound // renamed since the lookup
 		}
-		if u.Status == "disabled" {
+		// An upstream-disabled account still needs the local override, or a later
+		// upstream activation would undo the retirement.
+		if u.Status == "disabled" && (u.SourceConnectorID == "" || u.LocallyDisabled) {
 			return false, errAlreadyDisabled
 		}
 		if err := requirePermanentAdminTx(tx, `username=? COLLATE NOCASE AND id<>?`, guard, u.ID); err != nil {

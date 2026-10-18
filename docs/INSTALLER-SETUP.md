@@ -269,6 +269,7 @@ sessions, tokens and app access are revoked, connectors receive the inactive sta
 `admin.user_updated` audit row (actor `kyidentity-cli`, `via: cli`) commits with it. Role and
 password are untouched. It refuses unless `--require-active-admin` names a different active
 administrator with no end date. An already-disabled account answers `unchanged` and writes
-nothing. `<data>/first-run-password.txt` is removed when it names the disabled account. The
+nothing; an upstream (SCIM) account counts as already disabled only once its local override
+is set, so one its source disabled still gets the override and stays retired if reactivated. `<data>/first-run-password.txt` is removed when it names the disabled account. The
 only output is `{"schema":"kyidentity.disable-user/1","username":"…","status":"disabled|unchanged"}`;
 refusals exit non-zero with nothing on stdout. It works while the server runs.

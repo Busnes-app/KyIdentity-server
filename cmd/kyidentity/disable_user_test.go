@@ -174,6 +174,24 @@ func TestDisableUser(t *testing.T) {
 	if err := raw.QueryRow(`SELECT locally_disabled FROM users WHERE id=?`, upstream.ID).Scan(&locally); err != nil || !locally || status(upstream) != "disabled" {
 		t.Fatal("upstream account not locally disabled")
 	}
+
+	// Already disabled upstream is not "unchanged": the override is still recorded, so a
+	// later upstream activation cannot bring the account back.
+	paused := user("paused", "user")
+	exec(`UPDATE users SET source_connector_id=?, external_id='ext-2', source_active=0, status='disabled' WHERE id=?`, c.ID, paused.ID)
+	result, err = run("--username", "paused", "--require-active-admin", "owner-admin")
+	if err != nil || result["status"] != "disabled" {
+		t.Fatalf("upstream-disabled account: %v %v", result, err)
+	}
+	if _, err := s.UpdateUpstreamUser(c.ID, paused.ID, nil, func(u *store.User) error { u.SourceActive = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if status(paused) != "disabled" {
+		t.Fatal("upstream activation undid the retirement")
+	}
+	if result, err := run("--username", "paused", "--require-active-admin", "owner-admin"); err != nil || result["status"] != "unchanged" {
+		t.Fatalf("rerun after override: %v %v", result, err)
+	}
 }
 
 func TestDisableUserIsAdvertised(t *testing.T) {
