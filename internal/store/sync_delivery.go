@@ -213,3 +213,39 @@ func (s *Store) MarkSyncDeliveryUncertain(ev AccountSyncEvent) error {
 	}
 	return tx.Commit()
 }
+
+// deliverableTypes are the connector types the worker sends to; others pause.
+const deliverableTypes = `('scim','suite_webhook','kypost','kypasswords','kybookmarks','kynotes')`
+
+// SystemForClient returns the connector that shares an app with the OAuth client.
+func (s *Store) SystemForClient(clientID string) (string, error) {
+	var id string
+	err := s.db.QueryRow(`SELECT system_id FROM app_registry WHERE client_id=? AND system_id IS NOT NULL`, clientID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
+// SyncBacklog is one connector's undelivered outbox. Failed is work that cannot finish
+// without an operator: exhausted retries or an uncertain remote write. Blocked names why
+// the worker sends nothing at all: disabled, held or unsupported.
+type SyncBacklog struct {
+	Pending, Failed int
+	Blocked         string
+}
+
+func (s *Store) SyncBacklog(systemID string) (SyncBacklog, error) {
+	var b SyncBacklog
+	err := s.db.QueryRow(`SELECT
+ (SELECT COUNT(*) FROM account_sync_events e WHERE e.system_id=p.id AND e.status='pending'),
+ (SELECT COUNT(*) FROM account_sync_events e WHERE e.system_id=p.id AND (e.status='failed'
+   OR (e.last_error<>'' AND EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=e.id)))),
+ CASE WHEN p.status='disabled' THEN 'disabled' WHEN p.provisioning_hold THEN 'held'
+  WHEN p.system_type NOT IN `+deliverableTypes+` THEN 'unsupported' ELSE '' END
+ FROM paired_systems p WHERE p.id=?`, systemID).Scan(&b.Pending, &b.Failed, &b.Blocked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return b, ErrNotFound
+	}
+	return b, err
+}

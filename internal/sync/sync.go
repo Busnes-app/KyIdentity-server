@@ -592,7 +592,7 @@ func (e *Engine) deliver(ctx context.Context, sys *store.PairedSystem, secret, e
 	return fmt.Errorf("system %s returned status %d", sys.Name, resp.StatusCode)
 }
 
-// ResyncAllAccounts re-sends every in-scope account and group to one paired system.
+// ResyncAllAccounts re-sends every held account (removals included) and group to one paired system.
 func (e *Engine) ResyncAllAccounts(systemID string, audit *store.AuditEvent) error {
 	return e.store.ResyncSystem(systemID, audit)
 }

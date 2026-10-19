@@ -44,7 +44,7 @@ import (
 // grows fastest and never stops.
 const auditRetention = 180 * 24 * time.Hour
 
-const appVersion = "0.4.3"
+const appVersion = "0.4.4"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -56,6 +56,11 @@ func main() {
 			return
 		case "disable-user":
 			if err := runDisableUser(os.Args[2:], os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "resync-system":
+			if err := runResyncSystem(os.Args[2:], os.Stdout); err != nil {
 				log.Fatal(err)
 			}
 			return

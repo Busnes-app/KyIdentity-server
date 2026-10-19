@@ -373,7 +373,7 @@ func runSetupInput(args []string, input io.Reader, out io.Writer) error {
 		if *file != "" || *db != "" || *check || *stage || *exportClient != "" {
 			return errors.New("capabilities cannot be combined with setup arguments")
 		}
-		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments"}})
+		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system"}})
 	}
 	if *exportClient != "" {
 		if *stage || *check {

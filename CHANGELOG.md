@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.4.4 — 2026-10-19
+
+### Changes
+
+- Security: **Resync** now replays removals. It re-sends an inactive update for every account the connector held or holds through a remote ID mapping and has since been disabled, unassigned or deleted, so a downstream app restored from a backup taken before the removal loses the account again instead of readmitting it. Replays deactivate, never delete, and a repeated resync queues nothing extra. A later re-assignment is re-sent as active, as before.
+- Add `kyidentity resync-system --client <client id> [--wait <duration>]` so an installer can replay a connector's directory state from inside the container after a downstream app restores a backup, without an admin session. It audits `admin.system_resynced` as `kyidentity-cli`; with `--wait` it exits 0 only once the connector's outbox is delivered, and prints one `kyidentity.resync-system/1` JSON result. Advertised as capability `resync-system`. See [Resyncing after a downstream restore](docs/INSTALLER-SETUP.md#resyncing-after-a-downstream-restore).
 
 ## 0.4.3 — 2026-10-18
 

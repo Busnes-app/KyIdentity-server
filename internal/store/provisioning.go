@@ -430,9 +430,9 @@ func (s *Store) ReconcileProvisioning() error {
 	return tx.Commit()
 }
 
-// ResyncSystem re-sends the desired state of everything in scope for one connector.
-// It never provisions a user outside the connector's effective access. The audit row
-// commits with the queued work.
+// ResyncSystem re-sends the desired state of every account the connector holds or held,
+// removals included, and of every assigned group. It never provisions a user outside the
+// connector's effective access. The audit row commits with the queued work.
 func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -472,6 +472,38 @@ func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
 			return err
 		}
 		if err := queueDesiredStateTx(tx, desiredState{systemID: systemID, resourceID: u.ID, kind: "user", active: true, payload: payload, force: true}, now); err != nil {
+			return err
+		}
+	}
+	// Replay every removal too, or a target restored from an older backup readmits the
+	// account: every out-of-scope account the target held, through a delivered state row
+	// or a remote mapping. The replay is an inactive update, never a deletion, so a repeat
+	// supersedes it.
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision)
+ SELECT l.system_id,l.local_id,'user',0,1,0 FROM scim_user_links l WHERE l.system_id=? AND l.kind='user' AND l.remote_id<>''
+ AND NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=l.system_id AND e.user_id=l.local_id)`, systemID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=1 WHERE system_id=? AND kind='user' AND NOT active AND NOT provisioned
+ AND EXISTS(SELECT 1 FROM scim_user_links l WHERE l.system_id=sync_resource_state.system_id AND l.local_id=sync_resource_state.resource_id AND l.kind='user' AND l.remote_id<>'')`, systemID); err != nil {
+		return err
+	}
+	removed, err := scanStrings(tx.Query(`SELECT resource_id FROM sync_resource_state WHERE system_id=? AND kind='user' AND NOT active AND provisioned ORDER BY resource_id`, systemID))
+	if err != nil {
+		return err
+	}
+	for _, id := range removed {
+		u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, id))
+		if err != nil {
+			return err
+		}
+		payload := scimInactivePayload(id)
+		if u != nil {
+			if payload, err = scimUserPayload(u, false); err != nil {
+				return err
+			}
+		}
+		if err := queueDesiredStateTx(tx, desiredState{systemID: systemID, resourceID: id, kind: "user", active: false, payload: payload}, now); err != nil {
 			return err
 		}
 	}
