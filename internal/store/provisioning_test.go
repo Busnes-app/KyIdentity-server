@@ -428,3 +428,96 @@ func TestProvisioningBackfillMarksExistingPairsProvisioned(t *testing.T) {
 		t.Fatal("upgrade re-sent the directory", got)
 	}
 }
+
+// A target restored from a backup taken before a removal must lose the account again on
+// resync, while held accounts are re-sent unchanged and repeats queue nothing extra.
+func TestResyncReplaysRemovals(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	app := provisioningFixture(t, s, "target")
+	kept, disabled, unassigned, deleted, reassigned, never, linked := createTestUser(t, s), createTestUser(t, s), createTestUser(t, s), createTestUser(t, s), createTestUser(t, s), createTestUser(t, s), createTestUser(t, s)
+	for _, u := range []*User{kept, disabled, unassigned, deleted, reassigned} {
+		if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deliverAll(t, s)
+	disabled.Status = "disabled"
+	if err := s.UpdateUserWithSyncEvents(disabled, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []*User{unassigned, reassigned} {
+		if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteUserWithSyncEvents(deleted.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	if err := s.SetAppAssignment(app, "users", reassigned.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	// Held only through a remote mapping, never through a tracked grant.
+	if err := s.SaveSCIMUserLink("target", linked.ID, "remote-linked"); err != nil {
+		t.Fatal(err)
+	}
+	// A mapping for an account still in scope never turns into a removal.
+	if err := s.SaveSCIMUserLink("target", kept.ID, "remote-kept"); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := s.ResyncSystem("target", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		u    *User
+		want []queued
+	}{
+		{"active", kept, []queued{{"user.created", 3, true}}},
+		{"disabled", disabled, []queued{{"user.updated", 4, false}}},
+		{"unassigned", unassigned, []queued{{"user.updated", 4, false}}},
+		{"deleted", deleted, []queued{{"user.updated", 4, false}}},
+		{"reassigned", reassigned, []queued{{"user.created", 5, true}}},
+		{"linked", linked, []queued{{"user.updated", 2, false}}},
+		{"never delivered", never, nil},
+	} {
+		if got := pendingFor(t, s, "target", c.u.ID); len(got) != len(c.want) || (len(got) == 1 && got[0] != c.want[0]) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+	deliverAll(t, s)
+	var acked int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sync_resource_state WHERE system_id='target' AND NOT active AND offboarded_at IS NOT NULL`).Scan(&acked); err != nil || acked != 4 {
+		t.Fatal("replayed removals not acknowledged", acked, err)
+	}
+}
+
+// A disabled connector tracks no state, so a mapping alone must not read as a removal
+// for an account that is still in scope.
+func TestResyncKeepsMappedInScopeAccount(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	app := provisioningFixture(t, s, "target")
+	u := createTestUser(t, s)
+	if _, err := s.db.Exec(`UPDATE paired_systems SET status='disabled' WHERE id='target'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSCIMUserLink("target", u.ID, "remote"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResyncSystem("target", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range pendingFor(t, s, "target", u.ID) {
+		if !q.Active {
+			t.Fatal("in-scope account replayed as removed", q)
+		}
+	}
+}

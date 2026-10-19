@@ -1,8 +1,8 @@
 # Paired KyPost recovery evidence (version 1)
 
 This export reports current KyIdentity authority for an exact requested set of
-restored subjects. Ordinary resync only re-sends current in-scope accounts; absence
-from resync cannot prove that a restored account lost access or was deleted.
+restored subjects. Ordinary resync replays inactive state for accounts the connector
+held, but its outbox carries no nonce or exact-set answer, so it is not recovery evidence.
 The export does not release either product's restore hold. KyPost admission and
 restore-release consumers are separate work and are not implemented by this API.
 

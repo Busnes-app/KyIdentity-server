@@ -72,9 +72,10 @@ func TestRecoveryEvidenceIncludesAcknowledgedLossAndDeletion(t *testing.T) {
 			if err := s.ResyncSystem("mail", nil); err != nil {
 				t.Fatal(err)
 			}
-			if got := pendingFor(t, s, "mail", lost.ID); len(got) != 0 {
-				t.Fatal("fixture unexpectedly re-sends loss", got)
+			if got := pendingFor(t, s, "mail", lost.ID); len(got) != 1 || got[0] != (queued{"user.updated", 3, false}) {
+				t.Fatal("resync did not replay the loss", got)
 			}
+			deliverAll(t, s)
 			e := readRecovery(t, s, current.ID, lost.ID, unknown.ID, "never-existed")
 			if e.Version != 1 || e.SystemID != "mail" || e.Issuer != "https://identity.test" || e.Nonce != strings.Repeat("a", 64) || e.ExpiresAt.Sub(e.IssuedAt) != 5*time.Minute || len(e.Subjects) != 4 {
 				t.Fatalf("envelope: %+v", e)
@@ -83,7 +84,7 @@ func TestRecoveryEvidenceIncludesAcknowledgedLossAndDeletion(t *testing.T) {
 			if err := json.Unmarshal(e.Subjects[0].Profile, &p); err != nil || !p.Active {
 				t.Fatalf("current: %s %v", e.Subjects[0].Profile, err)
 			}
-			if e.Subjects[0].Revision == nil || *e.Subjects[0].Revision != 2 || e.Subjects[1].Revision == nil || *e.Subjects[1].Revision != 2 {
+			if e.Subjects[0].Revision == nil || *e.Subjects[0].Revision != 2 || e.Subjects[1].Revision == nil || *e.Subjects[1].Revision != 3 {
 				t.Fatalf("revision fence: %+v", e.Subjects)
 			}
 			for i := 1; i < 4; i++ {

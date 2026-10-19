@@ -765,3 +765,57 @@ func TestUserReplaceRequiresCompletion(t *testing.T) {
 		t.Fatalf("accepted replace recorded as delivered: %+v", pending)
 	}
 }
+
+// A target restored from a backup taken before an unassignment or deletion holds the
+// account active again; resync deactivates it without creating or erasing anything.
+func TestResyncDeactivatesAccountsARestoredTargetReadmits(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone := &store.User{ID: uuid.NewString(), Username: "gone", DisplayName: "Gone", Email: "gone@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := s.CreateUser(gone); err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	for _, id := range []string{u.ID, gone.ID} {
+		if err := s.SetAppAssignment(app.ID, "users", id, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	drain(t, e)
+	if err := s.SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteUserWithSyncEvents(gone.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	remote.mu.Lock()
+	for id, ru := range remote.users {
+		if ru.Active {
+			t.Fatal("removal not delivered", ru)
+		}
+		ru.Active = true
+		remote.users[id] = ru
+	}
+	remote.mu.Unlock()
+	if err := e.ResyncAllAccounts(sys.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	for _, id := range []string{u.ID, gone.ID} {
+		if got, ok := remote.userByExternal(id); !ok || got.Active {
+			t.Fatal("resync left a restored account active or erased it", id, got, ok)
+		}
+	}
+	if remote.posts["Users"] != 2 {
+		t.Fatal("resync created an account", remote.posts)
+	}
+}

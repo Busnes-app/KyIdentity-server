@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changes
+
+- Security: **Resync** now replays removals. It re-sends an inactive update for every account the connector held or holds through a remote ID mapping and has since been disabled, unassigned or deleted, so a downstream app restored from a backup taken before the removal loses the account again instead of readmitting it. Replays deactivate, never delete, and a repeated resync queues nothing extra. A later re-assignment is re-sent as active, as before.
+
 ## 0.4.3 — 2026-10-18
 
 ### Upgrading from 0.4.2

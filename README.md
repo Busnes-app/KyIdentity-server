@@ -1138,7 +1138,10 @@ enabled connector; only a connector known to hold the account receives the profi
 the rest receive the identifier and `active=false`.
 
 **Resync** re-sends every in-scope account (and assigned group) and never provisions a
-user outside scope.
+user outside scope. It also replays every removal: each account the connector ever held
+(a delivered state or a remote ID mapping) that is now disabled, unassigned or deleted gets
+an inactive update again, so a target restored from an older backup cannot readmit it.
+Replays deactivate and never delete; repeating a resync queues nothing extra.
 
 For native KyPost recovery, `POST /api/admin/systems/{id}/recovery-evidence`
 (global admin, operation-bound step-up) returns a nonce-bound complete signed
