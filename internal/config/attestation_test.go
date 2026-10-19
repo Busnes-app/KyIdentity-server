@@ -20,7 +20,7 @@ func TestAttestationDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AttestationStatusURL != "https://android.googleapis.com/attestation/status" || len(cfg.KyAuthCertSHA256) != 1 || cfg.AttestationExtraRoots != "" {
+	if cfg.AttestationStatusURL != "https://android.googleapis.com/attestation/status" || len(cfg.KyAuthCertSHA256) != len(DefaultKyAuthCertSHA256) || cfg.AttestationExtraRoots != "" {
 		t.Fatalf("%+v", cfg)
 	}
 }
@@ -79,5 +79,15 @@ func TestAppAttestConfig(t *testing.T) {
 	t.Setenv("KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT", "yes")
 	if _, err := Load(); err == nil {
 		t.Fatal("non-boolean development flag accepted")
+	}
+}
+
+func TestDefaultKyAuthCertDigestsAreValid(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range DefaultKyAuthCertSHA256 {
+		if !certDigestRE.MatchString(d) || seen[d] {
+			t.Fatalf("bad or duplicate default digest %q", d)
+		}
+		seen[d] = true
 	}
 }
