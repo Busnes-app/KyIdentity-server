@@ -1292,7 +1292,7 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
             AND older.status='pending' AND older.attempts<5 AND older.rowid<account_sync_events.rowid)
           AND NOT EXISTS (SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id
             AND (p.status='disabled' OR p.provisioning_hold
-             OR p.system_type NOT IN ('scim','suite_webhook','kypost','kypasswords','kybookmarks','kynotes')))
+             OR p.system_type NOT IN `+deliverableTypes+`))
 		  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 		  AND (lease_until IS NULL OR lease_until <= ?)
 		ORDER BY created_at ASC LIMIT ?`, now, now, limit)

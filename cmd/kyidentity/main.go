@@ -59,6 +59,11 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "resync-system":
+			if err := runResyncSystem(os.Args[2:], os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "bootstrap-admin":
 			runBootstrap(os.Args[2:])
 			return

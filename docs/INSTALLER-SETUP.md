@@ -319,3 +319,34 @@ override set, and a pending invitation must have no live activation link. Otherw
 override is recorded or the link expired, with the same revocation and audit. `<data>/first-run-password.txt` is removed when it names the disabled account. The
 only output is `{"schema":"kyidentity.disable-user/1","username":"…","status":"disabled|unchanged"}`;
 refusals exit non-zero with nothing on stdout. It works while the server runs.
+
+## Resyncing after a downstream restore
+
+When an app restores its own backup, it may again hold accounts that KyIdentity has since
+disabled, unassigned or deleted. Replay the current directory state to it from inside the
+container, without a step-up grant (requires the `resync-system` capability):
+
+```sh
+kyidentity resync-system --client <client id> [--wait <duration, max 24h>]
+```
+
+It resyncs the connector that shares an app with that OAuth client, the same as **Resync**
+in the admin UI: held accounts are re-sent, and every account the connector ever held that
+is now removed is deactivated again (never deleted). An `admin.system_resynced` audit row
+(actor `kyidentity-cli`, `via: cli`) commits with the queued work. Repeating it is safe.
+The running server delivers; without `--wait` the command returns once the work is queued.
+With `--wait` it returns when the connector's outbox is empty, or earlier on a failure.
+
+The only output is one line:
+`{"schema":"kyidentity.resync-system/1","clientId":"…","systemId":"…","status":"…","pending":N,"failed":N,"blocked":"…"}`.
+
+| status | exit | meaning |
+|---|---|---|
+| `queued` | 0 | no `--wait`; `pending` is the connector's queued work |
+| `delivered` | 0 | every queued event for the connector was acknowledged |
+| `failed` | 1 | `failed` events exhausted their retries or have an uncertain remote write; an operator must resolve them under the connector's delivery attempts |
+| `blocked` | 1 | the worker will not deliver: `blocked` is `disabled`, `held` (restore hold) or `unsupported` (connector type needs review) |
+| `timeout` | 1 | `pending` work remained at the deadline; it stays queued |
+
+`pending` and `failed` count every outbox event for the connector, not only this resync's.
+A client without a connector, or bad arguments, exits 1 with nothing on stdout.
