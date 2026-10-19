@@ -29,7 +29,7 @@ report, not a note; file it before moving on.
 
 - A KyIdentity at or after #68, reachable over HTTPS, with
   `KYIDENTITY_ATTESTATION_STATUS_URL` left at its default and
-  `KYIDENTITY_KYAUTH_CERT_SHA256` left at its default (the Play digest).
+  `KYIDENTITY_KYAUTH_CERT_SHA256` left at its default (the release key and Play's signing keys).
 - A Play-installed KyAuth at or after #16 on a phone with a secure lock screen. Note
   whether the phone has StrongBox (Pixel 3 and later, most Samsung flagships).
 - One user with push MFA enrolled and organisation MFA mandatory, one KyPost (or any

@@ -124,6 +124,16 @@ type Config struct {
 
 var certDigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// DefaultKyAuthCertSHA256 is every key that signs a KyAuth release. Play re-signs uploads with its
+// own keys, and Android 17+ installs carry the v3.2 hybrid signer, so Play needs all three.
+var DefaultKyAuthCertSHA256 = []string{
+	"52f61684029401fcb0137b334ad41907f83948fa1ec1377834f3b4291765fd7b", // release key (GitHub builds)
+	"d419c37003033b87630a67f0f27f2295546ebd134956d3f37b20282964317f41", // Play App Signing
+	"c3b2a095228c2b80d4646b162dc3478542ff36c692619c0da6a8aa49f8fb11e5", // Play v3.2, classical
+	"293d7cd424179eed61003a2d4e1f21f1fb9e41faafc666837c5bf1fab330bc7f", // Play v3.2, ML-DSA
+	// F-Droid: add its digest once F-Droid has built and signed KyAuth.
+}
+
 var ubuntuAppIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*_[a-z0-9][a-z0-9+.-]*$`)
 
 // appIDRE is an Apple App ID: a ten-character Team ID, a dot, and a bundle ID.
@@ -223,7 +233,7 @@ func Load() (*Config, error) {
 	if attestationStatusURL != "" && !strings.HasPrefix(attestationStatusURL, "https://") {
 		return nil, errors.New("KYIDENTITY_ATTESTATION_STATUS_URL must be https")
 	}
-	kyAuthCertSHA256 := []string{"52f61684029401fcb0137b334ad41907f83948fa1ec1377834f3b4291765fd7b"}
+	kyAuthCertSHA256 := DefaultKyAuthCertSHA256
 	if v := strings.TrimSpace(os.Getenv("KYIDENTITY_KYAUTH_CERT_SHA256")); v != "" {
 		kyAuthCertSHA256 = nil
 		for _, d := range strings.Split(v, ",") {

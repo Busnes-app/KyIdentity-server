@@ -897,7 +897,9 @@ device `none`, `tee` or `strongbox`. KyAuth iOS uploads an App Attest object ins
   disables the check and logs a startup warning).
 - `KYIDENTITY_ATTESTATION_EXTRA_ROOTS`: extra PEM trust roots, added to Google's.
 - `KYIDENTITY_KYAUTH_CERT_SHA256`: comma-separated SHA-256 digests of accepted KyAuth signing
-  certificates (default is the release key).
+  certificates. The default accepts the release key (GitHub builds) and Play's three signing keys
+  (`DefaultKyAuthCertSHA256` in `internal/config/config.go`). Setting it replaces the default, so
+  repeat any default digest you still want; this is how to add an F-Droid build's key.
 - Admin setting `attestation.requireLockedBootloader` (Enrollment policies, "Device sign-on";
   default off): refuse, and daily downgrade, devices whose bootloader is unlocked. The boot state
   is recorded either way.
