@@ -1,10 +1,10 @@
 # Security Policy
 
-KyPost is a self-hosted IMAP web client with end-to-end encryption support. This document describes security practices, known limitations, responsible disclosure, and deployment security considerations.
+KyIdentity is the single-organization OpenID Connect provider and user directory for the KySecurity suite. This document covers disclosure, known limitations and trust boundaries, deployment, and how the server protects accounts and data.
 
 ## Reporting Security Vulnerabilities
 
-If you discover a security vulnerability in KyPost, please report it responsibly via GitHub Security Advisories rather than opening a public issue.
+If you discover a security vulnerability in KyIdentity, please report it responsibly via GitHub Security Advisories rather than opening a public issue.
 
 ### How to Report
 
@@ -36,59 +36,19 @@ We acknowledge security researchers and community members who help us improve. I
 
 ## Known Limitations & Trust Boundaries
 
-KyPost is honest about what it does and does not protect. Read these carefully before deploying or relying on specific features.
+Read these before deploying or relying on specific features.
 
-### PGP Key Custody
+### Sessions
 
-KyPost has two key protection modes. **Choose deliberately, not by accident.** See [Where your PGP private key lives](README.md#where-your-pgp-private-key-lives) for a complete explanation.
-
-**Client-Protected (End-to-End):** Your browser generates or wraps the key under a password-derived key. The server cannot open it. Costs: you must unlock it each browser session, and admin operations cannot access your encrypted mail. Security can create an encrypted offline recovery backup in the browser; restoring it requires both the downloaded file and its separately displayed random secret. Neither the plaintext key nor the secret is sent to or stored by the server.
-
-**Server-Protected:** The server holds a master key and unwraps your PGP key on demand. Convenience: automatic decryption, password resets work, background polling works. Cost: this is **not** end-to-end encryption. The server, and anyone with access to its disk (root, backup operators, disk seizure), can decrypt everything you receive. If you self-host, this may be acceptable. If someone else runs it, you are trusting them with plaintext mail.
-
-### Automatic Label Classification
-
-Labels (keywords) assigned by the classifier are **a sorting hint, not a security boundary.** The classifier reads sender-controlled email, so a sender can write instructions into their message and influence which label it receives. Testing shows roughly 50-87% resistance to prompt injection depending on configuration, but every model tested let some through.
-
-What an attacker can achieve: steer the label on **their own message** into a different folder (e.g., `Primary` instead of `Promotions`). The keyword allowlist is enforced in Go after the model answers, so output outside that list is discarded. A message cannot be deleted, moved, marked read, or cause any other message to be affected.
-
-**Do not build security controls on labels.** Never create a filter rule that grants trust based on a label, and never auto-archive anything by label alone. This is not a fixable limitation—it is a known property of using local LLMs to classify sender-controlled text. All decisions are recorded on the Decisions page so you can audit what actually happened.
-
-**Encrypted mail is not classified, and is never labelled as encrypted.** A PGP-encrypted message has no readable body, so it skips the classifier and is tagged with your account's default label instead. It is deliberately *not* given an `Encrypted` keyword. IMAP keywords are stored on the mail server in the clear, so such a keyword would hand whoever runs that server a precise index of which of your messages are worth attacking—the exact adversary client-protected custody exists to defend against—while looking to you like a security feature. It would break the rule above in both directions at once: not trustworthy enough to rely on, and harmful merely by existing. The padlock you see in the reader is derived from the message itself each time it is displayed and is never written anywhere.
-
-**Encrypted mail also stays out of mobile push payloads.** Native push travels to the relay Worker and on to FCM/APNs in cleartext at every hop. For an encrypted message the sender and subject are withheld from that payload regardless of your Content Preview setting, because a third-party PGP/MIME message that does not use protected headers carries its real subject in the clear. Web push is unaffected—those payloads are encrypted to your browser's own subscription keys (RFC 8291), so Content Preview remains your choice there.
-
-See [Classification flow](README.md#classification-flow) for details.
-
-### Email HTML Rendering
-
-KyPost renders email HTML in a sandboxed iframe with DOMPurify sanitization. The sandbox blocks most attacks (no script execution in the frame itself), but:
-
-- **Remote content loads on opt-in.** Images, stylesheets, and other remote resources are not loaded by default. Users can opt in per message.
-- **Links open in new windows** (via `<base target="_blank">`). The link destination is not constrained by KyPost; it goes wherever the sender directed.
-- **Sender HTML survival.** DOMPurify removes most dangerous elements, but sanitization is a defense layer, not a boundary. Treat all email HTML as potentially hostile, and do not trust email to be what it claims.
-
-### Session Security
-
-See [Session Behavior](README.md#session-behavior) for full details. Key points:
-
-- Sessions expire after 24 hours without activity (sliding window).
-- Sessions have a hard cap: 7 days from issue, regardless of activity. Stolen cookies cannot be kept alive indefinitely.
-- Sessions are swept every hour; expiry does not wait for the cookie to be presented again.
-
-### CardDAV & External Services
-
-- CardDAV clients (phones, desktop apps) authenticate with a per-user app-specific password separate from your login password.
-- CardDAV clients that sync from external servers should use HTTPS-only connections.
-- KyPost does not validate external CardDAV server certificates beyond the OS default. Use a trusted network or a known server.
+- Browser sessions are stored server-side; the cookie carries a random token and the database keeps only its SHA-256. The cookie is `HttpOnly` and `SameSite=Lax`.
+- Defaults: 24 hours absolute, 8 hours idle (`KYIDENTITY_SESSION_TTL`, `KYIDENTITY_SESSION_IDLE_TTL`). Administrators can change both within fixed bounds: 1 hour to 7 days absolute, 5 minutes to 24 hours idle.
+- Expired sessions are deleted by housekeeping every 15 minutes; a session past its idle limit is refused at once.
+- Sign-out deletes the session, revokes the tokens and authorization codes issued under it, and queues back-channel logout to apps that registered a receiver. Apps without one keep their own sessions until they expire. See [Integration Requirements](README.md#integration-requirements).
 
 ### Mobile Pairing
 
-- Pairing tokens are valid for 90 seconds and signed with a per-instance secret.
-- All pairing payloads (QR codes, pickup links, key exchange URLs) carry bearer credentials in the query string.
-- Set `SERVER_BASE_URL` to an HTTPS URL so credentials travel over TLS.
-- Pairing secrets must remain on the server only. Multi-replica deployments share one secret via `PAIRING_SECRET`.
-
+- A KyAuth device pairs from a QR code holding a pairing token and a 6-digit PIN, both stored only as hashes and valid for 90 seconds. The QR names the server by `KYIDENTITY_ISSUER_URL`, so the issuer must be the HTTPS address devices reach.
+- Device registration is rate-limited per client address.
 ### UnifiedPush
 
 - A device can register a UnifiedPush endpoint instead of an FCM token. KyIdentity then posts directly to the user's distributor (ntfy, NextPush, ...), and no relay or Google service is involved.
@@ -132,14 +92,9 @@ Whichever proxy you use, set `TRUSTED_PROXY_CIDRS` to its address as KyIdentity 
 
 ### TRUSTED_PROXY_CIDRS: Client IP Trust
 
-When a reverse proxy sits in front of KyPost, the server sees the proxy's address as the client IP. This address is used as the key for:
+When a reverse proxy sits in front of KyIdentity, the server sees the proxy's address as the client IP. The client address keys the per-address rate limits (sign-in, MFA, recovery codes, password reset, device registration) and is recorded in every audit event.
 
-- Login rate limiting (3 strikes, 15-minute lockout)
-- Per-IP account lockout (looser, across all accounts)
-- Instance-wide login rate limit
-- MFA push approval notifications (the push names the address)
-
-**If `TRUSTED_PROXY_CIDRS` is empty, forwarded headers are discarded entirely.** Every caller is keyed as the proxy, so all users share one lockout bucket and push notifications show the gateway address instead of the user signing in.
+**If `TRUSTED_PROXY_CIDRS` is empty, forwarded headers are discarded entirely.** Every caller is keyed as the proxy, so all users share one rate-limit bucket and the audit log shows the proxy's address instead of the user's.
 
 **If `TRUSTED_PROXY_CIDRS` is set, KyIdentity trusts `X-Forwarded-Proto` and exactly one client-address header from that CIDR.** This marks cookies `Secure` and keys lockouts off the real caller.
 
@@ -173,166 +128,129 @@ This replaces the old `TRUST_PROXY_HEADERS=true`, which trusted forwarded header
 **Verify rather than assume.** Sign in through the proxy from a machine whose address you know, then open the admin audit log and find your `auth.login_success` row. Its IP column is the client address KyIdentity resolved for you.
 
 - Your own address: the proxy is trusted and forwards the header named by `KYIDENTITY_FORWARDED_HEADER`.
-- The proxy's or a Docker gateway address (e.g. `10.89.0.1`): `TRUSTED_PROXY_CIDRS` does not match the proxy as KyIdentity sees it, or the proxy does not send that header. Every user then shares one lockout bucket.
+- The proxy's or a Docker gateway address (e.g. `10.89.0.1`): `TRUSTED_PROXY_CIDRS` does not match the proxy as KyIdentity sees it, or the proxy does not send that header. Every user then shares one rate-limit bucket.
 
 ### Secret Handling
 
-- **Bootstrap password:** On first start, KyPost writes the generated admin password to `first-run-password.txt` (mode `600`) in the config volume. Read it and delete it immediately. Logs are unrotated by default and readable by anything with Docker socket access—the password is never logged. This holds for both bootstrap paths: the container's `--mode bootstrap-admin` step and a server started directly against an empty config directory. If the file cannot be written, startup fails rather than falling back to printing the password.
-- **IMAP credentials:** Stored encrypted at `/kypost/private/imap-config.key` (master key) and per-user encrypted payloads. The key does not rotate; compromise of the key compromises all encrypted credentials.
-- **TOTP secrets:** Master key at `/kypost/private/totp-secret.key`. Same rotation caveat.
-- **Pairing secret:** `/kypost/private/pairing.key` (generated on first start). Must be identical across replicas if you run multiple.
-- **PGP server keys:** Master key at `/kypost/private/pgp-server-key` (only if using server-protected PGP mode).
+Everything KyIdentity needs to keep secret lives in its data volume (`/data` in the container):
 
-All of these live in `/kypost/private`. **Back up this volume separately and store it securely.** Compromise of this directory compromises all user data.
+| File | Purpose |
+|---|---|
+| `kyidentity.db` (or legacy `kysignon.db`) | SQLite database |
+| `encryption.key` | AES-256-GCM key for secrets at rest (`KYIDENTITY_ENCRYPTION_KEY`) |
+| `secret.key` | HMAC key for CSRF tokens and signed browser cookies (`KYIDENTITY_SECRET_KEY`) |
+| `jwt_rs256.key` | RSA signing key for ID and access tokens (`KYIDENTITY_RSA_KEY_PATH`) |
+| `push-vapid-private.key` | VAPID key for UnifiedPush; startup refuses a mode looser than `0600` |
+| `push-relay-fcm.key`, `push-relay-apns.key` | Keys returned by the push relays at registration |
+| `first-run-password.txt` | Generated bootstrap password, until first sign-in |
+
+- Keys not supplied through the environment are generated on first start, written `0600` in a `0700` directory, and reused.
+- A key of the wrong length is a startup error, never a silently weakened key. There is no key rotation: losing or replacing `encryption.key` makes the data sealed under it unrecoverable.
+- **Back up the whole volume and protect it like the keys it holds.** See [docs/RESTORE.md](docs/RESTORE.md).
 
 ### First Run & Bootstrap
 
-- Bootstrap credentials are written to a file on first run, not logged. Running the binary directly (systemd, CI, a bare host) takes the same path as the container: the password goes to `first-run-password.txt`, and only its *path* is printed.
-- You can pass `BOOTSTRAP_ADMIN_PASS` on the first run to avoid the file write (you already have the password).
-- You can also pass `BOOTSTRAP_ADMIN_USER` to name the initial admin (default: `admin`).
-- The bootstrap account starts on the password-change screen and cannot access anything else until you change it.
-- **Change the password immediately after first login.**
+- When no administrator exists, KyIdentity creates one named `BOOTSTRAP_ADMIN_USER` (default `admin`). Its password is `BOOTSTRAP_ADMIN_PASS` or, when unset, a random one written to `first-run-password.txt` (mode `0600`). Only the file's path is logged, never the password.
+- The file is removed automatically after the first sign-in. If an administrator already exists, `BOOTSTRAP_ADMIN_PASS` is ignored.
+- The bootstrap account is not forced to change its password. Change it, and enroll a second factor, right after first sign-in.
 
 ## Authentication & Authorization
 
 ### Login Flow
 
-- Username + password, with per-account salt and work factor.
-- Password never reaches the server. The browser derives an authentication half (what gets sent) and a key-wrapping half (for PGP key encryption, stays in the browser).
-- CAPTCHA challenge on login (optional, configurable: `pow`, `turnstile`, `friendly`, or `none`).
-- Proof-of-work CAPTCHA (`pow`) uses `crypto.subtle` and requires HTTPS (except localhost). Difficulty adapts per address; escalation is counted per IP and decays after 15 minutes or on successful login.
-- 3-strikes account lockout (15 minutes).
-- Per-IP lockout (looser, across all accounts).
-- Instance-wide login rate limit.
+- Username and password, sent to the server over the TLS proxy and checked against an Argon2id hash (64 MiB, 3 iterations, parallelism 4, 16-byte salt). Passwords are 12 to 1024 characters.
+- 10 consecutive failures, wrong second factors included, lock the account for 15 minutes. A locked account gets the same answer as a wrong password.
+- Per-address rate limits cover sign-in, every MFA step, recovery codes, password reset and account-link redemption.
+- At most 8 password hashes run at once; a sign-in that waits more than 3 seconds for a slot gets `503`, which does not count as a failure.
+- There is no CAPTCHA.
 
 ### Multi-Factor Authentication
 
-- **TOTP:** Time-based one-time passwords from an authenticator app.
-- **Recovery codes:** One-time codes for account recovery if you lose your authenticator.
-- **Push approval:** A pairing device receives a push notification and approves or denies the sign-in. Set up on Security's Devices tab.
+- **TOTP** from an authenticator app.
+- **Passkeys** (WebAuthn), bound to the issuer's origin.
+- **Push approval** on a paired KyAuth device, with number matching. At most 5 sign-in pushes per user per hour.
+- **Recovery codes:** 8 one-time codes, stored only as keyed hashes. With no other factor left, they are the only way back in. **Store them securely.**
 
-Recovery codes are the only way to regain access if you lose your authenticator and have no paired push device. **Export and store them securely.**
+Administrators can require enrollment for the whole organization, administrators only, or a group, with a grace period of up to 90 days.
 
 ### Roles & Authorization
 
-- **Admin:** Create users, reset passwords, deactivate accounts, view system logs, edit global settings, start health repair.
-- **User:** Connect their own IMAP/SMTP, read mail, manage their own rules and filters, set notification preferences, tune their own prompt.
-
-Authorization is checked on every request. Deactivation or role changes take effect on the user's next request, not at the next login.
-
-### Session Revocation
-
-- Logout invalidates the server-side session and clears the cookie.
-- Deactivation or demotion takes effect on the user's next authenticated request.
-- KyPost will not let you deactivate or demote the last active admin.
+- **Global roles:** `admin` (everything) and `user`.
+- **Delegations** on top of `user`: `auditor` (read-only administration), `helpdesk` (recovery for ordinary users, never administrators), `app_owner` (grants and roles for the apps they own). See [Delegated administration](README.md#delegated-administration).
+- Permissions are computed on every request, never cached in the session. Disabling a user, demoting an administrator or changing a password revokes that user's sessions and tokens at once.
+- KyIdentity refuses to disable, demote or delete the last active administrator.
+- Destructive administrative operations require step-up re-authentication.
 
 ## Data Protection
 
 ### Encryption at Rest
 
-User data is stored in `/kypost/config/users/<userID>/` and `/kypost/state/users/<userID>/`. What is encrypted:
+Sealed with AES-256-GCM under a per-purpose key derived from `encryption.key`:
 
-- **IMAP credentials:** AES encryption with a master key (`imap-config.key`).
-- **TOTP secrets:** AES encryption with a master key (`totp-secret.key`).
-- **PGP keys (server-protected mode):** Encryption with a master key (`pgp-server-key`).
-- **PGP keys (client-protected mode):** Wrapped in the browser under a password-derived key; the server stores only the wrapped blob.
-- **Client recovery backups:** The downloaded backup contains a second browser-created AES-GCM envelope. Its recovery secret is shown once and is not stored by KyPost.
+- TOTP secrets
+- Connector credentials (suite signing secrets and SCIM bearer tokens)
+- Mail (SMTP) settings
+- The KyRecovery API token
 
-Unencrypted:
+Hashed, not stored: passwords (Argon2id), session tokens (SHA-256), recovery codes (keyed HMAC).
 
-- **User account metadata:** Username, role, hashed auth secret, account status.
-- **Mailbox state:** IMAP checkpoint, processed message IDs, decision history (which labels were assigned to which messages).
-- **Configuration:** Tuning prompts, notification preferences, rules, contacts.
-
-**If the `/kypost/private` volume is compromised, all encrypted data is compromised.** This includes all IMAP credentials, TOTP secrets, and server-protected PGP keys.
+Not encrypted: account metadata (usernames, names, email addresses, roles, groups, status), client registrations, app assignments and the audit log. Anyone who can read the database file can read these.
 
 ### Encryption in Transit
 
-- **Sessions:** Cookies marked `Secure` only on HTTPS (when `TRUSTED_PROXY_CIDRS` is set or TLS terminates in KyPost).
-- **API calls:** All backend endpoints expect HTTPS (enforced by cookie marking and browser same-origin policy).
-- **CardDAV:** Sync clients should use HTTPS-only servers.
-- **Mobile pairing:** QR codes and pickup links carry bearer tokens in the query string. Use HTTPS for `SERVER_BASE_URL`.
-- **External services:** Push relay APIs use HTTPS only (`PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS). UnifiedPush endpoints and `KYIDENTITY_UBUNTU_PUSH_URL` must be HTTPS and payloads are RFC 8291 encrypted.
+- **Browsers and apps:** through your TLS proxy (see [Deployment Security](#deployment-security)).
+- **Outbound calls** (SCIM and suite connectors, back-channel logout, UnifiedPush, UBports) go through one guarded client: HTTPS only, no embedded credentials, no redirects, and the destination is checked at connect time, so DNS rebinding cannot reach a refused address. Loopback, link-local and cloud-metadata addresses are always refused; private ranges are refused unless `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`.
+- **`KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` also allows plain `http`** for operator-supplied URLs. Use it only on a network you control, and prefer HTTPS anyway. It never applies to device-supplied push endpoints.
+- **Push relays:** `PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS.
+- **Certificates:** outbound TLS is verified against the container's trust store; to add a private CA, see [README step 4](README.md#4-private-certificate-authority-lan-installs).
 
 ### Sensitive Data in Logs
 
-- Passwords are never logged.
-- IMAP credentials are never logged in full; auth errors mention only the server and username.
-- CAPTCHA solutions are not logged.
-- Mail content (subject, body) is not logged except for decision history (which labels were assigned).
-
-Check `/kypost/logs` regularly and configure your log aggregator appropriately if you have one.
+- Logs go to standard output and standard error only; [LOGGING.md](LOGGING.md) is the contract.
+- Passwords, password-derived values, client secrets, tokens, signing keys, TOTP values, recovery codes, authorization codes and raw request bodies are never logged. UnifiedPush endpoint URLs are capabilities and are never logged either.
+- Audit events are kept in the database for 180 days. Audit exports redact keys that look like credentials.
 
 ## Security Headers & Defense-in-Depth
 
-KyPost applies multiple defense layers to protect against common web attacks.
+Every response carries:
 
-### Content Security Policy
+- **Content-Security-Policy:** `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';` HTTPS images are allowed for custom launcher icons. The logout confirmation page widens `form-action` to the registered post-logout origin.
+- **X-Content-Type-Options:** `nosniff`
+- **X-Frame-Options:** `DENY`
+- **Referrer-Policy:** `strict-origin-when-cross-origin`
+- **Permissions-Policy:** `camera=(), microphone=(), geolocation=(), payment=()`
+- **Cache-Control:** `no-store` on `/api/` and `/oauth/`
 
-CSP is configured per CAPTCHA provider to block script injection and limit the capabilities an attacker can use if HTML sanitization fails. Directives:
-
-- **script-src:** `'self'` plus provider-specific origins only (e.g., `challenges.cloudflare.com` for Turnstile, `cdn.jsdelivr.net` for Friendly Captcha). **Never `'unsafe-inline'` or `'unsafe-eval'`.**
-- **style-src:** `'self'` and `'unsafe-inline'` (for the Quill editor's inline styles). No third-party origin.
-- **font-src:** `'self'` and `data:`. The webfonts are served from this origin out of the app bundle, not from Google Fonts — an install with no CAPTCHA configured, or on the self-hosted `pow` provider, makes no cross-origin request at all.
-- **img-src/media-src:** Allows remote content (shown after user opt-in per message) and data URIs.
-- **object-src:** `'none'` (blocks Flash, PDF plugins, etc.).
-- **frame-ancestors:** `'none'` (prevents clickjacking).
-- **base-uri:** `'self'` (prevents injection of a malicious `<base>` tag).
-- **form-action:** `'self'` (all forms submit to this origin).
-
-### Other Security Headers
-
-- **X-Content-Type-Options:** `nosniff` (prevents MIME sniffing).
-- **X-Frame-Options:** `DENY` (prevents framing).
-- **Referrer-Policy:** `strict-origin-when-cross-origin` (limits referrer information).
-- **Permissions-Policy:** Blocks powerful features (camera, microphone, geolocation, payment, etc.) that KyPost never needs.
-- **Cross-Origin-Opener-Policy:** `same-origin` (severs `window.opener` for client-protected PGP keys).
-- **Strict-Transport-Security:** `max-age=31536000; includeSubDomains` (on HTTPS only).
-
-### Email HTML Sanitization
-
-Email HTML is sanitized with DOMPurify before rendering in a sandboxed iframe. The sandbox blocks script execution in the frame itself, but **DOMPurify is a defense layer, not a boundary.** Treat all email HTML as potentially hostile.
-
-### CAPTCHA & Rate Limiting
-
-- **CAPTCHA:** Optional on login. Proof-of-work (`pow`) is self-hosted and requires HTTPS. Turnstile and Friendly Captcha use third-party verification.
-- **Account lockout:** 3 failed login attempts = 15-minute lockout per account.
-- **Per-IP lockout:** Looser, across all accounts.
-- **Instance-wide limit:** Meters login attempts across the instance.
-- **Proof-of-work escalation:** Difficulty increases with each recent failed login from the same IP (up to a ceiling), decaying after 15 minutes or on success.
-
-None of these replace the others; they work together.
+KyIdentity does not send `Strict-Transport-Security`; it does not see TLS. Set HSTS at your proxy.
 
 ## Development & Security Testing
 
-Security-sensitive code should meet these expectations:
-
 ### Testing
 
-- **Authentication changes:** Tests for bypass scenarios (missing credentials, modified tokens, expired sessions).
-- **Authorization changes:** Tests for privilege escalation (users accessing admin endpoints, admins accessing user-scoped data).
-- **Cryptographic operations:** Tests for correct key derivation, encryption, and decryption.
-- **Input validation:** Tests for injection attacks (SQL if applicable, command injection, XSS via sanitized HTML).
-
-See `backend/internal/api/*_security_fixes_test.go` for patterns.
+- Each security-relevant package keeps a `security_test.go` (`internal/api`, `config`, `crypto`, `mfa`, `oauth`, `sync`).
+- Authentication changes: test bypasses (missing credentials, modified or expired tokens, revoked sessions).
+- Authorization changes: test escalation (users and delegates reaching admin routes, helpdesk reaching administrators).
+- Cryptographic changes: test sealing, opening and refusal of wrong keys.
+- Input validation: test injection and URL validation (redirect URIs, outbound targets).
 
 ### Code Review
 
 Security-sensitive PRs should include:
 
 - A description of the trust boundary or attack surface.
-- Explanation of why the approach is secure (or why a known limitation is acceptable).
-- Test coverage for both the happy path and attack scenarios.
-- Any assumptions about the deployment (e.g., "assumes TLS termination in KyPost").
+- Why the approach is secure, or why a known limitation is acceptable.
+- Tests for both the happy path and attack scenarios.
+- Any assumption about the deployment (for example, "assumes a TLS proxy in `TRUSTED_PROXY_CIDRS`").
 
-### Examples of Security-Sensitive Code
+### Security-Sensitive Code
 
-- Authentication and session management (`backend/internal/api/auth.go`)
-- Authorization checks (role-based access)
-- Cryptographic operations (key derivation, encryption, decryption)
-- Input validation and sanitization (HTML email, filter rules, etc.)
-- Rate limiting and lockout logic
-- Trust boundary validation (client IP from forwarded headers, etc.)
+- Sign-in, sessions and CSRF: `internal/api/auth_handlers.go`, `internal/api/middleware.go`, `internal/store/sessions.go`
+- Authorization: `internal/api/permissions.go`, `internal/store/delegations.go`
+- MFA and passkeys: `internal/mfa/mfa.go`, `internal/webauthn/`
+- OAuth/OIDC: `internal/oauth/`
+- Passwords and keys: `internal/auth/password.go`, `internal/crypto/`
+- Outbound requests: `internal/netguard/netguard.go`
+- Client IP trust: `internal/api/middleware.go`
 
 ## Security Contacts
 
@@ -341,6 +259,8 @@ Security-sensitive PRs should include:
 
 ## Additional Resources
 
-- [README Security Section](README.md#where-your-pgp-private-key-lives) — PGP key custody, session behavior, users and roles
 - [Quickstart with Docker Compose](README.md#quickstart-with-docker-compose) — `kypost-net`, issuer, proxy trust and private CA
+- [Onboarding and passwords](README.md#onboarding-and-passwords) — activation, password reset, lockout
+- [docs/RESTORE.md](docs/RESTORE.md) — backups and restore
+- [LOGGING.md](LOGGING.md) — logging contract
 - OWASP guidelines on secure development practices

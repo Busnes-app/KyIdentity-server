@@ -158,22 +158,24 @@ and the health checks below, not for browsers on other machines.
 
 ### 4. Private certificate authority (LAN installs)
 KyIdentity verifies every outbound TLS connection (KyRecovery, SCIM and suite connectors,
-back-channel logout, mail, push relays) against the image's system trust store and has no
-setting for an extra CA. If your services use certificates from a private CA, mount a PEM
-bundle holding the system roots plus your CA over that store with an overlay file, for
-example `docker-compose.ca.yml`:
+back-channel logout, mail, push relays) against the container's trust store. To add a
+private CA, put its PEM certificate in a directory and point Go's standard `SSL_CERT_DIR` at
+it with an overlay file, for example `docker-compose.ca.yml`:
 
 ```yaml
 services:
   kyidentity-server:
+    environment:
+      SSL_CERT_DIR: /etc/kyidentity/ca
     volumes:
-      - /path/to/ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      - ./ca:/etc/kyidentity/ca:ro
 ```
 
 Append it to the `COMPOSE_FILE` chain in `.env` (for example
-`COMPOSE_FILE=docker-compose.yml:docker-compose.ca.yml`), then `docker compose up -d`. Keep the
-public roots in the bundle: push relays and UnifiedPush endpoints are public HTTPS. The file
-must be readable by the container's non-root user.
+`COMPOSE_FILE=docker-compose.yml:docker-compose.ca.yml`), then `docker compose up -d`.
+`SSL_CERT_DIR` adds the directory's certificates to the image's bundle, so public roots
+(push relays, UnifiedPush endpoints) stay trusted. Use a colon to list several directories.
+The files must be readable by the container's non-root user (`kyidentity`).
 
 ---
 
