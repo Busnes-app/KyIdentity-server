@@ -236,6 +236,54 @@ linkage, exact-role delivery and downstream native session/device revocation on 
 state (KyNotes `docs/SSO.md`). It does not prove full OAuth issuance or installer secret
 transfer between separate targets. Those remain full-stack acceptance gates.
 
+## Verified owner email
+
+The installer owns the `admin` and `everyday` identities and takes their addresses from
+the owner's plan, so `apply-setup` creates both with a verified email: apps that require
+`email_verified=true` (Matrix MAS, Mealie) accept them at once. Nothing else marks an
+address verified except redeeming a link mailed to it. Changing an address later, in the
+admin UI or by SCIM, clears verification and expires outstanding links; a rerun then
+refuses the changed account and never verifies the new address. An ordinary rerun of the
+same setup (not `--check`, not an amendment) verifies an owned account whose address is
+still the declared one, so accounts applied by 0.4.4 or earlier gain it, audited as
+`installer.email_verified`. Capability `installer-verified-email`.
+
+## Mail relay
+
+A setup (not an amendment) can configure the SMTP relay that sends activation, reset and
+alert mail, so an unattended run can deliver and complete a verification link. Require
+capability `mail-relay`:
+
+```json
+"mail": {
+  "host": "smtp.example.com",
+  "port": 587,
+  "security": "starttls",
+  "from": "KyIdentity <identity@example.com>",
+  "username": "kyidentity",
+  "passwordFile": "/data/secrets/smtp.password"
+}
+```
+
+`security` is `starttls` or `tls`; there is no plaintext mode, and the relay's certificate
+must be trusted by the container. `username` and `passwordFile` come together or not at
+all (an unauthenticated relay). The password is destination-issued, like a SCIM token: a
+private target-local file outside every preparation directory, never a setup credential,
+the encryption key or the database, at most 1024 bytes without newlines. It is never
+generated. Because it may be human-chosen, preparation checks the file but records
+nothing derived from it; apply compares it with the sealed settings instead. Setup seals the settings with the existing product key,
+exactly as the admin UI does, audits `admin.mail_configured` (which raises the mail relay
+alert) and never reports the password.
+
+Setup refuses relay settings it does not own, including ones saved earlier in the UI.
+Afterwards the UI may still change them with step-up; check and rerun then refuse the
+drift rather than overwrite it, as for connectors. Omitting `mail` preserves the relay.
+
+With the relay in place, the mailed verification path needs no browser: sign in as the
+administrator, request a step-up grant for `POST /api/admin/users/{id}/reset-link`, send
+`{"send":true}`, and redeem the link from the mail sink at `POST /api/auth/password/reset`.
+That marks the address verified. A verified account can also use `POST /api/auth/password/forgot`.
+
 ## Adding clients later
 
 Setup intent is immutable, so a product installed after the first setup comes in an

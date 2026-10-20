@@ -16,9 +16,11 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"unicode"
 
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	kymail "github.com/Busnes-app/kyidentity-server/internal/mail"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
@@ -49,6 +51,17 @@ type setupSuiteWebhook struct {
 	URL               string `json:"url"`
 	SigningSecretFile string `json:"signingSecretFile"`
 }
+
+// setupMail is the outbound relay for activation, reset and alert mail. The password
+// is a target-local protected file, like a SCIM token; it never travels in the bundle.
+type setupMail struct {
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	Security     string `json:"security"`
+	From         string `json:"from"`
+	Username     string `json:"username,omitempty"`
+	PasswordFile string `json:"passwordFile,omitempty"`
+}
 type setupGroup struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
@@ -62,6 +75,7 @@ type setupBundle struct {
 	Everyday setupAccount  `json:"everyday,omitzero"`
 	Clients  []setupClient `json:"clients"`
 	Groups   []setupGroup  `json:"groups,omitempty"`
+	Mail     *setupMail    `json:"mail,omitempty"`
 }
 
 var setupName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
@@ -99,9 +113,9 @@ func readSetupFile(path string, limit int64) ([]byte, error) {
 	return b, nil
 }
 
-// scimTokenAllowed refuses setup credentials, preparation directories and product
-// secrets as a SCIM token: the worker would send that file to the connector URL.
-func scimTokenAllowed(path string, own []string) error {
+// externalCredentialAllowed refuses setup credentials, preparation directories and
+// product secrets as a SCIM token or relay password: they are sent to their remote host.
+func externalCredentialAllowed(path string, own []string, what string) error {
 	path = filepath.Clean(path)
 	data, err := setupDataDirectory()
 	if err != nil {
@@ -114,13 +128,13 @@ func scimTokenAllowed(path string, own []string) error {
 	}
 	for _, root := range roots {
 		if rel, err := filepath.Rel(filepath.Join(root, "installer"), path); err == nil && strings.Contains(rel, string(filepath.Separator)) && !strings.HasPrefix(rel, "..") {
-			return errors.New("SCIM token cannot use a preparation-owned directory")
+			return errors.New(what + " cannot use a preparation-owned directory")
 		}
 		refused = append(refused, filepath.Join(root, "encryption.key"))
 	}
 	for _, p := range refused {
 		if abs, err := filepath.Abs(p); err == nil && p != "" && abs == path {
-			return errors.New("SCIM tokens must be destination-issued protected files")
+			return errors.New(what + " must be a destination-issued protected file")
 		}
 	}
 	return nil
@@ -169,7 +183,7 @@ func setupMetadata(b []byte) (setupBundle, store.InstallerSetup, error) {
 		if err != nil || parent.String() != bundle.Extends || bundle.Extends == bundle.ID {
 			return bundle, p, errors.New("extends must be another setup's canonical UUID")
 		}
-		if bundle.Admin != (setupAccount{}) || bundle.Everyday != (setupAccount{}) || len(bundle.Groups) > 0 || len(bundle.Clients) == 0 {
+		if bundle.Admin != (setupAccount{}) || bundle.Everyday != (setupAccount{}) || len(bundle.Groups) > 0 || bundle.Mail != nil || len(bundle.Clients) == 0 {
 			return bundle, p, errors.New("an amendment declares clients only, never accounts or groups")
 		}
 		accounts = nil
@@ -181,6 +195,13 @@ func setupMetadata(b []byte) (setupBundle, store.InstallerSetup, error) {
 		addr, err := mail.ParseAddress(u.Email)
 		if !setupName.MatchString(u.Username) || err != nil || addr.Address != u.Email || len(u.Email) > 254 {
 			return bundle, p, errors.New("invalid setup account name or email")
+		}
+	}
+	if m := bundle.Mail; m != nil {
+		settings := kymail.Settings{Host: m.Host, Port: m.Port, Security: m.Security, From: m.From, Username: m.Username}
+		if settings.Validate() != nil || settings != (kymail.Settings{Host: m.Host, Port: m.Port, Security: m.Security, From: m.From, Username: m.Username}) ||
+			(m.Username == "") != (m.PasswordFile == "") || m.PasswordFile != "" && !filepath.IsAbs(m.PasswordFile) || strings.ContainsFunc(m.Host+m.From+m.Username, unicode.IsControl) {
+			return bundle, p, errors.New("mail requires a valid TLS relay and sender, and a username only with an absolute protected password file")
 		}
 	}
 	ids := map[string]bool{}
@@ -271,6 +292,28 @@ func prepareSetup(raw []byte) (store.InstallerSetup, error) {
 			p.Everyday = account
 		}
 	}
+	if m := bundle.Mail; m != nil {
+		settings := kymail.Settings{Host: m.Host, Port: m.Port, Security: m.Security, From: m.From, Username: m.Username}
+		contract, _ := json.Marshal(settings)
+		if m.PasswordFile != "" {
+			if err := externalCredentialAllowed(m.PasswordFile, setupCredentialFiles(bundle), "mail password"); err != nil {
+				return p, err
+			}
+			raw, err := readSetupFile(m.PasswordFile, 1025)
+			if err != nil {
+				return p, err
+			}
+			settings.Password = strings.TrimSuffix(string(raw), "\n")
+			if settings.Password == "" || len(settings.Password) > 1024 || strings.ContainsAny(settings.Password, "\r\n\x00") {
+				return p, errors.New("mail password requires 1 to 1024 bytes without newlines")
+			}
+		}
+		plain, _ := json.Marshal(settings)
+		p.Mail = &store.InstallerMail{Host: m.Host, Contract: string(contract), Settings: plain}
+		if p.EncryptionKey, err = existingSetupEncryptionKey(); err != nil {
+			return p, err
+		}
+	}
 	for _, c := range bundle.Clients {
 		raw, err := readSetupFile(c.SecretFile, 1024)
 		if err != nil {
@@ -289,7 +332,7 @@ func prepareSetup(raw []byte) (store.InstallerSetup, error) {
 		client.Groups = append([]string(nil), c.Groups...)
 		sort.Strings(client.Groups)
 		if c.SCIM != nil {
-			if err := scimTokenAllowed(c.SCIM.TokenFile, setupCredentialFiles(bundle)); err != nil {
+			if err := externalCredentialAllowed(c.SCIM.TokenFile, setupCredentialFiles(bundle), "SCIM token"); err != nil {
 				return p, err
 			}
 			raw, err := readSetupFile(c.SCIM.TokenFile, 8193)
@@ -373,7 +416,7 @@ func runSetupInput(args []string, input io.Reader, out io.Writer) error {
 		if *file != "" || *db != "" || *check || *stage || *exportClient != "" {
 			return errors.New("capabilities cannot be combined with setup arguments")
 		}
-		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system"}})
+		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system", "installer-verified-email", "mail-relay"}})
 	}
 	if *exportClient != "" {
 		if *stage || *check {

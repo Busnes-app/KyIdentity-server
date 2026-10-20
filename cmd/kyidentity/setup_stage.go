@@ -193,7 +193,7 @@ func stageSetup(file, db string, raw []byte, check bool) (string, error) {
 	needsKey := false
 	for _, c := range b.Clients {
 		if c.SCIM != nil {
-			if err := scimTokenAllowed(c.SCIM.TokenFile, append(append([]string{file}, generated...), setupCredentialFiles(b)...)); err != nil {
+			if err := externalCredentialAllowed(c.SCIM.TokenFile, append(append([]string{file}, generated...), setupCredentialFiles(b)...), "SCIM token"); err != nil {
 				return "", err
 			}
 			token, err := readSetupFile(c.SCIM.TokenFile, 8193)
@@ -208,6 +208,19 @@ func stageSetup(file, db string, raw []byte, check bool) (string, error) {
 			needsKey = true
 		}
 		needsKey = needsKey || c.SuiteWebhook != nil
+	}
+	// A relay password may be human-chosen, so the receipt holds nothing derived from it:
+	// apply compares it with the sealed relay settings instead.
+	if m := b.Mail; m != nil {
+		needsKey = true
+		if m.PasswordFile != "" {
+			if err := externalCredentialAllowed(m.PasswordFile, append(append([]string{file}, generated...), setupCredentialFiles(b)...), "mail password"); err != nil {
+				return "", err
+			}
+			if _, err := readSetupFile(m.PasswordFile, 1025); err != nil {
+				return "", errors.New("destination-issued mail password is unavailable")
+			}
+		}
 	}
 	if needsKey {
 		key, err := existingSetupEncryptionKey()

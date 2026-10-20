@@ -78,10 +78,10 @@ func TestSetupSCIMTokenRefusesSetupCredentials(t *testing.T) {
 		})
 	}
 	t.Run("own-password", func(t *testing.T) {
-		if err := scimTokenAllowed(filepath.Join(data, "pw"), []string{filepath.Join(data, "pw")}); err == nil {
+		if err := externalCredentialAllowed(filepath.Join(data, "pw"), []string{filepath.Join(data, "pw")}, "SCIM token"); err == nil {
 			t.Fatal("bundle credential accepted as SCIM token")
 		}
-		if err := scimTokenAllowed(filepath.Join(data, "destination.token"), []string{filepath.Join(data, "pw")}); err != nil {
+		if err := externalCredentialAllowed(filepath.Join(data, "destination.token"), []string{filepath.Join(data, "pw")}, "SCIM token"); err != nil {
 			t.Fatal("destination-issued token refused:", err)
 		}
 	})
