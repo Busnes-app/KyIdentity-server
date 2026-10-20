@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.5 — 2026-10-20
+
+### Changes
+
+- `apply-setup` creates the setup's `admin` and `everyday` accounts with a verified email: the installer owns them and took the addresses from the owner's plan, so apps that require `email_verified=true` (Matrix MAS, Mealie) accept them without a mailed link. An ordinary rerun verifies an owned account still at its declared address, so accounts applied by 0.4.4 or earlier gain it (audit `installer.email_verified`). Changing an address still clears verification, and a rerun refuses the changed account. Advertised as capability `installer-verified-email`. See [Verified owner email](docs/INSTALLER-SETUP.md#verified-owner-email).
+- A setup bundle can configure the SMTP relay with `mail` (`host`, `port`, `security` `starttls`/`tls`, `from`, optional `username` with `passwordFile`). The password comes from a destination-issued protected file, is bound by digest in preparation and sealed with the existing product key like the admin UI's; it never enters arguments or reports. Setup refuses relay settings it does not own and later drift; UI changes still need step-up. With a relay, an unattended run can mail and redeem a verification link. Advertised as capability `mail-relay`. See [Mail relay](docs/INSTALLER-SETUP.md#mail-relay).
+
 ## 0.4.4 — 2026-10-19
 
 ### Changes
