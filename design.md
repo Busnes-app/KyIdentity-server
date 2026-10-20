@@ -2,11 +2,11 @@
 
 ## 1. Purpose
 
-KyIdentity is the single-organization identity service and central identity authority for the KySecurity suite. It provides single sign-on (SSO) for KyPost, KyBookmarks, KyNotes, and KyPasswords, as well as OAuth 2.0 and OpenID Connect (OIDC) for approved non-KySecurity services.
+KyIdentity is the single-organization identity service and central identity authority for the Busnes.app Ky products. It provides single sign-on (SSO) for Ky products such as KyPost and KyNotes, as well as OAuth 2.0 and OpenID Connect (OIDC) for approved non-Ky services.
 
-KyIdentity acts as the authoritative user directory for the suite: when an administrator creates or updates an account in KyIdentity, the account automatically replicates across paired KySecurity products. Connecting downstream KySecurity systems to KyIdentity is performed securely through a UI-generated, short-lived pairing key.
+KyIdentity acts as the authoritative user directory for the suite: when an administrator creates or updates an account in KyIdentity, the account automatically replicates across paired Ky products. Connecting downstream Ky systems to KyIdentity is performed securely through a UI-generated, short-lived pairing key.
 
-The first release prioritizes secure authentication, automated suite-wide account syncing, native push/TOTP MFA, and an application launcher. KyIdentity MFA requires its own dedicated mobile authenticator app (or KyPost mobile during transition). It must not be folded into KyPassword or a single super app containing every KySecurity product.
+The first release prioritizes secure authentication, automated suite-wide account syncing, native push/TOTP MFA, and an application launcher. KyIdentity MFA requires its own dedicated mobile authenticator app (or KyPost mobile during transition). It must not be folded into a password manager or a single super app containing every Ky product.
 
 ## 2. MVP Scope
 
