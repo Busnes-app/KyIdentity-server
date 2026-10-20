@@ -18,7 +18,7 @@ self-hosted Go server  --(Bearer per-server key)-->  this Worker  --(APNs provid
 
 1. Install deps and log in:
    ```sh
-   cd worker-apns
+   cd workers/apns
    npm install
    npx wrangler login
    ```
@@ -135,11 +135,24 @@ Three routes, and that is the entire surface — anything else is `404`, includi
 ```json
 {
   "token": "<raw APNs device token (64-char hex)>",
-  "title": "Sign-in approval",
-  "body": "Approve the request in KySecurity.",
-  "data": { "type": "mfa_challenge", "challengeId": "..." }
+  "title": "Sign-in request",
+  "body": "Open KyAuth to review.",
+  "platform": "ios",
+  "data": {
+    "type": "mfa_challenge",
+    "title": "Sign-in request",
+    "body": "Open KyAuth to review.",
+    "challengeId": "...",
+    "deviceId": "...",
+    "deviceUserId": "...",
+    "purpose": "...",
+    "expiresAtEpochMs": "1760000000000",
+    "devicePlatform": "ios"
+  }
 }
 ```
+
+That is the unsealed `data` KyIdentity builds (`challengeData` in `internal/mfa/push_relay.go`). For a device that registered push keys it sends `"data": {"type": "mfa_challenge", "kyauth": "<968-character base64url RFC 8291 body>"}` instead; see [HTTP/2 and Payload Compatibility](#http2-and-payload-compatibility). `platform` is ignored.
 
 Responses:
 - `200 {"ok":true}` on delivery
@@ -247,36 +260,20 @@ Exhausting it returns `429` with `{"error":"relay daily budget exhausted","windo
 
 APNs requires HTTP/2. Cloudflare Workers' `fetch()` automatically negotiates HTTP/2 via ALPN. All current Cloudflare plans support HTTP/2.
 
-Both the FCM (Android) and APNs (iOS) workers receive identical request payloads from the Go backend:
-
-```json
-{
-  "token": "device-token-here",
-  "title": "Sign-in approval",
-  "body": "Approve the request in KySecurity.",
-  "data": {
-    "type": "mfa_challenge",
-    "challengeId": "..."
-  }
-}
-```
-
-The APNs worker translates this to the APS payload:
+The FCM (Android) and APNs (iOS) workers take the same `/send` body (above). The APNs worker turns it into the APS payload, copying every `data` key to the top level; for a sealed push:
 
 ```json
 {
   "aps": {
-    "alert": { "title": "Sign-in approval", "body": "Approve the request in KySecurity." },
+    "alert": { "title": "Sign-in request", "body": "Open KyAuth to review." },
     "sound": "default",
     "mutable-content": 1,
     "category": "MFA_CHALLENGE"
   },
   "type": "mfa_challenge",
-  "challengeId": "..."
+  "kyauth": "<968-character base64url RFC 8291 body>"
 }
 ```
-
-Both platforms handle the full payload identically client-side.
 
 KyIdentity's unsealed `data` is `type`, `title`, `body`, `challengeId`, `deviceId`, `deviceUserId`, `purpose`, `expiresAtEpochMs` and `devicePlatform` (`challengeData` in `internal/mfa/push_relay.go`), so the relay and APNs see KyIdentity's user and device IDs in the clear for any device registered without push keys, Android over FCM included.
 
