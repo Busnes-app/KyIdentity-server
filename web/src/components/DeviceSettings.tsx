@@ -634,10 +634,10 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
       </div>
 
       {showPairModal && (
-        <Modal title="Pair KySecurity Authenticator" onClose={closePairModal}>
+        <Modal title="Pair KyAuth" onClose={closePairModal}>
           <div className="modal-body text-center">
             <p className="modal-desc">
-              Open the <strong>KySecurity Authenticator</strong> app on your mobile device and scan the QR code or enter the pairing PIN.
+              Open the <strong>KyAuth</strong> app on your mobile device and scan the QR code or enter the pairing PIN.
             </p>
             <p className="modal-desc">
               This adds a different device without removing the paired devices listed above. Pairing the same device identifier updates that device.
