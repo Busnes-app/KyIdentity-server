@@ -209,18 +209,17 @@ func stageSetup(file, db string, raw []byte, check bool) (string, error) {
 		}
 		needsKey = needsKey || c.SuiteWebhook != nil
 	}
-	// A relay password is destination-issued too: bound by digest, never generated.
+	// A relay password may be human-chosen, so the receipt holds nothing derived from it:
+	// apply compares it with the sealed relay settings instead.
 	if m := b.Mail; m != nil {
 		needsKey = true
 		if m.PasswordFile != "" {
 			if err := externalCredentialAllowed(m.PasswordFile, append(append([]string{file}, generated...), setupCredentialFiles(b)...), "mail password"); err != nil {
 				return "", err
 			}
-			password, err := readSetupFile(m.PasswordFile, 1025)
-			if err != nil {
+			if _, err := readSetupFile(m.PasswordFile, 1025); err != nil {
 				return "", errors.New("destination-issued mail password is unavailable")
 			}
-			digest(m.PasswordFile, password)
 		}
 	}
 	if needsKey {

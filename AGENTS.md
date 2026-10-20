@@ -69,8 +69,9 @@ KyIdentity Server is the single-organization SSO provider and central identity a
   an ordinary rerun verifies an owned account still at its declared address. Only this and
   a redeemed mailed link set `email_verified_at`; any address change clears it.
   Optional `mail` (setups only, never amendments) owns the SMTP relay: settings sealed like
-  the UI's, password from a destination-issued protected file bound by digest and compared
-  against the sealed value, never in the contract or report. Foreign settings and drift are refused.
+  the UI's, password from a destination-issued protected file compared against the sealed
+  value. It may be human-chosen, so no value derived from it enters the preparation receipt,
+  ownership contract or report. Foreign settings and drift are refused.
 
 - Public `GET /healthz` uses `ky-primitives/health` with service `kyidentity`, checks database, signing key, encryption key, and audit persistence, and caches the safe `ky.health/1` response for five seconds. `GET /livez` retains dependency-free `{"status":"alive"}`; `/readyz` remains an uncached readiness check and Docker probe.
 

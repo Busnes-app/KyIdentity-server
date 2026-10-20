@@ -269,8 +269,9 @@ capability `mail-relay`:
 must be trusted by the container. `username` and `passwordFile` come together or not at
 all (an unauthenticated relay). The password is destination-issued, like a SCIM token: a
 private target-local file outside every preparation directory, never a setup credential,
-the encryption key or the database, at most 1024 bytes without newlines. Preparation binds
-its digest; it is never generated. Setup seals the settings with the existing product key,
+the encryption key or the database, at most 1024 bytes without newlines. It is never
+generated. Because it may be human-chosen, preparation checks the file but records
+nothing derived from it; apply compares it with the sealed settings instead. Setup seals the settings with the existing product key,
 exactly as the admin UI does, audits `admin.mail_configured` (which raises the mail relay
 alert) and never reports the password.
 

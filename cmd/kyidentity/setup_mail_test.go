@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -109,20 +111,38 @@ func TestSetupMailMetadataRefusesUnsafeRelays(t *testing.T) {
 	}
 }
 
-// Preparation binds the destination-issued relay password by digest, like a SCIM token.
-func TestSetupPreparationBindsMailPassword(t *testing.T) {
+// A relay password may be human-chosen: nothing derived from it enters the preparation
+// receipt or the native record, so a leaked receipt allows no offline guessing. Apply
+// still refuses a changed password through the sealed relay settings.
+func TestSetupPreparationRecordsNothingDerivedFromMailPassword(t *testing.T) {
 	b, file, db := stageFixture(t)
 	password := filepath.Join(os.Getenv("KYIDENTITY_DATA_DIR"), "smtp.password")
-	if err := os.WriteFile(password, []byte("relay-password-789"), 0600); err != nil {
+	b.Mail = &setupMail{Host: "mailpit", Port: 1025, Security: "starttls", From: "id@example.test", Username: "kyidentity", PasswordFile: password}
+	if _, err := stageCommand(t, b, file, db, false); err == nil {
+		t.Fatal("preparation accepted a missing relay password file")
+	}
+	if err := os.WriteFile(password, []byte("relay-password-789\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b.Mail = &setupMail{Host: "mailpit", Port: 1025, Security: "starttls", From: "id@example.test", Username: "kyidentity", PasswordFile: password}
 	if _, err := stageCommand(t, b, file, db, false); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := os.ReadFile(filepath.Join(filepath.Dir(file), "credentials.json"))
-	if err != nil || !strings.Contains(string(receipt), password) || strings.Contains(string(receipt), "relay-password") {
-		t.Fatalf("receipt %s %v", receipt, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sealed struct{ Credentials map[string]string }
+	if err := json.Unmarshal(receipt, &sealed); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := sealed.Credentials[password]; found {
+		t.Fatalf("receipt records the relay password file: %s", receipt)
+	}
+	for _, secret := range []string{"relay-password-789", "relay-password-789\n"} {
+		sum := sha256.Sum256([]byte(secret))
+		if bytes.Contains(receipt, []byte(secret)) || bytes.Contains(receipt, []byte(hex.EncodeToString(sum[:]))) {
+			t.Fatalf("receipt holds a value derived from the relay password: %s", receipt)
+		}
 	}
 	var out bytes.Buffer
 	if err := runSetup([]string{"--file", file, "--db", db}, &out); err != nil {
@@ -131,8 +151,8 @@ func TestSetupPreparationBindsMailPassword(t *testing.T) {
 	if err := os.WriteFile(password, []byte("rotated-password-000"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stageCommand(t, b, file, db, true); err == nil {
-		t.Fatal("preparation accepted a changed relay password")
+	if _, err := stageCommand(t, b, file, db, true); err != nil {
+		t.Fatalf("preparation check depends on the relay password: %v", err)
 	}
 	if err := runSetup([]string{"--file", file, "--db", db, "--check"}, &out); err == nil {
 		t.Fatal("changed relay password accepted")
