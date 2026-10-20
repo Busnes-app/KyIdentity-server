@@ -18,7 +18,7 @@ self-hosted Go server  --(Bearer per-server key)-->  this Worker  --(APNs provid
 
 1. Install deps and log in:
    ```sh
-   cd worker-apns
+   cd workers/apns
    npm install
    npx wrangler login
    ```
@@ -135,11 +135,24 @@ Three routes, and that is the entire surface — anything else is `404`, includi
 ```json
 {
   "token": "<raw APNs device token (64-char hex)>",
-  "title": "Sign-in approval",
-  "body": "Approve the request in KySecurity.",
-  "data": { "type": "mfa_challenge", "challengeId": "..." }
+  "title": "Sign-in request",
+  "body": "Open KyAuth to review.",
+  "platform": "ios",
+  "data": {
+    "type": "mfa_challenge",
+    "title": "Sign-in request",
+    "body": "Open KyAuth to review.",
+    "challengeId": "...",
+    "deviceId": "...",
+    "deviceUserId": "...",
+    "purpose": "...",
+    "expiresAtEpochMs": "1760000000000",
+    "devicePlatform": "ios"
+  }
 }
 ```
+
+That is the unsealed `data` KyIdentity builds (`challengeData` in `internal/mfa/push_relay.go`). For a device that registered push keys it sends `"data": {"type": "mfa_challenge", "kyauth": "<968-character base64url RFC 8291 body>"}` instead; see [HTTP/2 and Payload Compatibility](#http2-and-payload-compatibility). `platform` is ignored.
 
 Responses:
 - `200 {"ok":true}` on delivery
@@ -247,38 +260,26 @@ Exhausting it returns `429` with `{"error":"relay daily budget exhausted","windo
 
 APNs requires HTTP/2. Cloudflare Workers' `fetch()` automatically negotiates HTTP/2 via ALPN. All current Cloudflare plans support HTTP/2.
 
-Both the FCM (Android) and APNs (iOS) workers receive identical request payloads from the Go backend:
-
-```json
-{
-  "token": "device-token-here",
-  "title": "Sign-in approval",
-  "body": "Approve the request in KySecurity.",
-  "data": {
-    "type": "mfa_challenge",
-    "challengeId": "..."
-  }
-}
-```
-
-The APNs worker translates this to the APS payload:
+The FCM (Android) and APNs (iOS) workers take the same `/send` body (above). The APNs worker turns it into the APS payload, copying every `data` key to the top level; for a sealed push:
 
 ```json
 {
   "aps": {
-    "alert": { "title": "Sign-in approval", "body": "Approve the request in KySecurity." },
+    "alert": { "title": "Sign-in request", "body": "Open KyAuth to review." },
     "sound": "default",
     "mutable-content": 1,
     "category": "MFA_CHALLENGE"
   },
   "type": "mfa_challenge",
-  "challengeId": "..."
+  "kyauth": "<968-character base64url RFC 8291 body>"
 }
 ```
 
-Both platforms handle the full payload identically client-side.
+KyIdentity's unsealed `data` is `type`, `title`, `body`, `challengeId`, `deviceId`, `deviceUserId`, `purpose`, `expiresAtEpochMs` and `devicePlatform` (`challengeData` in `internal/mfa/push_relay.go`), so the relay and APNs see KyIdentity's user and device IDs in the clear for any device registered without push keys, Android over FCM included.
 
-A device that registered `pushP256dh`/`pushAuth` (KyAuth iOS) gets `data` sealed instead: `{"type": "mfa_challenge", "kyauth": "<968-character base64url RFC 8291 body>"}`. The Worker passes it through unchanged; the title and body are KyIdentity's fixed text, so the relay and APNs see no user, device or challenge identifier. `mutable-content: 1` hands the alert to KyAuth's notification service extension, which replaces the text with its own fixed strings. Keep the value cap (`MAX_DATA_VALUE_LENGTH`, 1024) at or above 968: the Worker truncates longer values, and a truncated body cannot be opened.
+A device that registered `pushP256dh`/`pushAuth` (KyAuth iOS) gets `data` sealed instead: `{"type": "mfa_challenge", "kyauth": "<968-character base64url RFC 8291 body>"}`. The Worker passes it through unchanged; the title and body are KyIdentity's fixed text, so the relay and APNs see no KyIdentity user, device or challenge identifier, only the APNs device token. `mutable-content: 1` hands the alert to KyAuth's notification service extension, which replaces the text with its own fixed strings. Keep the value cap (`MAX_DATA_VALUE_LENGTH`, 1024) at or above 968: the Worker truncates longer values, and a truncated body cannot be opened.
+
+What the relay keeps, whichever form the push takes: never the raw device token or the payload. A token's claim lives in the `RELAY_COORDINATOR` instance named after its SHA-256 (owner key id, claim time, delivery flag) and stays while that key is active once a send has delivered; Analytics Engine gets the key id, label and source per accepted send; log lines carry the request id, event and key id.
 
 ## Provider Token Lifecycle
 

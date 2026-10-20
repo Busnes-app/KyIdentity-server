@@ -18,7 +18,7 @@ self-hosted Go server  --(Bearer per-server key)-->  this Worker  --(service acc
 
 1. Install deps and log in:
    ```sh
-   cd worker
+   cd workers/fcn
    npm install
    npx wrangler login
    ```
@@ -132,8 +132,26 @@ the `/admin/keys` endpoints that used to be here.
 `POST /send` body:
 
 ```json
-{ "token": "<FCM registration token>", "title": "Sign-in approval", "body": "Approve the request in KySecurity.", "data": { "type": "mfa_challenge", "challengeId": "..." }, "platform": "android" }
+{
+  "token": "<FCM registration token>",
+  "title": "Sign-in request",
+  "body": "Open KyAuth to review.",
+  "platform": "android",
+  "data": {
+    "type": "mfa_challenge",
+    "title": "Sign-in request",
+    "body": "Open KyAuth to review.",
+    "challengeId": "...",
+    "deviceId": "...",
+    "deviceUserId": "...",
+    "purpose": "...",
+    "expiresAtEpochMs": "1760000000000",
+    "devicePlatform": "android"
+  }
+}
 ```
+
+That is the unsealed `data` KyIdentity builds (`challengeData` in `internal/mfa/push_relay.go`); KyAuth Android over FCM always gets this form. A device that registered push keys gets `"data": {"type": "mfa_challenge", "kyauth": "<RFC 8291 body>"}` instead. The Worker forwards `data` only, as a data-only message; `title`, `body` and `platform` are not forwarded.
 
 Responses: `200 {"ok":true}` on delivery; `403` when the token is already
 claimed by a different active key (see Token pinning below); `410 {"stale":true}`
