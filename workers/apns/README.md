@@ -278,7 +278,11 @@ The APNs worker translates this to the APS payload:
 
 Both platforms handle the full payload identically client-side.
 
-A device that registered `pushP256dh`/`pushAuth` (KyAuth iOS) gets `data` sealed instead: `{"type": "mfa_challenge", "kyauth": "<968-character base64url RFC 8291 body>"}`. The Worker passes it through unchanged; the title and body are KyIdentity's fixed text, so the relay and APNs see no user, device or challenge identifier. `mutable-content: 1` hands the alert to KyAuth's notification service extension, which replaces the text with its own fixed strings. Keep the value cap (`MAX_DATA_VALUE_LENGTH`, 1024) at or above 968: the Worker truncates longer values, and a truncated body cannot be opened.
+KyIdentity's unsealed `data` is `type`, `title`, `body`, `challengeId`, `deviceId`, `deviceUserId`, `purpose`, `expiresAtEpochMs` and `devicePlatform` (`challengeData` in `internal/mfa/push_relay.go`), so the relay and APNs see KyIdentity's user and device IDs in the clear for any device registered without push keys, Android over FCM included.
+
+A device that registered `pushP256dh`/`pushAuth` (KyAuth iOS) gets `data` sealed instead: `{"type": "mfa_challenge", "kyauth": "<968-character base64url RFC 8291 body>"}`. The Worker passes it through unchanged; the title and body are KyIdentity's fixed text, so the relay and APNs see no KyIdentity user, device or challenge identifier, only the APNs device token. `mutable-content: 1` hands the alert to KyAuth's notification service extension, which replaces the text with its own fixed strings. Keep the value cap (`MAX_DATA_VALUE_LENGTH`, 1024) at or above 968: the Worker truncates longer values, and a truncated body cannot be opened.
+
+What the relay keeps, whichever form the push takes: never the raw device token or the payload. A token's claim lives in the `RELAY_COORDINATOR` instance named after its SHA-256 (owner key id, claim time, delivery flag) and stays while that key is active once a send has delivered; Analytics Engine gets the key id, label and source per accepted send; log lines carry the request id, event and key id.
 
 ## Provider Token Lifecycle
 
