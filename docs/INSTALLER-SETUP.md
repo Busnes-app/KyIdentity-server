@@ -120,8 +120,15 @@ Example bundle (replace the identifiers, addresses, URLs and file paths):
 }
 ```
 
-Use the product's actual documented callback path. HTTPS is required; credentials
-and fragments in redirect URLs are refused. Preserve `setupId` on reruns.
+Use the product's actual documented callback path. Redirect and post-logout URIs must be
+HTTPS; credentials and fragments are refused. Custom app schemes (`myapp://callback`) are
+refused here and by native client registration, so a mobile app needs its HTTPS redirect.
+Preserve `setupId` on reruns.
+
+Bundle clients are always confidential, and the schema has no back-channel logout field
+(unknown fields are refused). Register a public client natively instead
+(`"clientType":"public"` on `POST /api/admin/clients`); set a back-channel logout URI on an
+applied client natively (`backchannelLogoutUri` on `PUT /api/admin/clients/{id}`).
 
 Role fields name the exact roles the product understands; they do not use the directory's
 global administrator role. Native OIDC issues only this app's `roles` claim.
@@ -276,6 +283,18 @@ Changing or removing a client added this way still needs native administration.
 kyidentity apply-setup --capabilities
 kyidentity apply-setup --file /data/installer/bundle.json
 kyidentity apply-setup --file /data/installer/bundle.json --check
+```
+
+With the stock compose file, run these inside the running container from the compose
+directory. `-T` keeps stdin a plain pipe, which `--stage` reads:
+
+```sh
+docker compose exec -T kyidentity-server /usr/local/bin/kyidentity apply-setup \
+  --stage --file /data/installer/<setup UUID>/setup.json < setup.json
+docker compose exec -T kyidentity-server /usr/local/bin/kyidentity apply-setup \
+  --file /data/installer/<setup UUID>/setup.json
+docker compose exec -T kyidentity-server /usr/local/bin/kyidentity apply-setup \
+  --file /data/installer/<setup UUID>/setup.json --check
 ```
 
 The database path follows `KYIDENTITY_DB_PATH`, otherwise `KYIDENTITY_DATA_DIR`
