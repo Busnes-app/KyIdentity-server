@@ -173,6 +173,8 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## Verification
 
+- Launcher search filters the arranged view only; never persist filtered results. Saved layouts, group order, hidden apps, custom icons and access-request controls remain available. `web/src/launcherLayout.test.ts` checks search leaves preferences and ordering unchanged.
+
 - `internal/sync/notes_native_test.go` is the opt-in real KyNotes directory sender.
   Precompile its race test binary and run the receiver as documented in KyNotes
   `docs/SSO.md`. It uses native account/client/role setup and a receipt-owned suite connector

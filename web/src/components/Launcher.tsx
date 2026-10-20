@@ -46,7 +46,8 @@ export const LauncherView: React.FC<{ arranged: Arranged; onUnhide: (key: string
                 <li key={app.key}>
                   <a href={app.url} {...link} className="launcher-tile" title={app.description}>
                     <AppIcon key={app.iconName} app={app} />
-                    {app.name}
+                    <span className="launcher-tile-copy"><b>{app.name}</b>{app.description && <small>{app.description}</small>}</span>
+                    <ExternalLink size={15} className="launcher-open-icon" aria-hidden="true" />
                   </a>
                 </li>
               ))}

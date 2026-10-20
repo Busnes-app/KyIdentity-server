@@ -23,7 +23,7 @@ interface Props {
 }
 
 const LAYOUTS = [
-  ['tiles', 'Tiles', 'Every group as a grid of icons. Descriptions on hover.'],
+  ['tiles', 'Tiles', 'Every group as a grid with names, icons and descriptions.'],
   ['dock', 'Dock + list', 'First group as large icons; the rest as a compact list with descriptions.'],
 ] as const;
 

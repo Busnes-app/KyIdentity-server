@@ -52,6 +52,18 @@ export function arrange(apps: Application[], prefs: LauncherPrefs | null): Arran
   };
 }
 
+/** Search is a view only: never feed its result back into saved preferences. */
+export function searchLauncher(arranged: Arranged, query: string): Arranged {
+  const text = query.trim().toLocaleLowerCase();
+  if (!text) return arranged;
+  const matches = (app: Application) => `${app.name} ${app.description ?? ''}`.toLocaleLowerCase().includes(text);
+  return {
+    ...arranged,
+    groups: arranged.groups.map((group) => ({ ...group, apps: group.apps.filter(matches) })).filter((group) => group.apps.length > 0),
+    hidden: arranged.hidden.filter(matches),
+  };
+}
+
 /** A group index, or 'hidden'. */
 export type Slot = number | 'hidden';
 
