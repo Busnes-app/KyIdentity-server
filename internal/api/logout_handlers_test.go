@@ -12,12 +12,12 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
-const bye = "https://notes.urlxl.com/bye"
+const bye = "https://notes.example.com/bye"
 
 // logoutClient registers a public client with one post-logout redirect URI.
 func logoutClient(t *testing.T, db *store.Store, id string) {
 	t.Helper()
-	newClient(t, db, id, []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, id, []string{"https://notes.example.com/callback"}, []string{"openid"})
 	c, err := db.GetOAuthClientByID(id)
 	if err != nil || c == nil {
 		t.Fatal(err)
@@ -31,11 +31,11 @@ func logoutClient(t *testing.T, db *store.Store, id string) {
 // idTokenFor completes a code exchange for the session behind cookie and returns its ID token.
 func idTokenFor(t *testing.T, db *store.Store, oe *oauth.Engine, cookie, clientID string) string {
 	t.Helper()
-	code, err := oe.CreateAuthorizationCode(clientID, sessionIDFor(t, db, cookie), "https://notes.urlxl.com/callback", "openid", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "S256")
+	code, err := oe.CreateAuthorizationCode(clientID, sessionIDFor(t, db, cookie), "https://notes.example.com/callback", "openid", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "S256")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := oe.ExchangeAuthorizationCode(code, clientID, "", "https://notes.urlxl.com/callback", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+	resp, err := oe.ExchangeAuthorizationCode(code, clientID, "", "https://notes.example.com/callback", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
 	if err != nil {
 		t.Fatal(err)
 	}

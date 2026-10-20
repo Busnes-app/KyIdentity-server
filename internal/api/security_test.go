@@ -74,10 +74,10 @@ func TestExpiredSessionCannotMintAuthorizationCode(t *testing.T) {
 
 	u := newUser(t, db, "user")
 	cookie := newSession(t, db, u, time.Now().UTC().Add(-30*24*time.Hour))
-	newClient(t, db, "kypost", []string{"https://mail.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kypost", []string{"https://mail.example.com/callback"}, []string{"openid"})
 
 	req := httptest.NewRequest("GET",
-		"/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.urlxl.com%2Fcallback"+
+		"/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.example.com%2Fcallback"+
 			"&response_type=code&scope=openid&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256", nil)
 	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	rr := httptest.NewRecorder()
@@ -94,10 +94,10 @@ func TestLiveSessionStillMintsAuthorizationCode(t *testing.T) {
 
 	u := newUser(t, db, "user")
 	cookie := newSession(t, db, u, time.Now().UTC().Add(24*time.Hour))
-	newClient(t, db, "kypost", []string{"https://mail.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kypost", []string{"https://mail.example.com/callback"}, []string{"openid"})
 
 	req := httptest.NewRequest("GET",
-		"/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.urlxl.com%2Fcallback"+
+		"/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.example.com%2Fcallback"+
 			"&response_type=code&scope=openid&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256", nil)
 	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	rr := httptest.NewRecorder()
@@ -115,7 +115,7 @@ func TestAuthorizeRequiresS256PKCEForConfidentialClients(t *testing.T) {
 
 	u := newUser(t, db, "user")
 	cookie := newSession(t, db, u, time.Now().UTC().Add(24*time.Hour))
-	newClient(t, db, "kypost", []string{"https://mail.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kypost", []string{"https://mail.example.com/callback"}, []string{"openid"})
 	c, err := db.GetOAuthClientByID("kypost")
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestAuthorizeRequiresS256PKCEForConfidentialClients(t *testing.T) {
 		"plain": "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=plain",
 		"bare":  "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 	} {
-		req := httptest.NewRequest("GET", "/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.urlxl.com%2Fcallback&response_type=code&scope=openid"+pkce, nil)
+		req := httptest.NewRequest("GET", "/oauth/authorize?client_id=kypost&redirect_uri=https%3A%2F%2Fmail.example.com%2Fcallback&response_type=code&scope=openid"+pkce, nil)
 		req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 		rr := httptest.NewRecorder()
 		srv.httpServer.Handler.ServeHTTP(rr, req)
@@ -646,15 +646,15 @@ func TestRevokedTokenIsRejectedAtUserinfo(t *testing.T) {
 	defer cleanup()
 
 	u := newUser(t, db, "user")
-	newClient(t, db, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kynotes", []string{"https://notes.example.com/callback"}, []string{"openid"})
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	challenge := "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-	code, err := oe.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.urlxl.com/callback", "openid", challenge, "S256")
+	code, err := oe.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.example.com/callback", "openid", challenge, "S256")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := oe.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", verifier)
+	resp, err := oe.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -693,12 +693,12 @@ func TestDisablingUserRevokesOutstandingTokens(t *testing.T) {
 	admin := newUser(t, db, "admin")
 	adminCookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 	victim := newUser(t, db, "user")
-	newClient(t, db, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kynotes", []string{"https://notes.example.com/callback"}, []string{"openid"})
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	challenge := "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-	code, _ := oe.CreateAuthorizationCode("kynotes", oauthSession(t, db, victim.ID), "https://notes.urlxl.com/callback", "openid", challenge, "S256")
-	resp, err := oe.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", verifier)
+	code, _ := oe.CreateAuthorizationCode("kynotes", oauthSession(t, db, victim.ID), "https://notes.example.com/callback", "openid", challenge, "S256")
+	resp, err := oe.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -886,7 +886,7 @@ func TestNewClientIsConfidentialByDefault(t *testing.T) {
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 
 	rr := adminRequest(t, srv, "POST", "/api/admin/clients", cookie,
-		`{"clientId":"kypost","clientName":"KyPost","redirectUris":["https://mail.urlxl.com/callback"]}`)
+		`{"clientId":"kypost","clientName":"KyPost","redirectUris":["https://mail.example.com/callback"]}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("client creation returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -924,7 +924,7 @@ func TestPublicClientStillRegistrableWhenAsked(t *testing.T) {
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 
 	rr := adminRequest(t, srv, "POST", "/api/admin/clients", cookie,
-		`{"clientId":"mobile","clientName":"Mobile","clientType":"public","redirectUris":["https://m.urlxl.com/callback"]}`)
+		`{"clientId":"mobile","clientName":"Mobile","clientType":"public","redirectUris":["https://m.example.com/callback"]}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("public client creation returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -944,7 +944,7 @@ func TestClientSecretCanBeRotated(t *testing.T) {
 	user := newUser(t, db, "user")
 
 	create := adminRequest(t, srv, "POST", "/api/admin/clients", cookie,
-		`{"clientId":"kydns","clientName":"KyDNS","redirectUris":["https://dns.urlxl.com/callback"]}`)
+		`{"clientId":"kydns","clientName":"KyDNS","redirectUris":["https://dns.example.com/callback"]}`)
 	if create.Code != http.StatusOK {
 		t.Fatalf("create returned %d: %s", create.Code, create.Body.String())
 	}
@@ -973,19 +973,19 @@ func TestClientSecretCanBeRotated(t *testing.T) {
 	challenge := "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
 
 	allowTestAppAccess(t, db, "kydns")
-	code, err := oe.CreateAuthorizationCode("kydns", oauthSession(t, db, user.ID), "https://dns.urlxl.com/callback", "openid", challenge, "S256")
+	code, err := oe.CreateAuthorizationCode("kydns", oauthSession(t, db, user.ID), "https://dns.example.com/callback", "openid", challenge, "S256")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := oe.ExchangeAuthorizationCode(code, "kydns", created.ClientSecret, "https://dns.urlxl.com/callback", verifier); err == nil {
+	if _, err := oe.ExchangeAuthorizationCode(code, "kydns", created.ClientSecret, "https://dns.example.com/callback", verifier); err == nil {
 		t.Error("the superseded client secret still authenticated")
 	}
 
-	code, err = oe.CreateAuthorizationCode("kydns", oauthSession(t, db, user.ID), "https://dns.urlxl.com/callback", "openid", challenge, "S256")
+	code, err = oe.CreateAuthorizationCode("kydns", oauthSession(t, db, user.ID), "https://dns.example.com/callback", "openid", challenge, "S256")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := oe.ExchangeAuthorizationCode(code, "kydns", rotated.ClientSecret, "https://dns.urlxl.com/callback", verifier); err != nil {
+	if _, err := oe.ExchangeAuthorizationCode(code, "kydns", rotated.ClientSecret, "https://dns.example.com/callback", verifier); err != nil {
 		t.Errorf("the rotated client secret did not authenticate: %v", err)
 	}
 }
@@ -998,7 +998,7 @@ func TestPublicClientCanBePromotedToConfidential(t *testing.T) {
 	admin := newUser(t, db, "admin")
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 
-	newClient(t, db, "kypasswords", []string{"https://passwords.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kypasswords", []string{"https://passwords.example.com/callback"}, []string{"openid"})
 
 	rr := adminRequest(t, srv, "PUT", "/api/admin/clients/kypasswords", cookie,
 		`{"clientType":"confidential"}`)
@@ -1026,10 +1026,10 @@ func TestClientRedirectURIsCanBeUpdated(t *testing.T) {
 	defer cleanup()
 	admin := newUser(t, db, "admin")
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
-	newClient(t, db, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kynotes", []string{"https://notes.example.com/callback"}, []string{"openid"})
 
 	rr := adminRequest(t, srv, "PUT", "/api/admin/clients/kynotes", cookie,
-		`{"redirectUris":["https://notes.urlxl.com/callback","https://notes.urlxl.com/oauth/callback"]}`)
+		`{"redirectUris":["https://notes.example.com/callback","https://notes.example.com/oauth/callback"]}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("update returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -1051,7 +1051,7 @@ func TestSuiteClientCannotBeRegisteredPublic(t *testing.T) {
 
 	for _, id := range []string{"kypost", "kydns", "kypasswords", "kynotes", "kybookmarks", "KyPost"} {
 		body := `{"clientId":"` + id + `","clientName":"x","clientType":"public",` +
-			`"redirectUris":["https://x.urlxl.com/callback"]}`
+			`"redirectUris":["https://x.example.com/callback"]}`
 		rr := adminRequest(t, srv, "POST", "/api/admin/clients", cookie, body)
 		if rr.Code == http.StatusOK {
 			t.Errorf("suite client %q was registered as public", id)
@@ -1069,7 +1069,7 @@ func TestSuiteClientRegistersAsConfidential(t *testing.T) {
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 
 	rr := adminRequest(t, srv, "POST", "/api/admin/clients", cookie,
-		`{"clientId":"kypost","clientName":"KyPost","redirectUris":["https://mail.urlxl.com/callback"]}`)
+		`{"clientId":"kypost","clientName":"KyPost","redirectUris":["https://mail.example.com/callback"]}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("suite client registration returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -1088,7 +1088,7 @@ func TestSuiteClientCannotBeDemotedToPublic(t *testing.T) {
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 
 	create := adminRequest(t, srv, "POST", "/api/admin/clients", cookie,
-		`{"clientId":"kydns","clientName":"KyDNS","redirectUris":["https://dns.urlxl.com/callback"]}`)
+		`{"clientId":"kydns","clientName":"KyDNS","redirectUris":["https://dns.example.com/callback"]}`)
 	if create.Code != http.StatusOK {
 		t.Fatalf("setup failed: %s", create.Body.String())
 	}

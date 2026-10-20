@@ -52,7 +52,7 @@ func TestConfirmationPagePermitsTheValidatedRedirectOriginInCSP(t *testing.T) {
 
 	rr := endSession(t, srv, cookie, url.Values{"client_id": {"kynotes"}, "post_logout_redirect_uri": {bye}})
 	csp := rr.Header().Get("Content-Security-Policy")
-	if !strings.Contains(csp, "form-action 'self' https://notes.urlxl.com;") {
+	if !strings.Contains(csp, "form-action 'self' https://notes.example.com;") {
 		t.Fatalf("csp = %q", csp)
 	}
 	rr = endSession(t, srv, cookie, url.Values{"client_id": {"kynotes"}})

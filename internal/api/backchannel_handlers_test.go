@@ -69,9 +69,9 @@ func TestInventoryShowsLogoutDeliveriesAndAdminCanRetry(t *testing.T) {
 	admin := newSession(t, db, newUser(t, db, "admin"), exp)
 	u := newUser(t, db, "user")
 	mine, other := newSession(t, db, u, exp), newSession(t, db, u, exp)
-	newClient(t, db, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kynotes", []string{"https://notes.example.com/callback"}, []string{"openid"})
 	c, _ := db.GetOAuthClientByID("kynotes")
-	c.BackchannelLogoutURI = "https://notes.urlxl.com/backchannel"
+	c.BackchannelLogoutURI = "https://notes.example.com/backchannel"
 	if err := db.UpdateOAuthClient(c); err != nil {
 		t.Fatal(err)
 	}
@@ -132,9 +132,9 @@ func TestReplacingAFactorQueuesLogoutForSiblingSessions(t *testing.T) {
 	f, cleanup := newStepUpFixture(t)
 	defer cleanup()
 	other := newSession(t, f.store, f.user, time.Now().UTC().Add(time.Hour))
-	newClient(t, f.store, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, f.store, "kynotes", []string{"https://notes.example.com/callback"}, []string{"openid"})
 	c, _ := f.store.GetOAuthClientByID("kynotes")
-	c.BackchannelLogoutURI = "https://notes.urlxl.com/backchannel"
+	c.BackchannelLogoutURI = "https://notes.example.com/backchannel"
 	if err := f.store.UpdateOAuthClient(c); err != nil {
 		t.Fatal(err)
 	}

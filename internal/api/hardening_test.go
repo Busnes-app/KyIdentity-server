@@ -47,7 +47,7 @@ func TestDestructiveAdminRoutesRequireStepUp(t *testing.T) {
 	admin := newUser(t, db, "admin")
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 	victim := newUser(t, db, "user")
-	newClient(t, db, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	newClient(t, db, "kynotes", []string{"https://notes.example.com/callback"}, []string{"openid"})
 
 	for _, route := range destructiveAdminRoutes {
 		path := strings.ReplaceAll(route.path, "{victim}", victim.ID)

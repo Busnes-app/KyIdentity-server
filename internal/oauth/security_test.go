@@ -55,9 +55,9 @@ func TestRedirectURIRequiresExactRegisteredMatch(t *testing.T) {
 	defer cleanup()
 
 	suite := testClient(t, db, "kypasswords", "public",
-		[]string{"https://passwords.urlxl.com/callback"}, []string{"openid"})
+		[]string{"https://passwords.example.com/callback"}, []string{"openid"})
 	notes := testClient(t, db, "kynotes", "public",
-		[]string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+		[]string{"https://notes.example.com/callback"}, []string{"openid"})
 	empty := testClient(t, db, "kypost", "public", []string{}, []string{"openid"})
 	custom := testClient(t, db, "custom", "public",
 		[]string{"https://app.example.com/oauth/callback"}, []string{"openid"})
@@ -69,7 +69,7 @@ func TestRedirectURIRequiresExactRegisteredMatch(t *testing.T) {
 	}{
 		{"localhost default port via suite fallback", suite, "http://localhost/callback"},
 		{"attacker path on an allowlisted port", notes, "http://localhost:8080/attacker/owned/callback"},
-		{"client with no registered URIs at all", empty, "https://mail.urlxl.com/anything/callback"},
+		{"client with no registered URIs at all", empty, "https://mail.example.com/anything/callback"},
 		{"different path on a registered host", custom, "https://app.example.com/totally/different/callback"},
 		{"hardcoded container IP", suite, "http://10.89.0.4/callback"},
 		{"scheme downgrade", custom, "http://app.example.com/oauth/callback"},
@@ -89,8 +89,8 @@ func TestRedirectURIRequiresExactRegisteredMatch(t *testing.T) {
 		client *store.OAuthClient
 		uri    string
 	}{
-		{suite, "https://passwords.urlxl.com/callback"},
-		{notes, "https://notes.urlxl.com/callback"},
+		{suite, "https://passwords.example.com/callback"},
+		{notes, "https://notes.example.com/callback"},
 		{custom, "https://app.example.com/oauth/callback"},
 	}
 	for _, c := range accepted {
@@ -104,12 +104,12 @@ func TestRedirectURIRequiresExactRegisteredMatch(t *testing.T) {
 func TestPublicClientCannotSkipPKCE(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
-	testClient(t, db, "kynotes", "public", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	testClient(t, db, "kynotes", "public", []string{"https://notes.example.com/callback"}, []string{"openid"})
 	u := testUser(t, db)
 
-	code, err := e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.urlxl.com/callback", "openid", "", "")
+	code, err := e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.example.com/callback", "openid", "", "")
 	if err == nil {
-		if _, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", ""); err == nil {
+		if _, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", ""); err == nil {
 			t.Error("a public client redeemed a code with no PKCE challenge and no secret")
 		}
 		return
@@ -123,7 +123,7 @@ func TestConfidentialClientCannotSkipPKCE(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	secret := "s3cret-value"
-	c := testClient(t, db, "kypost", "confidential", []string{"https://mail.urlxl.com/callback"}, []string{"openid"})
+	c := testClient(t, db, "kypost", "confidential", []string{"https://mail.example.com/callback"}, []string{"openid"})
 	c.ClientSecretHash = hashFor(secret)
 	if err := db.UpdateOAuthClient(c); err != nil {
 		t.Fatal(err)
@@ -131,17 +131,17 @@ func TestConfidentialClientCannotSkipPKCE(t *testing.T) {
 	u := testUser(t, db)
 
 	for _, method := range []string{"", "plain"} {
-		if _, err := e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.urlxl.com/callback", "openid", "", method); err == nil {
+		if _, err := e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.example.com/callback", "openid", "", method); err == nil {
 			t.Errorf("confidential client got a code without PKCE (method %q)", method)
 		}
 	}
 
 	raw := "legacy-code-without-challenge"
 	if err := db.CreateAuthorizationCode(&store.AuthorizationCode{ID: "legacy", CodeHash: crypto.HashSHA256(raw), ClientID: "kypost", UserID: u.ID,
-		SessionID: oauthSession(t, db, u.ID), RedirectURI: "https://mail.urlxl.com/callback", Scope: "openid", ExpiresAt: time.Now().UTC().Add(time.Minute)}); err != nil {
+		SessionID: oauthSession(t, db, u.ID), RedirectURI: "https://mail.example.com/callback", Scope: "openid", ExpiresAt: time.Now().UTC().Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.ExchangeAuthorizationCode(raw, "kypost", secret, "https://mail.urlxl.com/callback", ""); err == nil {
+	if _, err := e.ExchangeAuthorizationCode(raw, "kypost", secret, "https://mail.example.com/callback", ""); err == nil {
 		t.Error("a confidential client redeemed a code stored without a PKCE challenge")
 	}
 }
@@ -149,20 +149,20 @@ func TestConfidentialClientCannotSkipPKCE(t *testing.T) {
 func TestPKCEVerifierIsEnforced(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
-	testClient(t, db, "kynotes", "public", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	testClient(t, db, "kynotes", "public", []string{"https://notes.example.com/callback"}, []string{"openid"})
 	u := testUser(t, db)
 	verifier, challenge := pkcePair()
 
-	code, err := e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.urlxl.com/callback", "openid", challenge, "S256")
+	code, err := e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.example.com/callback", "openid", challenge, "S256")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", "wrong-verifier"); err == nil {
+	if _, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", "wrong-verifier"); err == nil {
 		t.Error("a wrong code_verifier was accepted")
 	}
 
-	code, _ = e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.urlxl.com/callback", "openid", challenge, "S256")
-	if _, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", verifier); err != nil {
+	code, _ = e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.example.com/callback", "openid", challenge, "S256")
+	if _, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", verifier); err != nil {
 		t.Errorf("the correct code_verifier was rejected: %v", err)
 	}
 }
@@ -172,12 +172,12 @@ func TestPKCEVerifierIsEnforced(t *testing.T) {
 func TestPlainPKCEIsRejected(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
-	testClient(t, db, "kynotes", "public", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	testClient(t, db, "kynotes", "public", []string{"https://notes.example.com/callback"}, []string{"openid"})
 	u := testUser(t, db)
 
-	code, err := e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.urlxl.com/callback", "openid", "plainsecret", "plain")
+	code, err := e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.example.com/callback", "openid", "plainsecret", "plain")
 	if err == nil {
-		if _, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", "plainsecret"); err == nil {
+		if _, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", "plainsecret"); err == nil {
 			t.Error("plain PKCE was accepted")
 		}
 	}
@@ -194,7 +194,7 @@ func TestConfidentialClientRequiresCorrectSecret(t *testing.T) {
 	defer cleanup()
 
 	secret := "s3cret-value"
-	c := testClient(t, db, "kypost", "confidential", []string{"https://mail.urlxl.com/callback"}, []string{"openid"})
+	c := testClient(t, db, "kypost", "confidential", []string{"https://mail.example.com/callback"}, []string{"openid"})
 	c.ClientSecretHash = hashFor(secret)
 	if err := db.UpdateOAuthClient(c); err != nil {
 		t.Fatal(err)
@@ -202,18 +202,18 @@ func TestConfidentialClientRequiresCorrectSecret(t *testing.T) {
 	u := testUser(t, db)
 	verifier, challenge := pkcePair()
 
-	code, _ := e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.urlxl.com/callback", "openid", challenge, "S256")
-	if _, err := e.ExchangeAuthorizationCode(code, "kypost", "", "https://mail.urlxl.com/callback", verifier); err == nil {
+	code, _ := e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.example.com/callback", "openid", challenge, "S256")
+	if _, err := e.ExchangeAuthorizationCode(code, "kypost", "", "https://mail.example.com/callback", verifier); err == nil {
 		t.Error("a confidential client redeemed a code with an empty secret")
 	}
 
-	code, _ = e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.urlxl.com/callback", "openid", challenge, "S256")
-	if _, err := e.ExchangeAuthorizationCode(code, "kypost", "wrong", "https://mail.urlxl.com/callback", verifier); err == nil {
+	code, _ = e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.example.com/callback", "openid", challenge, "S256")
+	if _, err := e.ExchangeAuthorizationCode(code, "kypost", "wrong", "https://mail.example.com/callback", verifier); err == nil {
 		t.Error("a confidential client redeemed a code with the wrong secret")
 	}
 
-	code, _ = e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.urlxl.com/callback", "openid", challenge, "S256")
-	if _, err := e.ExchangeAuthorizationCode(code, "kypost", secret, "https://mail.urlxl.com/callback", verifier); err != nil {
+	code, _ = e.CreateAuthorizationCode("kypost", oauthSession(t, db, u.ID), "https://mail.example.com/callback", "openid", challenge, "S256")
+	if _, err := e.ExchangeAuthorizationCode(code, "kypost", secret, "https://mail.example.com/callback", verifier); err != nil {
 		t.Errorf("the correct client secret was rejected: %v", err)
 	}
 }
@@ -235,12 +235,12 @@ func TestConfidentialClientWithNoSecretCannotAuthenticate(t *testing.T) {
 func TestAuthorizationCodeIsSingleUseUnderConcurrency(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
-	testClient(t, db, "kydns", "public", []string{"https://dns.urlxl.com/callback"}, []string{"openid"})
+	testClient(t, db, "kydns", "public", []string{"https://dns.example.com/callback"}, []string{"openid"})
 	u := testUser(t, db)
 	verifier, challenge := pkcePair()
 
 	for attempt := 0; attempt < 25; attempt++ {
-		code, err := e.CreateAuthorizationCode("kydns", oauthSession(t, db, u.ID), "https://dns.urlxl.com/callback", "openid", challenge, "S256")
+		code, err := e.CreateAuthorizationCode("kydns", oauthSession(t, db, u.ID), "https://dns.example.com/callback", "openid", challenge, "S256")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -253,7 +253,7 @@ func TestAuthorizationCodeIsSingleUseUnderConcurrency(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				if _, err := e.ExchangeAuthorizationCode(code, "kydns", "", "https://dns.urlxl.com/callback", verifier); err == nil {
+				if _, err := e.ExchangeAuthorizationCode(code, "kydns", "", "https://dns.example.com/callback", verifier); err == nil {
 					mu.Lock()
 					successes++
 					mu.Unlock()
@@ -271,7 +271,7 @@ func TestAuthorizationCodeIsSingleUseUnderConcurrency(t *testing.T) {
 func TestGrantedScopeIsIntersectedWithClientAllowlist(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
-	testClient(t, db, "kynotes", "public", []string{"https://notes.urlxl.com/callback"}, []string{"openid", "profile"})
+	testClient(t, db, "kynotes", "public", []string{"https://notes.example.com/callback"}, []string{"openid", "profile"})
 	u := testUser(t, db)
 	verifier, challenge := pkcePair()
 
@@ -285,8 +285,8 @@ func TestGrantedScopeIsIntersectedWithClientAllowlist(t *testing.T) {
 		}
 	}
 
-	code, _ := e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.urlxl.com/callback", granted, challenge, "S256")
-	resp, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", verifier)
+	code, _ := e.CreateAuthorizationCode("kynotes", oauthSession(t, db, u.ID), "https://notes.example.com/callback", granted, challenge, "S256")
+	resp, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestGrantedScopeIsIntersectedWithClientAllowlist(t *testing.T) {
 func TestRequestingOnlyForbiddenScopesIsAnError(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
-	testClient(t, db, "kynotes", "public", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	testClient(t, db, "kynotes", "public", []string{"https://notes.example.com/callback"}, []string{"openid"})
 
 	if _, err := e.GrantedScope("kynotes", "admin vault:write"); err == nil {
 		t.Error("a request for only unallowed scopes was not an error")
@@ -310,12 +310,12 @@ func TestRequestingOnlyForbiddenScopesIsAnError(t *testing.T) {
 func TestUserinfoRejectsIDToken(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
-	testClient(t, db, "kybookmarks", "public", []string{"https://bookmarks.urlxl.com/callback"}, []string{"openid", "profile"})
+	testClient(t, db, "kybookmarks", "public", []string{"https://bookmarks.example.com/callback"}, []string{"openid", "profile"})
 	u := testUser(t, db)
 	verifier, challenge := pkcePair()
 
-	code, _ := e.CreateAuthorizationCode("kybookmarks", oauthSession(t, db, u.ID), "https://bookmarks.urlxl.com/callback", "openid profile", challenge, "S256")
-	resp, err := e.ExchangeAuthorizationCode(code, "kybookmarks", "", "https://bookmarks.urlxl.com/callback", verifier)
+	code, _ := e.CreateAuthorizationCode("kybookmarks", oauthSession(t, db, u.ID), "https://bookmarks.example.com/callback", "openid profile", challenge, "S256")
+	resp, err := e.ExchangeAuthorizationCode(code, "kybookmarks", "", "https://bookmarks.example.com/callback", verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,16 +352,16 @@ func TestUserinfoChecksIssuer(t *testing.T) {
 func TestNonceIsEchoedIntoIDToken(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
-	testClient(t, db, "kynotes", "public", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
+	testClient(t, db, "kynotes", "public", []string{"https://notes.example.com/callback"}, []string{"openid"})
 	u := testUser(t, db)
 	verifier, challenge := pkcePair()
 
-	code, err := e.CreateAuthorizationCodeWithNonce("kynotes", oauthSession(t, db, u.ID), "https://notes.urlxl.com/callback",
+	code, err := e.CreateAuthorizationCodeWithNonce("kynotes", oauthSession(t, db, u.ID), "https://notes.example.com/callback",
 		"openid", challenge, "S256", "n-0S6_WzA2Mj")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", verifier)
+	resp, err := e.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
