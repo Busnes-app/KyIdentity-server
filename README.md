@@ -105,16 +105,17 @@ APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 ### 2. Start the Server
 The compose file joins the external Docker network `kypost-net` (`KYPOST_NETWORK`) at the
 fixed address `KYIDENTITY_IP` and does not create it; `up` fails until it exists. KyPost's
-compose file creates it, so on a host that runs KyPost, start KyPost first. Otherwise create
-it once:
+compose file is the sole owner. From the KyPost checkout, create only its shared network first:
 
 ```bash
-docker network create --subnet 10.89.0.0/24 --ip-range 10.89.0.128/25 kypost-net
+bash scripts/ensure-network.sh
 ```
 
-`--ip-range` keeps dynamically assigned addresses off the low, pinned ones such as
-`10.89.0.2`. A KyPost added later finds a network its compose did not create and needs an
-override marking `kypost-net` as `external: true`.
+This installs no mail server. Pass the exact network name and subnet as arguments
+if they differ from KyPost's defaults. Then start KyIdentity, KyNotes and the proxy, which join it as external consumers.
+Keep the same network name/subnet in every project. An existing manually owned
+network is an explicit legacy deployment exception: retain it and KyPost's existing
+external override; never delete a live shared network to change its labels.
 
 Published image:
 
@@ -1345,3 +1346,8 @@ tokens die with it, and the choice is audited.
 ## Upgrading from ghcr.io/busness-app
 
 The GitHub organisation was renamed on 2026-09-16 and the image now lives at `ghcr.io/busnes-app/kyidentity-server`. The project no longer controls `ghcr.io/busness-app`; GHCR does not redirect it, and anything served under that name must be treated as untrusted. If `KYIDENTITY_IMAGE` in `.env` still names the old namespace, re-pinning is required, not optional: run the digest procedure in `docs/RESTORE.md`, which resolves the commit you choose to a digest, verifies its attestation and writes the pin, then `docker compose pull`.
+
+New bootstrap administrators must replace their password before administration or
+application sign-in. Installer-owned accounts are unaffected. For file-backed
+master keys, [offline key rotation](docs/KEY-ROTATION.md) creates a verified replacement
+data directory while preserving recovery codes and installer ownership.

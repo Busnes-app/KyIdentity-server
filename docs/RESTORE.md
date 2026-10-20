@@ -301,7 +301,7 @@ against the restored server.
    the restored keys as exposed and rotate the two that can be rotated. A restore from before
    a compromise brings the attacker's access back with the service unless you do this.
 
-   **Never rotate `encryption.key`.** Every TOTP secret, every paired-system token and the
+   **Never replace `encryption.key` directly.** Use [verified offline rotation](KEY-ROTATION.md) to produce a separately verified data-directory copy; Every TOTP secret, every paired-system token and the
    KyRecovery pairing token are encrypted under it. Remove it and every user's second factor
    and the pairing are gone for good, on a server you just recovered. It sits beside the two
    files below; leave it there.

@@ -49,6 +49,11 @@ const appVersion = "0.4.4"
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "rotate-encryption-key":
+			if err := runKeyRotation(os.Args[2:], os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "apply-setup":
 			if err := runSetup(os.Args[2:], os.Stdout); err != nil {
 				log.Fatal(err)
@@ -90,6 +95,11 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	lock, err := rotationLock(cfg.DataDir, false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer lock.Close()
 	dbStore, err := store.New(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database store: %v", err)

@@ -111,7 +111,7 @@ Two further rules apply to the value:
 
 - Proxy on the same host, through the published port: the container does not see `127.0.0.1` but the address Docker forwards from, typically the `kypost-net` gateway (`TRUSTED_PROXY_CIDRS=10.89.0.1/32` with the default subnet). Confirm it with the check below.
 - Proxy pinned on `kypost-net`: `TRUSTED_PROXY_CIDRS=10.89.0.10/32` (replace with your proxy's actual Docker network IP)
-- Cloudflare Tunnel: `TRUSTED_PROXY_CIDRS=0.0.0.0/0` is unavoidable; Tunnel is the proxy and only Cloudflare can reach it. Pair it with `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`.
+- Cloudflare Tunnel: pin the cloudflared container address and trust its `/32` only. Pair it with `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`; never trust every network peer.
 
 ### Rate limiting under pressure
 
@@ -145,7 +145,7 @@ Everything KyIdentity needs to keep secret lives in its data volume (`/data` in 
 | `first-run-password.txt` | Generated bootstrap password, until first sign-in |
 
 - Keys not supplied through the environment are generated on first start, written `0600` in a `0700` directory, and reused.
-- A key of the wrong length is a startup error, never a silently weakened key. There is no key rotation: losing or replacing `encryption.key` makes the data sealed under it unrecoverable.
+- A key of the wrong length is a startup error, never a silently weakened key. Use the offline [verified-copy rotation command](docs/KEY-ROTATION.md); replacing the key file alone makes sealed data unrecoverable.
 - **Back up the whole volume and protect it like the keys it holds.** See [docs/RESTORE.md](docs/RESTORE.md).
 
 ### First Run & Bootstrap
@@ -162,6 +162,7 @@ Everything KyIdentity needs to keep secret lives in its data volume (`/data` in 
 - 10 consecutive failures, wrong second factors included, lock the account for 15 minutes. A locked account gets the same answer as a wrong password.
 - Per-address rate limits cover sign-in, every MFA step, recovery codes, password reset and account-link redemption.
 - At most 8 password hashes run at once; a sign-in that waits more than 3 seconds for a slot gets `503`, which does not count as a failure.
+- New bootstrap administrators must replace their password before administrator API or OAuth access. Existing accounts and installer-owned identities are not inferred to be bootstrap accounts.
 - There is no CAPTCHA.
 
 ### Multi-Factor Authentication
@@ -200,8 +201,8 @@ Not encrypted: account metadata (usernames, names, email addresses, roles, group
 
 - **Browsers and apps:** through your TLS proxy (see [Deployment Security](#deployment-security)).
 - **Outbound calls** (SCIM and suite connectors, back-channel logout, UnifiedPush, UBports) go through one guarded client: HTTPS only, no embedded credentials, no redirects, and the destination is checked at connect time, so DNS rebinding cannot reach a refused address. Loopback, link-local and cloud-metadata addresses are always refused; private ranges are refused unless `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`.
-- **`KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` also allows plain `http`** for operator-supplied URLs. Use it only on a network you control, and prefer HTTPS anyway. It never applies to device-supplied push endpoints.
-- **Push relays:** `PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS.
+- **`KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` permits private addresses while still requiring HTTPS.** It never applies to device-supplied push endpoints.
+- **Push relays:** `PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS and use the same guarded, no-redirect client for registration and sending.
 - **Certificates:** outbound TLS is verified against the container's trust store; to add a private CA, see [README step 4](README.md#4-private-certificate-authority-lan-installs).
 
 ### Sensitive Data in Logs

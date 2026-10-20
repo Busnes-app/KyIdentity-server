@@ -214,6 +214,10 @@ func (e *Engine) VerifyUserTOTP(userID, code string) (bool, error) {
 
 // GenerateRecoveryCodes creates 8 one-time recovery codes for a user.
 func (e *Engine) GenerateRecoveryCodes(userID string, audit *store.AuditEvent) ([]string, error) {
+	key, err := e.store.RecoveryCodeKey(e.encryptionKey)
+	if err != nil {
+		return nil, err
+	}
 	var plainCodes []string
 	var recoveryCodes []store.RecoveryCode
 
@@ -231,7 +235,7 @@ func (e *Engine) GenerateRecoveryCodes(userID string, audit *store.AuditEvent) (
 		recoveryCodes = append(recoveryCodes, store.RecoveryCode{
 			ID:       uuid.New().String(),
 			UserID:   userID,
-			CodeHash: e.recoveryCodeHash(userID, normalizeRecoveryCode(code)),
+			CodeHash: recoveryCodeHash(key, userID, normalizeRecoveryCode(code)),
 		})
 	}
 
@@ -248,8 +252,7 @@ func normalizeRecoveryCode(code string) string {
 
 // recoveryCodeHash keys the hash to this server's key and the user: a code holds only 40
 // bits, which a bare SHA-256 from a leaked database gives up in seconds.
-func (e *Engine) recoveryCodeHash(userID, normalized string) string {
-	key := crypto.DeriveKey(e.encryptionKey, "kyidentity:recovery-code")
+func recoveryCodeHash(key []byte, userID, normalized string) string {
 	return store.RecoveryCodeHMACPrefix + crypto.SignHMACSHA256(key, []byte(userID+"|"+normalized))
 }
 
@@ -258,7 +261,11 @@ func (e *Engine) recoveryCodeHash(userID, normalized string) string {
 // A spent code commits with audit.
 func (e *Engine) VerifyAndConsumeRecoveryCode(userID, code string, audit *store.AuditEvent) (bool, error) {
 	normalized := normalizeRecoveryCode(code)
-	return e.store.ConsumeRecoveryCode(userID, e.recoveryCodeHash(userID, normalized), crypto.HashSHA256(normalized), audit)
+	key, err := e.store.RecoveryCodeKey(e.encryptionKey)
+	if err != nil {
+		return false, err
+	}
+	return e.store.ConsumeRecoveryCode(userID, recoveryCodeHash(key, userID, normalized), crypto.HashSHA256(normalized), audit)
 }
 
 // GenerateDevicePairingToken generates a 90s ephemeral PIN & token for registering a native
