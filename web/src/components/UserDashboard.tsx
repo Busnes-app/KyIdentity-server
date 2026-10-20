@@ -7,7 +7,7 @@ import { Image, Upload, ArrowUpRight, Plus, Pencil } from 'lucide-react';
 import { LAUNCHER_ICONS } from '../launcherIcons';
 import { AppIcon, LauncherView, uploadedIconUrl } from './Launcher';
 import { LauncherCustomize } from './LauncherCustomize';
-import { arrange, normalize, unhide } from '../launcherLayout';
+import { arrange, normalize, searchLauncher, unhide } from '../launcherLayout';
 import { Modal } from './Modal';
 
 interface UserDashboardProps {
@@ -37,6 +37,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = (props) =>
 const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices }) => {
   const [launcher, setLauncher] = useState<Launcher | null>(null);
   const [editing, setEditing] = useState(false);
+  const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const load = () =>
@@ -72,6 +73,8 @@ const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices 
 
   const apps = launcher?.applications ?? [];
   const prefs = launcher?.preferences ?? null;
+  const arranged = searchLauncher(arrange(apps, prefs), query);
+  const resultCount = arranged.groups.reduce((count, group) => count + group.apps.length, 0) + arranged.hidden.length;
   const noSecondFactor = !(user.mfaMethods ?? []).some((m) => SECOND_FACTORS.includes(m));
   const errorBox = error && <p className="alert-box error" role="alert">{error}</p>;
 
@@ -93,7 +96,7 @@ const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices 
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Applications</h1>
+        <div><h1 className="page-title">Applications</h1><p className="launcher-intro">Your workspace, connected.</p></div>
         <div className="launcher-who">
           <span>
             Signed in as <b>{user.username}</b> · {user.role === 'admin' ? 'Administrator' : 'User'}
@@ -121,7 +124,15 @@ const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices 
             : 'No applications are available to you. Ask an administrator for access.'}
         </p>
       )}
-      <LauncherView arranged={arrange(apps, prefs)} onUnhide={(key) => save(unhide(normalize(apps, prefs), key))} />
+      {apps.length > 0 && <div className="launcher-search">
+        <label htmlFor="application-search">Find an application</label>
+        <div className="launcher-search-controls">
+          <input id="application-search" type="search" placeholder="Search by name or description" value={query} onChange={(event) => setQuery(event.target.value)} />
+          {query && <button type="button" className="secondary-btn sm" onClick={() => setQuery('')}>Clear search</button>}
+        </div>
+        {query.trim() && <p role="status">{resultCount} {resultCount === 1 ? 'match' : 'matches'}{resultCount === 0 ? '. Try another name or clear your search.' : ''}</p>}
+      </div>}
+      <LauncherView arranged={arranged} onUnhide={(key) => save(unhide(normalize(apps, prefs), key))} />
       <AccessRequests />
     </div>
   );

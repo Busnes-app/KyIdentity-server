@@ -270,24 +270,24 @@ button {
 
 .launcher-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
   gap: 0.75rem;
 }
 
 .launcher-tile {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.85rem;
   height: 100%;
-  padding: 1.1rem 0.5rem 0.9rem;
+  min-height: 6rem;
+  padding: 1.25rem;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
   color: inherit;
   text-decoration: none;
-  text-align: center;
-  font-size: 0.92rem;
+  text-align: left;
+  font-size: 0.95rem;
   overflow-wrap: anywhere;
 }
 
@@ -1966,4 +1966,31 @@ dialog.modal-backdrop::backdrop {
   --button-text: #182326;
   color-scheme: dark;
 }
+}
+
+/* Product-owned launcher layout; palette and saved layout choices remain unchanged. */
+.launcher-intro { margin: 0.5rem 0 0; color: var(--ink); }
+.launcher-search { margin: 0 0 2rem; max-width: 38rem; }
+.launcher-search label { display: block; margin-bottom: 0.5rem; font-size: 0.875rem; font-weight: 600; }
+.launcher-search-controls { display: flex; gap: 0.5rem; align-items: center; }
+.launcher-search input { width: 100%; min-width: 0; min-height: 2.75rem; padding: 0.65rem 0.85rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink-strong); font: inherit; }
+.launcher-search input::placeholder { color: var(--ink); opacity: 1; }
+.launcher-search p { margin: 0.5rem 0; color: var(--ink); font-size: 0.875rem; }
+.launcher-tile > .app-icon { flex: none; width: 2.75rem; height: 2.75rem; border-radius: 10px; }
+.launcher-tile-copy { flex: 1; min-width: 0; }
+.launcher-tile-copy b { display: block; font-weight: 600; }
+.launcher-tile-copy small { display: block; margin-top: 0.25rem; font-size: 0.8rem; color: var(--ink); line-height: 1.45; }
+.launcher-open-icon { flex: none; color: var(--ink); }
+.launcher-group-title { font-size: 0.9rem; letter-spacing: normal; text-transform: none; margin-bottom: 0.8rem; }
+.launcher-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 600px) { .launcher-who { width: 100%; justify-content: space-between; } .launcher-search-controls { flex-wrap: wrap; } }
+.launcher-group { padding: 0; }
+.side { overflow-y: auto; }
+@media (max-width: 52rem) {
+  .side { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; border-right: 0; border-bottom: 1px solid var(--line); }
+  .side .brand { grid-column: 1; padding: 0; gap: 0.5rem; }
+  .side-me { grid-column: 2; grid-row: 1; }
+  .side-who { max-width: 7rem; overflow-wrap: anywhere; }
+  .side-nav { grid-column: 1 / -1; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; min-width: 0; padding-block: 0.25rem; }
+  .side-nav button { flex: none; white-space: nowrap; min-height: 40px; }
 }

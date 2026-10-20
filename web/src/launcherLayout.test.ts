@@ -11,6 +11,7 @@ import {
   normalize,
   renameGroup,
   shiftApp,
+  searchLauncher,
   unhide,
 } from './launcherLayout';
 
@@ -121,5 +122,20 @@ describe('edits', () => {
 
   it('saves blank names as Untitled rather than failing', () => {
     expect(forSave(prefs({ groups: [{ name: '   ', apps: [] }] })).groups[0].name).toBe('Untitled');
+  });
+});
+
+
+describe('searchLauncher', () => {
+  it('searches visible and hidden apps without changing saved groups or order', () => {
+    const saved = prefs({ layout: 'dock' });
+    const before = structuredClone(saved);
+    const arranged = arrange([post, { ...dns, description: 'Domain management' }, wiki], saved);
+    expect(searchLauncher(arranged, ' DOMAIN ').groups[0].apps).toEqual([{ ...dns, description: 'Domain management' }]);
+    expect(searchLauncher(arranged, 'WIKI').hidden).toEqual([wiki]);
+    expect(searchLauncher(arranged, 'missing').groups).toEqual([]);
+    expect(searchLauncher(arranged, '  ')).toBe(arranged);
+    expect(saved).toEqual(before);
+    expect(arranged.groups[0].apps.map((a) => a.key)).toEqual(['client:kypost', 'client:kydns']);
   });
 });
