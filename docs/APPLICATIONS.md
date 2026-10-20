@@ -46,7 +46,7 @@ Token registration rechecks access and the originating code atomically, includin
 membership-removal races. Re-granting access cannot revive invalidated codes or tokens.
 Offline JWT consumers may accept old access tokens for up to 15 minutes, and an app's own
 session lasts until it asks KyIdentity to sign out or receives the back-channel logout
-described below; an app with no back-channel receiver is never told.
+documented in [Integration requirements](INTEGRATIONS.md#integration-requirements); an app with no back-channel receiver is never told.
 
 Admin API: `GET /api/admin/app-registry` accepts the same pagination bounds as group lists
 and searches connection names and IDs. `POST /api/admin/app-registry/{id}/link` accepts
