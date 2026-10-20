@@ -1,0 +1,2 @@
+# Review generated assets through their source; CI checks the committed build.
+web/dist/** -diff linguist-generated=true
