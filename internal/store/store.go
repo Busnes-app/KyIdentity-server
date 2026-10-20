@@ -823,12 +823,12 @@ func (s *Store) migrateSyncEventsUserReference() error {
 // User CRUD
 func (s *Store) CreateUser(u *User) error {
 	query := `
-	INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at, password_change_required)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	now := time.Now().UTC()
 	u.CreatedAt = now
 	u.UpdatedAt = now
-	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt)
+	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt, u.PasswordChangeRequired)
 	return err
 }
 
@@ -841,7 +841,7 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 	defer tx.Rollback()
 	now := time.Now().UTC()
 	u.CreatedAt, u.UpdatedAt = now, now
-	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, created_at, updated_at, password_change_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.CreatedAt, u.UpdatedAt, u.PasswordChangeRequired); err != nil {
 		if isUniqueViolation(err) {
 			return ErrUserConflict
 		}
@@ -2399,7 +2399,7 @@ func (s *Store) CreateAuthorizationCode(code *AuthorizationCode) error {
 	}
 	query := `INSERT INTO authorization_codes (id, code_hash, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, nonce, expires_at, created_at, session_id, primary_authenticated_at, factor_authenticated_at, factor_method, authentication_expires_at, auth_app_id, auth_policy_revision, role_revision) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS
  (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id
- JOIN sessions sess ON sess.user_id=e.user_id WHERE c.id=? AND c.enabled AND e.user_id=? AND sess.id=? AND sess.expires_at>? AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sess.id AND m.allowed))`
+ JOIN sessions sess ON sess.user_id=e.user_id WHERE c.id=? AND c.enabled AND e.user_id=? AND sess.id=? AND sess.expires_at>? AND EXISTS(SELECT 1 FROM users WHERE id=e.user_id AND NOT password_change_required) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sess.id AND m.allowed))`
 	code.CreatedAt = time.Now().UTC()
 	result, err := tx.Exec(query, code.ID, code.CodeHash, code.ClientID, code.UserID, code.RedirectURI, code.Scope, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce, code.ExpiresAt, code.CreatedAt, code.SessionID, code.PrimaryAuthenticatedAt, code.FactorAuthenticatedAt, code.FactorMethod, code.AuthenticationExpiresAt, code.AuthenticationAppID, code.AuthenticationPolicyRevision, code.RoleRevision, code.ClientID, code.UserID, code.SessionID, code.CreatedAt)
 	if err != nil {
@@ -2455,7 +2455,7 @@ func recordIssuedTokenTx(ex execer, t *IssuedToken) error {
 	query := `INSERT INTO issued_tokens (jti, user_id, client_id, expires_at, created_at, session_id, family_jti)
  SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, '') WHERE EXISTS
  (SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
- WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND (users.ends_at IS NULL OR users.ends_at>unixepoch()) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?))) AND (?='' OR EXISTS(SELECT 1 FROM app_registry policy WHERE policy.id=? AND policy.client_id=? AND policy.auth_revision=? AND policy.role_revision=?)) AND (?='' OR EXISTS(SELECT 1 FROM native_devices d WHERE d.id=? AND d.user_id=? AND d.public_key=? AND d.can_sign_on AND d.is_mfa_approver AND d.attested_level=?))`
+ WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND NOT users.password_change_required AND (users.ends_at IS NULL OR users.ends_at>unixepoch()) AND EXISTS(SELECT 1 FROM mfa_session_access m WHERE m.id=sessions.id AND m.allowed)) AND EXISTS (SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=? AND c.id=? AND c.enabled) AND (?='' OR EXISTS(SELECT 1 FROM authorization_codes ac JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision WHERE ac.id=? AND ac.session_id=? AND ac.client_id=? AND ac.user_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?))) AND (?='' OR EXISTS(SELECT 1 FROM app_registry policy WHERE policy.id=? AND policy.client_id=? AND policy.auth_revision=? AND policy.role_revision=?)) AND (?='' OR EXISTS(SELECT 1 FROM native_devices d WHERE d.id=? AND d.user_id=? AND d.public_key=? AND d.can_sign_on AND d.is_mfa_approver AND d.attested_level=?))`
 	t.CreatedAt = time.Now().UTC()
 	b, d := t.Policy, t.Device
 	res, err := ex.Exec(query, t.JTI, t.UserID, t.ClientID, t.ExpiresAt, t.CreatedAt, t.SessionID, t.FamilyJTI, t.SessionID, t.UserID, t.CreatedAt, t.UserID, t.ClientID, t.AuthorizationCodeID, t.AuthorizationCodeID, t.SessionID, t.ClientID, t.UserID, t.CreatedAt, t.CreatedAt, b.AppID, b.AppID, t.ClientID, b.AuthRevision, b.RoleRevision, d.ID, d.ID, d.UserID, d.PublicKey, d.AttestedLevel)
@@ -2479,7 +2479,7 @@ func (s *Store) IsTokenRevoked(jti string) (bool, error) {
 	var revokedAt sql.NullTime
 	err := s.db.QueryRow(
 		`SELECT revoked_at FROM issued_tokens WHERE jti = ? AND expires_at > ?
- AND (session_id IS NULL OR EXISTS (SELECT 1 FROM mfa_session_access WHERE id = issued_tokens.session_id AND allowed))`,
+ AND EXISTS(SELECT 1 FROM users WHERE id=issued_tokens.user_id AND NOT password_change_required) AND (session_id IS NULL OR EXISTS (SELECT 1 FROM mfa_session_access WHERE id = issued_tokens.session_id AND allowed))`,
 		jti, time.Now().UTC()).Scan(&revokedAt)
 	if err == sql.ErrNoRows {
 		return true, nil

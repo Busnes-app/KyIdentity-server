@@ -357,3 +357,42 @@ func TestForgotSkipsAnUnverifiedAddress(t *testing.T) {
 		t.Fatalf("reset not issued to a verified address: %d", rec.Code)
 	}
 }
+
+func TestBootstrapPasswordGate(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	u := newUser(t, db, "admin")
+	// Mark via a separate bootstrap-created identity rather than guessing existing accounts.
+	u.ID = "bootstrap-password-gate"
+	u.Username = "bootstrap-gate"
+	u.Email = "bootstrap-gate@example.test"
+	u.PasswordChangeRequired = true
+	if err := db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	if got := anonPost(t, srv, "/api/auth/login", map[string]string{"username": u.Username, "password": "correct-horse-battery"}); got.Code != 200 || !strings.Contains(got.Body.String(), `"passwordChangeRequired":true`) {
+		t.Fatalf("login password gate: %d %s", got.Code, got.Body.String())
+	}
+	cookie := newSession(t, db, u, time.Now().UTC().Add(time.Hour))
+	if got := call(t, srv, cookie, "GET", "/api/auth/me"); got.Code != 200 || !strings.Contains(got.Body.String(), `"passwordChangeRequired":true`) {
+		t.Fatalf("me: %d %s", got.Code, got.Body.String())
+	}
+	for _, path := range []string{"/api/admin/users", "/api/user/devices"} {
+		if got := call(t, srv, cookie, "GET", path); got.Code != 403 || !strings.Contains(got.Body.String(), "password_change_required") {
+			t.Fatalf("%s: %d %s", path, got.Code, got.Body.String())
+		}
+	}
+	if got := call(t, srv, cookie, "GET", "/oauth/authorize"); got.Code != http.StatusSeeOther || got.Header().Get("Location") != "/" {
+		t.Fatalf("authorize: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(t, srv, "POST", "/api/user/password", cookie, `{"currentPassword":"correct-horse-battery","newPassword":"a-different-password-42"}`); got.Code != 200 {
+		t.Fatalf("change: %d %s", got.Code, got.Body.String())
+	}
+	updated, err := db.GetUserByID(u.ID)
+	if err != nil || updated.PasswordChangeRequired {
+		t.Fatal("password gate not cleared", err)
+	}
+	if got := call(t, srv, cookie, "GET", "/api/admin/users"); got.Code != 200 {
+		t.Fatalf("admin after change: %d %s", got.Code, got.Body.String())
+	}
+}

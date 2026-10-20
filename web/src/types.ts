@@ -11,6 +11,7 @@ export function canAdminister(a: Access | undefined): boolean {
 }
 
 export interface User {
+  passwordChangeRequired?: boolean;
   access?: Access;
   /** UTC instant after which the account is ended; absent means never. */
   endsAt?: string;

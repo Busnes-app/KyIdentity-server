@@ -429,13 +429,14 @@ func ensureBootstrapAdmin(dbStore *store.Store, username, email, password, via s
 		email = username + "@local.kysecurity"
 	}
 	admin := &store.User{
-		ID:           uuid.New().String(),
-		Username:     username,
-		DisplayName:  "Administrator",
-		Email:        email,
-		PasswordHash: passHash,
-		Role:         "admin",
-		Status:       "active",
+		ID:                     uuid.New().String(),
+		Username:               username,
+		DisplayName:            "Administrator",
+		PasswordChangeRequired: true,
+		Email:                  email,
+		PasswordHash:           passHash,
+		Role:                   "admin",
+		Status:                 "active",
 	}
 	event := audit.NewLogger(dbStore).Prepare("admin.user_created", "", "bootstrap", admin.ID, "user", "", via, "success",
 		map[string]any{"username": admin.Username, "role": admin.Role, "pending": false})

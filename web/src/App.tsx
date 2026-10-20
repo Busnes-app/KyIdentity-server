@@ -20,6 +20,7 @@ import { AdminSCIM } from './components/AdminSCIM';
 import { AdminAccessRequests } from './components/AdminAccessRequests';
 import { AdminAlerts } from './components/AdminAlerts';
 import { AccountLinkView } from './components/AccountLinkView';
+import { PasswordChangeView } from './components/PasswordChangeView';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -74,6 +75,8 @@ export const App: React.FC = () => {
   }
 
   if (linkKind) return <AccountLinkView kind={linkKind} />;
+
+  if (currentUser?.passwordChangeRequired) return <PasswordChangeView onChanged={checkSession} onLogout={handleLogout} />;
 
   if (!currentUser || (window.location.pathname === '/login' && new URLSearchParams(window.location.search).has('interaction'))) {
     return <LoginView onLoginSuccess={(u) => { setCurrentUser(u); checkSession(); }} />;

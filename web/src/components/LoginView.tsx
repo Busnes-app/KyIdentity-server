@@ -106,7 +106,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       setError('The server reported a successful sign-in but returned no account');
       return;
     }
-    if (user.enrollment?.restricted) { window.location.href = '/'; return; }
+    if (user.passwordChangeRequired || user.enrollment?.restricted) { window.location.href = '/'; return; }
     if (restartAuthorization) {
       setMfaRequired(false);
       setAuthorizationRestarted(true);

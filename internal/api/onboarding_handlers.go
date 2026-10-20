@@ -257,6 +257,10 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		http.Error(w, `{"error":"invalid_credentials","error_description":"Current password is incorrect"}`, http.StatusUnauthorized)
 		return
 	}
+	if req.NewPassword == req.CurrentPassword {
+		http.Error(w, `{"error":"password_reused","error_description":"Choose a different password."}`, 400)
+		return
+	}
 	hash, err := auth.HashPassword(req.NewPassword)
 	if argonBusy(w, err) {
 		return
@@ -266,7 +270,7 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	pending := h.audit.Prepare("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	if err := h.store.ChangePassword(user.ID, sess.ID, hash, pending.Row); err != nil {
+	if err := h.store.ChangePassword(user.ID, sess.ID, hash, pending.Row, user.PasswordHash); err != nil {
 		log.Printf("password change for %s: %v", user.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

@@ -31,3 +31,23 @@ Run npm ci, npm test (where configured), and npm run build in web/, then start t
 ## Approved interface polish — 2026-10-19
 
 See [UI-POLISH.md](UI-POLISH.md) for the implemented changes, preservation scope, checks, actual before/after screenshots and disposable capture conditions. Earlier captures above remain historical evidence.
+
+## Bootstrap password replacement — 2026-10-19
+
+Captured through T3's native browser against a disposable local server from this
+source, with an isolated private data directory and a newly created bootstrap
+administrator. Busnes Light at 1280×800 and 390×844 CSS pixels; device scaling
+increases the mobile PNG dimensions. The new form uses the existing login layout,
+labels and input classes. Vertical scrolling on mobile is intentional.
+
+The actual browser flow completed sign-in, required password replacement,
+password-only operation-bound step-up and replacement. Readback then showed
+`passwordChangeRequired: false`, `role: admin` and HTTP 200 for the administrator
+users API. The fixture was stopped afterward. Existing accounts are not flagged.
+MFA enrollment, every named theme and an exhaustive accessibility audit were not
+exercised in this capture. Frontend: 189 tests, typecheck and production build
+passed; the source detector reported no findings.
+
+| Desktop | Mobile |
+| --- | --- |
+| ![Bootstrap password form on desktop](docs/bootstrap-password-desktop.png) | ![Bootstrap password form on mobile](docs/bootstrap-password-mobile.png) |

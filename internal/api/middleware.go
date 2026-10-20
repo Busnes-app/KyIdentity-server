@@ -328,12 +328,16 @@ func (m *MiddlewareManager) RequireAuth(next http.Handler) http.Handler {
 			http.Error(w, `{"error":"unauthorized","error_description":"Authentication required"}`, http.StatusUnauthorized)
 			return
 		}
+		if user.PasswordChangeRequired && !passwordChangeRouteAllowed(r.Method, r.URL.Path) {
+			http.Error(w, `{"error":"password_change_required","error_description":"Replace the bootstrap password before continuing."}`, 403)
+			return
+		}
 		status, err := m.store.SessionEnrollmentStatus(user.ID, sess.ID)
 		if err != nil {
 			stepUpInternalError(w)
 			return
 		}
-		if status.Restricted && !enrollmentRouteAllowed(r.Method, r.URL.Path) {
+		if status.Restricted && !(user.PasswordChangeRequired && passwordChangeRouteAllowed(r.Method, r.URL.Path)) && !enrollmentRouteAllowed(r.Method, r.URL.Path) {
 			http.Error(w, `{"error":"enrollment_required","error_description":"Complete MFA enrollment and sign in again to continue."}`, 403)
 			return
 		}
@@ -346,6 +350,10 @@ func (m *MiddlewareManager) RequireAuth(next http.Handler) http.Handler {
 func (m *MiddlewareManager) OptionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if user, sess := m.authenticate(r); user != nil {
+			if user.PasswordChangeRequired {
+				http.Redirect(w, r, "/", http.StatusSeeOther)
+				return
+			}
 			r = withIdentity(r, user, sess)
 		}
 		next.ServeHTTP(w, r)
@@ -441,4 +449,12 @@ func GetSessionFromContext(ctx context.Context) *store.Session {
 		return s
 	}
 	return nil
+}
+
+func passwordChangeRouteAllowed(method, path string) bool {
+	switch method + " " + path {
+	case "GET /api/auth/me", "POST /api/auth/logout", "POST /api/user/password", "GET /api/auth/step-up/methods", "POST /api/auth/step-up", "POST /api/auth/step-up/finish", "POST /api/auth/step-up/cancel":
+		return true
+	}
+	return false
 }

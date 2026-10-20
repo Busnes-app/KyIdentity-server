@@ -122,6 +122,7 @@ export function parseUser(value: unknown): User {
     endsAt: optStr(o, 'endsAt'),
     enrollment: o.enrollment === undefined ? undefined : parseEnrollmentStatus(o.enrollment),
     id: str(o, 'id'),
+    passwordChangeRequired: bool(o, 'passwordChangeRequired'),
     username: str(o, 'username'),
     displayName: optStr(o, 'displayName') ?? str(o, 'username'),
     email: optStr(o, 'email') ?? '',

@@ -88,12 +88,16 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		http.Error(w, `{"error":"invalid_request","error_description":"Password and target operation are required"}`, 400)
 		return
 	}
+	if user.PasswordChangeRequired && req.Operation != "POST /api/user/password" {
+		http.Error(w, `{"error":"password_change_required"}`, 403)
+		return
+	}
 	enrollment, err := h.store.SessionEnrollmentStatus(user.ID, sess.ID)
 	if err != nil {
 		stepUpInternalError(w)
 		return
 	}
-	if enrollment.Restricted && !enrollmentOperationAllowed(stepUpOperation(req.Operation)) {
+	if enrollment.Restricted && !(user.PasswordChangeRequired && req.Operation == "POST /api/user/password") && !enrollmentOperationAllowed(stepUpOperation(req.Operation)) {
 		http.Error(w, `{"error":"enrollment_required"}`, 403)
 		return
 	}
