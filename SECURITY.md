@@ -43,7 +43,7 @@ Read these before deploying or relying on specific features.
 - Browser sessions are stored server-side; the cookie carries a random token and the database keeps only its SHA-256. The cookie is `HttpOnly` and `SameSite=Lax`.
 - Defaults: 24 hours absolute, 8 hours idle (`KYIDENTITY_SESSION_TTL`, `KYIDENTITY_SESSION_IDLE_TTL`). Administrators can change both within fixed bounds: 1 hour to 7 days absolute, 5 minutes to 24 hours idle.
 - Expired sessions are deleted by housekeeping every 15 minutes; a session past its idle limit is refused at once.
-- Sign-out deletes the session, revokes the tokens and authorization codes issued under it, and queues back-channel logout to apps that registered a receiver. Apps without one keep their own sessions until they expire. See [Integration Requirements](README.md#integration-requirements).
+- Sign-out deletes the session, revokes the tokens and authorization codes issued under it, and queues back-channel logout to apps that registered a receiver. Apps without one keep their own sessions until they expire. See [Integration Requirements](docs/INTEGRATIONS.md#integration-requirements).
 
 ### Mobile Pairing
 
@@ -176,7 +176,7 @@ Administrators can require enrollment for the whole organization, administrators
 ### Roles & Authorization
 
 - **Global roles:** `admin` (everything) and `user`.
-- **Delegations** on top of `user`: `auditor` (read-only administration), `helpdesk` (recovery for ordinary users, never administrators), `app_owner` (grants and roles for the apps they own). See [Delegated administration](README.md#delegated-administration).
+- **Delegations** on top of `user`: `auditor` (read-only administration), `helpdesk` (recovery for ordinary users, never administrators), `app_owner` (grants and roles for the apps they own). See [Delegated administration](docs/ACCOUNTS-AND-ACCESS.md#delegated-administration).
 - Permissions are computed on every request, never cached in the session. Disabling a user, demoting an administrator or changing a password revokes that user's sessions and tokens at once.
 - KyIdentity refuses to disable, demote or delete the last active administrator.
 - Destructive administrative operations require step-up re-authentication.
@@ -202,7 +202,7 @@ Not encrypted: account metadata (usernames, names, email addresses, roles, group
 - **Outbound calls** (SCIM and suite connectors, back-channel logout, UnifiedPush, UBports) go through one guarded client: HTTPS only, no embedded credentials, no redirects, and the destination is checked at connect time, so DNS rebinding cannot reach a refused address. Loopback, link-local and cloud-metadata addresses are always refused; private ranges are refused unless `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`.
 - **`KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` also allows plain `http`** for operator-supplied URLs. Use it only on a network you control, and prefer HTTPS anyway. It never applies to device-supplied push endpoints.
 - **Push relays:** `PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS.
-- **Certificates:** outbound TLS is verified against the container's trust store; to add a private CA, see [README step 4](README.md#4-private-certificate-authority-lan-installs).
+- **Certificates:** outbound TLS is verified against the container's trust store; to add a private CA, see [README step 4](docs/RUNNING.md#4-private-certificate-authority-lan-installs).
 
 ### Sensitive Data in Logs
 
@@ -259,8 +259,8 @@ Security-sensitive PRs should include:
 
 ## Additional Resources
 
-- [Quickstart with Docker Compose](README.md#quickstart-with-docker-compose) — `kypost-net`, issuer, proxy trust and private CA
-- [Onboarding and passwords](README.md#onboarding-and-passwords) — activation, password reset, lockout
+- [Quickstart with Docker Compose](docs/RUNNING.md#quickstart-with-docker-compose) — `kypost-net`, issuer, proxy trust and private CA
+- [Onboarding and passwords](docs/ACCOUNTS-AND-ACCESS.md#onboarding-and-passwords) — activation, password reset, lockout
 - [docs/RESTORE.md](docs/RESTORE.md) — backups and restore
 - [LOGGING.md](LOGGING.md) — logging contract
 - OWASP guidelines on secure development practices
