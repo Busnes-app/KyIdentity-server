@@ -132,7 +132,7 @@ export function useStepUp() {
                 onChange={e => setCode(e.target.value)} />
             </div>
           )}
-          {digits && <p role="status">Approve the request on your phone and select <strong>{digits}</strong>.</p>}
+          {digits && <p role="status">Open KyAuth on your phone and type in <strong>{digits}</strong> to approve.</p>}
           {error && <div className="alert-box error" role="alert">{error}</div>}
         </div>
         <div className="modal-footer">

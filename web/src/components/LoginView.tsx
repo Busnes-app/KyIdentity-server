@@ -364,10 +364,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           {mfaRequired && mfaMode === 'push' && (
             <div className="login-form">
               <h2>Check your phone</h2>
-              <p className="text-muted">Open KySecurity Authenticator and tap the number you see here.</p>
+              <p className="text-muted">Open KyAuth on your phone and type in this number.</p>
               <div className="match" aria-live="polite">
                 <b>{matchDigits}</b>
-                <span>Only one of the numbers on your phone matches.</span>
+                <span>Type it into KyAuth to approve this sign-in.</span>
               </div>
               <div className="wait"><i />Waiting for approval.</div>
               <div className="mfa-alt-links">

@@ -362,7 +362,7 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest, audit fu
 
 	name := req.DeviceName
 	if name == "" {
-		name = "KySecurity Authenticator Device"
+		name = "KyAuth Device"
 	}
 	device := &store.NativeDevice{
 		ID:               uuid.New().String(),
