@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/google/uuid"
 )
 
@@ -28,6 +30,13 @@ type InstallerSCIM struct {
 	Groups     bool
 }
 type InstallerSuiteWebhook struct{ URL, SigningSecret string }
+
+// InstallerMail is the relay the bundle declares: Settings is the plaintext mail
+// settings JSON to seal, Contract the same without the password.
+type InstallerMail struct {
+	Host, Contract string
+	Settings       []byte
+}
 type InstallerGroup struct {
 	Name, Description string
 	IncludeEveryday   bool
@@ -38,6 +47,7 @@ type InstallerSetup struct {
 	Admin, Everyday InstallerUser
 	Clients         []InstallerClient
 	Groups          []InstallerGroup
+	Mail            *InstallerMail
 	EncryptionKey   []byte
 }
 type InstallerObject struct {
@@ -172,7 +182,7 @@ func (s *Store) InstallerSetupAdministrator(setupID string) (*User, error) {
 // installerParentTx binds an amendment to its parent's owned accounts and the groups its
 // clients name, from native ownership only. The caller's inspection then proves them current.
 func installerParentTx(tx *sql.Tx, p *InstallerSetup) error {
-	if p.Extends == "" || p.Extends == p.ID || p.Admin != (InstallerUser{}) || p.Everyday != (InstallerUser{}) || len(p.Groups) > 0 || len(p.Clients) == 0 {
+	if p.Extends == "" || p.Extends == p.ID || p.Admin != (InstallerUser{}) || p.Everyday != (InstallerUser{}) || len(p.Groups) > 0 || p.Mail != nil || len(p.Clients) == 0 {
 		return errors.New("an amendment adds clients only and must extend another setup")
 	}
 	rows, err := tx.Query(`SELECT contract FROM installer_setup_resources WHERE kind='user' AND setup_id=?`, p.Extends)
@@ -266,11 +276,17 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 			if err := tx.QueryRow(`SELECT role FROM users WHERE id=?`, id).Scan(&role); err != nil {
 				return err
 			}
-			fields["username"], fields["role"] = name, role
+			fields["username"], fields["role"], fields["emailVerified"] = name, role, "true"
 			action = "admin.user_created"
 		}
+		targetType := kind
+		if kind == "mail" {
+			// The native event raises the mail relay credential alert.
+			action, targetType = "admin.mail_configured", "settings"
+			fields["configured"], fields["host"] = "true", p.Mail.Host
+		}
 		details, _ := json.Marshal(fields)
-		return recordAuditTx(tx, &AuditEvent{ID: uuid.NewString(), ActorUsername: "kyquickstart", Action: action, TargetID: id, TargetType: kind, IPAddress: "container-local", Outcome: "success", DetailsJSON: string(details), CreatedAt: now})
+		return recordAuditTx(tx, &AuditEvent{ID: uuid.NewString(), ActorUsername: "kyquickstart", Action: action, TargetID: id, TargetType: targetType, IPAddress: "container-local", Outcome: "success", DetailsJSON: string(details), CreatedAt: now})
 	}
 	ownership := func(kind, name, id, contract string) (bool, error) {
 		var owner, storedID, storedContract string
@@ -323,6 +339,20 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 			if invalid {
 				return nil, fmt.Errorf("user %s has conflicting account lifecycle or delegated privileges", u.Username)
 			}
+			// The address is still the one this setup declared, so it counts as verified.
+			// Accounts created before installer verification existed gain it here.
+			if !inspect && !amendment {
+				res, err := tx.Exec(`UPDATE users SET email_verified_at=? WHERE id=? AND email_verified_at IS NULL`, now, id)
+				if err != nil {
+					return nil, err
+				}
+				if n, _ := res.RowsAffected(); n == 1 {
+					details, _ := json.Marshal(map[string]string{"setupId": p.ID, "username": u.Username})
+					if err := recordAuditTx(tx, &AuditEvent{ID: uuid.NewString(), ActorUsername: "kyquickstart", Action: "installer.email_verified", TargetID: id, TargetType: "user", IPAddress: "container-local", Outcome: "success", DetailsJSON: string(details), CreatedAt: now}); err != nil {
+						return nil, err
+					}
+				}
+			}
 			report.Reused = append(report.Reused, InstallerObject{"user", u.Username, id})
 			continue
 		}
@@ -330,7 +360,8 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 			return nil, fmt.Errorf("user %s is not configured", u.Username)
 		}
 		id = uuid.NewString()
-		if _, err := tx.Exec(`INSERT INTO users(id,username,display_name,email,password_hash,role,status,pending,created_at,updated_at) VALUES(?,?,?,?,?,?,'active',0,?,?)`, id, u.Username, u.Username, u.Email, u.PasswordHash, u.Role, now, now); err != nil {
+		// The installer owns these identities and took the address from the owner's plan.
+		if _, err := tx.Exec(`INSERT INTO users(id,username,display_name,email,password_hash,role,status,pending,email_verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,'active',0,?,?,?)`, id, u.Username, u.Username, u.Email, u.PasswordHash, u.Role, now, now, now); err != nil {
 			return nil, errors.New("installer account creation conflicts with an existing account")
 		}
 		if err := remember("user", u.Username, id, contract); err != nil {
@@ -343,6 +374,9 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		return nil, err
 	}
 	if err := tx.QueryRow(`SELECT id FROM users WHERE username=? COLLATE NOCASE`, p.Admin.Username).Scan(&adminID); err != nil {
+		return nil, err
+	}
+	if err := configureInstallerMail(tx, p, inspect, report, ownership, remember); err != nil {
 		return nil, err
 	}
 	groupIDs, err := configureInstallerGroups(tx, p, everydayID, inspect || amendment, report, ownership, remember, audit, now)
@@ -547,4 +581,49 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		return nil, err
 	}
 	return report, nil
+}
+
+// configureInstallerMail owns the mail relay a bundle declares. Settings configured
+// elsewhere and any drift, including a changed password, are refused. The password is
+// compared against the sealed setting and never enters the ownership contract.
+func configureInstallerMail(tx *sql.Tx, p InstallerSetup, inspect bool, report *InstallerReport,
+	ownership func(string, string, string, string) (bool, error), remember func(string, string, string, string) error) error {
+	if p.Mail == nil {
+		return nil
+	}
+	stored, err := getSetting(tx, MailSettingKey)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	id := ""
+	if err == nil {
+		id = "mail"
+	}
+	reused, err := ownership("mail", "settings", id, p.Mail.Contract)
+	if err != nil {
+		return err
+	}
+	if reused {
+		plain, err := crypto.Open(p.EncryptionKey, SealMail, MailSettingKey, stored)
+		if err != nil || subtle.ConstantTimeCompare(plain, p.Mail.Settings) != 1 {
+			return errors.New("owned mail settings or credential differ")
+		}
+		report.Reused = append(report.Reused, InstallerObject{"mail", "settings", id})
+		return nil
+	}
+	if inspect {
+		return errors.New("mail settings are not configured")
+	}
+	sealed, err := crypto.Seal(p.EncryptionKey, SealMail, MailSettingKey, p.Mail.Settings)
+	if err != nil {
+		return errors.New("cannot protect mail settings with existing product key")
+	}
+	if err := setSetting(tx, MailSettingKey, sealed); err != nil {
+		return err
+	}
+	if err := remember("mail", "settings", "mail", p.Mail.Contract); err != nil {
+		return err
+	}
+	report.Created = append(report.Created, InstallerObject{"mail", "settings", "mail"})
+	return nil
 }
