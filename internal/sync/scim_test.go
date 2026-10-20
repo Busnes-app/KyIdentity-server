@@ -258,7 +258,7 @@ func TestLegacyCustomDoesNotGuessProtocol(t *testing.T) {
 	e, s, u, cleanup := setupTestSyncEngine(t)
 	defer cleanup()
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))
 	defer srv.Close()
 	sys := &store.PairedSystem{ID: "legacy", Name: "legacy", SystemType: "custom", CallbackURL: srv.URL + "/scim/v2", HMACSecretEncrypted: mustEncrypt(t, e, "legacy", "old-secret"), Status: "active"}
 	if err := s.CreatePairedSystem(sys, nil); err != nil {

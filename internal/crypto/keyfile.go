@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"github.com/Busnes-app/ky-primitives/keyfile"
 	"os"
 	"path/filepath"
 )
@@ -39,4 +40,18 @@ func CreateKeyFile(path string, data []byte) error {
 	}
 	defer d.Close()
 	return d.Sync()
+}
+
+// ReadKeyFile preserves not-found for first-start creation while refusing unsafe
+// retained files through the shared descriptor-verified reader.
+func ReadKeyFile(path string, limit int64) ([]byte, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	path = absolute
+	if _, err := os.Lstat(path); err != nil {
+		return nil, err
+	}
+	return keyfile.ReadPrivate(path, limit)
 }

@@ -92,14 +92,7 @@ func loadOrCreateVAPIDKey(path string) (private, public string, err error) {
 	if err := createVAPIDKey(path); err != nil {
 		return "", "", err
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", "", err
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return "", "", fmt.Errorf("permissions %v are too open; chmod 600 it", info.Mode().Perm())
-	}
-	raw, err := os.ReadFile(path)
+	raw, err := crypto.ReadKeyFile(path, 4096)
 	if err != nil {
 		return "", "", err
 	}

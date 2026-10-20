@@ -131,7 +131,7 @@ func validate(raw, field string, device bool) error {
 	if err != nil {
 		return fmt.Errorf("%s is not a valid URL: %w", field, err)
 	}
-	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && allowPrivate) {
+	if parsed.Scheme != "https" {
 		return fmt.Errorf("%s must use https", field)
 	}
 	host := parsed.Hostname()

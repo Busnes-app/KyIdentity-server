@@ -79,9 +79,9 @@ func TestEventsAreScopedToTheirSystem(t *testing.T) {
 	defer cleanup()
 
 	var hitsA, hitsB int
-	srvA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hitsA++ }))
+	srvA := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hitsA++ }))
 	defer srvA.Close()
-	srvB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hitsB++ }))
+	srvB := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hitsB++ }))
 	defer srvB.Close()
 
 	pair := func(name, url string) string {
@@ -127,7 +127,7 @@ func TestUndeliverableEventStaysQueued(t *testing.T) {
 	e, db, _, cleanup := setupSync(t)
 	defer cleanup()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 
 	ps, _, err := e.CreateSystem(&CreateSystemRequest{
@@ -168,7 +168,7 @@ func TestFailedDeliveryBacksOff(t *testing.T) {
 	defer cleanup()
 
 	var attempts int
-	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	failing := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -244,7 +244,7 @@ func TestConcurrentDispatchDeliversEachEventOnce(t *testing.T) {
 
 	var mu stdsync.Mutex
 	seen := map[string]int{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		seen[r.Header.Get("X-KySignOn-Event-Id")]++
 		mu.Unlock()

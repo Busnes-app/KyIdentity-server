@@ -66,7 +66,7 @@ func TestTimedOutWriteBlocksLaterDelivery(t *testing.T) {
 func TestDeliveryOutcomeClassification(t *testing.T) {
 	for _, code := range []int{200, 201, 204, 202, 400, 408, 409, 429, 500, 503} {
 		t.Run(http.StatusText(code), func(t *testing.T) {
-			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(code) }))
+			remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(code) }))
 			defer remote.Close()
 			tracker := &deliveryTransport{base: http.DefaultTransport}
 			client := &http.Client{Transport: tracker}
@@ -97,7 +97,7 @@ func TestDeliveryDoesNotReplayInsideHTTPTransport(t *testing.T) {
 	for _, body := range []string{`{"active":true}`, ""} {
 		t.Run(body, func(t *testing.T) {
 			var writes atomic.Int32
-			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					w.WriteHeader(204)
 					return
@@ -150,14 +150,14 @@ func TestDeliveryFencesOnlyWrittenRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusedURL := "http://" + refused.Addr().String()
+	refusedURL := "https://" + refused.Addr().String()
 	refused.Close()
-	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	unavailable := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(503)
 	}))
 	defer unavailable.Close()
-	lost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	lost := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err == nil {
@@ -201,7 +201,7 @@ func TestSlowConnectorDoesNotDelayOthers(t *testing.T) {
 	e, s, u, cleanup := setupSync(t)
 	defer cleanup()
 	release := make(chan struct{})
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	slow := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-release
 		w.WriteHeader(204)
 	}))
@@ -211,7 +211,7 @@ func TestSlowConnectorDoesNotDelayOthers(t *testing.T) {
 	fastHit := make(chan struct{}, 1)
 	var mu stdsync.Mutex
 	var order []string
-	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fast := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		order = append(order, r.Header.Get("Idempotency-Key"))
 		mu.Unlock()

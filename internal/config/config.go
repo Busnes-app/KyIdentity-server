@@ -431,7 +431,7 @@ func loadKey(envName, path string) ([]byte, error) {
 }
 
 func loadOrGenerateKeyFile(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	data, err := crypto.ReadKeyFile(path, KeyLength)
 	switch {
 	case err == nil:
 		if len(data) != KeyLength {

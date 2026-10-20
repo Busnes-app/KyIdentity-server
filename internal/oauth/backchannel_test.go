@@ -122,7 +122,7 @@ func TestBackchannelDeliveryPostsASignedLogoutTokenAndRecordsTheOutcome(t *testi
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	rcv := &receiver{status: http.StatusOK}
-	srv := httptest.NewServer(rcv.handler(t))
+	srv := httptest.NewTLSServer(rcv.handler(t))
 	defer srv.Close()
 	u, sid := queuedLogout(t, e, db, srv.URL+"/backchannel")
 
@@ -150,7 +150,7 @@ func TestBackchannelDeliveryRetriesServerErrorsWithAFreshToken(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	rcv := &receiver{status: http.StatusServiceUnavailable}
-	srv := httptest.NewServer(rcv.handler(t))
+	srv := httptest.NewTLSServer(rcv.handler(t))
 	defer srv.Close()
 	u, _ := queuedLogout(t, e, db, srv.URL+"/backchannel")
 
@@ -185,7 +185,7 @@ func TestBackchannelDeliveryNeverFollowsRedirects(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	var followed int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/elsewhere" {
 			atomic.AddInt32(&followed, 1)
 			return
@@ -215,8 +215,8 @@ func TestATarpittedReceiverDoesNotBlockOtherApps(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	release := make(chan struct{})
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
-	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	slow := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
+	fast := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer fast.Close()
 
 	u := testUser(t, db)

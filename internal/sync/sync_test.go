@@ -215,7 +215,7 @@ func TestAccountSyncWebhookDispatch(t *testing.T) {
 	sharedSecret := "mock-hmac-secret-32-chars-long!"
 
 	// Mock downstream KyPost sync receiver server
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mockServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&receivedCount, 1)
 		lastReceivedSignature = r.Header.Get("X-KySignOn-Signature")
 		lastReceivedEventType = r.Header.Get("X-KySignOn-Event-Type")
@@ -281,7 +281,7 @@ func TestAccountSyncSCIMPayloadAndHeaders(t *testing.T) {
 
 	sharedSecret := "mock-hmac-secret-32-chars-long!"
 
-	mockSCIMServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mockSCIMServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&receivedCount, 1)
 		receivedContentType = r.Header.Get("Content-Type")
 		receivedAuthHeader = r.Header.Get("Authorization")

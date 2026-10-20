@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -34,5 +35,28 @@ func TestKeyFileConcurrentFirstStartAgrees(t *testing.T) {
 		if errs[i] != nil || !bytes.Equal(keys[i], onDisk) {
 			t.Fatalf("caller %d got a key other than the one on disk (err %v)", i, errs[i])
 		}
+	}
+}
+
+func TestKeyFileRefusesUnsafeRetainedFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(path, make([]byte, KeyLength), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadOrGenerateKeyFile(path); err == nil {
+		t.Fatal("read shared key")
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := path + ".link"
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadOrGenerateKeyFile(link); err == nil {
+		t.Fatal("read symlink key")
+	}
+	if _, err := loadOrGenerateKeyFile(path); err != nil {
+		t.Fatal(err)
 	}
 }

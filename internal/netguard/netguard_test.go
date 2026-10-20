@@ -116,7 +116,7 @@ func TestAllowPrivateOpensOnlyLANRanges(t *testing.T) {
 			t.Errorf("%s accepted with AllowPrivate", raw)
 		}
 	}
-	for _, raw := range []string{"http://10.89.0.2/", "https://192.168.1.1/", "https://172.16.0.5/", "https://100.64.0.1/", "https://[fd12::1]/"} {
+	for _, raw := range []string{"https://10.89.0.2/", "https://192.168.1.1/", "https://172.16.0.5/", "https://100.64.0.1/", "https://[fd12::1]/"} {
 		if err := ValidateURL(raw, "url"); err != nil {
 			t.Errorf("%s rejected with AllowPrivate: %v", raw, err)
 		}
@@ -166,5 +166,18 @@ func TestDeviceClientRefusesPrivateDialWithAllowPrivate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "non-public") {
 		t.Errorf("expected a non-public refusal, got %v", err)
+	}
+}
+
+func TestPrivateCallbacksStillRequireHTTPS(t *testing.T) {
+	AllowPrivate = true
+	defer func() { AllowPrivate = false }()
+	for _, target := range []string{"http://10.89.0.2/hook", "http://public.example/hook"} {
+		if ValidateURL(target, "callback") == nil {
+			t.Fatal("allowed plaintext", target)
+		}
+	}
+	if err := ValidateURL("https://10.89.0.2/hook", "callback"); err != nil {
+		t.Fatal(err)
 	}
 }

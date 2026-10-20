@@ -272,7 +272,7 @@ type JWTKeyManager struct {
 func LoadOrCreateRSAKey(keyPath string) (*JWTKeyManager, error) {
 	var privKey *rsa.PrivateKey
 
-	data, err := os.ReadFile(keyPath)
+	data, err := ReadKeyFile(keyPath, 32<<10)
 	if err == nil {
 		block, _ := pem.Decode(data)
 		if block == nil {

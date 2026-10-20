@@ -60,3 +60,25 @@ func TestCreateKeyFileNeverReplaces(t *testing.T) {
 		t.Fatalf("key file = %q mode %v, %v", got, fi.Mode().Perm(), err)
 	}
 }
+
+func TestRSAKeyRefusesSharedAndSymlinkFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rsa")
+	if _, err := LoadOrCreateRSAKey(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateRSAKey(path); err == nil {
+		t.Fatal("read shared signing key")
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(path, path+".link"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateRSAKey(path + ".link"); err == nil {
+		t.Fatal("read symlink signing key")
+	}
+}

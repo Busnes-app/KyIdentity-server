@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/netguard"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -77,7 +79,7 @@ func NewRelaySender(fcm, apns RelayConfig) (*RelaySender, error) {
 	return &RelaySender{
 		fcm:    fcmEndpoint,
 		apns:   apnsEndpoint,
-		client: &http.Client{Timeout: 5 * time.Second},
+		client: netguard.Client(5 * time.Second),
 	}, nil
 }
 
@@ -90,8 +92,14 @@ func prepareRelay(cfg RelayConfig) (*relayEndpoint, error) {
 		return e, nil
 	}
 	if cfg.KeyFile != "" {
-		key, err := os.ReadFile(cfg.KeyFile)
-		if err == nil && strings.TrimSpace(string(key)) != "" {
+		key, err := crypto.ReadKeyFile(cfg.KeyFile, 4096)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, errors.New("push relay key file is unsafe or unreadable")
+		}
+		if err == nil && strings.TrimSpace(string(key)) == "" {
+			return nil, errors.New("push relay key file is empty")
+		}
+		if err == nil {
 			e.key = strings.TrimSpace(string(key))
 			return e, nil
 		}
@@ -168,7 +176,7 @@ func registerRelayKey(relayURL, label string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := netguard.Client(10 * time.Second).Do(req)
 	if err != nil {
 		return "", err
 	}

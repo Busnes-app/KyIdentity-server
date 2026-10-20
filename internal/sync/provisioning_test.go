@@ -496,7 +496,7 @@ type suiteHit struct {
 func newSuiteReceiver(t *testing.T, delay time.Duration) (*httptest.Server, func() map[string][]suiteHit) {
 	var mu stdsync.Mutex
 	hits := map[string][]suiteHit{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body SCIMUserResource
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Meta == nil {
 			t.Error("bad suite body", err)

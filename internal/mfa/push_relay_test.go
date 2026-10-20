@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/netguard"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -24,6 +25,9 @@ func TestRelaySenderRegistersAndPersistsKey(t *testing.T) {
 	var registered bool
 	var sentAuth string
 	var sentPayload map[string]any
+	allow := netguard.AllowLoopback
+	netguard.AllowLoopback = true
+	t.Cleanup(func() { netguard.AllowLoopback = allow })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/register":
@@ -102,6 +106,9 @@ func TestRelaySenderRegistersAndPersistsKey(t *testing.T) {
 }
 
 func TestRelaySenderReturnsStaleTokenOnGone(t *testing.T) {
+	allow := netguard.AllowLoopback
+	netguard.AllowLoopback = true
+	t.Cleanup(func() { netguard.AllowLoopback = allow })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusGone)
 	}))
@@ -120,6 +127,9 @@ func TestRelaySenderReturnsStaleTokenOnGone(t *testing.T) {
 }
 
 func TestRelaySenderRequiresOKBodyOnSuccess(t *testing.T) {
+	allow := netguard.AllowLoopback
+	netguard.AllowLoopback = true
+	t.Cleanup(func() { netguard.AllowLoopback = allow })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Request-Id", "req-bad")
 		w.WriteHeader(http.StatusOK)
@@ -146,6 +156,9 @@ func TestRelaySenderRequiresOKBodyOnSuccess(t *testing.T) {
 // or a plain 401 when superseded is false.
 func supersedingRelay(t *testing.T, superseded bool) (*httptest.Server, *atomic.Int32) {
 	var registrations atomic.Int32
+	allow := netguard.AllowLoopback
+	netguard.AllowLoopback = true
+	t.Cleanup(func() { netguard.AllowLoopback = allow })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/register":
@@ -236,6 +249,9 @@ func TestRelaySenderKeepsRefusedKeysRefused(t *testing.T) {
 // one fixed-size ciphertext, and no identifier.
 func TestRelaySenderSealsChallengeForDeviceKeys(t *testing.T) {
 	var raw []byte
+	allow := netguard.AllowLoopback
+	netguard.AllowLoopback = true
+	t.Cleanup(func() { netguard.AllowLoopback = allow })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ = io.ReadAll(r.Body)
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
@@ -294,5 +310,45 @@ func TestRelaySenderRefusesBadDeviceKeys(t *testing.T) {
 		MFAChallengePush{ChallengeID: "c", Purpose: "login"})
 	if err == nil || !strings.Contains(err.Error(), "encrypt") {
 		t.Fatalf("err = %v, want an encryption failure before any send", err)
+	}
+}
+
+func TestRelayUsesOutboundGuard(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("relay reached loopback") }))
+	defer srv.Close()
+	if _, err := NewRelaySender(RelayConfig{URL: srv.URL, KeyFile: filepath.Join(t.TempDir(), "key")}, RelayConfig{}); err == nil {
+		t.Fatal("registration bypassed guard")
+	}
+	sender, err := NewRelaySender(RelayConfig{URL: srv.URL, Key: "test-key"}, RelayConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.SendPush(relayTestDevice, MFAChallengePush{ChallengeID: "challenge"}); err == nil {
+		t.Fatal("send bypassed guard")
+	}
+}
+
+func TestRelayRefusesRedirects(t *testing.T) {
+	netguard.AllowLoopback = true
+	defer func() { netguard.AllowLoopback = false }()
+	leaked := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked = true; w.WriteHeader(200) }))
+	defer target.Close()
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer relay.Close()
+	if _, err := NewRelaySender(RelayConfig{URL: relay.URL, KeyFile: filepath.Join(t.TempDir(), "key")}, RelayConfig{}); err == nil {
+		t.Fatal("followed registration redirect")
+	}
+	sender, err := NewRelaySender(RelayConfig{URL: relay.URL, Key: "test-key"}, RelayConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.SendPush(relayTestDevice, MFAChallengePush{ChallengeID: "challenge"}); err == nil {
+		t.Fatal("followed send redirect")
+	}
+	if leaked {
+		t.Fatal("request followed relay redirect")
 	}
 }
