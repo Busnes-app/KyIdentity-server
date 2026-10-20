@@ -73,14 +73,19 @@ Clone the repository and copy the sample configuration:
 
 Review and adjust variables in `.env`:
 ```ini
-# Interface binding (127.0.0.1 for local/proxy only, or 0.0.0.0 if not using proxy)
+# Host interface for port 5867. KyIdentity serves plain HTTP only, so browsers reach it
+# through a TLS proxy whatever you bind here.
 KYIDENTITY_BIND=127.0.0.1
 
 # Static container IP on shared kypost-net network
 KYIDENTITY_IP=10.89.0.2
 
-# Public URL used in issued tokens (use your public HTTPS domain in production)
+# Public URL used in issued tokens. Must be https unless the host is localhost or a
+# loopback IP; startup refuses anything else.
 KYIDENTITY_ISSUER_URL=https://auth.yourdomain.com
+
+# Your TLS proxy's address as KyIdentity sees it, and nothing wider (see SECURITY.md).
+TRUSTED_PROXY_CIDRS=<proxy-ip>/32
 
 # Optional: Pre-seed administrator credentials
 BOOTSTRAP_ADMIN_USER=admin
@@ -98,6 +103,19 @@ APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
 ```
 
 ### 2. Start the Server
+The compose file joins the external Docker network `kypost-net` (`KYPOST_NETWORK`) at the
+fixed address `KYIDENTITY_IP` and does not create it; `up` fails until it exists. KyPost's
+compose file creates it, so on a host that runs KyPost, start KyPost first. Otherwise create
+it once:
+
+```bash
+docker network create --subnet 10.89.0.0/24 --ip-range 10.89.0.128/25 kypost-net
+```
+
+`--ip-range` keeps dynamically assigned addresses off the low, pinned ones such as
+`10.89.0.2`. A KyPost added later finds a network its compose did not create and needs an
+override marking `kypost-net` as `external: true`.
+
 Published image:
 
 ```bash
@@ -133,11 +151,29 @@ If you did not define `BOOTSTRAP_ADMIN_PASS` in `.env`, KyIdentity generates a o
 docker compose exec kyidentity-server cat /data/first-run-password.txt
 ```
 
-Open your browser and navigate to:
-```text
-http://<YOUR_SERVER_IP>:5867
+Open your `KYIDENTITY_ISSUER_URL` (for example `https://<id.example.com>`) through your TLS
+proxy and sign in with `admin` and the retrieved password. With the default
+`KYIDENTITY_BIND`, port 5867 is published on `127.0.0.1` only: for a proxy on the same host
+and the health checks below, not for browsers on other machines.
+
+### 4. Private certificate authority (LAN installs)
+KyIdentity verifies every outbound TLS connection (KyRecovery, SCIM and suite connectors,
+back-channel logout, mail, push relays) against the image's system trust store and has no
+setting for an extra CA. If your services use certificates from a private CA, mount a PEM
+bundle holding the system roots plus your CA over that store with an overlay file, for
+example `docker-compose.ca.yml`:
+
+```yaml
+services:
+  kyidentity-server:
+    volumes:
+      - /path/to/ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
 ```
-Sign in with `admin` and the retrieved password.
+
+Append it to the `COMPOSE_FILE` chain in `.env` (for example
+`COMPOSE_FILE=docker-compose.yml:docker-compose.ca.yml`), then `docker compose up -d`. Keep the
+public roots in the bundle: push relays and UnifiedPush endpoints are public HTTPS. The file
+must be readable by the container's non-root user.
 
 ---
 

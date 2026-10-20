@@ -110,44 +110,25 @@ Android pairings are graded from a Keystore attestation chain that describes the
 
 ## Deployment Security
 
-Your deployment choices determine the actual security of KyPost. This section covers the configuration decisions that matter most.
+Your deployment choices determine the actual security of KyIdentity. This section covers the configuration decisions that matter most.
 
 ### TLS & Network Binding
 
-**This is the most important decision you make.** KyPost serves plain HTTP by default. Session cookies are marked `Secure` only when the request provably arrived over TLS.
+**KyIdentity serves plain HTTP only; it does not terminate TLS.** Put a TLS proxy (Caddy, nginx, Cloudflare Tunnel) in front of it.
 
-**Before exposing KyPost to a network, get TLS in front of it.** On bare `http://`, cookies are sent in the clear on every request.
+`KYIDENTITY_ISSUER_URL` must be `https://` unless its host is `localhost` or a loopback IP; startup refuses anything else. An `https` issuer marks session cookies `Secure` on every response. `KYIDENTITY_SECURE_COOKIES=true` forces the flag for a loopback issuer.
 
-Three ways to get TLS:
+Whichever proxy you use, set `TRUSTED_PROXY_CIDRS` to its address as KyIdentity sees it (below), and set `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP` behind Cloudflare.
 
-**1. Terminate TLS in KyPost (recommended if you control the host)**
-- Set `TLS_CERT_FILE` and `TLS_KEY_FILE` to mounted certificate paths.
-- KyPost will reload certificates without a restart (important: restarting logs everyone out).
-- Setting only one path is a startup error; it will not fall back to cleartext.
-- This is the only option where "did this arrive over TLS?" is answered by the connection itself, not by a header. `TRUSTED_PROXY_CIDRS` does not apply.
-- Certificates are never baked into the image.
-- See `.env.example` and the commented volume in `docker-compose.yml`.
+### KYIDENTITY_BIND: Which Interface to Publish
 
-**2. Cloudflare Tunnel**
-- cloudflared gives the browser a real HTTPS origin (needed for proof-of-work CAPTCHA).
-- No TLS configuration of your own.
-- Set `TRUSTED_PROXY_CIDRS` to the proxy's address.
+`KYIDENTITY_BIND` chooses the host interface that publishes port 5867. It defaults to `127.0.0.1`.
 
-**3. Reverse proxy you operate** (nginx, Caddy, etc.)
-- Set `TRUSTED_PROXY_CIDRS` to the proxy's address.
-- Proxy must use HTTPS when reaching KyPost if the hop carries session cookies across a real network.
+- **`127.0.0.1`** (default): loopback only, for a proxy on this host and local health checks.
+- **One LAN address** (e.g. `<host-lan-ip>`): only when a proxy on another machine must reach this host.
+- **`0.0.0.0`**: every interface. Rarely right: anything that can reach the port talks plain HTTP to the server.
 
-### KYPOST_BIND: Which Interface to Publish
-
-`KYPOST_BIND` controls which interface publishes port 5866. It has no default—compose refuses to start without it.
-
-- **`127.0.0.1`**: loopback only. Use when your reverse proxy runs on this same host.
-- **Your LAN IP** (e.g., `192.168.1.10`): publish to the LAN. Use when a proxy on another machine reaches this host.
-- **`0.0.0.0`**: publish everywhere. Use only when you deliberately want KyPost reachable on all interfaces. **This is usually wrong unless you also set `ALLOW_INSECURE_HTTP=true` and understand the consequences.**
-
-**Check where your proxy actually reaches this container from** before choosing. Loopback publishing severs a proxy that arrives by the host's LAN address, which is the typical shape for cloudflared or an nginx on another machine.
-
-**Better practice:** Run the proxy as a container on `kypost-net` (the network the compose file defines) and point it at `http://KyPost-Server:5866`. That network has DNS, nothing needs publishing, and the path ignores source NAT entirely—the server sees the real client IP. See [Reverse_Proxy_Networking.md](docs/Reverse_Proxy_Networking.md) for setup and Docker error recovery.
+**Better practice:** run the proxy as a container on `kypost-net` and point it at `http://KyIdentity-Server:5867`. Nothing needs publishing for the proxy, and KyIdentity sees the proxy's own container address, so `TRUSTED_PROXY_CIDRS` can name exactly that one address. Pin the proxy to a fixed address on the network so the setting stays true.
 
 ### TRUSTED_PROXY_CIDRS: Client IP Trust
 
@@ -173,7 +154,7 @@ Two further rules apply to the value:
 
 **Name the proxy's address specifically, not a wide range.** Any peer inside the range you name can forge their own client IP and bypass every rate limit and lockout. Example:
 
-- Proxy on same host: `TRUSTED_PROXY_CIDRS=127.0.0.1/32`
+- Proxy on the same host, through the published port: the container does not see `127.0.0.1` but the address Docker forwards from, typically the `kypost-net` gateway (`TRUSTED_PROXY_CIDRS=10.89.0.1/32` with the default subnet). Confirm it with the check below.
 - Proxy pinned on `kypost-net`: `TRUSTED_PROXY_CIDRS=10.89.0.10/32` (replace with your proxy's actual Docker network IP)
 - Cloudflare Tunnel: `TRUSTED_PROXY_CIDRS=0.0.0.0/0` is unavoidable; Tunnel is the proxy and only Cloudflare can reach it. Pair it with `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`.
 
@@ -189,12 +170,10 @@ This replaces the old `TRUST_PROXY_HEADERS=true`, which trusted forwarded header
 
 ### Verification: Confirm Your Setup
 
-**Verify rather than assume.** Sign in and fetch `GET /api/status`. Check two fields:
+**Verify rather than assume.** Sign in through the proxy from a machine whose address you know, then open the admin audit log and find your `auth.login_success` row. Its IP column is the client address KyIdentity resolved for you.
 
-- `clientIp`: must be your own public address (or `127.0.0.1` if TLS-terminating in KyPost)
-- `proxyHeadersTrusted`: must be `true` (if using a reverse proxy) or `false` (if TLS-terminating in KyPost)
-
-If `clientIp` is a loopback or bridge address (e.g., `172.17.0.1`), every user shares one lockout bucket and the session cookie is not being marked `Secure`.
+- Your own address: the proxy is trusted and forwards the header named by `KYIDENTITY_FORWARDED_HEADER`.
+- The proxy's or a Docker gateway address (e.g. `10.89.0.1`): `TRUSTED_PROXY_CIDRS` does not match the proxy as KyIdentity sees it, or the proxy does not send that header. Every user then shares one lockout bucket.
 
 ### Secret Handling
 
@@ -363,6 +342,5 @@ Security-sensitive PRs should include:
 ## Additional Resources
 
 - [README Security Section](README.md#where-your-pgp-private-key-lives) — PGP key custody, session behavior, users and roles
-- [Reverse Proxy Networking](docs/Reverse_Proxy_Networking.md) — Setting up a proxy on `kypost-net`
-- [Quick Start TLS Notes](README.md#quick-start) — TLS termination and proxy configuration
+- [Quickstart with Docker Compose](README.md#quickstart-with-docker-compose) — `kypost-net`, issuer, proxy trust and private CA
 - OWASP guidelines on secure development practices
