@@ -1,6 +1,6 @@
 # KyIdentity Server
 
-KyIdentity Server is the single-organization SSO provider and central identity authority for the KySecurity Suite of software (KyPost, KyBookmarks, KyNotes, KyPasswords).
+KyIdentity Server is the single-organization SSO provider and central identity authority for the Busnes.app Ky products.
 
 ## Core Capabilities & Responsibilities
 
