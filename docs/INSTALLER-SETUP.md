@@ -125,10 +125,13 @@ HTTPS; credentials and fragments are refused. Custom app schemes (`myapp://callb
 refused here and by native client registration, so a mobile app needs its HTTPS redirect.
 Preserve `setupId` on reruns.
 
-Bundle clients are always confidential, and the schema has no back-channel logout field
-(unknown fields are refused). Register a public client natively instead
-(`"clientType":"public"` on `POST /api/admin/clients`); set a back-channel logout URI on an
-applied client natively (`backchannelLogoutUri` on `PUT /api/admin/clients/{id}`).
+Clients default to `"clientType":"confidential"` for compatibility. Set
+`"clientType":"public"` for a public PKCE client and omit `secretFile`; staging
+creates no OAuth secret and private credential export is refused for that client.
+S256 PKCE remains required for every client. Optional `backchannelLogoutUri` is an
+exact HTTPS endpoint without credentials or fragments. Both values participate in
+ownership and read-only drift checks; changing an already-owned client requires
+native management, never silent installer replacement.
 
 Role fields name the exact roles the product understands; they do not use the directory's
 global administrator role. Native OIDC issues only this app's `roles` claim.

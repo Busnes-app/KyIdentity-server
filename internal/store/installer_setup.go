@@ -16,12 +16,13 @@ import (
 // InstallerUser contains validated local setup values, never a plaintext password.
 type InstallerUser struct{ Username, Email, Role, PasswordHash string }
 type InstallerClient struct {
-	ID, Name, SecretHash            string
-	RedirectURIs, PostLogoutURIs    []string
-	AdministratorRole, EverydayRole string
-	SCIM                            *InstallerSCIM
-	SuiteWebhook                    *InstallerSuiteWebhook
-	Groups                          []string
+	ID, Name, SecretHash             string
+	ClientType, BackchannelLogoutURI string
+	RedirectURIs, PostLogoutURIs     []string
+	AdministratorRole, EverydayRole  string
+	SCIM                             *InstallerSCIM
+	SuiteWebhook                     *InstallerSuiteWebhook
+	Groups                           []string
 }
 type InstallerSCIM struct {
 	URL, Token string
@@ -418,9 +419,23 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		return nil
 	}
 	for _, c := range p.Clients {
+		clientType := c.ClientType
+		if clientType == "" {
+			clientType = "confidential"
+		}
+		if clientType != "public" && clientType != "confidential" || clientType == "public" && c.SecretHash != "" {
+			return nil, errors.New("invalid installer client type or secret")
+		}
 		redirects, _ := json.Marshal(c.RedirectURIs)
 		logout, _ := json.Marshal(c.PostLogoutURIs)
 		contractFields := []string{c.Name, string(redirects), string(logout)}
+		// Keep historical confidential receipts byte-identical.
+		if clientType != "confidential" {
+			contractFields = append(contractFields, "clientType", clientType)
+		}
+		if c.BackchannelLogoutURI != "" {
+			contractFields = append(contractFields, "backchannelLogoutUri", c.BackchannelLogoutURI)
+		}
 		if c.AdministratorRole != "" || c.EverydayRole != "" {
 			contractFields = append(contractFields, c.AdministratorRole, c.EverydayRole)
 		}
@@ -433,9 +448,9 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		}
 		contractBytes, _ := json.Marshal(contractFields)
 		contract := string(contractBytes)
-		var id, name, kind, hash, existingRedirects, existingLogout, scopes string
+		var id, name, kind, hash, existingRedirects, existingLogout, scopes, backchannel string
 		var enabled bool
-		err := tx.QueryRow(`SELECT id,client_name,client_type,client_secret_hash,redirect_uris_json,post_logout_redirect_uris_json,allowed_scopes_json,enabled FROM oauth_clients WHERE id=?`, c.ID).Scan(&id, &name, &kind, &hash, &existingRedirects, &existingLogout, &scopes, &enabled)
+		err := tx.QueryRow(`SELECT id,client_name,client_type,client_secret_hash,redirect_uris_json,post_logout_redirect_uris_json,allowed_scopes_json,enabled,COALESCE(backchannel_logout_uri,'') FROM oauth_clients WHERE id=?`, c.ID).Scan(&id, &name, &kind, &hash, &existingRedirects, &existingLogout, &scopes, &enabled, &backchannel)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -444,7 +459,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 			return nil, err
 		}
 		if reused {
-			if name != c.Name || kind != "confidential" || hash != c.SecretHash || existingRedirects != string(redirects) || existingLogout != string(logout) || scopes != `["openid","profile","email"]` || !enabled {
+			if name != c.Name || kind != clientType || backchannel != c.BackchannelLogoutURI || hash != c.SecretHash || existingRedirects != string(redirects) || existingLogout != string(logout) || scopes != `["openid","profile","email"]` || !enabled {
 				return nil, fmt.Errorf("client %s differs from its installer configuration", c.ID)
 			}
 			var policy, everydayAccess bool
@@ -498,7 +513,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		if inspect {
 			return nil, fmt.Errorf("client %s is not configured", c.ID)
 		}
-		if _, err := tx.Exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,launch_url,enabled,created_at,post_logout_redirect_uris_json) VALUES(?,?,'confidential',?,?,?,NULL,1,?,?)`, c.ID, c.Name, c.SecretHash, string(redirects), `["openid","profile","email"]`, now, string(logout)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,launch_url,enabled,created_at,post_logout_redirect_uris_json,backchannel_logout_uri) VALUES(?,?,?,?,?,?,NULL,1,?,?,?)`, c.ID, c.Name, clientType, c.SecretHash, string(redirects), `["openid","profile","email"]`, now, string(logout), c.BackchannelLogoutURI); err != nil {
 			return nil, err
 		}
 		var appID string

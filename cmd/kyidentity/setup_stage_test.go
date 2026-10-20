@@ -322,3 +322,52 @@ func TestSetupPreparationLostCompletionFilesBeforeApplication(t *testing.T) {
 		t.Fatal("prepared password regenerated before account application")
 	}
 }
+
+func TestSetupPublicClientAndBackchannel(t *testing.T) {
+	b, file, db := stageFixture(t)
+	b.Clients[0].ClientType = "public"
+	b.Clients[0].BackchannelLogoutURI = "https://notes.example.test/logout"
+	if _, err := stageCommand(t, b, file, db, false); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var staged setupBundle
+	if err := json.Unmarshal(raw, &staged); err != nil {
+		t.Fatal(err)
+	}
+	if staged.Clients[0].SecretFile != "" {
+		t.Fatal("public client got a secret")
+	}
+	var out bytes.Buffer
+	if err := runSetup([]string{"--file", file, "--db", db}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSetup([]string{"--file", file, "--db", db, "--check"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.OpenInstallerStore(db, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c, err := s.GetOAuthClientByID("notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ClientType != "public" || c.ClientSecretHash != "" || c.BackchannelLogoutURI != b.Clients[0].BackchannelLogoutURI {
+		t.Fatalf("wrong client: %#v", c)
+	}
+	if err := runSetup([]string{"--file", file, "--db", db, "--export-client", "notes"}, &out); err == nil {
+		t.Fatal("exported public client")
+	}
+	c.BackchannelLogoutURI = "https://notes.example.test/changed"
+	if err := s.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSetup([]string{"--file", file, "--db", db, "--check"}, &out); err == nil {
+		t.Fatal("accepted back-channel logout drift")
+	}
+}

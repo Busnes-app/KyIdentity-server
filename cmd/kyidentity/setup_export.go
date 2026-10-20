@@ -82,6 +82,9 @@ func exportSetupClient(file, db, clientID string, out io.Writer) error {
 		return errors.New("credential export owner no longer matches setup ownership")
 	}
 	c := b.Clients[selected]
+	if c.ClientType == "public" {
+		return errors.New("public clients have no credentials to export")
+	}
 	secret, err := readSetupFile(c.SecretFile, 43)
 	if err != nil {
 		return err

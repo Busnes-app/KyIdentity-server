@@ -168,8 +168,10 @@ func stageSetup(file, db string, raw []byte, check bool) (string, error) {
 		if !setupName.MatchString(c.ID) {
 			return "", errors.New("invalid preparation client identifier")
 		}
-		if err := bind(&c.SecretFile, "client-"+c.ID+".secret"); err != nil {
-			return "", err
+		if c.ClientType != "public" {
+			if err := bind(&c.SecretFile, "client-"+c.ID+".secret"); err != nil {
+				return "", err
+			}
 		}
 		if c.SuiteWebhook != nil {
 			if err := bind(&c.SuiteWebhook.SigningSecretFile, "client-"+c.ID+".webhook"); err != nil {

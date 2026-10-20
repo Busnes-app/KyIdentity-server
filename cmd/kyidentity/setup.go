@@ -29,16 +29,18 @@ type setupAccount struct {
 	PasswordFile string `json:"passwordFile"`
 }
 type setupClient struct {
-	ID                string             `json:"id"`
-	Name              string             `json:"name"`
-	SecretFile        string             `json:"secretFile"`
-	RedirectURIs      []string           `json:"redirectUris"`
-	PostLogoutURIs    []string           `json:"postLogoutUris"`
-	AdministratorRole string             `json:"administratorRole,omitempty"`
-	EverydayRole      string             `json:"everydayRole,omitempty"`
-	SCIM              *setupSCIM         `json:"scim,omitempty"`
-	SuiteWebhook      *setupSuiteWebhook `json:"suiteWebhook,omitempty"`
-	Groups            []string           `json:"groups,omitempty"`
+	ID                   string             `json:"id"`
+	Name                 string             `json:"name"`
+	ClientType           string             `json:"clientType,omitempty"`
+	BackchannelLogoutURI string             `json:"backchannelLogoutUri,omitempty"`
+	SecretFile           string             `json:"secretFile"`
+	RedirectURIs         []string           `json:"redirectUris"`
+	PostLogoutURIs       []string           `json:"postLogoutUris"`
+	AdministratorRole    string             `json:"administratorRole,omitempty"`
+	EverydayRole         string             `json:"everydayRole,omitempty"`
+	SCIM                 *setupSCIM         `json:"scim,omitempty"`
+	SuiteWebhook         *setupSuiteWebhook `json:"suiteWebhook,omitempty"`
+	Groups               []string           `json:"groups,omitempty"`
 }
 type setupSCIM struct {
 	URL       string `json:"url"`
@@ -132,7 +134,9 @@ func setupCredentialFiles(b setupBundle) []string {
 		files = append(files, b.Admin.PasswordFile, b.Everyday.PasswordFile)
 	}
 	for _, c := range b.Clients {
-		files = append(files, c.SecretFile)
+		if c.ClientType != "public" {
+			files = append(files, c.SecretFile)
+		}
 		if c.SuiteWebhook != nil {
 			files = append(files, c.SuiteWebhook.SigningSecretFile)
 		}
@@ -194,6 +198,15 @@ func setupMetadata(b []byte) (setupBundle, store.InstallerSetup, error) {
 		p.Groups = append(p.Groups, store.InstallerGroup{Name: g.Name, Description: g.Description, IncludeEveryday: len(g.Members) == 1})
 	}
 	for _, c := range bundle.Clients {
+		if c.ClientType != "" && c.ClientType != "confidential" && c.ClientType != "public" {
+			return bundle, p, errors.New("setup clientType must be public or confidential")
+		}
+		if c.ClientType == "public" && c.SecretFile != "" {
+			return bundle, p, errors.New("public setup clients must not have a secret file")
+		}
+		if c.BackchannelLogoutURI != "" && (len(c.BackchannelLogoutURI) > 2048 || !setupURI(c.BackchannelLogoutURI)) {
+			return bundle, p, errors.New("back-channel logout requires HTTPS without credentials or fragments")
+		}
 		if c.SCIM != nil && c.SuiteWebhook != nil {
 			return bundle, p, errors.New("choose one SCIM or signed suite connector per client")
 		}
@@ -272,19 +285,23 @@ func prepareSetup(raw []byte) (store.InstallerSetup, error) {
 		}
 	}
 	for _, c := range bundle.Clients {
-		raw, err := readSetupFile(c.SecretFile, 1024)
-		if err != nil {
-			return p, err
-		}
-		secret := strings.TrimSuffix(string(raw), "\n")
-		if len(secret) < 32 || strings.ContainsAny(secret, "\r\n\x00") {
-			return p, errors.New("client secret requires at least 32 bytes without newlines")
+		secretHash := ""
+		if c.ClientType != "public" {
+			raw, err := readSetupFile(c.SecretFile, 1024)
+			if err != nil {
+				return p, err
+			}
+			secret := strings.TrimSuffix(string(raw), "\n")
+			if len(secret) < 32 || strings.ContainsAny(secret, "\r\n\x00") {
+				return p, errors.New("client secret requires at least 32 bytes without newlines")
+			}
+			secretHash = crypto.HashSHA256(secret)
 		}
 		logout := c.PostLogoutURIs
 		if logout == nil {
 			logout = []string{}
 		}
-		client := store.InstallerClient{ID: c.ID, Name: c.Name, SecretHash: crypto.HashSHA256(secret), RedirectURIs: c.RedirectURIs, PostLogoutURIs: logout,
+		client := store.InstallerClient{ID: c.ID, Name: c.Name, SecretHash: secretHash, ClientType: c.ClientType, BackchannelLogoutURI: c.BackchannelLogoutURI, RedirectURIs: c.RedirectURIs, PostLogoutURIs: logout,
 			AdministratorRole: c.AdministratorRole, EverydayRole: c.EverydayRole}
 		client.Groups = append([]string(nil), c.Groups...)
 		sort.Strings(client.Groups)
@@ -373,7 +390,7 @@ func runSetupInput(args []string, input io.Reader, out io.Writer) error {
 		if *file != "" || *db != "" || *check || *stage || *exportClient != "" {
 			return errors.New("capabilities cannot be combined with setup arguments")
 		}
-		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system"}})
+		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "public-oidc-clients", "backchannel-logout", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system"}})
 	}
 	if *exportClient != "" {
 		if *stage || *check {
