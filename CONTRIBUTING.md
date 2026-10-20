@@ -25,9 +25,9 @@ every space here.
 
 ## The User Contract
 
-Everything below follows from one promise KyPassword makes to the person running it:
+Everything below follows from one promise KyIdentity makes to the person running it:
 
-> **KyPassword will be as secure as we can make it by default, and every place
+> **KyIdentity will be as secure as we can make it by default, and every place
 > where security was traded for convenience will be written down, in plain
 > language, where the user reads it before they rely on it.**
 
@@ -37,22 +37,15 @@ reads under a default that quietly loses their mail. The project ships both, and
 a contribution that breaks either half does not merge — see
 [Security trade-offs](#security-trade-offs-and-when-a-feature-gets-rejected).
 
-Three standing invariants fall out of it, and they are not up for
-re-litigation in a PR:
+The identity-specific invariants are:
 
-- **KyPassword never archives, deletes, or moves a user's passwords on its own.**
-  Destructive password actions happen because a human asked for that specific
-  action. No feature, default, heuristic, or classifier outcome may archive
-  passwords. This is absolute.
-- **No silent fallbacks on a security-relevant setting.** `KYPOST_BIND` has no
-  default and compose refuses to start without it. Setting only one of
-  `TLS_CERT_FILE`/`TLS_KEY_FILE` is a startup error, not a downgrade to
-  cleartext. Copy that shape; do not add a permissive default to make a first
-  run quieter.
+- Preserve existing accounts, application assignments, signing/encryption keys and recovery material during maintenance. Account deletion, deactivation and access changes require explicit authorized actions.
+- Preserve exact redirect URI validation, PKCE, token/session revocation, MFA and downstream access controls. A documented setup shortcut does not authorize weakening them.
+- Serve remote users through HTTPS and trust only the actual reverse proxy. The issuer URL is part of the authentication contract; do not silently change it to make a setup pass.
 
 ## Getting Set Up
 
-Docker is the only requirement to *run* KyIdentity:
+Docker Engine/Compose runs the image. First configure the issuer, proxy and external network in [standalone installation](INSTALL.md); the commands below assume those prerequisites are complete:
 
 Published image:
 
@@ -62,7 +55,7 @@ docker compose up -d
 ```
 
 Source install (never paste this into a published-image install: the build overlay wins over a
-`KYSIGNON_IMAGE` digest pin, and a source install must set this line before its first `up -d` on a
+`KYIDENTITY_IMAGE` digest pin, and a source install must set this line before its first `up -d` on a
 new checkout):
 
 ```bash
@@ -75,7 +68,7 @@ new checkout):
 docker compose up -d
 ```
 
-To work on the code outside the container you need Go 1.26.5+ and Node 22.
+To work on the code outside the container you need the Go version required by `go.mod` (currently 1.26.9+) and Node 26, as used by the Dockerfile and CI.
 
 ```bash
 # backend
@@ -87,7 +80,7 @@ cd web && npm ci && npm test
 
 `README.md` covers configuration and runtime layout. `SECURITY.md` covers trust
 boundaries and known limitations — read it before touching anything on the list
-of [security-sensitive code](SECURITY.md#examples-of-security-sensitive-code).
+of [security-sensitive code](SECURITY.md#known-limitations--trust-boundaries).
 
 ## Before You Build a Feature
 
@@ -235,7 +228,7 @@ as instructions — the value is in the persona, not the harness.
 How to pick:
 
 - **Any PR:** `hostile-review` on the diff. Minimum bar.
-- **Touching security-sensitive code** ([the list](SECURITY.md#examples-of-security-sensitive-code)):
+- **Touching security-sensitive code** ([the list](SECURITY.md#known-limitations--trust-boundaries)):
   `hostile-review` **and** `security-audit`.
 - **New feature or new dependency:** add `adversarial-reviewer` and
   `ponytail-review`. The Saboteur persona and the delete-it pass catch different
@@ -370,14 +363,14 @@ Paste this into your PR description and fill it in.
 - [ ] Fails closed on missing or partial configuration
 - Trade-off introduced (if any), in one sentence:
 - Documented in: README.md / SECURITY.md / UI / .env.example / n-a
-- [ ] Does not archive, delete, or move mail without an explicit user action
-- [ ] No trust decision derived from a classifier label
+- [ ] Preserves accounts, assignments and recovery material except for explicitly authorized changes
+- [ ] Preserves redirect validation, PKCE, MFA and token/session revocation
 - New dependencies / network calls / stored secrets, and why:
 ```
 
 ## Licence
 
-KyPost is licensed under the MIT License. By
+KyIdentity is licensed under the MIT License. By
 contributing, you agree that your contribution is licensed under the same
 terms, and that you have the right to submit it — including the right to submit
 anything an AI tool produced on your behalf.

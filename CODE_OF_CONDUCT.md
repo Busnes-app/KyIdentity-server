@@ -1,19 +1,19 @@
 # Code of Conduct
 
-KyPassword handles other people's passwords. Getting
+KyIdentity handles other people's passwords. Getting
 that right takes people who disagree with each other in public and keep showing
 up anyway. This document exists so that disagreement stays about the work.
 
 ## Our Commitment
 
-Everyone who contributes to KyPassword — code, documentation, bug reports, security
+Everyone who contributes to KyIdentity — code, documentation, bug reports, security
 findings, translations, or a question in an issue — is welcome here regardless
 of age, body size, visible or invisible disability, ethnicity, sex
 characteristics, gender identity and expression, level of experience,
 education, socio-economic status, nationality, personal appearance, race,
 religion, caste, colour, or sexual identity and orientation.
 
-We are building software for people who want control over their own mail. A
+We are building software for people who want control over their identities and application access. A
 project about self-determination that treats its contributors as
 interchangeable would be lying about what it is.
 
@@ -54,10 +54,10 @@ interchangeable would be lying about what it is.
 
 ## Hostile Reviews Are About Code, Never People
 
-KyPost deliberately runs adversarial review: human reviewers, and AI reviewers
+KyIdentity deliberately runs adversarial review: human reviewers, and AI reviewers
 running skills that are *instructed* to be unimpressed with your work. Every PR
 gets torn at on purpose, because the alternative is finding out from a user
-whose mailbox credentials leaked. See
+whose sign-in credentials leaked. See
 [CONTRIBUTING](CONTRIBUTING.md#adversarial-review-skills).
 
 That practice has an exact boundary, and the boundary is this:

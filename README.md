@@ -1,8 +1,10 @@
 # KyIdentity Server
 
-KyIdentity Server is the single-organization Single Sign-On (SSO) identity provider and central user directory for the **KySecurity Suite** (KyPost, KyPasswords, KyBookmarks, KyNotes).
+**Start here:** [Standalone installation](INSTALL.md). Local accounts, groups, MFA and the identity provider run without other Ky servers. Configure an SMTP sender separately for activation and password-reset email; KyAuth is optional for push MFA and app sign-on.
 
-Built in Go with a focus on simplicity, minimal external dependencies, and native platform standards, KyIdentity serves as the authoritative source of truth for accounts, OpenID Connect authentication, and mutual system replication.
+KyIdentity is a self-hosted, single-organization identity provider and user directory for the Busnes.app Ky products. Manage people, groups, application access and MFA in one place; connected products use OpenID Connect for sign-in and configured connectors for provisioning and offboarding.
+
+Built in Go with a focus on simplicity, minimal external dependencies, and native platform standards, KyIdentity serves as the authoritative source of truth for accounts and OpenID Connect authentication. Downstream synchronization is configured per product; it does not replicate every product’s database.
 
 ---
 
@@ -12,17 +14,17 @@ Built in Go with a focus on simplicity, minimal external dependencies, and nativ
 2. **OpenID Connect & OAuth 2.0 Provider**: RFC-compliant authorization code flow with PKCE (`S256`), dynamic JWKS key discovery (`/.well-known/jwks.json`), and RS256 token signing.
 3. **Multi-Factor Authentication (MFA)**:
    - **TOTP Authenticator Apps**: Standard RFC 6238 time-based one-time passwords with encrypted secrets at rest (AES-256-GCM).
-   - **Push Authentication with Number Matching**: 2-digit verification challenges with decoy numbers for mobile pairing. Delivered through the FCM/APNs relay, directly over UnifiedPush, or through the UBports push service to Linux (Ubuntu Touch) devices; UnifiedPush distributors and UBports see when a sign-in happens but not its content (see SECURITY.md).
-   - **Passkeys (WebAuthn)**: ES256 platform and roaming authenticators as a second factor, verified with the standard library alone. Works with KyAuth's Android credential provider, and with iCloud Keychain, Windows Hello and hardware keys.
+   - **Push Authentication with Number Matching**: Two-digit number-matching challenges for paired devices. Delivered through the FCM/APNs relay, directly over UnifiedPush, or through the UBports push service to Linux (Ubuntu Touch) devices; UnifiedPush distributors and UBports see when a sign-in happens but not its content (see SECURITY.md).
+   - **Passkeys (WebAuthn)**: ES256 platform and roaming authenticators as a second factor, verified with the standard library alone. Works with compatible platform passkey managers and roaming hardware keys; current KyAuth apps are authenticators rather than passkey managers.
    - **Emergency Recovery Codes**: Single-use recovery codes stored as HMAC-SHA256 under a key derived from the encryption key, bound to the user. Codes issued by older versions (bare SHA-256) still work until regenerated; `GET /api/auth/me` reports `recoveryCodesNeedRegeneration` while any remain.
 4. **90-Second Ephemeral Pairing**: Frictionless UI-based pairing with QR codes and short PINs for native mobile devices and downstream server applications.
-5. **KySecurity Suite Application Launcher**: Single-pane dashboard themed in KySecurity Patina (dark `#0d0f14`, cyan `#4deeea`, Space Grotesk, IBM Plex Mono) embedding the full React frontend into the standalone binary.
+5. **Application Launcher**: Search and arrange the applications you can access, with saved groups, ordering and custom icons. The embedded React frontend follows system light/dark appearance with Busnes themes; older named presets remain available.
 
 ---
 
 ## Architecture & Standard Library Philosophy
 
-Following the **Ponytail** engineering philosophy (*use the smallest correct change, prefer native platform APIs, minimize external bloat*), **over 95% of the Go backend is built exclusively using the Go Standard Library (`stdlib`)**.
+Following the **Ponytail** engineering philosophy (*use the smallest correct change, prefer native platform APIs, minimize external bloat*), the backend uses the Go standard library for HTTP, token signing and cryptographic primitives, with the external modules listed in `go.mod`.
 
 ```
                            ┌───────────────────────────────┐
@@ -56,10 +58,14 @@ Following the **Ponytail** engineering philosophy (*use the smallest correct cha
 
 ### Direct Dependencies
 
-KyIdentity relies on only **3 direct external packages**:
-- **`modernc.org/sqlite`**: Pure-Go SQLite engine allowing zero-CGO static compilation (`CGO_ENABLED=0`) on Alpine Linux.
-- **`golang.org/x/crypto`**: Official Go extended crypto library for secure `bcrypt` password hashing.
-- **`github.com/google/uuid`**: RFC 4122 UUID generator.
+The direct modules in [go.mod](go.mod) are the authoritative dependency list:
+
+- `github.com/Busnes-app/ky-primitives`: shared Ky security and recovery components.
+- `github.com/SherClockHolmes/webpush-go`: Web Push delivery.
+- `github.com/fxamacker/cbor/v2`: CBOR encoding/decoding used by authenticator protocols.
+- `github.com/google/uuid`: identifiers.
+- `golang.org/x/crypto`: extended cryptographic implementations.
+- `modernc.org/sqlite`: SQLite without a CGO dependency.
 
 ---
 
@@ -89,7 +95,7 @@ TRUSTED_PROXY_CIDRS=<proxy-ip>/32
 
 # Optional: Pre-seed administrator credentials
 BOOTSTRAP_ADMIN_USER=admin
-BOOTSTRAP_ADMIN_PASS=YourSecurePassword123!
+# BOOTSTRAP_ADMIN_PASS=<a privately generated unique password; never use this placeholder>
 
 # Optional: Cloudflare Worker native-push relays. Without a *_RELAY_KEY the server
 # self-registers, keeps the key under the data directory, and re-registers once if
@@ -661,8 +667,7 @@ binding a code to the party that requested it; for a confidential client it stop
 injected authorization code (RFC 9700). A code stored without a challenge never redeems.
 
 **Clients are confidential by default.** Registration issues a client secret unless
-`"clientType":"public"` is passed explicitly. Every suite service (KyPost, KyDNS,
-KyPasswords, KyNotes, KyBookmarks) is a server-side application that can hold one, so it
+`"clientType":"public"` is passed explicitly. A suite server such as KyPost, KyDNS, KyNotes or KyCalendar can hold a secret, so it
 should be confidential; `public` exists for SPAs and native apps that genuinely cannot.
 A confidential client with an empty `client_secret_hash` is rejected rather than
 authenticated by existing.

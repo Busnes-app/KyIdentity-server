@@ -250,3 +250,7 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 ## Child DOX Index
 
 - [internal/backup/AGENTS.md](file:///home/yoshi/busness.app/kyidentity-server/internal/backup/AGENTS.md): adapter over ky-primitives/recoveryclient: what KyIdentity seals, its drill checks, store/key/config glue.
+
+## Operator documentation
+
+`INSTALL.md` is the root-owned standalone entry point. When installation prerequisites, bootstrap, persistence or verification change, update it together with `README.md` and the linked operator guides.
