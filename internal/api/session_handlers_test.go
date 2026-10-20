@@ -194,8 +194,8 @@ func TestCodeExchangeCannotEscapeSessionRevocation(t *testing.T) {
 	u := newUser(t, db, "user")
 	exp := time.Now().UTC().Add(time.Hour)
 	mine, other := newSession(t, db, u, exp), newSession(t, db, u, exp)
-	newClient(t, db, "kynotes", []string{"https://notes.urlxl.com/callback"}, []string{"openid"})
-	code, err := oe.CreateAuthorizationCode("kynotes", sessionIDFor(t, db, other), "https://notes.urlxl.com/callback", "openid", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "S256")
+	newClient(t, db, "kynotes", []string{"https://notes.example.com/callback"}, []string{"openid"})
+	code, err := oe.CreateAuthorizationCode("kynotes", sessionIDFor(t, db, other), "https://notes.example.com/callback", "openid", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "S256")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestCodeExchangeCannotEscapeSessionRevocation(t *testing.T) {
 	if got := call(t, srv, mine, "DELETE", "/api/user/sessions/"+sessionIDFor(t, db, other)); got.Code != http.StatusOK {
 		t.Fatalf("revoke: %d", got.Code)
 	}
-	if _, err := oe.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.urlxl.com/callback", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"); err == nil {
+	if _, err := oe.ExchangeAuthorizationCode(code, "kynotes", "", "https://notes.example.com/callback", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"); err == nil {
 		t.Fatal("code from a revoked session was exchanged")
 	}
 }

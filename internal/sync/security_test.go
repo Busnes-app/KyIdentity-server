@@ -209,7 +209,7 @@ func TestHMACSecretIsNotStoredInPlaintext(t *testing.T) {
 	defer cleanup()
 
 	_, token, err := e.CreateSystem(&CreateSystemRequest{
-		Name: "mail", SystemType: "kypost", CallbackURL: "https://mail.urlxl.com/scim/v2",
+		Name: "mail", SystemType: "kypost", CallbackURL: "https://mail.example.com/scim/v2",
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -449,7 +449,7 @@ export const AdminClients: React.FC = () => {
                 <input
                   type="url"
                   className="form-input font-mono"
-                  placeholder="e.g. https://dns.urlxl.com/auth/sso/login or https://grafana.example.com/login/generic_oauth"
+                  placeholder="e.g. https://dns.example.com/auth/sso/login or https://grafana.example.com/login/generic_oauth"
                   value={launchUrl}
                   onChange={(e) => setLaunchUrl(e.target.value)}
                 />
