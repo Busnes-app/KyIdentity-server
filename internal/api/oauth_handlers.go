@@ -434,11 +434,12 @@ func (h *OAuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 // a requestable app where to ask.
 func (h *OAuthHandler) denyAccess(w http.ResponseWriter, r *http.Request, user *store.User, clientID, redirectURI, state string) {
 	details := map[string]any{"reason": "app_access_denied"}
-	description := "You do not have access to this application"
+	// Relying parties may show only this text, so it names the next step.
+	description := "You do not have access to this application. Ask an administrator for access"
 	if e, err := h.store.ExplainClientAccess(user.ID, clientID); err == nil {
 		details = map[string]any{"reason": e.Reason, "revision": e.Revision, "authenticationRevision": e.AuthRevision, "roleRevision": e.RoleRevision}
 		if e.Requestable {
-			description += ". You can request it from your KySignOn dashboard"
+			description = "You do not have access to this application. You can request it from your KyIdentity dashboard"
 		}
 	}
 	h.audit.Observe("oauth.authorize", user.ID, user.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "denied", details)

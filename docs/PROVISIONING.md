@@ -142,7 +142,12 @@ user with effective access to it, a held desired-state row or a stored remote ma
 target cannot make itself the holder of an account by naming an arbitrary local user;
 everything else is left alone and counted as unrelated. A preview writes nothing but
 observations. Repair stores remote IDs learned from the listing; a target ID that
-disagrees with a stored mapping is counted as a conflict and never written through. A complete run classifies each managed
+disagrees with a stored mapping the target still lists is counted as a conflict and never
+written through. A stored mapping to an ID a complete listing does not hold is dead (the
+target was wiped or restored without it): repair replaces it with the listed resource that
+carries the same `externalId`, or drops it so delivery looks the user or group up and
+creates it again. A wiped target therefore gets its users and assigned groups back from
+one repair. A complete run classifies each managed
 account as **missing** (desired, absent), **stale** (desired, but inactive or with
 different userName, displayName or email) or **orphaned** (active at the target without
 effective access). Repair queues a create for missing, an update for stale, an inactive

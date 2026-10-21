@@ -225,16 +225,18 @@ func TestReconcilePreviewWritesNothingAndManagedIsConnectorScoped(t *testing.T) 
 		t.Fatal(err)
 	}
 	// The target names a local user this connector has no relationship with, and
-	// disputes the mapping of one it holds.
+	// disputes the mapping of one it holds: the stored ID still exists there, now under
+	// another identity, so it is not dead.
 	listing := RemoteListing{Supported: true, Complete: true, Users: []RemoteAccount{
 		{ID: "r-stranger", ExternalID: stranger.ID, UserName: stranger.Username, Active: true},
 		{ID: "r-other", ExternalID: held.ID, UserName: held.Username, DisplayName: held.DisplayName, Email: held.Email, Active: true},
+		{ID: "r-held", ExternalID: "reassigned", UserName: "reassigned", Active: true},
 	}}
 	preview, err := s.ReconcileDrift("target", listing, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.Unrelated != 1 || preview.OrphanedCount != 0 {
+	if preview.Unrelated != 2 || preview.OrphanedCount != 0 {
 		t.Fatalf("stranger treated as managed: %+v", preview)
 	}
 	var links int
@@ -248,7 +250,7 @@ func TestReconcilePreviewWritesNothingAndManagedIsConnectorScoped(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repair.MappingConflicts != 1 || repair.Unrelated != 1 {
+	if repair.MappingConflicts != 1 || repair.Unrelated != 2 {
 		t.Fatalf("conflict not observed: %+v", repair)
 	}
 	if id, _, _ := s.SCIMUserLink("target", held.ID); id != "r-held" {

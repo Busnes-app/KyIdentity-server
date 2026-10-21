@@ -62,7 +62,7 @@ func TestAppAssignmentOAuthAndLauncherEnforcement(t *testing.T) {
 		return location.Query()
 	}
 	for _, session := range []string{cookie, adminCookie} {
-		if q := authorize(session); q.Get("error") != "access_denied" {
+		if q := authorize(session); q.Get("error") != "access_denied" || !strings.Contains(q.Get("error_description"), "Ask an administrator") {
 			t.Fatal("direct URL bypass", q)
 		}
 		r := adminRequestNoStepUp(t, srv, "GET", "/api/user/applications", session, "")
