@@ -95,14 +95,11 @@ func TestProvisioningFollowsEffectiveAccess(t *testing.T) {
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0].Type != "user.created" {
 		t.Fatal("second grant changed the queue", got)
 	}
-	// Final removal before anything was delivered forgets the account instead of disabling a ghost.
+	// Final removal before the create was delivered replaces it with the removal: the
+	// target may know the person another way.
 	assign("groups", g.ID, false)
-	if got := pendingFor(t, s, "target", u.ID); len(got) != 0 {
-		t.Fatal("undelivered create survived loss", got)
-	}
-	var rows int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sync_resource_state WHERE resource_id=?`, u.ID).Scan(&rows); err != nil || rows != 0 {
-		t.Fatal("state row retained", rows, err)
+	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 2, false}) {
+		t.Fatal("undelivered create's removal", got)
 	}
 	assign("users", u.ID, true)
 	assign("groups", g.ID, true)
@@ -114,25 +111,25 @@ func TestProvisioningFollowsEffectiveAccess(t *testing.T) {
 		t.Fatal("removing one of two grants changed the account", got)
 	}
 	assign("groups", g.ID, false)
-	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 2, false}) {
+	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 4, false}) {
 		t.Fatal("final removal", got)
 	}
 	assign("users", u.ID, true)
-	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 3, true}) {
+	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 5, true}) {
 		t.Fatal("regain superseded the disable with a reactivation", got)
 	}
 	u.DisplayName = "Renamed"
 	if err := s.UpdateUserWithSyncEvents(u, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 4, true}) {
+	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 6, true}) {
 		t.Fatal("profile update", got)
 	}
 	u.Status = "disabled"
 	if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 5, false}) {
+	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 7, false}) {
 		t.Fatal("local disable", got)
 	}
 	if err := s.ResetUserMFA(u.ID, nil); err != nil {
@@ -519,5 +516,144 @@ func TestResyncKeepsMappedInScopeAccount(t *testing.T) {
 		if !q.Active {
 			t.Fatal("in-scope account replayed as removed", q)
 		}
+	}
+}
+
+// A person removed before their create was delivered may still be known downstream
+// (installer setup, sign-in), so the removal replaces the create, is acknowledged,
+// replays on resync, and a later regain creates again.
+func TestRemovalBeforeCreateIsDelivered(t *testing.T) {
+	windows := map[string]func(t *testing.T, s *Store){
+		"pending": func(*testing.T, *Store) {},
+		"retrying": func(t *testing.T, s *Store) {
+			ev, _ := s.ClaimDueSyncEvents(10, time.Minute)
+			if len(ev) != 1 {
+				t.Fatal(ev)
+			}
+			if ok, err := s.BeginSyncDelivery(ev[0], time.Minute); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			next := time.Now().UTC().Add(time.Hour)
+			if err := s.FinishSyncDelivery(ev[0], "pending", "refused", 1, &next); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"failed": func(t *testing.T, s *Store) {
+			ev, _ := s.ClaimDueSyncEvents(10, time.Minute)
+			if len(ev) != 1 {
+				t.Fatal(ev)
+			}
+			if ok, err := s.BeginSyncDelivery(ev[0], time.Minute); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			if err := s.FinishSyncDelivery(ev[0], "failed", "refused", 5, nil); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"delivered": func(t *testing.T, s *Store) { deliverAll(t, s) },
+	}
+	removals := map[string]struct {
+		remove, restore func(t *testing.T, s *Store, app string, u *User)
+	}{
+		"disable": {
+			func(t *testing.T, s *Store, _ string, u *User) {
+				u.Status = "disabled"
+				if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
+					t.Fatal(err)
+				}
+			},
+			func(t *testing.T, s *Store, _ string, u *User) {
+				u.Status = "active"
+				if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		"unassign": {
+			func(t *testing.T, s *Store, app string, u *User) {
+				if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+					t.Fatal(err)
+				}
+			},
+			func(t *testing.T, s *Store, app string, u *User) {
+				if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	for wname, window := range windows {
+		for rname, r := range removals {
+			t.Run(wname+"/"+rname, func(t *testing.T) {
+				s, cleanup := setupTestStore(t)
+				defer cleanup()
+				app := provisioningFixture(t, s, "target")
+				u := createTestUser(t, s)
+				if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+					t.Fatal(err)
+				}
+				window(t, s)
+				r.remove(t, s, app, u)
+				if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 2, false}) {
+					t.Fatal("removal", got)
+				}
+				if events := deliverAll(t, s); len(events) != 1 || events[0].EventType != "user.updated" {
+					t.Fatal("removal not delivered alone", events)
+				}
+				var acked bool
+				if err := s.db.QueryRow(`SELECT offboarded_at IS NOT NULL FROM sync_resource_state WHERE system_id='target' AND resource_id=?`, u.ID).Scan(&acked); err != nil || !acked {
+					t.Fatal("removal not acknowledged", acked, err)
+				}
+				// Replay re-sends the removal, and a repeat supersedes rather than adds.
+				for range 2 {
+					if err := s.ResyncSystem("target", nil); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 4, false}) {
+					t.Fatal("replay", got)
+				}
+				deliverAll(t, s)
+				r.restore(t, s, app, u)
+				want := "user.created"
+				if wname == "delivered" {
+					want = "user.updated"
+				}
+				if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{want, 5, true}) {
+					t.Fatal("regain", got)
+				}
+			})
+		}
+	}
+}
+
+// A removal whose delivery is exhausted retries like any current desired state.
+func TestExhaustedRemovalBeforeCreateRetries(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	app := provisioningFixture(t, s, "target")
+	u := createTestUser(t, s)
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := s.ClaimDueSyncEvents(10, time.Minute)
+	if len(ev) != 1 || ev[0].EventType != "user.updated" {
+		t.Fatal(ev)
+	}
+	if ok, err := s.BeginSyncDelivery(ev[0], time.Minute); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if err := s.FinishSyncDelivery(ev[0], "failed", "refused", 5, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReconcileProvisioning(); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.GetPendingSyncEvents(10)
+	if err != nil || len(pending) != 1 || pending[0].EventType != "user.updated" || pending[0].Attempts != 0 {
+		t.Fatalf("exhausted removal not revived: %+v %v", pending, err)
 	}
 }

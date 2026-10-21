@@ -18,9 +18,9 @@ const scimGroupSchema = "urn:ietf:params:scim:schemas:core:2.0:Group"
 
 // sync_resource_state holds the desired downstream state per connector/resource and the
 // revision every event for that resource carries. provisioned records that the receiver
-// acknowledged a create or update, so a loss before then drops the create instead of
-// disabling an account that never existed. Existing pairs are backfilled as provisioned
-// because delivery covered the whole directory before this table existed.
+// acknowledged a create, so a regain after an unacknowledged one creates again. Existing
+// pairs are backfilled as provisioned because delivery covered the whole directory before
+// this table existed.
 func (s *Store) migrateProvisioning() error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -152,8 +152,9 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
  AND NOT EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=account_sync_events.id)`, d.systemID, d.resourceID); err != nil {
 		return err
 	}
-	if !d.active && !provisioned && !fenced {
-		// Nothing downstream has heard of this resource; forget it rather than disable a ghost.
+	if d.kind == "group" && !d.active && !provisioned && !fenced {
+		// A group never created is forgotten rather than deleted. A person may be known
+		// downstream another way (the app's own setup, a sign-in), so their removal is sent.
 		_, err := tx.Exec(`DELETE FROM sync_resource_state WHERE system_id=? AND resource_id=?`, d.systemID, d.resourceID)
 		return err
 	}
@@ -476,9 +477,9 @@ func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
 		}
 	}
 	// Replay every removal too, or a target restored from an older backup readmits the
-	// account: every out-of-scope account the target held, through a delivered state row
-	// or a remote mapping. The replay is an inactive update, never a deletion, so a repeat
-	// supersedes it.
+	// account: every out-of-scope account the connector was ever meant to hold, through a
+	// state row or a remote mapping, delivered or not. The replay is an inactive update,
+	// never a deletion, so a repeat supersedes it.
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision)
  SELECT l.system_id,l.local_id,'user',0,1,0 FROM scim_user_links l WHERE l.system_id=? AND l.kind='user' AND l.remote_id<>''
  AND NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=l.system_id AND e.user_id=l.local_id)`, systemID); err != nil {
@@ -488,7 +489,7 @@ func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
  AND EXISTS(SELECT 1 FROM scim_user_links l WHERE l.system_id=sync_resource_state.system_id AND l.local_id=sync_resource_state.resource_id AND l.kind='user' AND l.remote_id<>'')`, systemID); err != nil {
 		return err
 	}
-	removed, err := scanStrings(tx.Query(`SELECT resource_id FROM sync_resource_state WHERE system_id=? AND kind='user' AND NOT active AND provisioned ORDER BY resource_id`, systemID))
+	removed, err := scanStrings(tx.Query(`SELECT resource_id FROM sync_resource_state WHERE system_id=? AND kind='user' AND NOT active ORDER BY resource_id`, systemID))
 	if err != nil {
 		return err
 	}
@@ -558,7 +559,8 @@ func provisionedTx(tx *sql.Tx, ev AccountSyncEvent, now time.Time) error {
 		}
 	}
 	switch ev.EventType {
-	case "user.created", "user.updated", "group.updated":
+	// An update reaching an unprovisioned row is a removal, which creates nothing.
+	case "user.created", "group.updated":
 	case "group.deleted":
 		_, err := tx.Exec(`DELETE FROM sync_resource_state WHERE system_id=? AND resource_id=? AND kind='group' AND NOT active`, ev.SystemID, ev.UserID)
 		return err

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/scim"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
@@ -100,6 +101,53 @@ func TestInstallerSCIMNativeDeliveryAndAccessLoss(t *testing.T) {
 			}
 			if got, ok := remote.userByExternal(owner.ID); !ok || !got.Active {
 				t.Fatal("everyday access loss affected owner")
+			}
+		})
+	}
+}
+
+// The target already holds the setup's everyday account (its own setup made it) when the
+// account is removed before KyIdentity's first delivery: the removal still reaches it.
+func TestInstallerRemovalBeforeFirstDelivery(t *testing.T) {
+	for _, cause := range []string{"unassign", "disable"} {
+		t.Run(cause, func(t *testing.T) {
+			e, s, _, cleanup := setupTestSyncEngine(t)
+			defer cleanup()
+			remote := newFakeSCIM()
+			srv := httptest.NewTLSServer(remote)
+			defer srv.Close()
+			e.httpClient = srv.Client()
+			p := store.InstallerSetup{ID: uuid.NewString(), EncryptionKey: e.encryptionKey,
+				Admin:    store.InstallerUser{Username: "owner-admin", Email: "owner-admin@example.test", Role: "admin", PasswordHash: "fixture-admin-hash"},
+				Everyday: store.InstallerUser{Username: "owner", Email: "owner@example.test", Role: "user", PasswordHash: "fixture-user-hash"},
+				Clients: []store.InstallerClient{{ID: "chat", Name: "Chat", SecretHash: "fixture-client-hash", RedirectURIs: []string{"https://chat.test/callback"}, PostLogoutURIs: []string{},
+					AdministratorRole: "admin", EverydayRole: "member", SCIM: &store.InstallerSCIM{URL: srv.URL + "/scim/v2", Token: "target-token"}}}}
+			r, err := s.ApplyInstallerSetup(p, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			systemID := ""
+			for _, object := range r.Created {
+				if object.Kind == "connector" {
+					systemID = object.ID
+				}
+			}
+			day, err := s.GetUserByUsername("owner")
+			if err != nil {
+				t.Fatal(err)
+			}
+			remote.users["setup-made"] = scim.User{ID: "setup-made", ExternalID: day.ID, UserName: "owner", Active: true}
+			if cause == "unassign" {
+				err = s.SetAppAssignment(appRecordFor(t, s, systemID).ID, "users", day.ID, false, nil)
+			} else {
+				_, err = s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil })
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			drain(t, e)
+			if got, ok := remote.userByExternal(day.ID); !ok || got.Active || got.ID != "setup-made" {
+				t.Fatal("removal before first delivery left the account active", got, ok)
 			}
 		})
 	}

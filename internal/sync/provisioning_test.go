@@ -819,3 +819,112 @@ func TestResyncDeactivatesAccountsARestoredTargetReadmits(t *testing.T) {
 		t.Fatal("resync created an account", remote.posts)
 	}
 }
+
+// A target that already holds the person (installer setup, sign-in) is told of a removal
+// made before KyIdentity's own create reached it, and a resync replays it; nothing is created.
+func TestGenericSCIMRemovalBeforeCreate(t *testing.T) {
+	e, s, _, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	u := member(t, s)
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote.users["held"] = scim.User{ID: "held", ExternalID: u.ID, UserName: u.Username, Active: true}
+	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	setStatus(t, s, u, "disabled")
+	drain(t, e)
+	if got, _ := remote.userByExternal(u.ID); got.Active {
+		t.Fatal("removal before create left the account active")
+	}
+	remote.mu.Lock()
+	ru := remote.users["held"]
+	ru.Active = true
+	remote.users["held"] = ru
+	remote.mu.Unlock()
+	if err := e.ResyncAllAccounts(sys.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	if got, _ := remote.userByExternal(u.ID); got.Active || remote.posts["Users"] != 0 {
+		t.Fatal("replay", got, remote.posts)
+	}
+	if pending, err := s.GetPendingSyncEvents(10); err != nil || len(pending) != 0 {
+		t.Fatal("undelivered work remains", pending, err)
+	}
+}
+
+// A suite receiver refusing the create while it starts (503: unfenced retry) still hears
+// the removal, in order, and a re-enable creates the account afresh.
+func TestSuiteRemovalWhileCreateRetries(t *testing.T) {
+	e, s, _, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	u := member(t, s)
+	var mu stdsync.Mutex
+	var seen []suiteHit
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body SCIMUserResource
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		rev, _ := strconv.Atoi(strings.Trim(strings.TrimPrefix(body.Meta.Version, "W/"), `"`))
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, suiteHit{revision: rev, active: body.Active, event: r.Header.Get("X-KySignOn-Event-Type")})
+		if len(seen) == 1 {
+			w.WriteHeader(503)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "suite", SystemType: "suite_webhook", CallbackURL: srv.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.DispatchPendingEvents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	setStatus(t, s, u, "disabled")
+	drain(t, e)
+	if err := e.ResyncAllAccounts(sys.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	setStatus(t, s, u, "active")
+	drain(t, e)
+	mu.Lock()
+	defer mu.Unlock()
+	want := []suiteHit{{1, true, "user.created"}, {2, false, "user.updated"}, {3, false, "user.updated"}, {4, true, "user.created"}}
+	if len(seen) != len(want) {
+		t.Fatalf("suite sequence %+v", seen)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("suite sequence %+v", seen)
+		}
+	}
+}
+
+func setStatus(t *testing.T, s *store.Store, u *store.User, status string) {
+	t.Helper()
+	if _, err := s.EditUser(u.ID, nil, func(next *store.User) (bool, error) { next.Status = status; return true, nil }); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func member(t *testing.T, s *store.Store) *store.User {
+	t.Helper()
+	u := &store.User{ID: uuid.NewString(), Username: "pat", DisplayName: "Pat", Email: "pat@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := s.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	return u
+}

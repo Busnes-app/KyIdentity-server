@@ -1,14 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.4.6 — 2026-10-21
 
 ### Upgrading
 
+- Removals that earlier versions dropped this way left no record, so a resync cannot replay them. If someone was disabled or unassigned right after being given access, check that app's account for them.
 - The first start flags an existing bootstrap administrator still on its first password; its next sign-in must choose a new one (audit `system.password_change_required`). Nothing is reset and no one is locked out. See [Given passwords](docs/ACCOUNTS-AND-ACCESS.md#onboarding-and-passwords).
 
 ### Changes
 
 - Security: the bootstrap administrator, and any account whose password an administrator set, must choose a new password at the next sign-in. Until then the session can only read itself, step up, change the password, enroll a replacement factor or sign out; other APIs answer `403 password_change_required`, `/oauth/authorize` returns `interaction_required` and no app token is issued. The web UI shows a **Choose a new password** screen. The change clears the flag, ends every other session and is audited as `user.password_changed` with `required: true`.
+- Security: removing a person (disable, unassign, deletion) before KyIdentity has delivered their account to a directory connector now sends the removal instead of dropping it with the undelivered create. The downstream app may already know the person from its own setup or a sign-in, so it now hears the removal whether the create was pending, retrying or failed. Generic SCIM deactivates a matching account and creates nothing; suite webhooks receive the usual inactive `user.updated`. **Resync** and `resync-system` replay these removals too. A later re-assignment sends a fresh create. Accounts and content are never deleted.
 - Audit: `auth.password_reset` and `auth.account_activated` rows now name the account; they were committed with an empty actor and target. `admin.user_updated` records `passwordSet`.
 
 ## 0.4.5 — 2026-10-20

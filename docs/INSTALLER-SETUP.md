@@ -398,8 +398,9 @@ kyidentity resync-system --client <client id> [--wait <duration, max 24h>]
 ```
 
 It resyncs the connector that shares an app with that OAuth client, the same as **Resync**
-in the admin UI: held accounts are re-sent, and every account the connector ever held that
-is now removed is deactivated again (never deleted). An `admin.system_resynced` audit row
+in the admin UI: held accounts are re-sent, and every account the connector ever held or was
+meant to hold that is now removed is deactivated again (never deleted), including one
+removed before its first delivery. An `admin.system_resynced` audit row
 (actor `kyidentity-cli`, `via: cli`) commits with the queued work. Repeating it is safe.
 The running server delivers; without `--wait` the command returns once the work is queued.
 With `--wait` it returns when the connector's outbox is empty, or earlier on a failure.
