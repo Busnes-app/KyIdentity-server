@@ -310,8 +310,9 @@ user presence, so it is a level of its own and grades as one possession factor: 
 signs on only to apps whose policy is `reuse` + `password` for users without mandatory MFA. A pass is `appattest` with boot state `unknown`; the daily sweep skips these devices
 (no serials, no boot state). Failures grade `none` with the reason in the log and audit row only.
 
-- `KYIDENTITY_APPATTEST_APP_IDS`: comma-separated `<TeamID>.<bundleID>` (KyAuth iOS is
-  `TATYN4X57D.org.kysecurity.authenticator`); empty (default) disables grading and logs it at startup.
+- `KYIDENTITY_APPATTEST_APP_IDS`: comma-separated `<TeamID>.<bundleID>`. Unset, it defaults to KyAuth
+  iOS (`TATYN4X57D.org.kysecurity.authenticator`, `DefaultAppAttestAppIDs`); setting it replaces the
+  default; set but empty disables grading and logs it at startup.
 - `KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT`: `true` also accepts the development App Attest
   environment (debug and sandbox builds). Default `false`; anything but `true`/`false` refuses startup.
 

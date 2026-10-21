@@ -425,7 +425,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
           </button>
         </div>
 
-        <label className="text-sm">
+        <label className="pair-signon text-sm">
           <input type="checkbox" checked={pairSignOn} disabled={!permitted('push')} onChange={(e) => setPairSignOn(e.target.checked)} />{' '}
           Allow this phone to sign in to suite apps (KyPost, KyVault, ...)
         </label>
@@ -444,20 +444,27 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                 </div>
                 <div className="device-info">
                   <span className="device-name">{dev.deviceName}</span>
-                  <span className="device-id-mono">{dev.deviceIdentifier}</span>
+                  <span className="device-id-mono font-mono">{dev.deviceIdentifier}</span>
+                  <div className="device-badges">
+                    {dev.isMfaApprover && (
+                      <span className="badge-approver">
+                        <CheckCircle size={12} /> Push approver
+                      </span>
+                    )}
+                    {dev.attestedLevel === 'strongbox' && <span className="badge-type"><ShieldCheck size={12} /> Attested: StrongBox</span>}
+                    {dev.attestedLevel === 'tee' && <span className="badge-type"><ShieldCheck size={12} /> Attested: TEE</span>}
+                    {dev.attestedLevel === 'appattest' && <span className="badge-type"><ShieldCheck size={12} /> Verified by App Attest</span>}
+                    {dev.attestedLevel === 'none' && (
+                      <span className="badge-type warn">
+                        <ShieldAlert size={12} /> Not attested
+                      </span>
+                    )}
+                    {dev.bootState === 'unlocked' && <span className="badge-type warn">Bootloader unlocked</span>}
+                  </div>
+                  {dev.attestedLevel === 'none' && <span className="device-hint">Pair KyAuth again to attest this phone.</span>}
                 </div>
-                <div className="device-status">
-                  {dev.isMfaApprover && (
-                    <span className="badge-approver">
-                      <CheckCircle size={12} /> Push approver
-                    </span>
-                  )}
-                  {dev.attestedLevel === 'strongbox' && <span className="badge-type"><ShieldCheck size={12} /> Attested: StrongBox</span>}
-                  {dev.attestedLevel === 'tee' && <span className="badge-type"><ShieldCheck size={12} /> Attested: TEE</span>}
-                  {dev.attestedLevel === 'appattest' && <span className="badge-type"><ShieldCheck size={12} /> Verified by App Attest</span>}
-                  {dev.attestedLevel === 'none' && <span className="text-muted text-sm">Not attested. Pair KyAuth again to attest this phone.</span>}
-                  {dev.bootState === 'unlocked' && <span className="text-muted text-sm">Bootloader unlocked.</span>}
-                  <label className="text-sm">
+                <div className="device-signon">
+                  <label>
                     <input
                       type="checkbox"
                       checked={dev.canSignOn}
@@ -466,9 +473,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                     />{' '}
                     Sign in to apps
                   </label>
-                  <span className="text-muted text-sm">
-                    Off: this phone still approves MFA but cannot sign you in to KyPost or other suite apps.
-                  </span>
+                  {!dev.canSignOn && <span className="device-hint">Approves MFA only. Cannot sign you in to KyPost or other suite apps.</span>}
                 </div>
                 <button
                   className="icon-danger-btn"

@@ -134,6 +134,9 @@ var DefaultKyAuthCertSHA256 = []string{
 	// F-Droid: add its digest once F-Droid has built and signed KyAuth.
 }
 
+// DefaultAppAttestAppIDs is KyAuth iOS, so App Attest grading is on unless an operator turns it off.
+var DefaultAppAttestAppIDs = []string{"TATYN4X57D.org.kysecurity.authenticator"}
+
 var ubuntuAppIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*_[a-z0-9][a-z0-9+.-]*$`)
 
 // appIDRE is an Apple App ID: a ten-character Team ID, a dot, and a bundle ID.
@@ -289,14 +292,18 @@ func Load() (*Config, error) {
 }
 
 func loadAppAttest() ([]string, bool, error) {
-	var ids []string
-	if v := strings.TrimSpace(os.Getenv("KYIDENTITY_APPATTEST_APP_IDS")); v != "" {
-		for _, id := range strings.Split(v, ",") {
-			id = strings.TrimSpace(id)
-			if len(id) > 255 || !appIDRE.MatchString(id) {
-				return nil, false, fmt.Errorf("KYIDENTITY_APPATTEST_APP_IDS: %q is not <TeamID>.<bundleID>", id)
+	// Unset keeps the default; set but empty turns grading off.
+	ids := DefaultAppAttestAppIDs
+	if v, ok := os.LookupEnv("KYIDENTITY_APPATTEST_APP_IDS"); ok {
+		ids = nil
+		if v = strings.TrimSpace(v); v != "" {
+			for _, id := range strings.Split(v, ",") {
+				id = strings.TrimSpace(id)
+				if len(id) > 255 || !appIDRE.MatchString(id) {
+					return nil, false, fmt.Errorf("KYIDENTITY_APPATTEST_APP_IDS: %q is not <TeamID>.<bundleID>", id)
+				}
+				ids = append(ids, id)
 			}
-			ids = append(ids, id)
 		}
 	}
 	var dev bool

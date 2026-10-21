@@ -59,8 +59,13 @@ func TestAppAttestConfig(t *testing.T) {
 		os.Unsetenv(k)
 	}
 	cfg, err := Load()
-	if err != nil || len(cfg.AppAttestAppIDs) != 0 || cfg.AppAttestAllowDevelopment {
+	if err != nil || len(cfg.AppAttestAppIDs) != 1 || cfg.AppAttestAppIDs[0] != "TATYN4X57D.org.kysecurity.authenticator" || cfg.AppAttestAllowDevelopment {
 		t.Fatalf("defaults: %v %+v", err, cfg)
+	}
+	t.Setenv("KYIDENTITY_APPATTEST_APP_IDS", " ")
+	cfg, err = Load()
+	if err != nil || len(cfg.AppAttestAppIDs) != 0 {
+		t.Fatalf("set empty should disable: %v %+v", err, cfg)
 	}
 	t.Setenv("KYIDENTITY_APPATTEST_APP_IDS", "TATYN4X57D.org.kysecurity.authenticator, ABCDE12345.com.example.app-beta")
 	t.Setenv("KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT", "TRUE")
