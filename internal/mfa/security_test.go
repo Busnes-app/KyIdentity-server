@@ -32,12 +32,14 @@ func mfaUser(t *testing.T, db *store.Store) *store.User {
 }
 
 type fakePushSender struct {
-	sent []store.NativeDevice
-	err  error
+	sent   []store.NativeDevice
+	pushes []MFAChallengePush
+	err    error
 }
 
 func (f *fakePushSender) SendPush(dev store.NativeDevice, ch MFAChallengePush) error {
 	f.sent = append(f.sent, dev)
+	f.pushes = append(f.pushes, ch)
 	return f.err
 }
 
@@ -435,6 +437,10 @@ func TestPushChallengeDispatchesToRegisteredRelayToken(t *testing.T) {
 	}
 	if sender.sent[0].Platform != "ios" || sender.sent[0].PushToken != "apns-token" {
 		t.Fatalf("unexpected dispatched device: %+v", sender.sent[0])
+	}
+	// The sender seals it for keyed devices and leaves it out otherwise (push_relay_test.go).
+	if sender.pushes[0].Username != u.Username {
+		t.Fatalf("dispatched username %q, want %q", sender.pushes[0].Username, u.Username)
 	}
 }
 

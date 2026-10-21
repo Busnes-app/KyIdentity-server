@@ -208,6 +208,29 @@ func challengeData(dev store.NativeDevice, ch MFAChallengePush) map[string]strin
 	}
 }
 
+// sealedChallenge is the plaintext of a sealed push: challengeData plus the account's
+// username. The username goes only here, never in challengeData, because an unsealed push
+// crosses the relay and the push provider readable. One that would not fit a record of
+// recordSize is left out and logged rather than overflowing it; the authenticator then shows
+// the username saved at pairing.
+func sealedChallenge(dev store.NativeDevice, ch MFAChallengePush, recordSize int) ([]byte, error) {
+	data := challengeData(dev, ch)
+	plain, err := json.Marshal(data)
+	if err != nil || ch.Username == "" {
+		return plain, err
+	}
+	data["username"] = ch.Username
+	named, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(named) > maxRecordPlaintext(recordSize) {
+		log.Printf("mfa push: username left out of challenge %s for device %s: %d bytes do not fit a %d-byte record", ch.ChallengeID, dev.ID, len(named), recordSize)
+		return plain, nil
+	}
+	return named, nil
+}
+
 // relayRecordSize pads every sealed relay payload to 86+640 bytes, 968 base64url characters:
 // under the relay's 1024-character cap on one data value (MAX_DATA_VALUE_LENGTH), past which
 // it truncates.
@@ -224,7 +247,7 @@ func (s *RelaySender) SendPush(dev store.NativeDevice, ch MFAChallengePush) erro
 	data := challengeData(dev, ch)
 	if dev.PushP256dh != "" {
 		// The relay and the push provider then see only this ciphertext and the fixed alert.
-		plain, err := json.Marshal(data)
+		plain, err := sealedChallenge(dev, ch, relayRecordSize)
 		if err != nil {
 			return err
 		}

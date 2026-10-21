@@ -49,6 +49,7 @@ Read these before deploying or relying on specific features.
 
 - A KyAuth device pairs from a QR code holding a pairing token and a 6-digit PIN, both stored only as hashes and valid for 90 seconds. The QR names the server by `KYIDENTITY_ISSUER_URL`, so the issuer must be the HTTPS address devices reach.
 - Device registration is rate-limited per client address.
+- Sign-in pushes name the account's username only inside an RFC 8291 sealed payload: the FCM and APNs relay body of a device that registered push keys, UnifiedPush and Ubuntu Touch push. A relay device paired without keys (an older KyAuth Android pairing) gets unsealed identifiers (user, device and challenge IDs, purpose, expiry), never the username, and the relay and Google can read them. A username too long for the fixed-size record is left out rather than enlarging it.
 ### UnifiedPush
 
 - A device can register a UnifiedPush endpoint instead of an FCM token. KyIdentity then posts directly to the user's distributor (ntfy, NextPush, ...), and no relay or Google service is involved.

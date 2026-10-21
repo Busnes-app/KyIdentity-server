@@ -143,7 +143,7 @@ func TestUnifiedPushSenderEncryptsChallenge(t *testing.T) {
 		PushToken: ps.URL + "/upAbC123?up=1", PushP256dh: rk.p256dh, PushAuth: rk.a64,
 	}
 	expires := time.Now().Add(90 * time.Second).UnixMilli()
-	if err := s.SendPush(dev, MFAChallengePush{ChallengeID: "ch1", Purpose: "login", ExpiresAtMS: expires}); err != nil {
+	if err := s.SendPush(dev, MFAChallengePush{ChallengeID: "ch1", Purpose: "login", ExpiresAtMS: expires, Username: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,8 +157,8 @@ func TestUnifiedPushSenderEncryptsChallenge(t *testing.T) {
 	if auth := h.Get("Authorization"); !strings.HasPrefix(auth, "vapid t=") || !strings.HasSuffix(auth, ", k="+s.vapidPublic) {
 		t.Fatalf("Authorization = %q", auth)
 	}
-	if bytes.Contains(body, []byte("ch1")) {
-		t.Fatal("challenge id visible to the distributor")
+	if bytes.Contains(body, []byte("ch1")) || bytes.Contains(body, []byte("alice")) {
+		t.Fatal("challenge id or username visible to the distributor")
 	}
 	var got map[string]string
 	if err := json.Unmarshal(decryptRFC8291(t, rk, body), &got); err != nil {
@@ -168,7 +168,7 @@ func TestUnifiedPushSenderEncryptsChallenge(t *testing.T) {
 	want := map[string]string{
 		"type": "mfa_challenge", "title": "Sign-in request", "body": "Open KyAuth to review.",
 		"challengeId": "ch1", "deviceId": "dev1", "deviceUserId": "u1", "purpose": "login",
-		"expiresAtEpochMs": strconv.FormatInt(expires, 10), "devicePlatform": "android",
+		"expiresAtEpochMs": strconv.FormatInt(expires, 10), "devicePlatform": "android", "username": "alice",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("payload = %v, want %v", got, want)
