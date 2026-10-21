@@ -82,7 +82,7 @@ func TestExplanationsFollowViewerPermissions(t *testing.T) {
 	// A denied authorization is audited with the reason and revisions of that moment,
 	// and the redirect tells a user of a requestable app what to do.
 	res = call(t, srv, userCookie, "GET", "/oauth/authorize?client_id=app-b&redirect_uri=https%3A%2F%2Fa%2Fcb&response_type=code&scope=openid&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&state=s")
-	if loc := res.Header().Get("Location"); !strings.Contains(loc, "access_denied") || !strings.Contains(loc, "request") {
+	if loc := res.Header().Get("Location"); !strings.Contains(loc, "access_denied") || !strings.Contains(loc, "request+it+from+your+KyIdentity") {
 		t.Fatalf("denial redirect: %d %s", res.Code, loc)
 	}
 	events, _, _ := db.ListAuditEvents(10, 0)

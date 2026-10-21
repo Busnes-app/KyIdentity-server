@@ -288,3 +288,67 @@ func TestReconcileJobRejectsOverlongRemoteIDs(t *testing.T) {
 		}
 	}
 }
+
+// A target wiped behind KyIdentity's back (data emptied, then restarted) holds none of the
+// users or groups it acknowledged. A repair must notice from the listing and deliver them
+// again, through fresh mappings rather than the dead IDs the target handed out before.
+func TestRepairReprovisionsWipedTarget(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ReviewSystem(sys, "scim", "", true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	direct := &store.User{ID: uuid.NewString(), Username: "sam", DisplayName: "Sam", Email: "sam@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := s.CreateUser(direct); err != nil {
+		t.Fatal(err)
+	}
+	group := &store.Group{ID: uuid.NewString(), Name: "Studio"}
+	if err := s.CreateGroup(group, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app.ID, "users", direct.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	if _, ok := remote.groupByExternal(group.ID); !ok {
+		t.Fatal("fixture group not delivered")
+	}
+	// The wipe leaves nothing; then the first user is back under a new ID, as a sign-in at
+	// the emptied target would make. The old mappings now name IDs the target never lists.
+	remote.mu.Lock()
+	remote.users, remote.groups = map[string]scim.User{"fresh": {ID: "fresh", ExternalID: u.ID, UserName: u.Username, Active: true}}, map[string]scimGroup{}
+	remote.mu.Unlock()
+
+	report := runJob(t, e, s, sys.ID, "repair")
+	if !report.Complete || !report.Repaired || report.MissingCount != 1 || report.StaleCount != 1 || report.MappingConflicts != 0 || report.GroupsRequeued != 1 {
+		t.Fatalf("repair %+v", report)
+	}
+	drain(t, e)
+	for _, x := range []*store.User{u, direct} {
+		if got, ok := remote.userByExternal(x.ID); !ok || !got.Active {
+			t.Fatal("wiped account not provisioned again", x.Username, got, ok)
+		}
+	}
+	g, ok := remote.groupByExternal(group.ID)
+	if !ok || len(g.Members) != 1 || g.Members[0].Value != "fresh" {
+		t.Fatal("wiped group not provisioned again with its member", g, ok)
+	}
+	if pending, err := s.GetPendingSyncEvents(10); err != nil || len(pending) != 0 {
+		t.Fatal("undelivered work remains", pending, err)
+	}
+}

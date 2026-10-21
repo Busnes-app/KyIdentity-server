@@ -409,7 +409,33 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
  OR EXISTS(SELECT 1 FROM scim_user_links WHERE system_id=? AND local_id=? AND kind=?)`, systemID, id, kind, systemID, id, kind).Scan(&known)
 		return known, err
 	}
-	// Mappings are only written by repair. A target ID that disagrees with a stored
+	// A stored mapping to an ID a complete listing does not hold is dead: the target was
+	// wiped or restored without it. Repair may replace or drop it; any other disagreement
+	// is a dispute.
+	listed := map[string]map[string]bool{"user": {}, "group": {}}
+	for _, r := range listing.Users {
+		listed["user"][r.ID] = true
+	}
+	for _, r := range listing.Groups {
+		listed["group"][r.ID] = true
+	}
+	dead := func(kind, remoteID string) bool {
+		return remoteID != "" && listing.Complete && (kind == "user" || listing.GroupsListed) && !listed[kind][remoteID]
+	}
+	// Clearing a dead mapping lets delivery look the resource up by externalId and create
+	// it again. An uncertain-create marker (empty remote ID) is never dead.
+	dropDead := func(kind, localID string) error {
+		var remoteID string
+		if err := tx.QueryRow(`SELECT remote_id FROM scim_user_links WHERE system_id=? AND local_id=? AND kind=?`, systemID, localID, kind).Scan(&remoteID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if !dead(kind, remoteID) {
+			return nil
+		}
+		_, err := tx.Exec(`DELETE FROM scim_user_links WHERE system_id=? AND local_id=? AND kind=?`, systemID, localID, kind)
+		return err
+	}
+	// Mappings are only written by repair. A target ID that disagrees with a live stored
 	// mapping is observed and counted; nothing is written through it.
 	link := func(kind, localID, remoteID string) (bool, error) {
 		if remoteID == "" || remoteID == "." || remoteID == ".." {
@@ -420,11 +446,11 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return false, err
 		}
-		if stored != "" && stored != remoteID {
+		if stored != "" && stored != remoteID && !dead(kind, stored) {
 			return false, nil
 		}
 		r, err := tx.Exec(`INSERT INTO scim_user_links(system_id,local_id,kind,remote_id) VALUES(?,?,?,?)
- ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE kind=excluded.kind AND remote_id=''`, systemID, localID, kind, remoteID)
+ ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE kind=excluded.kind AND remote_id IN ('',?)`, systemID, localID, kind, remoteID, stored)
 		if err != nil {
 			return false, err
 		}
@@ -442,10 +468,8 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 		return err
 	}
 	seen := map[string]bool{}
-	listedIDs := map[string]bool{}
 	report.ListedUsers = len(listing.Users)
 	for _, remote := range listing.Users {
-		listedIDs[remote.ID] = true
 		known := false
 		if remote.ExternalID != "" {
 			if known, err = managed("user", remote.ExternalID); err != nil {
@@ -524,16 +548,8 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 			}
 			appendDrift(&report.Missing, &report.MissingCount, DriftEntry{ID: id, Username: u.Username, Reason: "absent at target"})
 			if repair {
-				// A mapping to an ID the complete listing did not contain is dead; clearing it
-				// lets delivery look the account up by externalId and create it again.
-				var remoteID string
-				if err := tx.QueryRow(`SELECT remote_id FROM scim_user_links WHERE system_id=? AND local_id=? AND kind='user'`, systemID, id).Scan(&remoteID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				if err := dropDead("user", id); err != nil {
 					return nil, err
-				}
-				if remoteID != "" && !listedIDs[remoteID] {
-					if _, err := tx.Exec(`DELETE FROM scim_user_links WHERE system_id=? AND local_id=? AND kind='user'`, systemID, id); err != nil {
-						return nil, err
-					}
 				}
 				payload, err := scimUserPayload(u, true)
 				if err != nil {
@@ -552,6 +568,9 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 	if listing.GroupsListed && listing.Complete {
 		for _, g := range groups {
 			if repair {
+				if err := dropDead("group", g.groupID); err != nil {
+					return nil, err
+				}
 				hash, err := groupMembersHashTx(tx, g)
 				if err != nil {
 					return nil, err
