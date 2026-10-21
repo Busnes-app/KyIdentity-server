@@ -104,8 +104,9 @@ services:
       APNS_RELAY_KEY: ${APNS_RELAY_KEY:-}
       KYIDENTITY_UBUNTU_PUSH_URL: ${KYIDENTITY_UBUNTU_PUSH_URL:-https://push.ubports.com/notify}
       KYIDENTITY_UBUNTU_PUSH_APPID: ${KYIDENTITY_UBUNTU_PUSH_APPID:-kyauth.busnes_kyauth}
-      # iOS App Attest grading at pairing: comma-separated <TeamID>.<bundleID>; empty disables.
-      KYIDENTITY_APPATTEST_APP_IDS: ${KYIDENTITY_APPATTEST_APP_IDS:-}
+      # iOS App Attest grading at pairing: comma-separated <TeamID>.<bundleID>. Unset uses KyAuth
+      # iOS; set it to an empty value to disable.
+      KYIDENTITY_APPATTEST_APP_IDS: ${KYIDENTITY_APPATTEST_APP_IDS-TATYN4X57D.org.kysecurity.authenticator}
       KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT: ${KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT:-false}
       # Set to true when paired systems call back over kypost-net or another private LAN.
       # Opens RFC 1918/ULA/CGNAT only; loopback, link-local and metadata stay refused.

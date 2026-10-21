@@ -848,9 +848,12 @@ button {
 }
 
 .badge-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   border: 1px solid var(--line);
   color: var(--ink);
-  padding: 0.2rem 0.4rem;
+  padding: 0.2rem 0.5rem;
   border-radius: 4px;
   font-size: 0.75rem;
 }
@@ -859,7 +862,6 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-family: var(--font-mono);
   font-size: 0.75rem;
   border: 1px solid var(--line);
   color: var(--ink-strong);
@@ -1432,11 +1434,22 @@ dialog.modal-backdrop::backdrop {
   flex-direction: column;
 }
 
+.badge-type.warn {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.pair-signon {
+  display: block;
+  padding: 0 1.25rem 1rem;
+}
+
 .device-card {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.8rem 1.25rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  padding: 1rem 1.25rem;
   border-top: 1px solid var(--line);
 }
 
@@ -1445,9 +1458,31 @@ dialog.modal-backdrop::backdrop {
 }
 
 .device-info {
-  flex: 1;
+  flex: 1 1 18rem;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: 0.15rem;
+}
+
+.device-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.device-hint {
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.device-signon {
+  flex: 0 1 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
 }
 
 .device-name {

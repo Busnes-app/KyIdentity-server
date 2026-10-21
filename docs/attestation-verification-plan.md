@@ -132,8 +132,8 @@ report, not a note; file it before moving on.
 ## 6. iOS App Attest
 
 Contract: `KyAuth-iOS/docs/specs/2026-10-11-ios-app-attest.md`. Server tests use a generated
-CA; the simulator has no App Attest, so these need a physical iPhone. Set
-`KYIDENTITY_APPATTEST_APP_IDS=TATYN4X57D.org.kysecurity.authenticator`.
+CA; the simulator has no App Attest, so these need a physical iPhone. Leave
+`KYIDENTITY_APPATTEST_APP_IDS` unset (it defaults to `TATYN4X57D.org.kysecurity.authenticator`).
 
 22. Pair a TestFlight or development build with `KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT`
     unset. Expected: pairing succeeds, `none`, audit reason `aaguid not accepted`. Set it to
