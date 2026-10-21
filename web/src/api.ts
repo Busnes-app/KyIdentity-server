@@ -78,6 +78,7 @@ export async function apiRequest(path: string, options: ApiOptions = {}): Promis
   }
 
   if (res.status === 403 && isRecord(data) && data.error === 'enrollment_required') { window.dispatchEvent(new CustomEvent('kyidentity:enrollment-required')); }
+  if (res.status === 403 && isRecord(data) && data.error === 'password_change_required') { window.dispatchEvent(new CustomEvent('kyidentity:password-change-required')); }
   if (!res.ok) {
     throw new ApiError(res.status, data);
   }

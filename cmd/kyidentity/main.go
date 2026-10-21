@@ -436,9 +436,11 @@ func ensureBootstrapAdmin(dbStore *store.Store, username, email, password, via s
 		PasswordHash: passHash,
 		Role:         "admin",
 		Status:       "active",
+		// A bootstrap password sits in a file, an .env or shell history: replace it first.
+		PasswordChangeRequired: true,
 	}
 	event := audit.NewLogger(dbStore).Prepare("admin.user_created", "", "bootstrap", admin.ID, "user", "", via, "success",
-		map[string]any{"username": admin.Username, "role": admin.Role, "pending": false})
+		map[string]any{"username": admin.Username, "role": admin.Role, "pending": false, "passwordChangeRequired": true})
 	if err := dbStore.CreateUserWithSyncEvents(admin, event.Row); err != nil {
 		return false, fmt.Errorf("failed to create the bootstrap administrator: %w", err)
 	}

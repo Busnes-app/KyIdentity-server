@@ -153,7 +153,8 @@ Everything KyIdentity needs to keep secret lives in its data volume (`/data` in 
 
 - When no administrator exists, KyIdentity creates one named `BOOTSTRAP_ADMIN_USER` (default `admin`). Its password is `BOOTSTRAP_ADMIN_PASS` or, when unset, a random one written to `first-run-password.txt` (mode `0600`). Only the file's path is logged, never the password.
 - The file is removed automatically after the first sign-in. If an administrator already exists, `BOOTSTRAP_ADMIN_PASS` is ignored.
-- The bootstrap account is not forced to change its password. Change it, and enroll a second factor, right after first sign-in.
+- The bootstrap account must choose a new password at its first sign-in, MFA included. Until it does, every session it holds can only read its own identity (`GET /api/auth/me`), step up for the change, change the password, enroll a replacement factor, or sign out. Every other API, admin APIs included, answers `403 password_change_required`; `/oauth/authorize` sends the app `interaction_required`; no authorization code or token is issued, and tokens issued earlier stop validating. Enroll a second factor right after the change.
+- The same applies to a password an administrator sets on someone else's account, at creation or later. Upgrading flags an existing bootstrap administrator that never replaced its first password (see [docs/ACCOUNTS-AND-ACCESS.md](docs/ACCOUNTS-AND-ACCESS.md#onboarding-and-passwords)).
 
 ## Authentication & Authorization
 

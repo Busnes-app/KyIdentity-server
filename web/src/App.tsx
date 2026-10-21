@@ -20,6 +20,7 @@ import { AdminSCIM } from './components/AdminSCIM';
 import { AdminAccessRequests } from './components/AdminAccessRequests';
 import { AdminAlerts } from './components/AdminAlerts';
 import { AccountLinkView } from './components/AccountLinkView';
+import { PasswordChangeRequired } from './components/PasswordChangeRequired';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -50,7 +51,8 @@ export const App: React.FC = () => {
 
     window.addEventListener('kyidentity:unauthorized', handleUnauthorized);
     window.addEventListener('kyidentity:enrollment-required',checkSession);
-    return () => {window.removeEventListener('kyidentity:unauthorized', handleUnauthorized);window.removeEventListener('kyidentity:enrollment-required',checkSession);};
+    window.addEventListener('kyidentity:password-change-required',checkSession);
+    return () => {window.removeEventListener('kyidentity:unauthorized', handleUnauthorized);window.removeEventListener('kyidentity:enrollment-required',checkSession);window.removeEventListener('kyidentity:password-change-required',checkSession);};
   }, []);
 
   const handleLogout = async () => {
@@ -83,6 +85,10 @@ export const App: React.FC = () => {
     <div role="status" className="alert-box"><div><h1>Complete MFA enrollment</h1><p>This session can only set up account security. Permitted methods: {currentUser.enrollment.allowedMethods.map(m=>m==='webauthn'?'passkey':m.toUpperCase()).join(', ')}.</p><p>After enrolling, sign out and sign in with a permitted factor to continue.</p><button className="secondary-btn" onClick={handleLogout}>Sign out and sign in again</button></div></div>
     <DeviceSettings user={currentUser} onUserUpdate={checkSession}/>
   </main></div>;
+
+  if (currentUser.passwordChangeRequired) {
+    return <PasswordChangeRequired user={currentUser} onLogout={handleLogout} onChanged={() => { setActiveTab('dashboard'); checkSession(); }} />;
+  }
 
   return (
     <div className="shell">

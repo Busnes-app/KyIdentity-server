@@ -93,6 +93,10 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		stepUpInternalError(w)
 		return
 	}
+	if user.PasswordChangeRequired && !passwordChangeOperationAllowed(stepUpOperation(req.Operation)) {
+		writePasswordChangeRequired(w)
+		return
+	}
 	if enrollment.Restricted && !enrollmentOperationAllowed(stepUpOperation(req.Operation)) {
 		http.Error(w, `{"error":"enrollment_required"}`, 403)
 		return

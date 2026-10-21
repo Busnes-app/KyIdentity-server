@@ -93,7 +93,8 @@ docker compose exec kyidentity-server cat /data/first-run-password.txt
 ```
 
 Open your `KYIDENTITY_ISSUER_URL` (for example `https://<id.example.com>`) through your TLS
-proxy and sign in with `admin` and the retrieved password. With the default
+proxy and sign in with `admin` and the retrieved password. You'll be asked to choose a new
+password before anything else opens, the same when `BOOTSTRAP_ADMIN_PASS` set it. With the default
 `KYIDENTITY_BIND`, port 5867 is published on `127.0.0.1` only: for a proxy on the same host
 and the health checks below, not for browsers on other machines.
 

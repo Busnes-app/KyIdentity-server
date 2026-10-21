@@ -44,6 +44,12 @@ describe('parseUser', () => {
     expect(parseMe({ user }).username).toBe('ada');
   });
 
+  it('reads the forced password change only when the server says so', () => {
+    expect(parseMe({ ...user, passwordChangeRequired: true }).passwordChangeRequired).toBe(true);
+    expect(parseMe(user).passwordChangeRequired).toBe(false);
+    expect(parseMe({ ...user, passwordChangeRequired: 'true' }).passwordChangeRequired).toBe(false);
+  });
+
   // A security state the UI does not understand must not be rendered as a safe one. If the
   // API grows `locked` or `pending`, showing that account as active is worse than failing.
   it.each(['locked', 'pending', '', undefined, null, 'ADMIN'])(

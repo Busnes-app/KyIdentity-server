@@ -135,6 +135,7 @@ export function parseUser(value: unknown): User {
     mfaMethods: strArray(o.mfaMethods),
     createdAt: optStr(o, 'createdAt'),
     recoveryCodesNeedRegeneration: o.recoveryCodesNeedRegeneration === true,
+    passwordChangeRequired: o.passwordChangeRequired === true,
   };
 }
 

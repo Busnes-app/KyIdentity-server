@@ -107,7 +107,7 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 		}
 		// Activation derives status from the source state, never a bare 'active': an owned
 		// account stays disabled while the upstream says inactive or a local override holds.
-		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=0,
+		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=0, password_change_required=0,
  status=CASE WHEN ?='activation' THEN CASE WHEN source_connector_id IS NULL OR (source_active AND NOT locally_disabled) THEN 'active' ELSE 'disabled' END ELSE status END,
  email_verified_at=COALESCE(email_verified_at, CASE WHEN ?='email' THEN ? END), updated_at=?
  WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending))`, passwordHash, kind, delivery, now, now, userID, kind, kind)
@@ -126,8 +126,14 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 		if err := reconcileProvisioningTx(tx, now); err != nil {
 			return err
 		}
-		user, err = scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, userID))
-		return err
+		if user, err = scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, userID)); err != nil {
+			return err
+		}
+		// The row commits in this transaction, so it must name the account before it does.
+		if audit != nil {
+			audit.ActorID, audit.ActorUsername, audit.TargetID = user.ID, user.Username, user.ID
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -140,7 +146,7 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 func (s *Store) ChangePassword(userID, keepSessionID, passwordHash string, audit *AuditEvent) error {
 	now := time.Now().UTC()
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE users SET password_hash=?, updated_at=? WHERE id=? AND status='active' AND NOT pending`, passwordHash, now, userID)
+		res, err := tx.Exec(`UPDATE users SET password_hash=?, password_change_required=0, updated_at=? WHERE id=? AND status='active' AND NOT pending`, passwordHash, now, userID)
 		if err != nil {
 			return err
 		}

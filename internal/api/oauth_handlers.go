@@ -183,6 +183,10 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		redirectError(w, r, redirectURI, state, "interaction_required", "Complete MFA enrollment at your account dashboard and sign in again")
 		return
 	}
+	if user.PasswordChangeRequired {
+		redirectError(w, r, redirectURI, state, "interaction_required", "password_change_required: choose a new password at your account dashboard, then sign in to this app again")
+		return
+	}
 	allowed, err := h.store.ClientAccessAllowed(user.ID, clientID)
 	if err != nil {
 		redirectError(w, r, redirectURI, state, "server_error", "Could not check application access")

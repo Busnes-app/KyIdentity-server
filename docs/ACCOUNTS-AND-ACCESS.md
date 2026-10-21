@@ -22,8 +22,32 @@ was mailed, records the address as verified; the first sign-in then goes through
 required factor enrollment before app access. An administrator setting a password on a
 pending account is the manual activation; flipping its status alone is refused.
 
+**Given passwords.** A password the account's owner did not choose must be replaced at the
+next sign-in: the bootstrap administrator's (generated, or `BOOTSTRAP_ADMIN_PASS`, or
+`bootstrap-admin`), and any password an administrator sets on someone else's account when
+creating it or later. Sign-in, MFA included, succeeds but opens only **Choose a new
+password**. Until the change, the session can read `GET /api/auth/me` (which reports
+`passwordChangeRequired: true`), step up for the change, call `POST /api/user/password`,
+enroll a replacement factor (for a sign-in with a recovery code, whose step-up cannot
+authorize the change), and sign out. Every other API answers `403
+password_change_required`, `/oauth/authorize` returns `interaction_required` to the app, no
+code or token is issued, and the account's earlier tokens stop validating. The new password
+must differ from the given one. The change clears the flag, ends every other session, token
+and app grant, and is audited as `user.password_changed` with `required: true`; a reset link
+also clears it. Invitations, setup-created accounts (`apply-setup`) and an administrator
+setting their own password are not flagged.
+
+**Upgrading.** The first start of this version flags, once, an existing bootstrap
+administrator still on its first password, audited as `system.password_change_required`. It
+is identified by its `admin.user_created` audit row from the `bootstrap` actor with no later
+`user.password_changed`, `auth.password_reset` or password-setting `admin.user_updated` row;
+or, once retention has pruned its creation row, as an administrator whose row was never
+modified. Nothing is reset: the account still signs in with its current password, then
+chooses a new one. Setup-owned and SCIM-owned accounts are never flagged.
+
 **Passwords.** Security and devices → Password changes your own password after a
 step-up; every other session, token and app grant ends, this browser stays signed in.
+Changing it clears a required password change.
 "Forgot your password?" on the sign-in page always answers the same way whether or not
 the account exists or mail is configured, is limited per address and per account, and
 mails a 30-minute reset link when it can. Redeeming a reset link signs the account out

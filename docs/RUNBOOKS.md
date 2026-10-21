@@ -45,8 +45,8 @@ Nobody can log in as an administrator.
    `-password` is refused). It creates a new administrator with an `admin.user_created`
    audit row. It never resets a password, promotes or re-enables an account: a name that
    already exists and is not an active administrator is an error, so pick an unused one.
-3. Start the server and sign in. If mail is configured, use the new administrator to send
-   the locked-out one a password reset link.
+3. Start the server and sign in. The new administrator chooses a new password first. If
+   mail is configured, use it to send the locked-out one a password reset link.
 
 If the first-run password was never used, it is at `<data>/first-run-password.txt`,
 mode 0600, and the server deletes it once that account has a password of its own.

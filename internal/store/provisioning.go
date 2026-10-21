@@ -102,7 +102,7 @@ func scimGroupPayload(groupID string) []byte {
 	return b
 }
 
-const userColumns = `id, username, display_name, email, password_hash, role, status, pending, email_verified_at, source_connector_id, external_id, source_active, locally_disabled, ends_at, created_at, updated_at`
+const userColumns = `id, username, display_name, email, password_hash, role, status, pending, password_change_required, email_verified_at, source_connector_id, external_id, source_active, locally_disabled, ends_at, created_at, updated_at`
 
 // scanUser reads a user row. An account past its end date reads as disabled, so every
 // decision that checks status honours the end date without a worker.
@@ -111,7 +111,7 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var verified sql.NullTime
 	var source, external sql.NullString
 	var endsAt sql.NullInt64
-	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.Pending, &verified, &source, &external, &u.SourceActive, &u.LocallyDisabled, &endsAt, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.Pending, &u.PasswordChangeRequired, &verified, &source, &external, &u.SourceActive, &u.LocallyDisabled, &endsAt, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
