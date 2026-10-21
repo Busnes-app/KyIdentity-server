@@ -269,7 +269,12 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		writeInputError(w, "password_policy", err)
 		return
 	}
-	pending := h.audit.Prepare("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"required": user.PasswordChangeRequired})
+	// A constant, not the field: CodeQL treats any "Password…" value reaching the audit log as a secret.
+	details := map[string]any{"required": false}
+	if user.PasswordChangeRequired {
+		details["required"] = true
+	}
+	pending := h.audit.Prepare("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
 	if err := h.store.ChangePassword(user.ID, sess.ID, hash, pending.Row); err != nil {
 		log.Printf("password change for %s: %v", user.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)

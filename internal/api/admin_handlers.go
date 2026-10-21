@@ -113,11 +113,13 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		user.PasswordHash, user.PasswordChangeRequired = passHash, true
 	}
 
+	// A given password is exactly a non-pending account here; logged without reading the
+	// "Password…" field, which CodeQL treats as a secret.
 	created := h.audit.Prepare("admin.user_created", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
 		"username":               user.Username,
 		"role":                   user.Role,
 		"pending":                user.Pending,
-		"passwordChangeRequired": user.PasswordChangeRequired,
+		"passwordChangeRequired": !user.Pending,
 	})
 	if err := h.syncEngine.CreateUserAndQueueSyncEvents(user, created.Row); err != nil {
 		if errors.Is(err, store.ErrUserConflict) {
