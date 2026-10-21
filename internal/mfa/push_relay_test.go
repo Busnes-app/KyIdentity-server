@@ -67,7 +67,7 @@ func TestRelaySenderRegistersAndPersistsKey(t *testing.T) {
 	expires := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
 	err = sender.SendPush(store.NativeDevice{
 		ID: "dev1", UserID: "u1", Platform: "android", PushToken: "token",
-	}, MFAChallengePush{ChallengeID: "challenge", Purpose: "login", ExpiresAtMS: expires.UnixMilli()})
+	}, MFAChallengePush{ChallengeID: "challenge", Purpose: "login", ExpiresAtMS: expires.UnixMilli(), Username: "alice.unsealed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +83,14 @@ func TestRelaySenderRegistersAndPersistsKey(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected data payload: %#v", sentPayload["data"])
 	}
-	for _, field := range []string{"matchDigits", "decoyDigits"} {
+	for _, field := range []string{"matchDigits", "decoyDigits", "username"} {
 		if _, ok := data[field]; ok {
 			t.Fatalf("push data leaked %s", field)
 		}
+	}
+	// A keyless device's push is readable by the relay and Google: it never names the account.
+	if strings.Contains(fmt.Sprint(sentPayload), "alice.unsealed") {
+		t.Fatalf("unsealed push carries the username: %v", sentPayload)
 	}
 	for _, field := range []string{"title", "body"} {
 		if strings.Contains(fmt.Sprint(data[field]), "42") {
@@ -250,11 +254,11 @@ func TestRelaySenderSealsChallengeForDeviceKeys(t *testing.T) {
 		ID: "3f9d6a1e-7c2b-4e58-9a0d-5b1c8e2f4a67", UserID: "c81e728d-9d4c-4f63-8b2a-0e5d7f9a1b3c",
 		Platform: "ios", PushToken: strings.Repeat("ab", 32), PushP256dh: rk.p256dh, PushAuth: rk.a64,
 	}
-	ch := MFAChallengePush{ChallengeID: "e4da3b7f-bbce-4345-8d1f-6c2a9e0b7d58", Purpose: "step_up", ExpiresAtMS: time.Now().Add(5 * time.Minute).UnixMilli()}
+	ch := MFAChallengePush{ChallengeID: "e4da3b7f-bbce-4345-8d1f-6c2a9e0b7d58", Purpose: "step_up", ExpiresAtMS: time.Now().Add(5 * time.Minute).UnixMilli(), Username: "alice.sealed"}
 	if err := sender.SendPush(dev, ch); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{dev.ID, dev.UserID, ch.ChallengeID, "step_up"} {
+	for _, id := range []string{dev.ID, dev.UserID, ch.ChallengeID, "step_up", ch.Username} {
 		if strings.Contains(string(raw), id) {
 			t.Fatalf("relay request carries %q: %s", id, raw)
 		}
@@ -280,8 +284,61 @@ func TestRelaySenderSealsChallengeForDeviceKeys(t *testing.T) {
 	if err := json.Unmarshal(decryptRFC8291(t, rk, sealed), &got); err != nil {
 		t.Fatal(err)
 	}
-	if want := challengeData(dev, ch); !maps.Equal(got, want) {
+	want := challengeData(dev, ch)
+	want["username"] = "alice.sealed"
+	if !maps.Equal(got, want) {
 		t.Fatalf("decrypted %v, want %v", got, want)
+	}
+}
+
+// The username rides only in the sealed payload, so it must leave the relay record at its
+// fixed 640 bytes (968 characters, under the relay's 1024). A longest-case challenge (UUID
+// identifiers, step_up, a 13-digit expiry) still has room for a long username; one that would
+// overflow the record is left out rather than breaking the cap.
+func TestSealedChallengeUsernameFitsTheRelayRecord(t *testing.T) {
+	dev := store.NativeDevice{
+		ID: "3f9d6a1e-7c2b-4e58-9a0d-5b1c8e2f4a67", UserID: "c81e728d-9d4c-4f63-8b2a-0e5d7f9a1b3c", Platform: "android",
+	}
+	ch := MFAChallengePush{ChallengeID: "e4da3b7f-bbce-4345-8d1f-6c2a9e0b7d58", Purpose: "step_up", ExpiresAtMS: 9_999_999_999_999}
+	bare, err := json.Marshal(challengeData(dev, ch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rk := newReceiver(t)
+	room := maxRecordPlaintext(relayRecordSize) - len(bare) - len(`,"username":""`)
+	if room < 200 {
+		t.Fatalf("only %d bytes left for a username in the relay record", room)
+	}
+	for _, tc := range []struct {
+		name string
+		kept bool
+	}{
+		{strings.Repeat("a", room), true},
+		{strings.Repeat("a", room+1), false},
+		{strings.Repeat("<", room/6), true}, // json escapes each to \u003c: six bytes
+		{strings.Repeat("<", room/6+1), false},
+		{strings.Repeat("é", room/2), true},
+	} {
+		ch.Username = tc.name
+		plain, err := sealedChallenge(dev, ch, relayRecordSize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plain) > maxRecordPlaintext(relayRecordSize) {
+			t.Fatalf("%d-byte username: plaintext is %d bytes, over one record", len(tc.name), len(plain))
+		}
+		var got map[string]string
+		if err := json.Unmarshal(plain, &got); err != nil {
+			t.Fatal(err)
+		}
+		if kept := got["username"] == tc.name; kept != tc.kept {
+			t.Fatalf("%d-byte username kept = %v, want %v", len(tc.name), kept, tc.kept)
+		}
+		if sealed, err := webPushEncrypt(plain, rk.p256dh, rk.a64, relayRecordSize); err != nil {
+			t.Fatal(err)
+		} else if n := len(base64.RawURLEncoding.EncodeToString(sealed)); n != 968 {
+			t.Fatalf("kyauth is %d characters, want 968", n)
+		}
 	}
 }
 

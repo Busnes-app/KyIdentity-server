@@ -151,7 +151,7 @@ the `/admin/keys` endpoints that used to be here.
 }
 ```
 
-That is the unsealed `data` KyIdentity builds (`challengeData` in `internal/mfa/push_relay.go`); only a device that registered no push keys gets this form (a KyAuth Android pairing made before it sent FCM keys, until it refreshes). A device that registered push keys (KyAuth iOS, and KyAuth Android since it seals FCM) gets `"data": {"type": "mfa_challenge", "kyauth": "<RFC 8291 body>"}` instead. The Worker forwards `data` only, as a data-only message; `title`, `body` and `platform` are not forwarded.
+That is the unsealed `data` KyIdentity builds (`challengeData` in `internal/mfa/push_relay.go`); only a device that registered no push keys gets this form (a KyAuth Android pairing made before it sent FCM keys, until it refreshes). A device that registered push keys (KyAuth iOS, and KyAuth Android since it seals FCM) gets `"data": {"type": "mfa_challenge", "kyauth": "<RFC 8291 body>"}` instead. The sealed body holds the same fields plus `username`, the signing-in account's name; the unsealed form never carries it. The Worker forwards `data` only, as a data-only message; `title`, `body` and `platform` are not forwarded.
 
 Responses: `200 {"ok":true}` on delivery; `403` when the token is already
 claimed by a different active key (see Token pinning below); `410 {"stale":true}`

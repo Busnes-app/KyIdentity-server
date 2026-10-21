@@ -68,7 +68,7 @@ func TestUbuntuPushSenderRequest(t *testing.T) {
 		PushToken: "NQq1Ox+9Ah/lOM=:tok", PushP256dh: rk.p256dh, PushAuth: rk.a64,
 	}
 	expires := time.Date(2026, 10, 11, 12, 0, 30, 500e6, time.UTC)
-	if err := s.SendPush(dev, MFAChallengePush{ChallengeID: "challenge-7f3a9c", Purpose: "step_up", ExpiresAtMS: expires.UnixMilli()}); err != nil {
+	if err := s.SendPush(dev, MFAChallengePush{ChallengeID: "challenge-7f3a9c", Purpose: "step_up", ExpiresAtMS: expires.UnixMilli(), Username: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -107,7 +107,7 @@ func TestUbuntuPushSenderRequest(t *testing.T) {
 	if string(d.Notification) != wantNotification {
 		t.Fatalf("notification = %s", d.Notification)
 	}
-	if bytes.Contains(body, []byte("challenge-7f3a9c")) || bytes.Contains(body, []byte("user-9c2e41")) {
+	if bytes.Contains(body, []byte("challenge-7f3a9c")) || bytes.Contains(body, []byte("user-9c2e41")) || bytes.Contains(body, []byte("alice")) {
 		t.Fatal("challenge details visible to the push service")
 	}
 	if len(d.Message) != 1 {
@@ -127,7 +127,7 @@ func TestUbuntuPushSenderRequest(t *testing.T) {
 	want := map[string]string{
 		"type": "mfa_challenge", "title": "Sign-in request", "body": "Open KyAuth to review.",
 		"challengeId": "challenge-7f3a9c", "deviceId": "device-5b1d07", "deviceUserId": "user-9c2e41", "purpose": "step_up",
-		"expiresAtEpochMs": strconv.FormatInt(expires.UnixMilli(), 10), "devicePlatform": "linux",
+		"expiresAtEpochMs": strconv.FormatInt(expires.UnixMilli(), 10), "devicePlatform": "linux", "username": "alice",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("payload = %v, want %v", got, want)

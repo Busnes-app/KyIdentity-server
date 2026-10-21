@@ -80,6 +80,9 @@ type MFAChallengePush struct {
 	ChallengeID string
 	Purpose     string
 	ExpiresAtMS int64
+	// Username is the signing-in account's name. It travels only inside an RFC 8291 sealed
+	// payload (sealedChallenge), never in plaintext data the relay and push provider can read.
+	Username string
 }
 
 // SetPushSender installs the FCM/APNs relay sender.
@@ -531,6 +534,12 @@ func (e *Engine) dispatchPushChallenge(challenge *store.MFAChallenge, decoys []s
 		ChallengeID: challenge.ID,
 		Purpose:     challenge.Purpose,
 		ExpiresAtMS: challenge.ExpiresAt.UnixMilli(),
+	}
+	// Display only: without it the authenticator falls back to the name saved at pairing.
+	if user, err := e.store.GetUserByID(challenge.UserID); err == nil {
+		push.Username = user.Username
+	} else {
+		log.Printf("mfa push: sending challenge %s without a username: %v", challenge.ID, err)
 	}
 	// Concurrent, so an unreachable distributor costs the login one send timeout, not one per
 	// device. Logs name the device and transport only: a UnifiedPush endpoint is a capability URL.

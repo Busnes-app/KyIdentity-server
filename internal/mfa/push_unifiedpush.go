@@ -5,7 +5,6 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -45,11 +44,15 @@ func NewUnifiedPushSender(keyFile, subscriber string) (*UnifiedPushSender, error
 	}, nil
 }
 
+// unifiedPushRecordSize pads to a fixed 2 KiB rather than 4 KiB, so a distributor that
+// re-encodes the body (FCM-backed ones base64 it) stays under its own 4 KiB limit.
+const unifiedPushRecordSize = 2048
+
 func (s *UnifiedPushSender) SendPush(dev store.NativeDevice, ch MFAChallengePush) error {
 	if dev.PushP256dh == "" || dev.PushAuth == "" {
 		return errors.New("unifiedpush device has no encryption keys")
 	}
-	body, err := json.Marshal(challengeData(dev, ch))
+	body, err := sealedChallenge(dev, ch, unifiedPushRecordSize)
 	if err != nil {
 		return err
 	}
@@ -64,9 +67,7 @@ func (s *UnifiedPushSender) SendPush(dev store.NativeDevice, ch MFAChallengePush
 		VAPIDPrivateKey: s.vapidPrivate,
 		TTL:             max(ttl, 1),
 		Urgency:         webpush.UrgencyHigh,
-		// Padded to a fixed 2 KiB rather than 4 KiB, so a distributor that re-encodes the
-		// body (FCM-backed ones base64 it) stays under its own 4 KiB limit.
-		RecordSize: 2048,
+		RecordSize:      unifiedPushRecordSize,
 	})
 	if err != nil {
 		// url.Error names the endpoint, which is a capability URL; keep it out of logs.

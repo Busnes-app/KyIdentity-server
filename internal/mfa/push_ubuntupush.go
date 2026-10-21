@@ -57,7 +57,7 @@ func NewUbuntuPushSender(notifyURL, appID string) *UbuntuPushSender {
 }
 
 func (s *UbuntuPushSender) SendPush(dev store.NativeDevice, ch MFAChallengePush) error {
-	plain, err := json.Marshal(challengeData(dev, ch))
+	plain, err := sealedChallenge(dev, ch, ubuntuPushRecordSize)
 	if err != nil {
 		return err
 	}
@@ -129,7 +129,7 @@ func webPushEncrypt(plaintext []byte, p256dh, auth string, recordSize int) ([]by
 	if err != nil || len(secret) != 16 {
 		return nil, errInvalidPushTarget
 	}
-	pad := recordSize - 16 - 1 - len(plaintext) // tag, delimiter
+	pad := maxRecordPlaintext(recordSize) - len(plaintext)
 	if pad < 0 {
 		return nil, errors.New("payload does not fit one record")
 	}
@@ -143,6 +143,10 @@ func webPushEncrypt(plaintext []byte, p256dh, auth string, recordSize int) ([]by
 	}
 	return sealAES128GCM(plaintext, ua, secret, salt, as, uint32(recordSize), pad)
 }
+
+// maxRecordPlaintext is the most plaintext one aes128gcm record of recordSize holds: the rest
+// is the 16-byte tag and the last-record delimiter.
+func maxRecordPlaintext(recordSize int) int { return recordSize - 16 - 1 }
 
 // sealAES128GCM is RFC 8291 section 3.4 over RFC 8188, single record, with pad zero bytes
 // after the last-record delimiter. Split from webPushEncrypt so the RFC 8291 vector can fix
