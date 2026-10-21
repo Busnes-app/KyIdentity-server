@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Upgrading
+
+- The first start flags an existing bootstrap administrator still on its first password; its next sign-in must choose a new one (audit `system.password_change_required`). Nothing is reset and no one is locked out. See [Given passwords](docs/ACCOUNTS-AND-ACCESS.md#onboarding-and-passwords).
+
+### Changes
+
+- Security: the bootstrap administrator, and any account whose password an administrator set, must choose a new password at the next sign-in. Until then the session can only read itself, step up, change the password, enroll a replacement factor or sign out; other APIs answer `403 password_change_required`, `/oauth/authorize` returns `interaction_required` and no app token is issued. The web UI shows a **Choose a new password** screen. The change clears the flag, ends every other session and is audited as `user.password_changed` with `required: true`.
+- Audit: `auth.password_reset` and `auth.account_activated` rows now name the account; they were committed with an empty actor and target. `admin.user_updated` records `passwordSet`.
+
 ## 0.4.5 — 2026-10-20
 
 ### Changes

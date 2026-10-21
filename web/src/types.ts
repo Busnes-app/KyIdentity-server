@@ -32,6 +32,8 @@ export interface User {
   createdAt?: string;
   /** Unused recovery codes predate keyed hashing; regenerating replaces them. */
   recoveryCodesNeedRegeneration?: boolean;
+  /** The password was given, not chosen: every session is limited to replacing it. */
+  passwordChangeRequired?: boolean;
 }
 
 export interface PairedSystem {

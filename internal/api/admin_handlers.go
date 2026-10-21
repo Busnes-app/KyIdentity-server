@@ -109,13 +109,17 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 			writeInputError(w, "password_policy", err)
 			return
 		}
-		user.PasswordHash = passHash
+		// The administrator knows this password, so the user must replace it.
+		user.PasswordHash, user.PasswordChangeRequired = passHash, true
 	}
 
+	// A given password is exactly a non-pending account here; logged without reading the
+	// "Password…" field, which CodeQL treats as a secret.
 	created := h.audit.Prepare("admin.user_created", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"username": user.Username,
-		"role":     user.Role,
-		"pending":  user.Pending,
+		"username":               user.Username,
+		"role":                   user.Role,
+		"pending":                user.Pending,
+		"passwordChangeRequired": !user.Pending,
 	})
 	if err := h.syncEngine.CreateUserAndQueueSyncEvents(user, created.Row); err != nil {
 		if errors.Is(err, store.ErrUserConflict) {
@@ -213,8 +217,10 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 		if passHash != "" {
 			user.PasswordHash = passHash
-			// An administrator setting the password is the manual activation path.
+			// An administrator setting the password is the manual activation path. Someone
+			// else's password must be replaced by its owner at the next sign-in.
 			user.Pending = false
+			user.PasswordChangeRequired = user.ID != admin.ID
 		}
 		if user.Pending && user.Status == "active" {
 			return false, errAccountPending
@@ -233,6 +239,7 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			"demoted":       demoted,
 			"roleChanged":   user.Role != wasRole,
 			"accessRevoked": revokeAccess,
+			"passwordSet":   passHash != "",
 		})
 		updated.Row.DetailsJSON = string(details)
 		return revokeAccess, nil

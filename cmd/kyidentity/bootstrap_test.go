@@ -165,6 +165,9 @@ func TestBootstrapCreatesAdminWhenNoneExists(t *testing.T) {
 	if ok, _ := auth.VerifyPassword("a-good-first-password", admin.PasswordHash); !ok {
 		t.Error("the bootstrap password does not verify")
 	}
+	if !admin.PasswordChangeRequired {
+		t.Error("the bootstrap admin is not required to replace its first password")
+	}
 }
 
 // The first-run credentials file is a plaintext password on disk. Once it has been used it

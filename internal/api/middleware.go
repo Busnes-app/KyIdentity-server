@@ -333,6 +333,10 @@ func (m *MiddlewareManager) RequireAuth(next http.Handler) http.Handler {
 			stepUpInternalError(w)
 			return
 		}
+		if user.PasswordChangeRequired && !passwordChangeRouteAllowed(r.Method, r.URL.Path) {
+			writePasswordChangeRequired(w)
+			return
+		}
 		if status.Restricted && !enrollmentRouteAllowed(r.Method, r.URL.Path) {
 			http.Error(w, `{"error":"enrollment_required","error_description":"Complete MFA enrollment and sign in again to continue."}`, 403)
 			return

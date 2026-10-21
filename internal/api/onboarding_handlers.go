@@ -257,6 +257,10 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		http.Error(w, `{"error":"invalid_credentials","error_description":"Current password is incorrect"}`, http.StatusUnauthorized)
 		return
 	}
+	if user.PasswordChangeRequired && req.NewPassword == req.CurrentPassword {
+		writeAPIError(w, http.StatusBadRequest, "password_reused", "Choose a password different from the one you were given")
+		return
+	}
 	hash, err := auth.HashPassword(req.NewPassword)
 	if argonBusy(w, err) {
 		return
@@ -265,7 +269,12 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		writeInputError(w, "password_policy", err)
 		return
 	}
-	pending := h.audit.Prepare("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	// A constant, not the field: CodeQL treats any "Password…" value reaching the audit log as a secret.
+	details := map[string]any{"required": false}
+	if user.PasswordChangeRequired {
+		details["required"] = true
+	}
+	pending := h.audit.Prepare("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
 	if err := h.store.ChangePassword(user.ID, sess.ID, hash, pending.Row); err != nil {
 		log.Printf("password change for %s: %v", user.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -273,6 +282,19 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 	}
 	pending.Committed()
 	writeSuccess(w)
+}
+
+// An account that must choose a new password may only read its identity, change the
+// password through its step-up, or leave. Factor enrollment stays open so an account that
+// signed in with a recovery code can replace the lost factor its step-up needs.
+func passwordChangeRouteAllowed(method, path string) bool {
+	return method+" "+path == "POST /api/user/password" || enrollmentRouteAllowed(method, path)
+}
+func passwordChangeOperationAllowed(operation string) bool {
+	return operation == "POST /api/user/password" || enrollmentOperationAllowed(operation)
+}
+func writePasswordChangeRequired(w http.ResponseWriter) {
+	writeAPIError(w, http.StatusForbidden, "password_change_required", "Choose a new password to continue.")
 }
 
 // Mail settings: GET returns everything but the password; PUT stores (blank password

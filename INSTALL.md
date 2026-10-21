@@ -54,8 +54,8 @@ Choose a different unused subnet and compatible `KYIDENTITY_IP` if that range co
 do not delete or recreate an existing shared network. The network name is historical and
 does not require KyPost to be installed.
 
-Open the issuer URL, sign in as `admin`, replace the bootstrap password, enable MFA and
-store recovery codes privately. Keep a separate everyday user. Configure the email sender
+Open the issuer URL and sign in as `admin` with that password. You'll be asked to choose a
+new password before anything else opens. Then enable MFA and store recovery codes privately. Keep a separate everyday user. Configure the email sender
 in the administrator settings, send a real verification email, follow its link as the
 user, and verify the user’s email status. A successful SMTP connection alone does not prove
 inbox delivery or a verified address.

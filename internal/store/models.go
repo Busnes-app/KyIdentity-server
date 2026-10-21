@@ -17,6 +17,9 @@ type User struct {
 	// Pending accounts were invited but have no password yet; they stay disabled until
 	// an activation link sets one.
 	Pending bool `json:"pending"`
+	// PasswordChangeRequired restricts every session of the account to choosing a new
+	// password: set for the bootstrap administrator and for passwords an administrator set.
+	PasswordChangeRequired bool `json:"passwordChangeRequired"`
 	// EmailVerifiedAt is set only when a link mailed to the address was redeemed.
 	EmailVerifiedAt *time.Time `json:"emailVerifiedAt,omitempty"`
 	// SourceConnectorID names the inbound SCIM connector that owns the profile; empty
