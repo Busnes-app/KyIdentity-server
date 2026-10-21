@@ -89,8 +89,10 @@ reconciles cascades (client deletion, foreign-key removal) within a minute.
 
 A newer desired state supersedes queued work for the same connector and resource that
 has not begun delivery; an attempt that has begun keeps its place and the newer state
-queues behind it, so an old create can never undo a later disable. A resource whose
-create was never acknowledged is forgotten on loss rather than disabled. Every event
+queues behind it, so an old create can never undo a later disable. An account removed
+before its create was acknowledged (pending, retrying or failed) still receives the
+inactive update in the create's place: the app may know the person another way, such as
+its own setup or a sign-in. Only a never-acknowledged group is forgotten. Every event
 carries a monotonic per-resource revision; suite receivers receive it as `meta.version`
 (`W/"<n>"`) and should refuse writes older than one they applied. Conditional
 `If-Match` writes to generic SCIM targets are not implemented.
@@ -103,7 +105,8 @@ the rest receive the identifier and `active=false`.
 
 **Resync** re-sends every in-scope account (and assigned group) and never provisions a
 user outside scope. It also replays every removal: each account the connector ever held
-(a delivered state or a remote ID mapping) that is now disabled, unassigned or deleted gets
+or was meant to hold (a state row, delivered or not, or a remote ID mapping) that is now
+disabled, unassigned or deleted gets
 an inactive update again, so a target restored from an older backup cannot readmit it.
 Replays deactivate and never delete; repeating a resync queues nothing extra.
 Installers run the same resync from inside the container with
