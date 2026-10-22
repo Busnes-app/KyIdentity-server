@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.7 — 2026-10-22
+
+### Upgrading
+
+- `KYIDENTITY_APPATTEST_APP_IDS` now defaults to KyAuth iOS when unset, as the Android signing digests already did; set it empty to turn App Attest grading off.
+- The first start marks pending outbox work that earlier versions left at its attempt budget as failed, so the reconcile pass re-queues it while it is current. Pending removals stay pending.
+
+### Changes
+
+- Security: removals to any connector are never given up. An inactive `user.updated`, `user.deleted` or `group.deleted` retries with backoff capped at 30 minutes between attempts until the receiver accepts it, so a receiver that was down for hours still gets the removal once it is back, with no administrator step. A re-grant still supersedes it. Creates and updates keep the five-attempt budget and are re-queued every 30 minutes while current, for suite webhooks as well as generic SCIM.
+- Security: a removal is no longer held behind an attempt with an unknown outcome. A removal whose answer was lost is resent; an expired blocked create or update with a removal queued behind it is dropped and the removal sent in its place (generic SCIM keeps its create guard). A removal also supersedes an undelivered MFA reset for that connector. Other uncertain writes stay blocked for an operator, as before.
+- The provisioning alert now also opens while a removal is retrying past five attempts or an attempt is blocked past its recovery time, even if other deliveries to that connector succeed. **Suite sync → Deliveries** lists given-up work and retrying removals under **Failing deliveries** (`GET /api/admin/systems/{id}/deliveries/failing`).
+- `resync-system --wait`: `failed` now means a create or update given up after five attempts, or a write blocked with an uncertain outcome. Removals never count as failed; one to a receiver that stays down ends in `timeout` and is delivered later on its own.
+- A Retry-After from a SCIM target now delays the next attempt by at most 30 minutes.
+- Repair re-provisions a SCIM target that was wiped behind KyIdentity's back: a stored remote ID that a complete listing does not hold is relinked by externalId or dropped, so the user or group is created again.
+- The access-denied page tells a user without access to ask an administrator and names KyIdentity.
+- Launcher tiles keep icon, name and arrow on one line with descriptions capped at two lines; paired phone rows are tidier.
+
 ## 0.4.6 — 2026-10-21
 
 ### Upgrading
