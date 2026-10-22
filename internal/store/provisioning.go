@@ -147,16 +147,23 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
  EXISTS(SELECT 1 FROM sync_delivery_attempts WHERE system_id=? AND user_id=?)`, d.systemID, d.resourceID, d.systemID, d.resourceID).Scan(&provisioned, &fenced); err != nil {
 		return err
 	}
-	// A removal also supersedes an undelivered MFA reset, which would otherwise hold it in
-	// order behind a retry; the account is deactivated there, and a regain sends a create.
-	superseded := `'user.created','user.updated','group.updated','group.deleted'`
-	if d.kind == "user" && (!d.active || d.deleted) {
-		superseded += `,'user.mfa_reset'`
-	}
-	if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE system_id=? AND user_id=? AND status IN ('pending','failed')
- AND event_type IN (`+superseded+`)
- AND NOT EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=account_sync_events.id)`, d.systemID, d.resourceID); err != nil {
+	unsent := `system_id=? AND user_id=? AND status IN ('pending','failed')
+ AND NOT EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=account_sync_events.id)`
+	if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE `+unsent+`
+ AND event_type IN ('user.created','user.updated','group.updated','group.deleted')`, d.systemID, d.resourceID); err != nil {
 		return err
+	}
+	// A removal goes ahead of an undelivered MFA reset, which would otherwise hold it in
+	// order behind a retry. The reset still follows: a regain reactivates the same account.
+	var resets []AccountSyncEvent
+	if d.kind == "user" && (!d.active || d.deleted) {
+		rows, err := tx.Query(`DELETE FROM account_sync_events WHERE `+unsent+` AND event_type='user.mfa_reset' RETURNING `+syncEventColumns, d.systemID, d.resourceID)
+		if err != nil {
+			return err
+		}
+		if resets, err = scanSyncEvents(rows); err != nil {
+			return err
+		}
 	}
 	if d.kind == "group" && !d.active && !provisioned && !fenced {
 		// A group never created is forgotten rather than deleted. A person may be known
@@ -181,7 +188,16 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	case d.active && (!provisioned || d.force):
 		eventType = "user.created"
 	}
-	return insertResourceEventTx(tx, d.systemID, d.resourceID, eventType, d.payload, revision, now)
+	if err := insertResourceEventTx(tx, d.systemID, d.resourceID, eventType, d.payload, revision, now); err != nil {
+		return err
+	}
+	for _, r := range resets {
+		if _, err := tx.Exec(`INSERT INTO account_sync_events (`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			r.ID, r.UserID, r.SystemID, r.EventType, r.PayloadJSON, r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", r.Revision); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func insertResourceEventTx(tx *sql.Tx, systemID, resourceID, eventType string, payload []byte, revision int, now time.Time) error {

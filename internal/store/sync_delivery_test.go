@@ -71,25 +71,20 @@ func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	// Within its recovery time the write holds the deletion back. Past it, a removal does
-	// not wait for an operator: the write is dropped and the deletion sent in its place.
-	recoverAfter := func(d time.Duration) {
-		t.Helper()
-		if _, err := s.db.Exec(`UPDATE sync_delivery_attempts SET recover_after=?`, time.Now().UTC().Add(d)); err != nil {
-			t.Fatal(err)
-		}
+	// The write holds the deletion back even past its recovery time; only its known
+	// outcome releases it.
+	if _, err := s.db.Exec(`UPDATE sync_delivery_attempts SET recover_after=?`, time.Now().UTC().Add(-time.Second)); err != nil {
+		t.Fatal(err)
 	}
-	recoverAfter(time.Minute)
 	if got := claim(); len(got) != 0 {
 		t.Fatal("delete bypassed in-flight write", got)
 	}
-	recoverAfter(-time.Second)
+	if err := s.FinishSyncDelivery(first, "delivered", "", 1, nil); err != nil {
+		t.Fatal(err)
+	}
 	got := claim()
 	if len(got) != 1 || got[0].EventType != "user.deleted" || got[0].Revision != 2 {
 		t.Fatal("delete not released", got)
-	}
-	if err := s.FinishSyncDelivery(first, "delivered", "", 1, nil); err == nil {
-		t.Fatal("dropped write completed")
 	}
 	if ok, err := s.BeginSyncDelivery(got[0], -time.Second); err != nil || !ok {
 		t.Fatal(ok, err)

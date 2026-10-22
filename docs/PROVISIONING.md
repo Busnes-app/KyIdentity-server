@@ -39,10 +39,11 @@ Removals are the exception to both the attempt budget and the block. A removal i
 inactive update, a deletion or a group deletion; every receiver applies one
 idempotently. It retries with the same backoff, at most 30 minutes apart, until the
 receiver accepts it, for as long as it is current (a re-grant supersedes it). A removal
-whose answer was lost is resent rather than blocked. Past its recovery time, an attempt
-blocked ahead of a removal is dropped and the removal sent in its place; generic SCIM
-keeps its create guard, so the removal still looks the account up by externalId. A
-removal also supersedes an undelivered MFA reset for that connector.
+whose answer was lost is resent rather than blocked. A removal queued behind another
+write that is blocked waits with it, even past its recovery time: that write may still
+land and restore access, so it needs the operator recovery below. The alert stays open
+meanwhile. A removal goes ahead of an undelivered MFA reset for that connector, and the
+reset follows it, so a re-grant never reactivates the account with its old factors.
 
 In **Suite sync → Deliveries**, inspect in-flight/blocked attempts and read remote state.
 **Failing deliveries** lists work given up after five attempts and removals still retrying

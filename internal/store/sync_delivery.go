@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"slices"
 	"time"
 )
 
@@ -225,63 +224,18 @@ func (s *Store) ResumeSyncDeliveries(systemID string, audit *AuditEvent) (int, e
 	return len(tokens), tx.Commit()
 }
 
-// releaseFencesForRemovalsTx keeps a removal from waiting on an operator. Past its
-// recovery time, a fence on a removal is released for retry, and a fence on any other
-// write is dropped with its event once a removal for the same resource is queued
-// behind it: that write would have been superseded had it not begun. Generic SCIM
-// keeps its create guard, so the removal still waits for an unresolved create.
+// releaseFencesForRemovalsTx releases a removal's own fence past its recovery time, so
+// a removal never waits on an operator for itself. A fence on any other write stays:
+// an expired deadline does not prove that write cannot still land after the removal.
 func releaseFencesForRemovalsTx(tx *sql.Tx, now time.Time) error {
-	rows, err := tx.Query(`SELECT a.token,a.system_id,a.user_id,a.event_id,COALESCE(e.event_type,''),COALESCE(e.payload_json,'')
- FROM sync_delivery_attempts a LEFT JOIN account_sync_events e ON e.id=a.event_id WHERE a.recover_after<=?`, now)
-	if err != nil {
+	expired := `SELECT event_id FROM sync_delivery_attempts WHERE recover_after<=?`
+	if _, err := tx.Exec(`UPDATE account_sync_events SET status='pending',next_attempt_at=NULL,lease_until=NULL,claim_token='',updated_at=?
+ WHERE id IN (`+expired+`) AND `+removalSQL, now, now); err != nil {
 		return err
 	}
-	type fence struct {
-		token, systemID, userID string
-		ev                      AccountSyncEvent
-	}
-	var fences []fence
-	for rows.Next() {
-		var f fence
-		if err := rows.Scan(&f.token, &f.systemID, &f.userID, &f.ev.ID, &f.ev.EventType, &f.ev.PayloadJSON); err != nil {
-			rows.Close()
-			return err
-		}
-		fences = append(fences, f)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, f := range fences {
-		if f.ev.Removal() {
-			if _, err := tx.Exec(`DELETE FROM sync_delivery_attempts WHERE token=?`, f.token); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(`UPDATE account_sync_events SET status='pending',next_attempt_at=NULL,lease_until=NULL,claim_token='',updated_at=? WHERE id=?`, now, f.ev.ID); err != nil {
-				return err
-			}
-			continue
-		}
-		queued, err := tx.Query(`SELECT `+syncEventColumns+` FROM account_sync_events WHERE system_id=? AND user_id=? AND status='pending' AND id<>?`, f.systemID, f.userID, f.ev.ID)
-		if err != nil {
-			return err
-		}
-		behind, err := scanSyncEvents(queued)
-		if err != nil {
-			return err
-		}
-		if !slices.ContainsFunc(behind, AccountSyncEvent.Removal) {
-			continue
-		}
-		if _, err := tx.Exec(`DELETE FROM sync_delivery_attempts WHERE token=?`, f.token); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE id=?`, f.ev.ID); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := tx.Exec(`DELETE FROM sync_delivery_attempts WHERE recover_after<=?
+ AND event_id IN (SELECT id FROM account_sync_events WHERE `+removalSQL+`)`, now)
+	return err
 }
 
 // FailingSyncEvent is an outbox event that needs attention: given up, or a removal still

@@ -288,46 +288,84 @@ func TestUncertainRemovalIsResent(t *testing.T) {
 	}
 }
 
-// An uncertain create stays held for the operator and alerts, even once the connector
-// delivers other work, but a removal queued behind it is not held: past the create's
-// recovery time it is dropped and the removal is sent in its place, never the create.
-func TestHeldCreateYieldsOnlyToRemoval(t *testing.T) {
-	e, s, u, sys, recv := suiteFixture(t)
-	recv.mu.Lock()
-	recv.script = []int{500}
-	recv.mu.Unlock()
-	dispatch(t, e)
-	elapse(t, s)
-	dispatch(t, e)
-	if held, err := s.ListSyncDeliveryAttempts(sys.ID); err != nil || len(held) != 1 {
-		t.Fatalf("create not held: %+v %v", held, err)
-	}
-	execRaw(t, s, `UPDATE paired_systems SET status='active' WHERE id=?`, sys.ID)
-	if !outageOpen(t, s, sys.ID) {
-		t.Fatal("held create raised no alert")
-	}
+// An uncertain write stays held past its recovery time, and a removal queued behind it
+// waits with it: an expired deadline does not prove the write cannot still land, and a
+// late active update would restore access after the removal. Generic SCIM updates carry
+// no revision a receiver could use to refuse one. The alert stays open meanwhile.
+func TestHeldWriteHoldsRemoval(t *testing.T) {
+	for _, kind := range []string{"suite_webhook", "scim"} {
+		t.Run(kind, func(t *testing.T) {
+			e, s, _, cleanup := setupTestSyncEngine(t)
+			defer cleanup()
+			remote := newFakeSCIM()
+			flaky := &flakyReceiver{}
+			var handler http.Handler = flaky
+			req := &CreateSystemRequest{Name: "target", SystemType: kind}
+			if kind == "scim" {
+				handler, req.BearerToken = remote, "target-token"
+			}
+			srv := httptest.NewTLSServer(handler)
+			defer srv.Close()
+			e.httpClient = srv.Client()
+			req.CallbackURL = srv.URL
+			if kind == "scim" {
+				req.CallbackURL += "/scim/v2"
+			}
+			sys, _, err := e.CreateSystem(req, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u := member(t, s)
+			if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+				t.Fatal(err)
+			}
+			dispatch(t, e)
 
-	setStatus(t, s, u, "disabled")
-	if got := outbox(t, s, sys.ID, u.ID); len(got) != 2 || got[1].eventType != "user.updated" {
-		t.Fatalf("removal not queued behind the held create: %+v", got)
-	}
-	dispatch(t, e)
-	elapse(t, s)
-	dispatch(t, e)
-	want := []hit{{"user.created", true}, {"user.updated", false}}
-	if got := recv.seen(); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("receiver saw %+v", got)
-	}
-	if got := outbox(t, s, sys.ID, u.ID); len(got) != 0 {
-		t.Fatalf("outbox %+v", got)
-	}
-	if held, err := s.ListSyncDeliveryAttempts(sys.ID); err != nil || len(held) != 0 {
-		t.Fatalf("fence left behind: %+v %v", held, err)
+			// The receiver stays unable to answer, so every write it is sent is uncertain.
+			remote.mu.Lock()
+			remote.putStatus = 500
+			remote.mu.Unlock()
+			flaky.mu.Lock()
+			flaky.script = []int{500, 500, 500, 500}
+			flaky.mu.Unlock()
+			if _, err := s.EditUser(u.ID, nil, func(next *store.User) (bool, error) { next.DisplayName = "Pat Renamed"; return true, nil }); err != nil {
+				t.Fatal(err)
+			}
+			dispatch(t, e)
+			held, err := s.ListSyncDeliveryAttempts(sys.ID)
+			if err != nil || len(held) != 1 || held[0].EventType != "user.updated" {
+				t.Fatalf("active update not held: %+v %v", held, err)
+			}
+
+			setStatus(t, s, u, "disabled")
+			for i := 0; i < 3; i++ {
+				elapse(t, s)
+				dispatch(t, e)
+			}
+			got := outbox(t, s, sys.ID, u.ID)
+			if len(got) != 2 || got[1].eventType != "user.updated" || got[1].attempts != 0 {
+				t.Fatalf("removal sent ahead of the held update: %+v", got)
+			}
+			if held, err := s.ListSyncDeliveryAttempts(sys.ID); err != nil || len(held) != 1 {
+				t.Fatalf("held update released without an operator: %+v %v", held, err)
+			}
+			for _, h := range flaky.seen() {
+				if !h.active {
+					t.Fatalf("receiver saw the removal: %+v", flaky.seen())
+				}
+			}
+			execRaw(t, s, `UPDATE paired_systems SET status='active' WHERE id=?`, sys.ID)
+			if !outageOpen(t, s, sys.ID) {
+				t.Fatal("held update raised no alert")
+			}
+		})
 	}
 }
 
-// A removal is never held in order behind an MFA reset that cannot be delivered.
-func TestRemovalSupersedesUndeliveredMFAReset(t *testing.T) {
+// A removal is never held in order behind an MFA reset that cannot be delivered, and
+// never drops it: the reset follows the removal, and a re-grant before either is
+// delivered still sends the reset ahead of reactivating the same account.
+func TestRemovalGoesAheadOfUndeliveredMFAReset(t *testing.T) {
 	e, s, u, sys, recv := suiteFixture(t)
 	dispatch(t, e)
 	recv.down.Store(true)
@@ -336,15 +374,24 @@ func TestRemovalSupersedesUndeliveredMFAReset(t *testing.T) {
 	}
 	dispatch(t, e)
 	setStatus(t, s, u, "disabled")
-	if got := outbox(t, s, sys.ID, u.ID); len(got) != 1 || got[0].eventType != "user.updated" {
-		t.Fatalf("outbox %+v", got)
+	if got := outbox(t, s, sys.ID, u.ID); len(got) != 2 || got[0].eventType != "user.updated" || got[1].eventType != "user.mfa_reset" {
+		t.Fatalf("outbox after removal %+v", got)
 	}
+	setStatus(t, s, u, "active")
+	if got := outbox(t, s, sys.ID, u.ID); len(got) != 2 || got[0].eventType != "user.mfa_reset" || got[1].eventType != "user.updated" {
+		t.Fatalf("outbox after re-grant %+v", got)
+	}
+	setStatus(t, s, u, "disabled")
 	recv.down.Store(false)
 	elapse(t, s)
 	dispatch(t, e)
+	dispatch(t, e)
 	got := recv.seen()
-	if got[len(got)-1] != (hit{"user.updated", false}) {
+	if len(got) < 2 || got[len(got)-2] != (hit{"user.updated", false}) || got[len(got)-1].event != "user.mfa_reset" {
 		t.Fatalf("receiver saw %+v", got)
+	}
+	if left := outbox(t, s, sys.ID, u.ID); len(left) != 0 {
+		t.Fatalf("outbox %+v", left)
 	}
 }
 

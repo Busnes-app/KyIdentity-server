@@ -60,7 +60,8 @@ Access was removed here but the far end still has the account.
 1. Read the alert. A connector whose deliveries are failing, given up, a removal still
    retrying after five attempts, or blocked past recovery raises one, and the alert names
    the connector rather than the account. A removal keeps retrying at most 30 minutes
-   apart, so once the far end is back it arrives without a step from you.
+   apart, so once the far end is back it arrives without a step from you, unless it is
+   queued behind an uncertain attempt (step 3).
 2. `GET /api/admin/systems/{id}/provisioning` shows what this connector still believes.
    `GET /api/admin/systems/{id}/deliveries` shows the attempts whose outcome is unknown;
    `GET /api/admin/systems/{id}/deliveries/failing` shows given-up work and retrying
