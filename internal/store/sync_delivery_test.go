@@ -71,6 +71,11 @@ func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
+	// The write holds the deletion back even past its recovery time; only its known
+	// outcome releases it.
+	if _, err := s.db.Exec(`UPDATE sync_delivery_attempts SET recover_after=?`, time.Now().UTC().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	if got := claim(); len(got) != 0 {
 		t.Fatal("delete bypassed in-flight write", got)
 	}
@@ -122,6 +127,7 @@ func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 func TestSyncDeliveryBackoffHoldsLaterEvents(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
+	provisioningFixture(t, s, "s")
 	for _, id := range []string{"first", "second"} {
 		if err := s.CreateAccountSyncEvent(&AccountSyncEvent{ID: id, UserID: "u", SystemID: "s", EventType: "user.updated", Status: "pending", PayloadJSON: `{}`}); err != nil {
 			t.Fatal(err)
@@ -138,7 +144,17 @@ func TestSyncDeliveryBackoffHoldsLaterEvents(t *testing.T) {
 	if err := s.UpdateSyncEventStatus("first", "pending", "exhausted", 5, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.ClaimDueSyncEvents(50, time.Minute); err != nil || len(got) != 1 || got[0].ID != "second" {
+	// A legacy removal stays pending: removals are never given up.
+	if err := s.CreateAccountSyncEvent(&AccountSyncEvent{ID: "removal", UserID: "v", SystemID: "s", EventType: "user.updated", Status: "pending", PayloadJSON: `{"active":false}`}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateSyncEventStatus("removal", "pending", "exhausted", 9, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrateSyncDelivery(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ClaimDueSyncEvents(50, time.Minute); err != nil || len(got) != 2 || got[0].ID != "second" || got[1].ID != "removal" {
 		t.Fatal("exhausted legacy head starved queue", got, err)
 	}
 }

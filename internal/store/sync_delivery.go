@@ -28,8 +28,17 @@ func (s *Store) migrateSyncDelivery() error {
  CREATE TRIGGER IF NOT EXISTS delete_sync_delivery_system AFTER DELETE ON paired_systems
  BEGIN DELETE FROM sync_delivery_attempts WHERE system_id=OLD.id; END;
  DELETE FROM account_sync_events WHERE NOT EXISTS(SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id);`)
+	if err != nil {
+		return err
+	}
+	// Older versions left some exhausted work pending; pending now always means deliverable.
+	_, err = s.db.Exec(`UPDATE account_sync_events SET status='failed' WHERE status='pending' AND attempts>=? AND NOT `+removalSQL, SyncAttemptBudget)
 	return err
 }
+
+// removalSQL is AccountSyncEvent.Removal for an account_sync_events row.
+const removalSQL = `(event_type IN ('user.deleted','group.deleted') OR (event_type='user.updated'
+ AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.active') END IS 0))`
 
 // BeginSyncDelivery turns a valid unsent claim into a durable resource fence.
 // Expiration is a diagnostic/recovery threshold, never permission to send again.
@@ -46,10 +55,29 @@ func (s *Store) BeginSyncDelivery(ev AccountSyncEvent, duration time.Duration) (
 	return n == 1, err
 }
 
+// SyncAttemptBudget is how many attempts a create or update gets before it is failed and
+// left to the reconcile pass. A removal retries past it; one that has, still alerts.
+const SyncAttemptBudget = 5
+
+// Removal reports whether the event takes access away. Every receiver applies a removal
+// idempotently, so one is retried until delivered and never held as uncertain.
+func (ev AccountSyncEvent) Removal() bool {
+	switch ev.EventType {
+	case "user.deleted", "group.deleted":
+		return true
+	case "user.updated":
+		var body struct {
+			Active *bool `json:"active"`
+		}
+		return json.Unmarshal([]byte(ev.PayloadJSON), &body) == nil && body.Active != nil && !*body.Active
+	}
+	return false
+}
+
 // FinishSyncDelivery only releases the exact attempt whose HTTP outcome is known.
 // The event may have been removed by account deletion while the request ran.
 func (s *Store) FinishSyncDelivery(ev AccountSyncEvent, status, message string, attempts int, next *time.Time) error {
-	if status == "pending" && attempts >= 5 {
+	if status == "pending" && attempts >= SyncAttemptBudget && !ev.Removal() {
 		status = "failed"
 	}
 	tx, err := s.db.Begin()
@@ -194,6 +222,53 @@ func (s *Store) ResumeSyncDeliveries(systemID string, audit *AuditEvent) (int, e
 		return 0, err
 	}
 	return len(tokens), tx.Commit()
+}
+
+// releaseFencesForRemovalsTx releases a removal's own fence past its recovery time, so
+// a removal never waits on an operator for itself. A fence on any other write stays:
+// an expired deadline does not prove that write cannot still land after the removal.
+func releaseFencesForRemovalsTx(tx *sql.Tx, now time.Time) error {
+	expired := `SELECT event_id FROM sync_delivery_attempts WHERE recover_after<=?`
+	if _, err := tx.Exec(`UPDATE account_sync_events SET status='pending',next_attempt_at=NULL,lease_until=NULL,claim_token='',updated_at=?
+ WHERE id IN (`+expired+`) AND `+removalSQL, now, now); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM sync_delivery_attempts WHERE recover_after<=?
+ AND event_id IN (SELECT id FROM account_sync_events WHERE `+removalSQL+`)`, now)
+	return err
+}
+
+// FailingSyncEvent is an outbox event that needs attention: given up, or a removal still
+// retrying past the attempt budget.
+type FailingSyncEvent struct {
+	UserID      string     `json:"userId"`
+	EventType   string     `json:"eventType"`
+	Status      string     `json:"status"`
+	Attempts    int        `json:"attempts"`
+	LastError   string     `json:"lastError"`
+	NextAttempt *time.Time `json:"nextAttemptAt,omitempty"`
+}
+
+func (s *Store) ListFailingSyncEvents(systemID string) ([]FailingSyncEvent, error) {
+	rows, err := s.db.Query(`SELECT user_id,event_type,status,attempts,COALESCE(last_error,''),next_attempt_at FROM account_sync_events
+ WHERE system_id=? AND (status='failed' OR (status='pending' AND attempts>=?)) ORDER BY created_at LIMIT 100`, systemID, SyncAttemptBudget)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []FailingSyncEvent{}
+	for rows.Next() {
+		var f FailingSyncEvent
+		var next sql.NullTime
+		if err := rows.Scan(&f.UserID, &f.EventType, &f.Status, &f.Attempts, &f.LastError, &next); err != nil {
+			return nil, err
+		}
+		if next.Valid {
+			f.NextAttempt = &next.Time
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) MarkSyncDeliveryUncertain(ev AccountSyncEvent) error {

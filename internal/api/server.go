@@ -241,6 +241,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/mail/test", permAdmin, false, http.HandlerFunc(onboardH.TestMail)},
 		{"DELETE", "/api/admin/users/{id}", permAdmin, true, http.HandlerFunc(adminH.DeleteUser)},
 		{"GET", "/api/admin/systems/{id}/deliveries", permRead, false, http.HandlerFunc(adminH.ListSyncDeliveries)},
+		{"GET", "/api/admin/systems/{id}/deliveries/failing", permRead, false, http.HandlerFunc(adminH.ListFailingSyncDeliveries)},
 		{"POST", "/api/admin/systems/{id}/deliveries/{token}/read-back", permAdmin, false, http.HandlerFunc(adminH.ReadBackSyncDelivery)},
 		{"POST", "/api/admin/systems/{id}/deliveries/{token}/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeSyncDelivery)},
 		{"POST", "/api/admin/systems/{id}/deliveries/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeSyncDeliveries)},

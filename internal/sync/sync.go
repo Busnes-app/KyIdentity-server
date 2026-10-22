@@ -327,12 +327,9 @@ func (e *Engine) CreateSystem(req *CreateSystemRequest, audit func(*store.Paired
 
 // retryDelay is exponential with a ceiling, so a system that is down is not hammered every
 // tick until its attempt budget runs out.
+// Removals retry without limit, so the shift is capped before it can overflow.
 func retryDelay(attempts int) time.Duration {
-	delay := time.Duration(1<<attempts) * 30 * time.Second
-	if delay > 30*time.Minute {
-		delay = 30 * time.Minute
-	}
-	return delay
+	return min(time.Duration(1<<min(attempts, 6))*30*time.Second, 30*time.Minute)
 }
 
 // deliveryLease bounds unsent claims. Once delivery begins, its durable resource
@@ -470,9 +467,10 @@ func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncE
 		client.Transport = outcome
 		delivery.httpClient = &client
 		if derr := delivery.deliver(ctx, sys, secret, ev.ID, ev.EventType, ev.UserID, payloadBytes); derr != nil {
-			if outcome.uncertain.Load() {
+			if outcome.uncertain.Load() && !ev.Removal() {
 				// Keep the fence even after the lease expires. The remote may still
-				// commit this write after a newer write would otherwise be sent.
+				// commit this write after a newer write would otherwise be sent. A
+				// removal is safe to resend, so it backs off instead.
 				if err := e.store.MarkSyncDeliveryUncertain(ev); err != nil {
 					return err
 				}
@@ -483,7 +481,7 @@ func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncE
 				return e.store.FinishSyncDelivery(ev, "pending", "", ev.Attempts, ev.NextAttempt)
 			}
 			attempts := ev.Attempts + 1
-			if attempts >= 5 {
+			if attempts >= store.SyncAttemptBudget && !ev.Removal() {
 				if serr := e.store.FinishSyncDelivery(ev, "failed", deliveryError(derr), attempts, nil); serr != nil {
 					return serr
 				}
@@ -491,7 +489,7 @@ func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncE
 				delay := retryDelay(ev.Attempts)
 				var remoteErr *scim.Error
 				if errors.As(derr, &remoteErr) {
-					delay = max(delay, remoteErr.RetryAfter)
+					delay = min(max(delay, remoteErr.RetryAfter), 30*time.Minute)
 				}
 				next := time.Now().UTC().Add(delay)
 				if serr := e.store.FinishSyncDelivery(ev, "pending", deliveryError(derr), attempts, &next); serr != nil {

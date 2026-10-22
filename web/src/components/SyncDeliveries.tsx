@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { apiJson, apiRequest, errorMessage } from '../api';
-import { parseSyncDeliveries, parseSyncReadBack } from '../parsers';
+import { parseFailingDeliveries, parseSyncDeliveries, parseSyncReadBack } from '../parsers';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import type { PairedSystem } from '../types';
 
 export function SyncDeliveries({ system, onClose }: { system: PairedSystem; onClose: () => void }) {
   const [attempts, setAttempts] = useState<ReturnType<typeof parseSyncDeliveries>>([]);
+  const [failing, setFailing] = useState<ReturnType<typeof parseFailingDeliveries>>([]);
   const [message, setMessage] = useState('');
   const [allowCreateRetry, setAllowCreateRetry] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -13,7 +14,10 @@ export function SyncDeliveries({ system, onClose }: { system: PairedSystem; onCl
   const { requestGrant, stepUpPrompt } = useStepUp();
   const base = `/api/admin/systems/${encodeURIComponent(system.id)}/deliveries`;
   async function refresh() {
-    try { setAttempts(await apiJson(base, parseSyncDeliveries)); }
+    try {
+      setAttempts(await apiJson(base, parseSyncDeliveries));
+      setFailing(await apiJson(`${base}/failing`, parseFailingDeliveries));
+    }
     catch (err) { setMessage(errorMessage(err, 'Could not load deliveries')); }
   }
   useEffect(() => { void refresh(); }, [base]);
@@ -51,7 +55,7 @@ export function SyncDeliveries({ system, onClose }: { system: PairedSystem; onCl
   return <section className="table-card" aria-label={`Deliveries for ${system.name}`} style={{ padding: '1rem', marginBottom: '1rem' }}>
     {stepUpPrompt}
     <h3>In-flight and blocked deliveries — {system.name}</h3>
-    <p>Expired attempts stay blocked because the remote write may still finish. Read-back is an observation, not proof that a write stopped.</p>
+    <p>Expired attempts stay blocked because the remote write may still finish, unless a removal is waiting: removals are safe to resend and never wait here. Read-back is an observation, not proof that a write stopped.</p>
     <p>Before resuming: stop all KyIdentity workers, verify with the receiving service that the old request has finished, then restart one instance. Do not resume while an old worker or remote request can still write.</p>
     <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} /> I completed these steps and confirmed the old request has finished.</label>
     {system.systemType === 'scim' && <p><label><input type="checkbox" checked={allowCreateRetry} onChange={e => setAllowCreateRetry(e.target.checked)} /> The receiver also confirmed no account was created. Allow a fresh create if externalId lookup is still empty.</label></p>}
@@ -67,5 +71,12 @@ export function SyncDeliveries({ system, onClose }: { system: PairedSystem; onCl
           <button className="secondary-btn sm" disabled={busy || !confirmed || Date.parse(a.recoverAfter) > Date.now()} onClick={() => void resume(a.token)}>Resume delivery</button>
         </td></tr>)}</tbody></table>
     </>}
+    <h3>Failing deliveries</h3>
+    <p>Removals retry every 30 minutes at most until delivered, with no step from you. Other work is given up after five attempts, then re-queued with a 30-minute backoff while it still matches what the directory wants.</p>
+    {failing.length === 0 ? <p>No failing deliveries.</p> :
+      <table className="admin-table"><thead><tr><th>Resource ID</th><th>Event</th><th>State</th><th>Attempts</th><th>Last error</th></tr></thead>
+        <tbody>{failing.map((f, i) => <tr key={i}><td>{f.userId}</td><td>{f.eventType}</td>
+          <td>{f.status === 'failed' ? 'Given up; re-queued by the next reconcile' : `Retrying${f.nextAttemptAt ? `, next ${new Date(f.nextAttemptAt).toLocaleString()}` : ''}`}</td>
+          <td>{f.attempts}</td><td>{f.lastError}</td></tr>)}</tbody></table>}
   </section>;
 }

@@ -45,8 +45,8 @@ without mail, and login-failure mail is one mailing per four hours however many
 sources appear, so an attacker cycling names or addresses cannot flood the inbox, the
 mail or the table), push fatigue (three denied or unanswered sign-in pushes for one
 account within an hour),
-failed or refused scheduled access removal, and outages (a connector whose deliveries are failing
-or given up, a client whose back-channel logouts were given up). Every audit insert
+failed or refused scheduled access removal, and outages (a connector whose deliveries are failing,
+given up, a removal still retrying after five attempts or blocked past recovery, a client whose back-channel logouts were given up). Every audit insert
 queues its id through a trigger, the evaluator writes alerts and drains the queue in one
 transaction, and a worker goroutine of its own runs it every few seconds with a bounded
 pass, so a crash can repeat work but never skip a trigger, a stuck relay never delays

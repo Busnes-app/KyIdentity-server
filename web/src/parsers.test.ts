@@ -1,4 +1,4 @@
-import { parseSessionLimits, parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseDevice, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage } from './parsers';
+import { parseSessionLimits, parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseDevice, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage, parseFailingDeliveries } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseAccessExplanation,
@@ -717,4 +717,16 @@ describe('session limits boundary', () => {
    expect(() => parseSessionLimits(bad)).toThrow();
   }
  });
+});
+
+describe('parseFailingDeliveries', () => {
+  it('reads retrying and given-up rows and refuses an unknown state', () => {
+    const rows = parseFailingDeliveries([
+      { userId: 'u1', eventType: 'user.updated', status: 'pending', attempts: 9, lastError: 'SCIM HTTP 503', nextAttemptAt: '2026-10-22T10:00:00Z' },
+      { userId: 'u2', eventType: 'user.created', status: 'failed', attempts: 5, lastError: 'x' },
+    ]);
+    expect(rows.map(r => [r.status, r.attempts, r.nextAttemptAt])).toEqual([['pending', 9, '2026-10-22T10:00:00Z'], ['failed', 5, undefined]]);
+    expect(() => parseFailingDeliveries([{ userId: 'u', eventType: 'e', status: 'delivered', attempts: 1, lastError: '' }])).toThrow();
+    expect(() => parseFailingDeliveries({})).toThrow();
+  });
 });

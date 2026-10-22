@@ -1285,14 +1285,19 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := releaseFencesForRemovalsTx(tx, now); err != nil {
+		return nil, err
+	}
 
+	// Pending is always deliverable: a create or update is failed at its attempt budget,
+	// a removal never is.
 	rows, err := tx.Query(`SELECT `+syncEventColumns+` FROM account_sync_events
-		WHERE status = 'pending' AND attempts < 5
+		WHERE status = 'pending'
           AND NOT EXISTS (SELECT 1 FROM sync_delivery_attempts a
             WHERE a.system_id=account_sync_events.system_id AND a.user_id=account_sync_events.user_id)
           AND NOT EXISTS (SELECT 1 FROM account_sync_events older
             WHERE older.system_id=account_sync_events.system_id AND older.user_id=account_sync_events.user_id
-            AND older.status='pending' AND older.attempts<5 AND older.rowid<account_sync_events.rowid)
+            AND older.status='pending' AND older.rowid<account_sync_events.rowid)
           AND NOT EXISTS (SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id
             AND (p.status='disabled' OR p.provisioning_hold
              OR p.system_type NOT IN `+deliverableTypes+`))

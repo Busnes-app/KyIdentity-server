@@ -23,7 +23,7 @@ import (
 )
 
 // appVersion is reported in capsule manifests and status responses.
-const appVersion = "0.4.6"
+const appVersion = "0.4.7"
 
 // depositWriteBudget is how long the admin's connection may stay open for the receipt: the
 // upload budget plus room for sealing. The listener's write timeout is sized for JSON replies.
