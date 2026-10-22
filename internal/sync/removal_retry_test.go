@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	stdsync "sync"
@@ -87,12 +88,15 @@ type hit struct {
 }
 
 // flakyReceiver is a suite receiver that answers 503 while down, or the queued statuses
-// first. It records every request it saw.
+// first. It records every request it saw. With fence set it refuses, as suite receivers
+// do, a meta.version older than one it applied.
 type flakyReceiver struct {
 	down   atomic.Bool
 	mu     stdsync.Mutex
 	script []int
 	hits   []hit
+	fence  bool
+	last   int
 }
 
 func (f *flakyReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -101,13 +105,20 @@ func (f *flakyReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.hits = append(f.hits, hit{r.Header.Get("X-KySignOn-Event-Type"), body.Active})
+	var version int
+	if body.Meta != nil {
+		_, _ = fmt.Sscanf(body.Meta.Version, `W/"%d"`, &version)
+	}
 	switch {
 	case f.down.Load():
 		w.WriteHeader(503)
+	case f.fence && version < f.last:
+		w.WriteHeader(409)
 	case len(f.script) > 0:
 		w.WriteHeader(f.script[0])
 		f.script = f.script[1:]
 	default:
+		f.last = max(f.last, version)
 		w.WriteHeader(200)
 	}
 }
@@ -363,10 +374,11 @@ func TestHeldWriteHoldsRemoval(t *testing.T) {
 }
 
 // A removal is never held in order behind an MFA reset that cannot be delivered, and
-// never drops it: the reset follows the removal, and a re-grant before either is
-// delivered still sends the reset ahead of reactivating the same account.
+// never drops it: the reset follows the removal at a revision the receiver accepts, and
+// a re-grant before either is delivered still sends the reset ahead of reactivation.
 func TestRemovalGoesAheadOfUndeliveredMFAReset(t *testing.T) {
 	e, s, u, sys, recv := suiteFixture(t)
+	recv.fence = true
 	dispatch(t, e)
 	recv.down.Store(true)
 	if err := e.ResetUserMFAAndRevoke(u.ID, nil); err != nil {
@@ -391,7 +403,12 @@ func TestRemovalGoesAheadOfUndeliveredMFAReset(t *testing.T) {
 		t.Fatalf("receiver saw %+v", got)
 	}
 	if left := outbox(t, s, sys.ID, u.ID); len(left) != 0 {
-		t.Fatalf("outbox %+v", left)
+		t.Fatalf("reset refused as stale: %+v", left)
+	}
+	setStatus(t, s, u, "active")
+	dispatch(t, e)
+	if got := recv.seen(); got[len(got)-1] != (hit{"user.updated", true}) {
+		t.Fatalf("receiver saw %+v", got)
 	}
 }
 

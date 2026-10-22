@@ -155,6 +155,8 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	}
 	// A removal goes ahead of an undelivered MFA reset, which would otherwise hold it in
 	// order behind a retry. The reset still follows: a regain reactivates the same account.
+	// It takes the removal's revision, as a reset queued now would, so a receiver fencing
+	// on meta.version does not refuse it as older.
 	var resets []AccountSyncEvent
 	if d.kind == "user" && (!d.active || d.deleted) {
 		rows, err := tx.Query(`DELETE FROM account_sync_events WHERE `+unsent+` AND event_type='user.mfa_reset' RETURNING `+syncEventColumns, d.systemID, d.resourceID)
@@ -193,7 +195,7 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	}
 	for _, r := range resets {
 		if _, err := tx.Exec(`INSERT INTO account_sync_events (`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			r.ID, r.UserID, r.SystemID, r.EventType, r.PayloadJSON, r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", r.Revision); err != nil {
+			r.ID, r.UserID, r.SystemID, r.EventType, r.PayloadJSON, r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision); err != nil {
 			return err
 		}
 	}
