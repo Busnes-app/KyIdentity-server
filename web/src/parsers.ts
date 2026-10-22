@@ -744,6 +744,14 @@ export function parseSyncDeliveries(value: unknown) {
   });
 }
 
+export function parseFailingDeliveries(value: unknown) {
+  return arr(value, 'failing deliveries').map((item: unknown) => {
+    const row = obj(item, 'a failing delivery');
+    return { userId: str(row, 'userId'), eventType: str(row, 'eventType'), status: oneOf(row, 'status', ['pending', 'failed']),
+      attempts: directoryCount(row, 'attempts'), lastError: str(row, 'lastError'), nextAttemptAt: optStr(row, 'nextAttemptAt') };
+  });
+}
+
 export function parseSyncReadBack(value: unknown): string {
   const row = obj(value, 'read-back');
   switch (str(row, 'state')) {

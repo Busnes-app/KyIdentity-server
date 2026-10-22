@@ -15,6 +15,18 @@ func (h *AdminHandler) ListSyncDeliveries(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(attempts)
 }
 
+// ListFailingSyncDeliveries shows outbox work that needs attention: given up, or a
+// removal retrying past the attempt budget. Errors are stored already sanitised.
+func (h *AdminHandler) ListFailingSyncDeliveries(w http.ResponseWriter, r *http.Request) {
+	events, err := h.store.ListFailingSyncEvents(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(events)
+}
+
 func (h *AdminHandler) ReadBackSyncDelivery(w http.ResponseWriter, r *http.Request) {
 	sys, err := h.store.GetPairedSystemByID(r.PathValue("id"))
 	if err != nil {

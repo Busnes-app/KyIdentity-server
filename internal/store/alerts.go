@@ -457,7 +457,11 @@ func (s *Store) evaluateOutages(now time.Time, settings AlertSettings) error {
 	defer tx.Rollback()
 	type outage struct{ rule, key, title, summary string }
 	var live []outage
-	rows, err := tx.Query(`SELECT id, name FROM paired_systems s WHERE status<>'disabled' AND (status='failing' OR EXISTS (SELECT 1 FROM account_sync_events e WHERE e.system_id=s.id AND e.status='failed'))`)
+	// Failing, or holding work that needs attention: given up, a removal retrying past the
+	// attempt budget, or an attempt held past its recovery time with its outcome unknown.
+	rows, err := tx.Query(`SELECT id, name FROM paired_systems s WHERE status<>'disabled' AND (status='failing'
+ OR EXISTS (SELECT 1 FROM account_sync_events e WHERE e.system_id=s.id AND (e.status='failed' OR (e.status='pending' AND e.attempts>=?)))
+ OR EXISTS (SELECT 1 FROM sync_delivery_attempts a WHERE a.system_id=s.id AND a.recover_after<=?))`, SyncAttemptBudget, now)
 	if err != nil {
 		return err
 	}
@@ -468,7 +472,7 @@ func (s *Store) evaluateOutages(now time.Time, settings AlertSettings) error {
 			return err
 		}
 		name = alertText(name)
-		live = append(live, outage{"provisioning_outage", id, "Provisioning failing: " + name, "Deliveries to " + name + " are failing or have been given up; accounts there may be out of date."})
+		live = append(live, outage{"provisioning_outage", id, "Provisioning failing: " + name, "Deliveries to " + name + " are failing, retrying or held; accounts there may be out of date. See its Deliveries."})
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {

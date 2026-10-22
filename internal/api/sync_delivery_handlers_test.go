@@ -234,3 +234,21 @@ func insertSyncEvent(t *testing.T, dbPath string, ev store.AccountSyncEvent) {
 		t.Fatal(err)
 	}
 }
+
+func TestFailingSyncDeliveriesListsRetryingRemovals(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newUser(t, db, "admin")
+	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
+	sys := &store.PairedSystem{ID: "down-target", Name: "Down target", SystemType: "suite_webhook", CallbackURL: "https://example.com/hook", Status: "active"}
+	if err := db.CreatePairedSystem(sys, nil); err != nil {
+		t.Fatal(err)
+	}
+	insertSyncEvent(t, srv.cfg.DBPath, store.AccountSyncEvent{ID: "removal", UserID: "gone", SystemID: sys.ID, EventType: "user.updated", Status: "pending", PayloadJSON: `{"active":false}`, Attempts: store.SyncAttemptBudget + 3})
+	insertSyncEvent(t, srv.cfg.DBPath, store.AccountSyncEvent{ID: "fresh", UserID: "new", SystemID: sys.ID, EventType: "user.created", Status: "pending", PayloadJSON: `{}`, Attempts: 1})
+	rr := adminRequest(t, srv, "GET", "/api/admin/systems/"+sys.ID+"/deliveries/failing", cookie, "")
+	var rows []store.FailingSyncEvent
+	if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &rows) != nil || len(rows) != 1 || rows[0].UserID != "gone" || rows[0].Status != "pending" || rows[0].Attempts != store.SyncAttemptBudget+3 {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+}

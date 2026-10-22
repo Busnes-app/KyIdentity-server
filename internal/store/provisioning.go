@@ -147,8 +147,14 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
  EXISTS(SELECT 1 FROM sync_delivery_attempts WHERE system_id=? AND user_id=?)`, d.systemID, d.resourceID, d.systemID, d.resourceID).Scan(&provisioned, &fenced); err != nil {
 		return err
 	}
+	// A removal also supersedes an undelivered MFA reset, which would otherwise hold it in
+	// order behind a retry; the account is deactivated there, and a regain sends a create.
+	superseded := `'user.created','user.updated','group.updated','group.deleted'`
+	if d.kind == "user" && (!d.active || d.deleted) {
+		superseded += `,'user.mfa_reset'`
+	}
 	if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE system_id=? AND user_id=? AND status IN ('pending','failed')
- AND event_type IN ('user.created','user.updated','group.updated','group.deleted')
+ AND event_type IN (`+superseded+`)
  AND NOT EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=account_sync_events.id)`, d.systemID, d.resourceID); err != nil {
 		return err
 	}
