@@ -147,6 +147,15 @@ You can verify the status of the server at any time:
   curl http://localhost:5867/readyz
   # Response: {"status":"ready","checks":{"audit":"ok","database":"ok",...}}
   ```
+* **Proxy and scheme check** (public, the suite installer status endpoint that
+  `kyquickstart verify-edge` reads): reports the client address and scheme as KyIdentity
+  resolved them, and whether the immediate peer is in `TRUSTED_PROXY_CIDRS` so its forwarding
+  headers were believed. Through your public route it should show your own address,
+  `"proxyHeadersTrusted":true` and `"scheme":"https"`.
+  ```bash
+  curl https://id.example.com/api/installer/network
+  # Response: {"clientIp":"203.0.113.6","proxyHeadersTrusted":true,"scheme":"https"}
+  ```
 * **OpenID Connect Discovery**:
   ```bash
   curl http://localhost:5867/.well-known/openid-configuration

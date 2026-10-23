@@ -4,6 +4,11 @@
 product binary. It requires container access and exposes no HTTP setup endpoint.
 The server must first have run this version's database migrations.
 
+The only installer HTTP endpoint is the read-only suite status `GET /api/installer/network`
+(`{"clientIp","proxyHeadersTrusted","scheme"}` after `TRUSTED_PROXY_CIDRS` handling), which
+`kyquickstart verify-edge` uses to check the public route. See
+[Health & Status Verification](RUNNING.md#health--status-verification).
+
 This initial interface supports dedicated administrator and everyday accounts,
 confidential OIDC clients, assigned-only access, explicit per-app role/group assignments,
 owned directory groups and generic SCIM or signed suite connectors attached to those clients' app identities.
