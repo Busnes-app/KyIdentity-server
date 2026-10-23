@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- Security: the image is built with Go 1.27.3 (was 1.27.2) for GO-2026-6809: `crypto/x509` now distrusts compromised intermediate certificates. `go.mod` sets `toolchain go1.27.3` so `go build` from source uses it too.
+
 ## 0.4.7 — 2026-10-23
 
 ### Upgrading
