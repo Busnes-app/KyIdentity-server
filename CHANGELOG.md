@@ -1,12 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Changes
-
-- Serve the suite installer status endpoint `GET /api/installer/network` like the other Ky products, so `kyquickstart verify-edge` can check KyIdentity's route. It returns `{"clientIp","proxyHeadersTrusted","scheme"}` resolved by the existing `TRUSTED_PROXY_CIDRS` and `KYIDENTITY_FORWARDED_HEADER` rules; it used to fall through to the web app. See [Health & Status Verification](docs/RUNNING.md#health--status-verification).
-
-## 0.4.7 — 2026-10-22
+## 0.4.7 — 2026-10-23
 
 ### Upgrading
 
@@ -15,6 +9,7 @@
 
 ### Changes
 
+- Serve the suite installer status endpoint `GET /api/installer/network` like the other Ky products, so `kyquickstart verify-edge` can check KyIdentity's route. It returns `{"clientIp","proxyHeadersTrusted","scheme"}` resolved by the existing `TRUSTED_PROXY_CIDRS` and `KYIDENTITY_FORWARDED_HEADER` rules; it used to fall through to the web app. See [Health & Status Verification](docs/RUNNING.md#health--status-verification).
 - Security: removals to any connector are never given up. An inactive `user.updated`, `user.deleted` or `group.deleted` retries with backoff capped at 30 minutes between attempts until the receiver accepts it, so a receiver that was down for hours still gets the removal once it is back, with no administrator step. A re-grant still supersedes it. Creates and updates keep the five-attempt budget and are re-queued every 30 minutes while current, for suite webhooks as well as generic SCIM.
 - Security: a removal whose answer was lost is resent rather than blocked. A removal queued behind a create or update with an unknown outcome still waits for the operator, even past its recovery time, because that write could land after the removal and restore access. A removal goes ahead of an undelivered MFA reset for that connector, and the reset is still sent after it.
 - The provisioning alert now also opens while a removal is retrying past five attempts or an attempt is blocked past its recovery time, even if other deliveries to that connector succeed. **Suite sync → Deliveries** lists given-up work and retrying removals under **Failing deliveries** (`GET /api/admin/systems/{id}/deliveries/failing`).
