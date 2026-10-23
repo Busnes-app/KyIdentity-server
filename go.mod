@@ -2,6 +2,8 @@ module github.com/Busnes-app/kyidentity-server
 
 go 1.26.9
 
+toolchain go1.27.3
+
 require (
 	github.com/Busnes-app/ky-primitives v0.10.0
 	github.com/SherClockHolmes/webpush-go v1.4.0
