@@ -25,6 +25,7 @@ import (
 
 	"github.com/Busnes-app/kyidentity-server/internal/api"
 	"github.com/Busnes-app/kyidentity-server/internal/appattest"
+	"github.com/Busnes-app/kyidentity-server/internal/appversion"
 	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
@@ -43,8 +44,6 @@ import (
 // auditRetention bounds how long audit events are kept. On SQLite this is the table that
 // grows fastest and never stops.
 const auditRetention = 180 * 24 * time.Hour
-
-const appVersion = "0.4.7"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -501,7 +500,7 @@ func runBackupDrill() {
 	dbStore := openStoreForBackup(cfg)
 	defer dbStore.Close()
 
-	payload, err := backup.CollectSealable(cfg, dbStore, appVersion)
+	payload, err := backup.CollectSealable(cfg, dbStore, appversion.String())
 	if err != nil {
 		log.Fatalf("Failed to collect backup payload: %v", err)
 	}
@@ -548,7 +547,7 @@ func runExportCapsule(outPath string) {
 	if err != nil {
 		log.Fatalf("Recovery key: %v", err)
 	}
-	payload, err := backup.CollectSealable(cfg, dbStore, appVersion)
+	payload, err := backup.CollectSealable(cfg, dbStore, appversion.String())
 	if err != nil {
 		log.Fatalf("Failed to collect backup payload: %v", err)
 	}
@@ -576,7 +575,7 @@ func runDeposit() {
 	defer dbStore.Close()
 	auditLogger := audit.NewLogger(dbStore)
 
-	res, err := backup.RunBackup(context.Background(), cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appVersion)
+	res, err := backup.RunBackup(context.Background(), cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appversion.String())
 	action, outcome, details := backup.Outcome(res, err)
 	auditLogger.Observe(action, "", "cli", res.Manifest.CapsuleID, "backup", "", "kyidentity-cli", outcome, details)
 	if err != nil {
@@ -620,7 +619,7 @@ func backupLoop(ctx context.Context, cfg *config.Config, dbStore *store.Store, a
 		if !on || time.Now().Before(next) {
 			continue
 		}
-		res, err := backup.RunBackup(context.WithoutCancel(ctx), cfg, dbStore, dbStore, client, appVersion)
+		res, err := backup.RunBackup(context.WithoutCancel(ctx), cfg, dbStore, dbStore, client, appversion.String())
 		if errors.Is(err, backup.ErrNotPaired) || errors.Is(err, backup.ErrNoDestination) {
 			continue
 		}

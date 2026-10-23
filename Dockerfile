@@ -16,7 +16,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend-builder /app/web/dist ./web/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /kyidentity ./cmd/kyidentity
+# Release builds pass the tag's version (X.Y.Z or X.Y.Z.N); other builds report internal/appversion/VERSION.
+ARG VERSION=
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X github.com/Busnes-app/kyidentity-server/internal/appversion.release=${VERSION}" \
+    -o /kyidentity ./cmd/kyidentity
 
 # Stage 3: Minimal Production Image
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6

@@ -15,15 +15,13 @@ import (
 
 	"github.com/Busnes-app/ky-primitives/capsule"
 	"github.com/Busnes-app/ky-primitives/recoverykey"
+	"github.com/Busnes-app/kyidentity-server/internal/appversion"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
-
-// appVersion is reported in capsule manifests and status responses.
-const appVersion = "0.4.7"
 
 // depositWriteBudget is how long the admin's connection may stay open for the receipt: the
 // upload budget plus room for sealing. The listener's write timeout is sized for JSON replies.
@@ -145,7 +143,7 @@ func (h *BackupHandler) RunDrill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	adminID, adminUsername := h.actor(r)
-	payload, err := backup.CollectSealable(h.cfg, h.store, appVersion)
+	payload, err := backup.CollectSealable(h.cfg, h.store, appversion.String())
 	if err != nil {
 		log.Printf("[BACKUP] drill: collect failed: %s", backup.AuditSafe(err.Error()))
 		h.observe(r, "admin.backup_drill_run", adminID, adminUsername, "", "failure", map[string]any{"error": backup.AuditSafe(err.Error())})
@@ -191,7 +189,7 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to load recovery key")
 		return
 	}
-	payload, err := backup.CollectSealable(h.cfg, h.store, appVersion)
+	payload, err := backup.CollectSealable(h.cfg, h.store, appversion.String())
 	if err != nil {
 		log.Printf("[BACKUP] export capsule: collect failed: %s", backup.AuditSafe(err.Error()))
 		writeError(w, http.StatusInternalServerError, "Failed to collect backup payload")
@@ -311,7 +309,7 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	adminID, adminUsername := h.actor(r)
 	ctx := context.WithoutCancel(r.Context())
-	res, err := backup.RunBackup(ctx, h.cfg, h.store, h.store, h.recovery, appVersion)
+	res, err := backup.RunBackup(ctx, h.cfg, h.store, h.store, h.recovery, appversion.String())
 	action, outcome, details := backup.Outcome(res, err)
 	h.observe(r, action, adminID, adminUsername, res.Manifest.CapsuleID, outcome, details)
 	if errors.Is(err, backup.ErrReceiptUnrecorded) {
@@ -480,7 +478,7 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		"paired":      false,
 		"key_pinned":  false,
 		"app_name":    h.cfg.AppName,
-		"app_version": appVersion,
+		"app_version": appversion.String(),
 		"members":     backup.Members(h.cfg),
 	}
 	if u, err := h.store.GetSetting("kyrecovery_url"); err == nil {
