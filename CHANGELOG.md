@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- Serve the suite installer status endpoint `GET /api/installer/network` like the other Ky products, so `kyquickstart verify-edge` can check KyIdentity's route. It returns `{"clientIp","proxyHeadersTrusted","scheme"}` resolved by the existing `TRUSTED_PROXY_CIDRS` and `KYIDENTITY_FORWARDED_HEADER` rules; it used to fall through to the web app. See [Health & Status Verification](docs/RUNNING.md#health--status-verification).
+
 ## 0.4.7 — 2026-10-22
 
 ### Upgrading

@@ -122,6 +122,10 @@ func (s *Server) routes() *http.ServeMux {
 	// "healthy" from a goroutine that only encodes JSON, is the failure this separates out.
 	mux.HandleFunc("GET /readyz", s.readiness)
 
+	// Suite installer status (`kyquickstart verify-edge`): what this server made of the
+	// request after its own trusted-proxy handling.
+	mux.HandleFunc("GET /api/installer/network", s.installerNetwork)
+
 	// OIDC Discovery & JWKS
 	mux.HandleFunc("GET /.well-known/openid-configuration", oauthH.OIDCConfiguration)
 	mux.HandleFunc("GET /.well-known/jwks.json", oauthH.JWKS)
@@ -476,6 +480,22 @@ func (s *Server) requireStepUp(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// installerNetwork answers the suite status the other Ky products serve: the client address
+// and scheme as resolved by the existing trusted-proxy rules, and whether the immediate peer
+// is a trusted proxy whose forwarding headers were believed. Public and fixed-size.
+func (s *Server) installerNetwork(w http.ResponseWriter, r *http.Request) {
+	scheme := "http"
+	if s.middleware.IsHTTPS(r) {
+		scheme = "https"
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"clientIp":            s.middleware.ClientIP(r),
+		"proxyHeadersTrusted": s.middleware.isTrustedProxy(r),
+		"scheme":              scheme,
 	})
 }
 
