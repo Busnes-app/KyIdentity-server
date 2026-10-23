@@ -1,10 +1,15 @@
 name: publish release image
 
-# A published release vX.Y.Z publishes the immutable :X.Y.Z image, attests and
-# verifies it, then moves :stable. :<sha> and :latest belong to ci.yml.
+# A published release vX.Y.Z (or vX.Y.Z.N, from dependency-release.yml) publishes
+# the immutable :X.Y.Z[.N] image, attests and verifies it, then moves :stable.
+# :<sha> and :latest belong to ci.yml.
+#
+# A release created by a workflow's GITHUB_TOKEN raises no release event, so
+# dependency-release.yml dispatches this workflow on the release's tag instead.
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 # Serialised so two releases cannot race to move :stable. Never cancelled: a run
 # that pushed :X.Y.Z must finish attesting it.
@@ -27,23 +32,45 @@ jobs:
       checks: read
     env:
       IMAGE_NAME: ghcr.io/busnes-app/kyidentity-server
+      # The release event names its tag; a dispatch runs on the tag's ref.
+      TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
     steps:
       # Red, not skipped: a skipped job is green and leaves a release with no image.
+      # A dispatch must run on a tag that has a published release, so it can only
+      # build what a release event would have.
       - name: Validate release version
         id: version
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          EVENT_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            echo "::error::release tag must be v<major>.<minor>.<patch>, got: $TAG" >&2
+          if [[ ! "$TAG" =~ ^v(([0-9]+\.[0-9]+\.[0-9]+)(\.[1-9][0-9]*)?)$ ]]; then
+            echo "::error::release tag must be v<major>.<minor>.<patch> or v<major>.<minor>.<patch>.<n>, got: $TAG" >&2
             exit 1
           fi
           echo "value=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "line=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = release ]; then
+            echo "prerelease=$EVENT_PRERELEASE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$REF_TYPE" != tag ]; then
+            echo "::error::dispatch this workflow on a release tag, not a branch" >&2
+            exit 1
+          fi
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '{draft, prerelease}')"
+          if [ "$(jq -r .draft <<< "$release")" != false ]; then
+            echo "::error::$TAG has no published release" >&2
+            exit 1
+          fi
+          echo "prerelease=$(jq -r .prerelease <<< "$release")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ github.event.release.tag_name }}
+          ref: refs/tags/${{ env.TAG }}
           persist-credentials: false
 
       # A branch named like the tag must not stand in for it: build only the
@@ -58,25 +85,18 @@ jobs:
             exit 1
           fi
 
-      # Both appVersion constants are written into every capsule manifest; the web
-      # bundle's version is checked so the artifact has one answer to "which version".
-      - name: Require the tag and every version source to agree
+      # internal/appversion/VERSION is the only version source. The image reports
+      # the tag's full version (the build sets it); the tag's X.Y.Z must be the file's.
+      - name: Require the tag to match internal/appversion/VERSION
         env:
-          VERSION: ${{ steps.version.outputs.value }}
+          LINE: ${{ steps.version.outputs.line }}
         run: |
           set -euo pipefail
-          fail=""
-          check() {
-            echo "$1: ${2:-<unparsed>}"
-            [ "$2" = "$VERSION" ] || fail="$fail $1(${2:-unparsed})"
-          }
-          appversion() { sed -n 's/^const appVersion = "\(.*\)"$/\1/p' "$1"; }
-          check cmd/kyidentity/main.go "$(appversion cmd/kyidentity/main.go)"
-          check internal/api/backup_handlers.go "$(appversion internal/api/backup_handlers.go)"
-          check web/package.json "$(jq -r .version web/package.json)"
-          if [ -n "$fail" ]; then
-            echo "::error::release $VERSION disagrees with:$fail" >&2
-            echo "Bump every version source in the commit you tag." >&2
+          file="$(tr -d '[:space:]' < internal/appversion/VERSION)"
+          echo "tag line: $LINE; internal/appversion/VERSION: ${file:-<empty>}"
+          if [ "$file" != "$LINE" ]; then
+            echo "::error::$TAG is on the $LINE line, but internal/appversion/VERSION says ${file:-nothing}" >&2
+            echo "Bump internal/appversion/VERSION in the commit you tag." >&2
             exit 1
           fi
 
@@ -135,6 +155,7 @@ jobs:
           context: .
           push: true
           tags: ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.value }}
+          build-args: VERSION=${{ steps.version.outputs.value }}
           provenance: mode=max
           sbom: true
 
@@ -150,7 +171,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIGEST: ${{ steps.build.outputs.digest }}
-          TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
           gh attestation verify "oci://$IMAGE_NAME@$DIGEST" --repo "$GITHUB_REPOSITORY" \
@@ -163,7 +183,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.value }}
-          PRERELEASE: ${{ github.event.release.prerelease }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           set -euo pipefail
           if [ "$PRERELEASE" = "true" ]; then
@@ -174,7 +194,7 @@ jobs:
           # A failed lookup must stop here: an empty list would make this release "highest".
           tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
-          published="$(printf '%s\n' "$tags" | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          published="$(printf '%s\n' "$tags" | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(\.[1-9][0-9]*)?$' || true)"
           highest="$(printf '%s\n%s\n' "$published" "$VERSION" | sort -V | tail -n1)"
           echo "highest published release: $highest; this release: $VERSION"
           if [ "$highest" != "$VERSION" ]; then
@@ -191,7 +211,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIGEST: ${{ steps.build.outputs.digest }}
-          TAG: ${{ github.event.release.tag_name }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
