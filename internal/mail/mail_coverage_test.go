@@ -216,17 +216,17 @@ func rejectingRelay(t *testing.T, reject string) (s *Settings, dataSent func() b
 		}
 	}()
 	return &Settings{Host: "127.0.0.1", Port: ln.Addr().(*net.TCPAddr).Port, Username: "relay", Password: "s3cret", From: "KySignOn <id@example.test>", Security: "tls",
-			tlsConfig: &tls.Config{ServerName: "127.0.0.1", RootCAs: pool, MinVersion: tls.VersionTLS12}}, func() bool {
-			// A sender refused before it dials never reaches Accept; close the listener so
-			// the check reports "no data" instead of hanging.
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				ln.Close()
-				<-done
-			}
-			return gotData
+		tlsConfig: &tls.Config{ServerName: "127.0.0.1", RootCAs: pool, MinVersion: tls.VersionTLS12}}, func() bool {
+		// A sender refused before it dials never reaches Accept; close the listener so
+		// the check reports "no data" instead of hanging.
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			ln.Close()
+			<-done
 		}
+		return gotData
+	}
 }
 
 // Every refusal from the relay surfaces as an error, and a refusal before DATA means the
