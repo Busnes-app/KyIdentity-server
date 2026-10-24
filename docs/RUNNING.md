@@ -32,11 +32,13 @@ TRUSTED_PROXY_CIDRS=<proxy-ip>/32
 BOOTSTRAP_ADMIN_USER=admin
 # BOOTSTRAP_ADMIN_PASS=<a privately generated unique password; never use this placeholder>
 
-# Optional: Cloudflare Worker native-push relays. Without a *_RELAY_KEY the server
-# self-registers, keeps the key under the data directory, and re-registers once if
-# the relay reports it superseded.
-PUSH_RELAY_URL=https://kysecurity-mobile-push-fcm.<account>.workers.dev
-APNS_RELAY_URL=https://kysecurity-mobile-push-apns.<account>.workers.dev
+# Optional: native-push relays for KyAuth on Android (FCM) and iOS (APNs). Unset uses
+# the Busnes.app relays below; an empty value turns one off, and then push MFA on that
+# platform does not work (TOTP, passkeys and UnifiedPush still do). Without a
+# *_RELAY_KEY the server self-registers, keeps the key under the data directory, and
+# re-registers once if the relay reports it superseded.
+# PUSH_RELAY_URL=https://fcm.relay.kysecurity.org
+# APNS_RELAY_URL=https://kyauth-push-apns.kysecurity.workers.dev
 
 # Optional: Ubuntu Touch push (defaults shown; HTTPS only)
 # KYIDENTITY_UBUNTU_PUSH_URL=https://push.ubports.com/notify

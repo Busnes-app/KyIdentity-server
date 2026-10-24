@@ -128,16 +128,18 @@ func main() {
 	mfaEngine := mfa.NewEngine(dbStore, cfg.EncryptionKey)
 	relaySender, err := mfa.NewRelaySender(
 		mfa.RelayConfig{
-			URL:     cfg.PushRelayURL,
-			Key:     cfg.PushRelayKey,
-			KeyFile: filepath.Join(cfg.DataDir, "push-relay-fcm.key"),
-			Label:   "kyidentity-" + cfg.IssuerURL,
+			URL:      cfg.PushRelayURL,
+			Key:      cfg.PushRelayKey,
+			KeyFile:  filepath.Join(cfg.DataDir, "push-relay-fcm.key"),
+			Label:    "kyidentity-" + cfg.IssuerURL,
+			Optional: cfg.PushRelayURL == config.DefaultPushRelayURL,
 		},
 		mfa.RelayConfig{
-			URL:     cfg.APNSRelayURL,
-			Key:     cfg.APNSRelayKey,
-			KeyFile: filepath.Join(cfg.DataDir, "push-relay-apns.key"),
-			Label:   "kyidentity-" + cfg.IssuerURL,
+			URL:      cfg.APNSRelayURL,
+			Key:      cfg.APNSRelayKey,
+			KeyFile:  filepath.Join(cfg.DataDir, "push-relay-apns.key"),
+			Label:    "kyidentity-" + cfg.IssuerURL,
+			Optional: cfg.APNSRelayURL == config.DefaultAPNSRelayURL,
 		},
 	)
 	if err != nil {

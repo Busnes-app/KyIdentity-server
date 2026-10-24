@@ -203,7 +203,7 @@ Not encrypted: account metadata (usernames, names, email addresses, roles, group
 - **Browsers and apps:** through your TLS proxy (see [Deployment Security](#deployment-security)).
 - **Outbound calls** (SCIM and suite connectors, back-channel logout, UnifiedPush, UBports) go through one guarded client: HTTPS only, no embedded credentials, no redirects, and the destination is checked at connect time, so DNS rebinding cannot reach a refused address. Loopback, link-local and cloud-metadata addresses are always refused; private ranges are refused unless `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`.
 - **`KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true` also allows plain `http`** for operator-supplied URLs. Use it only on a network you control, and prefer HTTPS anyway. It never applies to device-supplied push endpoints.
-- **Push relays:** `PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS.
+- **Push relays:** `PUSH_RELAY_URL` and `APNS_RELAY_URL` must be HTTPS. Unset, they point at the Busnes.app relays, which see each push's device token, challenge and device IDs and timing, never the number the user enters; set them empty to keep push traffic off them, or run your own from `workers/`.
 - **Certificates:** outbound TLS is verified against the container's trust store; to add a private CA, see [README step 4](docs/RUNNING.md#4-private-certificate-authority-lan-installs).
 
 ### Sensitive Data in Logs

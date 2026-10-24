@@ -115,6 +115,20 @@ func TestNewRelaySenderConfigOutcomes(t *testing.T) {
 	}
 }
 
+// An optional relay that refuses registration is left off, so a default relay's outage
+// never stops the server; the other transport still comes up.
+func TestOptionalRelayRegistrationFailureLeavesItOff(t *testing.T) {
+	cr := newCovRelay(t)
+	cr.register = func(w http.ResponseWriter) { w.WriteHeader(http.StatusForbidden) }
+	if s, err := NewRelaySender(RelayConfig{URL: cr.URL, Optional: true}, RelayConfig{URL: cr.URL, Optional: true}); s != nil || err != nil {
+		t.Fatalf("both optional relays refused: %v %v", s, err)
+	}
+	s, err := NewRelaySender(RelayConfig{URL: "https://fcm.invalid", Key: "k"}, RelayConfig{URL: cr.URL, Optional: true})
+	if err != nil || s == nil || s.fcm == nil || s.apns != nil {
+		t.Fatalf("optional apns refused: %+v %v", s, err)
+	}
+}
+
 // A key that cannot be persisted fails startup: otherwise every restart would register a
 // new key and supersede the last.
 func TestRelayKeyPersistFailureFailsStartup(t *testing.T) {
