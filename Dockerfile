@@ -17,8 +17,10 @@ RUN go mod download
 COPY . .
 COPY --from=frontend-builder /app/web/dist ./web/dist
 # Release builds pass the tag's version (X.Y.Z or X.Y.Z.N); other builds report internal/appversion/VERSION.
+# -trimpath keeps the build directory out of the binary, so the same commit, Go version and
+# VERSION give the same bytes wherever it is built (docs/VERIFYING-RELEASES.md).
 ARG VERSION=
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
     -ldflags="-s -w -X github.com/Busnes-app/kyidentity-server/internal/appversion.release=${VERSION}" \
     -o /kyidentity ./cmd/kyidentity
 

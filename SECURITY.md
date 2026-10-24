@@ -264,5 +264,7 @@ Security-sensitive PRs should include:
 - [Quickstart with Docker Compose](docs/RUNNING.md#quickstart-with-docker-compose) — `kypost-net`, issuer, proxy trust and private CA
 - [Onboarding and passwords](docs/ACCOUNTS-AND-ACCESS.md#onboarding-and-passwords) — activation, password reset, lockout
 - [docs/RESTORE.md](docs/RESTORE.md) — backups and restore
+- [docs/VERIFYING-RELEASES.md](docs/VERIFYING-RELEASES.md) — verify a release image and rebuild its binary
+- [docs/ASSURANCE-CASE.md](docs/ASSURANCE-CASE.md) — threat model and the argument that the protections above hold
 - [LOGGING.md](LOGGING.md) — logging contract
 - OWASP guidelines on secure development practices
