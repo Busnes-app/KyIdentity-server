@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Upgrading
+
+- `PUSH_RELAY_URL` and `APNS_RELAY_URL` now default to the Busnes.app relays (`https://fcm.relay.kysecurity.org` and `https://kyauth-push-apns.kysecurity.workers.dev`) when unset, so push MFA on KyAuth for Android and iOS works with no setup. Set one empty to turn it off. If self-registration with a default relay fails, startup logs it and continues without that transport; a relay you set yourself still fails startup. (#153)
+
 ### Changes
 
 - Security: the image is built with Go 1.27.3 (was 1.27.2) for GO-2026-6809: `crypto/x509` now distrusts compromised intermediate certificates. `go.mod` sets `toolchain go1.27.3` so `go build` from source uses it too.
