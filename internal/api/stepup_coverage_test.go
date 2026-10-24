@@ -148,8 +148,16 @@ func TestStepUpPushDenialBurnsChallenge(t *testing.T) {
 	}
 	body := `{"challengeToken":"` + c.ChallengeToken + `"}`
 	covRefused(t, adminRequestNoStepUp(t, f.server, "POST", "/api/auth/step-up/finish", cookie, body), 400, "push_denied")
+	// A later approval of the same push is refused and does not revive the step-up.
+	approve := map[string]any{"challengeId": pc.ID, "deviceId": f.deviceID, "selectedDigits": c.MatchDigits, "approve": true, "signature": f.sign(t, pc, true, c.MatchDigits)}
+	if r := f.post(t, "/api/mfa/push/respond", approve); r.Code == http.StatusOK {
+		t.Fatalf("a denied push was approved afterwards: %s", r.Body.String())
+	}
 	if r := post("/api/auth/step-up/finish", body); r.StatusCode != http.StatusBadRequest {
 		t.Fatalf("burned challenge: %d", r.StatusCode)
+	}
+	if n := countAudit(t, f.store, "auth.step_up"); n != 0 {
+		t.Fatalf("a denied push issued %d step-up grants", n)
 	}
 	if r := adminRequestWithStepUp(t, f.server, "POST", "/api/user/recovery-codes", cookie, "", c.ChallengeToken); r.Code != http.StatusForbidden {
 		t.Fatalf("denied push challenge spent as a grant: %d", r.Code)

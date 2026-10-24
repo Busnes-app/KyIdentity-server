@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -84,12 +87,15 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
-// captureLog runs fn with the standard logger writing to a buffer.
+// captureLog runs fn with the standard logger also writing to a buffer. The commands under
+// test end with log.Fatalf on failure, so the line is teed to the previous writer: a
+// regression exits the test binary with its reason visible instead of a bare exit status.
 func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
+	prev := log.Writer()
+	log.SetOutput(io.MultiWriter(&buf, prev))
+	defer log.SetOutput(prev)
 	fn()
 	return buf.String()
 }
@@ -251,9 +257,30 @@ func TestBackupLoopStopsOnShutdown(t *testing.T) {
 	defer s.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	backupLoop(ctx, cfg, s, audit.NewLogger(s))
-	if _, err := s.GetSetting("backup_last_attempt"); err == nil {
-		t.Fatal("a cancelled scheduler still attempted a backup")
+	done := make(chan struct{})
+	go func() {
+		backupLoop(ctx, cfg, s, audit.NewLogger(s))
+		close(done)
+	}()
+	// The loop's ticker is a minute, so a loop that ignored ctx would still be blocked here.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled scheduler kept running")
+	}
+	events, _, err := s.ListAuditEvents(500, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		if e.TargetType == "backup" {
+			t.Fatalf("a cancelled scheduler still ran a backup: %+v", e)
+		}
+	}
+	if cfg.BackupDir != "" {
+		if entries, _ := os.ReadDir(cfg.BackupDir); len(entries) != 0 {
+			t.Fatalf("a cancelled scheduler wrote %d files to the backup directory", len(entries))
+		}
 	}
 }
 
@@ -588,10 +615,14 @@ func TestRestoreCommandFailsWhenTheMarkerCannotBeWritten(t *testing.T) {
 // The private copy the restore opens is made in the temp directory; if that cannot be
 // created, nothing is opened or written.
 func TestRestoreRefusesWithoutAPrivateCopy(t *testing.T) {
-	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("TMPDIR", missing)
 	target := filepath.Join(t.TempDir(), "restored")
-	if err := restore([]byte("raw"), target, config.DefaultAppName, []string{"s"}, &bytes.Buffer{}); err == nil {
-		t.Fatal("restore went ahead without its private copy")
+	err := restore([]byte("raw"), target, config.DefaultAppName, []string{"s"}, &bytes.Buffer{})
+	// The refusal must come from making the private copy, not from parsing the capsule.
+	var pe *fs.PathError
+	if !errors.As(err, &pe) || !strings.HasPrefix(pe.Path, missing) {
+		t.Fatalf("restore did not refuse at the private copy: %v", err)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatal("restore wrote the target:", err)

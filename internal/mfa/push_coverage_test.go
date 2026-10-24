@@ -323,6 +323,8 @@ func TestUbuntuPushTransportFailures(t *testing.T) {
 
 	ps := newPushServer(t, http.StatusOK)
 	s := newTestUbuntuPushSender(t, ps)
+	prevLoopback := netguard.AllowLoopback
+	t.Cleanup(func() { netguard.AllowLoopback = prevLoopback })
 	netguard.AllowLoopback = false
 	err := s.SendPush(dev, ch)
 	if err == nil || !strings.HasPrefix(err.Error(), "ubuntupush send failed") || !strings.Contains(err.Error(), "non-public") {

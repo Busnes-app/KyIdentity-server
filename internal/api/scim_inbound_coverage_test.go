@@ -367,6 +367,9 @@ func TestSCIMUserPatchAttributes(t *testing.T) {
 	if got := patch(`{"op":"replace","path":"emails[primary eq true].value","value":"alice.new@up.test"}`); got.Code != http.StatusOK {
 		t.Fatalf("email value path: %d %s", got.Code, got.Body.String())
 	}
+	if u := mustUser(t, f.db, f.alice); u.Email != "alice.new@up.test" {
+		t.Fatalf("primary email path not applied: %q", u.Email)
+	}
 	if got := patch(`{"op":"replace","path":"emails","value":[{"value":"second@up.test"},{"value":"primary@up.test","primary":true}]}`); got.Code != http.StatusOK {
 		t.Fatalf("emails list: %d", got.Code)
 	}

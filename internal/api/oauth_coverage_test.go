@@ -337,21 +337,34 @@ func TestTokenEndpointRefusals(t *testing.T) {
 		}
 		return covOAuthPost(t, srv, "/oauth/token", form, user, "")
 	}
-	for name, rr := range map[string]*httptest.ResponseRecorder{
-		"wrong verifier":               exchange(strings.Repeat("x", 43), covRedirect, ""),
-		"wrong redirect":               exchange(covVerifier, "https://notes.example.com/other", ""),
-		"basic auth as another client": exchange(covVerifier, covRedirect, "ghost"),
-	} {
+	const generic = "The authorization code, client credentials, redirect URI, or PKCE verifier is invalid"
+	cases := []struct{ name, verifier, redirect, user, reason string }{
+		{"wrong verifier", strings.Repeat("x", 43), covRedirect, "", "invalid PKCE code verifier"},
+		{"wrong redirect", covVerifier, "https://notes.example.com/other", "", "redirect uri mismatch"},
+		{"basic auth as another client", covVerifier, covRedirect, "ghost", "client mismatch"},
+	}
+	for _, c := range cases {
+		rr := exchange(c.verifier, c.redirect, c.user)
 		body := decodeAPIError(t, rr)
-		if rr.Code != http.StatusBadRequest || body["error"] != "invalid_grant" || strings.Contains(body["error_description"], "PKCE verifier mismatch") {
-			t.Fatalf("%s: %d %v", name, rr.Code, body)
+		// The caller sees only the generic text, whichever binding failed.
+		if rr.Code != http.StatusBadRequest || body["error"] != "invalid_grant" || body["error_description"] != generic {
+			t.Fatalf("%s: %d %v", c.name, rr.Code, body)
 		}
 		if rr.Header().Get("Cache-Control") != "no-store" {
-			t.Fatalf("%s: token error is cacheable", name)
+			t.Fatalf("%s: token error is cacheable", c.name)
 		}
 	}
-	if got := covAuditOutcomes(t, db, "oauth.token_exchange")["failure"] - before["failure"]; got < 1 {
-		t.Fatalf("failed exchanges left no audit trail")
+	if got := covAuditOutcomes(t, db, "oauth.token_exchange")["failure"] - before["failure"]; got != len(cases) {
+		t.Fatalf("%d failed exchanges audited, want %d", got, len(cases))
+	}
+	var details strings.Builder
+	for _, e := range auditRows(t, db, "oauth.token_exchange") {
+		details.WriteString(e.DetailsJSON)
+	}
+	for _, c := range cases {
+		if !strings.Contains(details.String(), c.reason) {
+			t.Fatalf("%s: audit log does not record %q: %s", c.name, c.reason, details.String())
+		}
 	}
 
 	// A jwt-bearer grant without its assertion is malformed, not an authentication failure.

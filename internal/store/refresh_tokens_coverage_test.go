@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -202,8 +203,8 @@ func TestCreateRefreshFamilyRequiresSpentCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Idle = 0
-	if err := s.CreateRefreshFamily(f, "unspent", "rt1"); err == nil {
-		t.Fatal("zero idle accepted")
+	if err := s.CreateRefreshFamily(f, "unspent", "rt1"); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+		t.Fatalf("zero idle not refused by the CHECK constraint: %v", err)
 	}
 	if count(t, s, `SELECT COUNT(*) FROM issued_tokens`) != 0 {
 		t.Fatal("failed family left its issued token")
