@@ -165,7 +165,7 @@ if a job is genuinely flaky, that is a bug to fix in the job.
 
 | Job | What it runs |
 |---|---|
-| `go` | `gofmt -l`, `go build`, `go vet`, `govulncheck`, `go test -race ./...` |
+| `go` | `gofmt -l`, `go build`, `go vet`, `govulncheck`, `go test -race ./...`, and two builds of the release binary that must be byte-identical |
 | `web` | Runtime dependency audit, TypeScript/Vite build, committed asset check, and Vitest |
 | `relay` | Runtime dependency audits, both Worker typechecks, and all relay behavior tests |
 | `docker` | Production image build, `/readyz` smoke test, and rejection of a public HTTP issuer |
@@ -185,6 +185,19 @@ Notes that trip people up:
   regression test for anything high-impact. Security-sensitive changes need
   attack-path coverage, not just the happy path — see
   [SECURITY.md](SECURITY.md#testing) and the `internal/api/*_test.go` files for the pattern.
+
+### Coding standard
+
+Contributions follow these style guides. CI enforces the parts a tool can check, so a
+style failure is a red build, not a review comment.
+
+| Language | Style guide | Enforced by |
+|---|---|---|
+| Go | [Effective Go](https://go.dev/doc/effective_go) and the [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) | `gofmt -l` (must print nothing) and `go vet ./...` in the `go` job |
+| TypeScript (`web/`, `workers/`) | The TypeScript compiler in `strict` mode; `web/` also refuses unused locals and parameters | `tsc -b` in `npm run build` (`web` job) and `npm run typecheck` (`relay` job) |
+
+Beyond what the tools check: keep to the comment density and naming of the file you are
+editing, and prefer the standard library ([ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 ## Every PR Must Pass Hostile AI Code Review
 
