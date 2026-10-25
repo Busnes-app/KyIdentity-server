@@ -60,7 +60,7 @@ func TestInstallerAssignmentsIssueOnlyDeclaredAppRoles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		claims, err := engine.keyManager.VerifyJWT(token.IDToken)
+		claims, err := engine.keyManager.VerifyJWT(token.IDToken, engine.issuerURL, "id_token")
 		if err != nil {
 			t.Fatal(err)
 		}

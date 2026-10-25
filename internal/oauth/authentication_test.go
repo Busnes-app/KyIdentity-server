@@ -61,7 +61,7 @@ func TestAuthorizationPreservesAuthenticationEvidence(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				claims, err := e.keyManager.VerifyJWT(tokens.IDToken)
+				claims, err := e.keyManager.VerifyJWT(tokens.IDToken, e.issuerURL, "id_token")
 				if err != nil {
 					t.Fatal(err)
 				}

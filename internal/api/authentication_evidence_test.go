@@ -90,7 +90,7 @@ func TestPasswordLoginEvidenceReachesOIDCToken(t *testing.T) {
 	if err := json.Unmarshal(tokenRec.Body.Bytes(), &tokens); err != nil {
 		t.Fatal(err)
 	}
-	claims, err := srv.keyManager.VerifyJWT(tokens.IDToken)
+	claims, err := srv.keyManager.VerifyJWT(tokens.IDToken, srv.cfg.IssuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}

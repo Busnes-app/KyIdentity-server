@@ -117,7 +117,7 @@ func TestAuthorizationCodeExchangeWithPKCE(t *testing.T) {
 	}
 
 	// Verify ID Token
-	idClaims, err := engine.keyManager.VerifyJWT(tokenResp.IDToken)
+	idClaims, err := engine.keyManager.VerifyJWT(tokenResp.IDToken, engine.issuerURL, "id_token")
 	if err != nil {
 		t.Fatalf("ID token verification failed: %v", err)
 	}

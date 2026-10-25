@@ -18,6 +18,7 @@ import (
 
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
@@ -48,22 +49,68 @@ func testClaims() map[string]any {
 	}
 }
 
+// parseForTest verifies against pub at a time inside testClaims' validity window.
+func parseForTest(compact string, pub *ecdsa.PublicKey) (*deviceAssertion, error) {
+	return parseDeviceAssertion(compact, "https://id.example/oauth/token", time.Unix(1100, 0), func(string, string) (*ecdsa.PublicKey, error) { return pub, nil })
+}
+
+// withSignature replaces the signature segment of a compact JWS.
+func withSignature(compact string, sig []byte) string {
+	return compact[:strings.LastIndex(compact, ".")+1] + base64.RawURLEncoding.EncodeToString(sig)
+}
+
 func TestParseDeviceAssertionRoundTrip(t *testing.T) {
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	compact := signDeviceAssertionForTest(t, priv, testHeader("dev-1"), testClaims())
-	a, input, sig, err := parseDeviceAssertion(compact)
+	a, err := parseForTest(compact, &priv.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.DeviceID != "dev-1" || a.Subject != "user-1" || a.ClientID != "kypost" || a.JTI != "j-1" || a.IssuedAt != 1000 || a.ExpiresAt != 1200 || a.Audience != "https://id.example/oauth/token" || a.Origin != "https://kypost.example" {
 		t.Fatalf("claims: %+v", a)
 	}
-	if !verifyES256(&priv.PublicKey, input, sig) {
-		t.Fatal("valid signature refused")
-	}
 	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if verifyES256(&other.PublicKey, input, sig) {
-		t.Fatal("sibling key accepted")
+	if _, err := parseForTest(compact, &other.PublicKey); !errors.Is(err, errAssertionSignature) {
+		t.Fatalf("sibling key: %v", err)
+	}
+}
+
+// The key callback sees the kid and subject, and its refusal is the result.
+func TestParseDeviceAssertionKeyLookup(t *testing.T) {
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	compact := signDeviceAssertionForTest(t, priv, testHeader("dev-1"), testClaims())
+	var gotKid, gotSub string
+	_, err := parseDeviceAssertion(compact, "https://id.example/oauth/token", time.Unix(1100, 0), func(kid, sub string) (*ecdsa.PublicKey, error) {
+		gotKid, gotSub = kid, sub
+		return nil, errUnknownDevice
+	})
+	if !errors.Is(err, errUnknownDevice) || gotKid != "dev-1" || gotSub != "user-1" {
+		t.Fatalf("err %v kid %q sub %q", err, gotKid, gotSub)
+	}
+}
+
+// exp and iat are enforced with the clock skew on each side, and aud is exact.
+func TestParseDeviceAssertionTimeAndAudience(t *testing.T) {
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	compact := signDeviceAssertionForTest(t, priv, testHeader("dev-1"), testClaims())
+	parseAt := func(now int64, aud string) error {
+		_, err := parseDeviceAssertion(compact, aud, time.Unix(now, 0), func(string, string) (*ecdsa.PublicKey, error) { return &priv.PublicKey, nil })
+		return err
+	}
+	const aud = "https://id.example/oauth/token"
+	skew := int64(deviceAssertionSkew / time.Second)
+	for now, want := range map[int64]error{
+		1000 - skew - 1: errAssertionFuture,
+		1000 - skew:     nil,
+		1200 + skew - 1: nil,
+		1200 + skew:     errAssertionExpired,
+	} {
+		if err := parseAt(now, aud); !errors.Is(err, want) {
+			t.Errorf("now=%d: got %v, want %v", now, err, want)
+		}
+	}
+	if err := parseAt(1100, "https://evil/oauth/token"); !errors.Is(err, errAssertionAudience) {
+		t.Errorf("foreign audience: %v", err)
 	}
 }
 
@@ -76,82 +123,87 @@ func TestParseDeviceAssertionRejectsBadHeaders(t *testing.T) {
 		{"alg": "ES256", "typ": "JWT", "kid": "dev-1", "crit": []string{"x"}},
 	}
 	for _, h := range bad {
-		if _, _, _, err := parseDeviceAssertion(signDeviceAssertionForTest(t, priv, h, testClaims())); err == nil {
+		if _, err := parseForTest(signDeviceAssertionForTest(t, priv, h, testClaims()), &priv.PublicKey); err == nil {
 			t.Fatalf("header %v accepted", h)
 		}
 	}
-	if _, _, _, err := parseDeviceAssertion("a.b"); err == nil {
+	if _, err := parseForTest("a.b", &priv.PublicKey); err == nil {
 		t.Fatal("two segments accepted")
 	}
 	c := testClaims()
 	c["iss"] = "device:other"
-	if _, _, _, err := parseDeviceAssertion(signDeviceAssertionForTest(t, priv, testHeader("dev-1"), c)); err == nil {
+	if _, err := parseForTest(signDeviceAssertionForTest(t, priv, testHeader("dev-1"), c), &priv.PublicKey); err == nil {
 		t.Fatal("iss/kid mismatch accepted")
 	}
 }
 
-func TestVerifyES256BoundaryAndFormat(t *testing.T) {
+func TestDeviceAssertionSignatureBoundaryAndFormat(t *testing.T) {
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	input := []byte("x.y")
-	digest := sha256.Sum256(input)
+	compact := signDeviceAssertionForTest(t, priv, testHeader("dev-1"), testClaims())
+	input := compact[:strings.LastIndex(compact, ".")]
+	digest := sha256.Sum256([]byte(input))
 
-	// Test DER format rejection (wrong length)
 	der, _ := ecdsa.SignASN1(rand.Reader, priv, digest[:])
-	if verifyES256(&priv.PublicKey, input, der) {
-		t.Fatal("DER signature accepted as raw")
+	if _, err := parseForTest(withSignature(compact, der), &priv.PublicKey); !errors.Is(err, errAssertionSignature) {
+		t.Fatalf("DER signature accepted as raw: %v", err)
+	}
+	if _, err := parseForTest(compact, &priv.PublicKey); err != nil {
+		t.Fatalf("valid signature rejected: %v", err)
 	}
 
-	// Test valid signature as control
-	r, s, _ := ecdsa.Sign(rand.Reader, priv, digest[:])
-	validSig := make([]byte, 64)
-	r.FillBytes(validSig[:32])
-	s.FillBytes(validSig[32:])
-	if !verifyES256(&priv.PublicKey, input, validSig) {
-		t.Fatal("valid signature rejected")
-	}
-
-	// Boundary cases: test each of r and s at 0, n, n+1 with the other at 1
+	// Each of r and s at 0, n, n+1 with the other at 1.
 	n := elliptic.P256().Params().N
 	tests := []struct {
-		name  string
-		r, s  *big.Int
-		valid bool
+		name string
+		r, s *big.Int
 	}{
-		{"r=0, s=1", big.NewInt(0), big.NewInt(1), false},
-		{"r=1, s=0", big.NewInt(1), big.NewInt(0), false},
-		{"r=n, s=1", new(big.Int).Set(n), big.NewInt(1), false},
-		{"r=1, s=n", big.NewInt(1), new(big.Int).Set(n), false},
-		{"r=n+1, s=1", new(big.Int).Add(n, big.NewInt(1)), big.NewInt(1), false},
-		{"r=1, s=n+1", big.NewInt(1), new(big.Int).Add(n, big.NewInt(1)), false},
-		{"r=0, s=0", big.NewInt(0), big.NewInt(0), false},
+		{"r=0, s=1", big.NewInt(0), big.NewInt(1)},
+		{"r=1, s=0", big.NewInt(1), big.NewInt(0)},
+		{"r=n, s=1", new(big.Int).Set(n), big.NewInt(1)},
+		{"r=1, s=n", big.NewInt(1), new(big.Int).Set(n)},
+		{"r=n+1, s=1", new(big.Int).Add(n, big.NewInt(1)), big.NewInt(1)},
+		{"r=1, s=n+1", big.NewInt(1), new(big.Int).Add(n, big.NewInt(1))},
+		{"r=0, s=0", big.NewInt(0), big.NewInt(0)},
 	}
 	for _, tt := range tests {
 		sig := make([]byte, 64)
 		tt.r.FillBytes(sig[:32])
 		tt.s.FillBytes(sig[32:])
-		if verifyES256(&priv.PublicKey, input, sig) != tt.valid {
-			t.Fatalf("%s: expected valid=%v", tt.name, tt.valid)
+		if _, err := parseForTest(withSignature(compact, sig), &priv.PublicKey); !errors.Is(err, errAssertionSignature) {
+			t.Fatalf("%s: %v", tt.name, err)
 		}
 	}
 }
 
-func TestVerifyES256RejectsBadCurve(t *testing.T) {
-	// P-256 key as control
-	priv256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	input := []byte("x.y")
-	digest := sha256.Sum256(input)
-	r, s, _ := ecdsa.Sign(rand.Reader, priv256, digest[:])
-	sig := make([]byte, 64)
-	r.FillBytes(sig[:32])
-	s.FillBytes(sig[32:])
-	if !verifyES256(&priv256.PublicKey, input, sig) {
-		t.Fatal("valid P256 signature rejected")
+// alg is pinned to ES256: an HS256 MAC keyed with the public key bytes, none, RS256
+// and ES384 are all refused before any key is used.
+func TestDeviceAssertionAlgPinning(t *testing.T) {
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	spki, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	claims := jwt.MapClaims(testClaims())
+	for _, m := range []struct {
+		method jwt.SigningMethod
+		key    any
+	}{
+		{jwt.SigningMethodHS256, spki},
+		{jwt.SigningMethodNone, jwt.UnsafeAllowNoneSignatureType},
+	} {
+		tok := jwt.NewWithClaims(m.method, claims)
+		tok.Header["kid"] = "dev-1"
+		compact, err := tok.SignedString(m.key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := parseForTest(compact, &priv.PublicKey); !errors.Is(err, errAssertionSignature) {
+			t.Fatalf("%s accepted: %v", m.method.Alg(), err)
+		}
 	}
-
-	// P-384 key should be rejected
-	priv384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if verifyES256(&priv384.PublicKey, input, sig) {
-		t.Fatal("P384 key accepted")
+	for _, alg := range []string{"RS256", "ES384"} {
+		h := testHeader("dev-1")
+		h["alg"] = alg
+		if _, err := parseForTest(signDeviceAssertionForTest(t, priv, h, testClaims()), &priv.PublicKey); !errors.Is(err, errAssertionSignature) {
+			t.Fatalf("%s accepted: %v", alg, err)
+		}
 	}
 }
 
@@ -194,7 +246,7 @@ func TestParseDeviceAssertionRejectsInvalidClaims(t *testing.T) {
 	for _, tt := range claimTests {
 		c := testClaims()
 		tt.modify(c)
-		if _, _, _, err := parseDeviceAssertion(signDeviceAssertionForTest(t, priv, testHeader("dev-1"), c)); err == nil {
+		if _, err := parseForTest(signDeviceAssertionForTest(t, priv, testHeader("dev-1"), c), &priv.PublicKey); err == nil {
 			t.Fatalf("%s accepted", tt.name)
 		}
 	}
@@ -210,7 +262,7 @@ func TestParseDeviceAssertionRejectsInvalidClaims(t *testing.T) {
 	for _, tt := range headerTests {
 		h := testHeader("dev-1")
 		tt.modify(h)
-		if _, _, _, err := parseDeviceAssertion(signDeviceAssertionForTest(t, priv, h, testClaims())); err == nil {
+		if _, err := parseForTest(signDeviceAssertionForTest(t, priv, h, testClaims()), &priv.PublicKey); err == nil {
 			t.Fatalf("%s accepted", tt.name)
 		}
 	}
@@ -218,7 +270,7 @@ func TestParseDeviceAssertionRejectsInvalidClaims(t *testing.T) {
 	// Test size limit
 	c := testClaims()
 	c["jti"] = string(make([]byte, 4096)) // Pad to exceed limit
-	if _, _, _, err := parseDeviceAssertion(signDeviceAssertionForTest(t, priv, testHeader("dev-1"), c)); err == nil {
+	if _, err := parseForTest(signDeviceAssertionForTest(t, priv, testHeader("dev-1"), c), &priv.PublicKey); err == nil {
 		t.Fatal("oversized assertion accepted")
 	}
 }
@@ -289,7 +341,7 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 	if who.DeviceID != "dev-1" || who.UserID != f.user.ID || who.Username != "alice" || resp.IDToken == "" || resp.AccessToken == "" {
 		t.Fatalf("resp %+v who %+v", resp, who)
 	}
-	claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken, f.engine.issuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +468,7 @@ func TestExchangeDeviceAssertionEnrollmentGrace(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
+		claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken, f.engine.issuerURL, "id_token")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -839,7 +891,7 @@ func TestExchangeDeviceAssertionBindsOrigin(t *testing.T) {
 		if f.sessionCount(t) != before+1 {
 			t.Errorf("%s: session count does not see device sessions", c.name)
 		}
-		claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
+		claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken, f.engine.issuerURL, "id_token")
 		if err != nil || claims["origin"] != c.want {
 			t.Errorf("%s: origin claim %v (%v)", c.name, claims["origin"], err)
 		}
@@ -896,7 +948,7 @@ func TestAttestedDeviceSatisfiesMandatoryMFA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken, f.engine.issuerURL, "id_token")
 	if at, _ := claims["auth_time"].(float64); int64(at) != iat {
 		t.Fatalf("auth_time %v, want assertion iat %d", claims["auth_time"], iat)
 	}
@@ -915,7 +967,7 @@ func TestAppAttestDeviceIsSingleFactor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	claims, _ := f.engine.keyManager.VerifyJWT(resp.IDToken, f.engine.issuerURL, "id_token")
 	amr, _ := claims["amr"].([]any)
 	if len(amr) != 1 || amr[0] != "pop" || claims["acr"] != DeviceACR || claims["attested"] != nil {
 		t.Fatalf("claims %v", claims)
@@ -1033,7 +1085,7 @@ func TestAttestedAssertionWithFutureIatIsClamped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("future iat: %v", err)
 	}
-	claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken, f.engine.issuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,12 +12,9 @@ type IDTokenHint struct {
 // the hint is to name a login that may already be old; issuer, signature and token type
 // are not, because a forged or foreign hint must not steer a logout or its redirect.
 func (e *Engine) ParseIDTokenHint(token string) (IDTokenHint, error) {
-	claims, err := e.keyManager.VerifyExpiredJWT(token)
+	claims, err := e.keyManager.VerifyExpiredJWT(token, e.issuerURL, "id_token")
 	if err != nil {
 		return IDTokenHint{}, err
-	}
-	if claims["iss"] != e.issuerURL || claims["token_use"] != "id_token" {
-		return IDTokenHint{}, errors.New("not an ID token from this issuer")
 	}
 	aud, _ := claims["aud"].(string)
 	sub, _ := claims["sub"].(string)

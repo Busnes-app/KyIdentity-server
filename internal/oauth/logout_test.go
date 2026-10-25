@@ -18,7 +18,7 @@ func exchange(t *testing.T, e *Engine, clientID, sessionID string) map[string]an
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := e.keyManager.VerifyJWT(resp.IDToken)
+	claims, err := e.keyManager.VerifyJWT(resp.IDToken, e.issuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,5 +112,16 @@ func TestIDTokenHintAcceptsExpiredButNotForgedOrForeignTokens(t *testing.T) {
 	foreign, _ := e.keyManager.SignJWT(map[string]any{"iss": "https://other", "sub": u.ID, "aud": "app", "token_use": "id_token", "exp": time.Now().Add(time.Hour).Unix()})
 	if _, err := e.ParseIDTokenHint(foreign); err == nil {
 		t.Fatal("token from another issuer accepted")
+	}
+	// Tolerating expiry relaxes nothing else.
+	for name, c := range map[string]map[string]any{
+		"expired foreign": {"iss": "https://other", "sub": u.ID, "aud": "app", "token_use": "id_token", "exp": time.Now().Add(-time.Hour).Unix()},
+		"expired access":  {"iss": e.issuerURL, "sub": u.ID, "aud": "app", "token_use": "access_token", "exp": time.Now().Add(-time.Hour).Unix()},
+		"no exp":          {"iss": e.issuerURL, "sub": u.ID, "aud": "app", "token_use": "id_token"},
+	} {
+		token, _ := e.keyManager.SignJWT(c)
+		if _, err := e.ParseIDTokenHint(token); err == nil {
+			t.Fatalf("%s accepted as an ID token hint", name)
+		}
 	}
 }
