@@ -115,9 +115,8 @@ func (h *WebAuthnHandler) BeginRegistration(w http.ResponseWriter, r *http.Reque
 
 type finishRegistrationRequest struct {
 	CredentialID      string `json:"credentialId"`
-	AuthenticatorData string `json:"authenticatorData"`
+	AttestationObject string `json:"attestationObject"`
 	ClientDataJSON    string `json:"clientDataJSON"`
-	PublicKey         string `json:"publicKey"`
 	Name              string `json:"name"`
 }
 
@@ -130,7 +129,7 @@ func (h *WebAuthnHandler) FinishRegistration(w http.ResponseWriter, r *http.Requ
 
 	var req finishRegistrationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
-		req.CredentialID == "" || req.AuthenticatorData == "" || req.ClientDataJSON == "" || req.PublicKey == "" {
+		req.CredentialID == "" || req.AttestationObject == "" || req.ClientDataJSON == "" {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
@@ -142,11 +141,10 @@ func (h *WebAuthnHandler) FinishRegistration(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	authData, err1 := base64.RawURLEncoding.DecodeString(req.AuthenticatorData)
+	attestation, err1 := base64.RawURLEncoding.DecodeString(req.AttestationObject)
 	clientData, err2 := base64.RawURLEncoding.DecodeString(req.ClientDataJSON)
-	publicKey, err3 := base64.RawURLEncoding.DecodeString(req.PublicKey)
-	credentialID, err4 := base64.RawURLEncoding.DecodeString(req.CredentialID)
-	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+	credentialID, err3 := base64.RawURLEncoding.DecodeString(req.CredentialID)
+	if err1 != nil || err2 != nil || err3 != nil {
 		http.Error(w, `{"error":"invalid_request","error_description":"Ceremony fields must be base64url"}`, http.StatusBadRequest)
 		return
 	}
@@ -178,10 +176,11 @@ func (h *WebAuthnHandler) FinishRegistration(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	ad, err := webauthn.VerifyRegistration(webauthn.RegistrationInput{
-		AuthenticatorData: authData,
+	reg, err := webauthn.VerifyRegistration(webauthn.RegistrationInput{
+		CredentialID:      credentialID,
+		AttestationObject: attestation,
 		ClientDataJSON:    clientData,
-		PublicKeySPKI:     publicKey,
+		UserHandle:        []byte(user.ID),
 		Challenge:         cd.Challenge,
 		Origin:            h.origin,
 		RPID:              h.rpID,
@@ -203,16 +202,16 @@ func (h *WebAuthnHandler) FinishRegistration(w http.ResponseWriter, r *http.Requ
 
 	enrolled := h.audit.Prepare("mfa.passkey_enrol", user.ID, user.Username, user.ID, "user",
 		h.middleware.ClientIP(r), r.UserAgent(), "success",
-		map[string]any{"backupEligible": ad.BackupEligible(), "userVerified": ad.UserVerified()})
+		map[string]any{"backupEligible": reg.BackupEligible(), "userVerified": reg.UserVerified()})
 	if err := h.store.CreateWebAuthnCredential(&store.WebAuthnCredential{
 		ID:             uuid.New().String(),
 		UserID:         user.ID,
-		CredentialID:   req.CredentialID,
-		PublicKeySPKI:  req.PublicKey,
-		SignCount:      ad.SignCount,
+		CredentialID:   base64.RawURLEncoding.EncodeToString(credentialID),
+		PublicKeySPKI:  base64.RawURLEncoding.EncodeToString(reg.PublicKeySPKI),
+		SignCount:      reg.SignCount,
 		Name:           name,
-		BackupEligible: ad.BackupEligible(),
-		BackupState:    ad.BackupState(),
+		BackupEligible: reg.BackupEligible(),
+		BackupState:    reg.BackupState(),
 	}, enrolled.Row); err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -348,13 +347,16 @@ func (h *WebAuthnHandler) FinishLogin(w http.ResponseWriter, r *http.Request, au
 		return
 	}
 
-	publicKey, err := base64.RawURLEncoding.DecodeString(cred.PublicKeySPKI)
-	if err != nil {
+	publicKey, err1 := base64.RawURLEncoding.DecodeString(cred.PublicKeySPKI)
+	credentialID, err2 := base64.RawURLEncoding.DecodeString(cred.CredentialID)
+	if err1 != nil || err2 != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
 
 	ad, err := webauthn.VerifyAssertion(webauthn.AssertionInput{
+		CredentialID:      credentialID,
+		UserHandle:        []byte(user.ID),
 		AuthenticatorData: authData,
 		ClientDataJSON:    clientData,
 		Signature:         signature,

@@ -160,9 +160,12 @@ KyIdentity Server is the single-organization SSO provider and central identity a
 
 ## WebAuthn
 
-`internal/webauthn` is pure verification: no database, no HTTP, no CBOR. It reads the SPKI
-public key and raw authenticator data the browser exports, because attestation is not
-verified and re-deriving those from the attestation object would buy nothing.
+`internal/webauthn` is pure verification over `github.com/go-webauthn/webauthn`: no database,
+no HTTP. Challenges stay in the store; keys stay base64url SPKI DER, converted to COSE per
+assertion and from COSE at enrolment, so rows from before the library need no migration.
+ES256 only, attestation `none`, user verification preferred. The library flags a counter
+that fails to advance; the package refuses it unless the credential is backup-eligible.
+`TestVerifyAssertionAcceptsLegacyStoredCredential` pins the stored-row format.
 
 KyIdentity records whether a passkey is backup-eligible but never rejects one for it. The rule
 that a KyIdentity login credential must live in KyAuth's device-local `totp_vault.kdbx` rather

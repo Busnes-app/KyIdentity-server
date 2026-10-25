@@ -33,9 +33,8 @@ export interface BeginRegistration {
 
 export interface FinishRegistration {
   credentialId: string;
-  authenticatorData: string;
+  attestationObject: string;
   clientDataJSON: string;
-  publicKey: string;
 }
 
 /** ES256. The server verifies nothing else, so nothing else is offered. */
@@ -52,8 +51,8 @@ export async function createPasskey(opts: BeginRegistration): Promise<FinishRegi
         displayName: opts.username,
       },
       pubKeyCredParams: [{ type: 'public-key', alg: ES256 }],
-      // Attestation is not verified server-side, so requesting it would only add a
-      // consent prompt for data nobody reads.
+      // Attestation is not trusted server-side, so requesting it would only add a
+      // consent prompt for data nobody acts on.
       attestation: 'none',
       authenticatorSelection: { userVerification: 'preferred', residentKey: 'preferred' },
       excludeCredentials: opts.excludeCredentials.map((id) => ({
@@ -67,16 +66,10 @@ export async function createPasskey(opts: BeginRegistration): Promise<FinishRegi
   if (!credential) throw new Error('Passkey creation was cancelled');
 
   const response = credential.response as AuthenticatorAttestationResponse;
-  const publicKey = response.getPublicKey?.();
-  if (!publicKey) {
-    throw new Error('This browser or authenticator did not provide an ES256 public key');
-  }
-
   return {
     credentialId: toBase64Url(credential.rawId),
-    authenticatorData: toBase64Url(response.getAuthenticatorData()),
+    attestationObject: toBase64Url(response.attestationObject),
     clientDataJSON: toBase64Url(response.clientDataJSON),
-    publicKey: toBase64Url(publicKey),
   };
 }
 

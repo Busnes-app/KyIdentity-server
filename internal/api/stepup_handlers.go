@@ -308,10 +308,11 @@ func (h *WebAuthnHandler) verifyStepUpAssertion(userID, challenge string, req fi
 	clientData, e2 := base64.RawURLEncoding.DecodeString(req.ClientDataJSON)
 	signature, e3 := base64.RawURLEncoding.DecodeString(req.Signature)
 	key, e4 := base64.RawURLEncoding.DecodeString(cred.PublicKeySPKI)
-	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
+	credentialID, e5 := base64.RawURLEncoding.DecodeString(cred.CredentialID)
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 		return errors.New("invalid assertion encoding")
 	}
-	ad, err := webauthn.VerifyAssertion(webauthn.AssertionInput{AuthenticatorData: authData, ClientDataJSON: clientData, Signature: signature, PublicKeySPKI: key, Challenge: challenge, Origin: h.origin, RPID: h.rpID, StoredSignCount: cred.SignCount, BackupEligible: cred.BackupEligible})
+	ad, err := webauthn.VerifyAssertion(webauthn.AssertionInput{CredentialID: credentialID, UserHandle: []byte(userID), AuthenticatorData: authData, ClientDataJSON: clientData, Signature: signature, PublicKeySPKI: key, Challenge: challenge, Origin: h.origin, RPID: h.rpID, StoredSignCount: cred.SignCount, BackupEligible: cred.BackupEligible})
 	if err != nil {
 		return err
 	}

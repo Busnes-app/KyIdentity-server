@@ -1,41 +1,32 @@
-// Package webauthn implements the subset of WebAuthn Level 2 that KyIdentity needs: verifying
-// an ES256 assertion from a registered credential, and reading the authenticator data that
-// accompanies registration.
-//
-// It deliberately parses no CBOR. The browser exposes the credential public key in SPKI form
-// (AuthenticatorAttestationResponse.getPublicKey) and the raw authenticator data
-// (getAuthenticatorData), both of which the standard library reads. KyIdentity does not verify
-// attestation, so re-deriving those two values from the attestation object ourselves would
-// buy no property we do not already have.
+// Package webauthn adapts github.com/go-webauthn/webauthn to KyIdentity's storage: challenges
+// live in the store, and credential public keys are kept as base64url SPKI DER. The library
+// does the ceremony verification; this package converts keys and enforces the counter policy.
 package webauthn
 
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/x509"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
+
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
+	"github.com/go-webauthn/webauthn/protocol/webauthncose"
+	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 )
 
 // Authenticator data flag bits (WebAuthn Level 2, section 6.1).
 const (
-	FlagUserPresent            byte = 0x01
-	FlagUserVerified           byte = 0x04
-	FlagBackupEligible         byte = 0x08
-	FlagBackupState            byte = 0x10
-	FlagAttestedCredentialData byte = 0x40
+	FlagUserPresent    byte = 0x01
+	FlagUserVerified   byte = 0x04
+	FlagBackupEligible byte = 0x08
+	FlagBackupState    byte = 0x10
 )
 
-// authDataHeaderLen is the fixed prefix: 32-byte RP ID hash, 1 flag byte, 4-byte counter.
-const authDataHeaderLen = 37
-
+// AuthenticatorData is what callers persist or audit from a verified ceremony.
 type AuthenticatorData struct {
-	RPIDHash  []byte
 	Flags     byte
 	SignCount uint32
 }
@@ -45,88 +36,87 @@ func (a AuthenticatorData) UserVerified() bool   { return a.Flags&FlagUserVerifi
 func (a AuthenticatorData) BackupEligible() bool { return a.Flags&FlagBackupEligible != 0 }
 func (a AuthenticatorData) BackupState() bool    { return a.Flags&FlagBackupState != 0 }
 
-// ParseAuthenticatorData reads the fixed header. Attested credential data and extensions
-// follow it during registration; nothing here reads past the header.
-func ParseAuthenticatorData(b []byte) (AuthenticatorData, error) {
-	if len(b) < authDataHeaderLen {
-		return AuthenticatorData{}, fmt.Errorf("authenticator data is %d bytes, need at least %d", len(b), authDataHeaderLen)
-	}
-	return AuthenticatorData{
-		RPIDHash:  b[:32],
-		Flags:     b[32],
-		SignCount: binary.BigEndian.Uint32(b[33:authDataHeaderLen]),
-	}, nil
+// ES256 only: every stored key is P-256 SPKI, and every mainstream passkey provider offers it.
+var credParams = []protocol.CredentialParameter{{Type: protocol.PublicKeyCredentialType, Algorithm: webauthncose.AlgES256}}
+
+// relyingParty is built per ceremony so an issuer the library rejects as an RP ID (a loopback
+// IP) fails the ceremony, as browsers would, rather than server startup.
+func relyingParty(rpID, origin string) (*gowebauthn.WebAuthn, error) {
+	return gowebauthn.New(&gowebauthn.Config{
+		RPID:                  rpID,
+		RPDisplayName:         "KyIdentity",
+		RPOrigins:             []string{origin},
+		AttestationPreference: protocol.PreferNoAttestation,
+	})
 }
 
-// ParseES256PublicKey reads a DER SPKI public key and rejects anything that is not P-256.
-func ParseES256PublicKey(spki []byte) (*ecdsa.PublicKey, error) {
-	parsed, err := x509.ParsePKIXPublicKey(spki)
-	if err != nil {
-		return nil, fmt.Errorf("credential public key is not a valid SPKI key: %w", err)
-	}
-	pub, ok := parsed.(*ecdsa.PublicKey)
-	if !ok {
-		return nil, errors.New("credential public key is not an ECDSA key")
-	}
-	if pub.Curve != elliptic.P256() {
-		return nil, errors.New("credential public key is not on P-256")
-	}
-	return pub, nil
+type user struct {
+	id    []byte
+	creds []gowebauthn.Credential
 }
 
-type clientData struct {
-	Type      string `json:"type"`
-	Challenge string `json:"challenge"`
-	Origin    string `json:"origin"`
-}
-
-// VerifyClientData checks the three fields that bind a ceremony to this server and this
-// request. The challenge is compared as the exact base64url string the server issued: a
-// re-encoding of the same bytes is a different string, and accepting it would let a caller
-// present a challenge the store cannot match.
-func VerifyClientData(raw []byte, wantType, wantChallenge, wantOrigin string) error {
-	var cd clientData
-	if err := json.Unmarshal(raw, &cd); err != nil {
-		return fmt.Errorf("client data is not valid JSON: %w", err)
-	}
-	if cd.Type != wantType {
-		return fmt.Errorf("client data type is %q, want %q", cd.Type, wantType)
-	}
-	if subtle.ConstantTimeCompare([]byte(cd.Challenge), []byte(wantChallenge)) != 1 {
-		return errors.New("client data challenge does not match the issued challenge")
-	}
-	if subtle.ConstantTimeCompare([]byte(cd.Origin), []byte(wantOrigin)) != 1 {
-		return fmt.Errorf("client data origin %q is not this server's origin", cd.Origin)
-	}
-	return nil
-}
+func (u user) WebAuthnID() []byte                           { return u.id }
+func (u user) WebAuthnName() string                         { return "" }
+func (u user) WebAuthnDisplayName() string                  { return "" }
+func (u user) WebAuthnCredentials() []gowebauthn.Credential { return u.creds }
 
 type RegistrationInput struct {
-	AuthenticatorData []byte
+	CredentialID      []byte
+	AttestationObject []byte
 	ClientDataJSON    []byte
-	PublicKeySPKI     []byte
+	UserHandle        []byte
 	Challenge         string
 	Origin            string
 	RPID              string
 }
 
-// VerifyRegistration checks a credential creation response. Attestation is not verified:
-// KyIdentity accepts any authenticator, so the statement would be recorded and never acted on.
-func VerifyRegistration(in RegistrationInput) (AuthenticatorData, error) {
-	if err := VerifyClientData(in.ClientDataJSON, "webauthn.create", in.Challenge, in.Origin); err != nil {
-		return AuthenticatorData{}, err
-	}
-	ad, err := parseAndBind(in.AuthenticatorData, in.RPID)
+type Registration struct {
+	AuthenticatorData
+	PublicKeySPKI []byte
+}
+
+// VerifyRegistration checks a credential creation response. Attestation is requested as
+// "none"; an authenticator that sends a statement anyway has it checked but not trusted.
+func VerifyRegistration(in RegistrationInput) (Registration, error) {
+	rp, err := relyingParty(in.RPID, in.Origin)
 	if err != nil {
-		return AuthenticatorData{}, err
+		return Registration{}, err
 	}
-	if _, err := ParseES256PublicKey(in.PublicKeySPKI); err != nil {
-		return AuthenticatorData{}, err
+	parsed, err := protocol.CredentialCreationResponse{
+		PublicKeyCredential: protocol.PublicKeyCredential{
+			Credential: protocol.Credential{ID: b64(in.CredentialID), Type: string(protocol.PublicKeyCredentialType)},
+			RawID:      in.CredentialID,
+		},
+		AttestationResponse: protocol.AuthenticatorAttestationResponse{
+			AuthenticatorResponse: protocol.AuthenticatorResponse{ClientDataJSON: in.ClientDataJSON},
+			AttestationObject:     in.AttestationObject,
+		},
+	}.Parse()
+	if err != nil {
+		return Registration{}, err
 	}
-	return ad, nil
+	cred, err := rp.CreateCredential(user{id: in.UserHandle}, gowebauthn.SessionData{
+		Challenge:        in.Challenge,
+		UserID:           in.UserHandle,
+		UserVerification: protocol.VerificationPreferred,
+		CredParams:       credParams,
+	}, parsed)
+	if err != nil {
+		return Registration{}, err
+	}
+	spki, err := coseToSPKI(cred.PublicKey)
+	if err != nil {
+		return Registration{}, err
+	}
+	return Registration{
+		AuthenticatorData: AuthenticatorData{Flags: byte(parsed.Response.AttestationObject.AuthData.Flags), SignCount: cred.Authenticator.SignCount},
+		PublicKeySPKI:     spki,
+	}, nil
 }
 
 type AssertionInput struct {
+	CredentialID      []byte
+	UserHandle        []byte
 	AuthenticatorData []byte
 	ClientDataJSON    []byte
 	Signature         []byte
@@ -141,56 +131,104 @@ type AssertionInput struct {
 // VerifyAssertion checks a credential assertion end to end and returns the authenticator
 // data it verified, so the caller can persist the new signature counter and backup state.
 func VerifyAssertion(in AssertionInput) (AuthenticatorData, error) {
-	if err := VerifyClientData(in.ClientDataJSON, "webauthn.get", in.Challenge, in.Origin); err != nil {
+	rp, err := relyingParty(in.RPID, in.Origin)
+	if err != nil {
 		return AuthenticatorData{}, err
 	}
-	ad, err := parseAndBind(in.AuthenticatorData, in.RPID)
+	publicKey, err := spkiToCOSE(in.PublicKeySPKI)
+	if err != nil {
+		return AuthenticatorData{}, err
+	}
+	parsed, err := protocol.CredentialAssertionResponse{
+		PublicKeyCredential: protocol.PublicKeyCredential{
+			Credential: protocol.Credential{ID: b64(in.CredentialID), Type: string(protocol.PublicKeyCredentialType)},
+			RawID:      in.CredentialID,
+		},
+		AssertionResponse: protocol.AuthenticatorAssertionResponse{
+			AuthenticatorResponse: protocol.AuthenticatorResponse{ClientDataJSON: in.ClientDataJSON},
+			AuthenticatorData:     in.AuthenticatorData,
+			Signature:             in.Signature,
+		},
+	}.Parse()
+	if err != nil {
+		return AuthenticatorData{}, err
+	}
+	// The caller resolved the credential within this user, so it is the user's only record here.
+	stored := gowebauthn.Credential{
+		ID:            in.CredentialID,
+		PublicKey:     publicKey,
+		Flags:         gowebauthn.CredentialFlags{BackupEligible: in.BackupEligible},
+		Authenticator: gowebauthn.Authenticator{SignCount: in.StoredSignCount},
+	}
+	cred, err := rp.ValidateLogin(user{id: in.UserHandle, creds: []gowebauthn.Credential{stored}}, gowebauthn.SessionData{
+		Challenge:            in.Challenge,
+		UserID:               in.UserHandle,
+		AllowedCredentialIDs: [][]byte{in.CredentialID},
+		UserVerification:     protocol.VerificationPreferred,
+	}, parsed)
 	if err != nil {
 		return AuthenticatorData{}, err
 	}
 
-	pub, err := ParseES256PublicKey(in.PublicKeySPKI)
-	if err != nil {
-		return AuthenticatorData{}, err
+	// The library only flags a counter that fails to advance; refusing is our policy. That
+	// means a clone or a replay, except for authenticators that never count (both zero,
+	// exempted by the library) and backup-eligible credentials, whose synced siblings each
+	// keep their own counter (WebAuthn Level 3 recommends not enforcing it for those).
+	got := parsed.Response.AuthenticatorData.Counter
+	if cred.Authenticator.CloneWarning && !in.BackupEligible {
+		return AuthenticatorData{}, fmt.Errorf("signature counter did not advance: got %d, stored %d", got, in.StoredSignCount)
 	}
-
-	cdHash := sha256.Sum256(in.ClientDataJSON)
-	signed := make([]byte, 0, len(in.AuthenticatorData)+len(cdHash))
-	signed = append(signed, in.AuthenticatorData...)
-	signed = append(signed, cdHash[:]...)
-	digest := sha256.Sum256(signed)
-	if !ecdsa.VerifyASN1(pub, digest[:], in.Signature) {
-		return AuthenticatorData{}, errors.New("assertion signature is not valid for this credential")
-	}
-
-	// A counter that fails to advance means the authenticator was cloned, or the response
-	// was replayed. Authenticators that never count report zero forever; only those are
-	// exempt (WebAuthn Level 2, section 6.1.1). A backup-eligible credential lives on
-	// several devices that each keep their own counter, so a sibling reporting a lower
-	// value than the one on record is normal, not evidence of cloning — WebAuthn Level 3
-	// recommends not enforcing the counter for those credentials at all.
-	if !in.BackupEligible && !(ad.SignCount == 0 && in.StoredSignCount == 0) && ad.SignCount <= in.StoredSignCount {
-		return AuthenticatorData{}, fmt.Errorf("signature counter did not advance: got %d, stored %d", ad.SignCount, in.StoredSignCount)
-	}
-
-	return ad, nil
+	return AuthenticatorData{Flags: byte(parsed.Response.AuthenticatorData.Flags), SignCount: got}, nil
 }
 
-// parseAndBind reads the authenticator data and confirms it was produced for this RP with
-// the user physically present.
-func parseAndBind(raw []byte, rpID string) (AuthenticatorData, error) {
-	ad, err := ParseAuthenticatorData(raw)
+func b64(b []byte) string { return protocol.URLEncodedBase64(b).String() }
+
+// parseES256PublicKey reads a DER SPKI public key and rejects anything that is not P-256.
+func parseES256PublicKey(spki []byte) (*ecdsa.PublicKey, error) {
+	parsed, err := x509.ParsePKIXPublicKey(spki)
 	if err != nil {
-		return AuthenticatorData{}, err
+		return nil, fmt.Errorf("credential public key is not a valid SPKI key: %w", err)
 	}
-	want := sha256.Sum256([]byte(rpID))
-	if subtle.ConstantTimeCompare(ad.RPIDHash, want[:]) != 1 {
-		return AuthenticatorData{}, errors.New("authenticator data was produced for a different relying party")
+	pub, ok := parsed.(*ecdsa.PublicKey)
+	if !ok || pub.Curve != elliptic.P256() {
+		return nil, errors.New("credential public key is not a P-256 ECDSA key")
 	}
-	if !ad.UserPresent() {
-		return AuthenticatorData{}, errors.New("authenticator did not report user presence")
+	return pub, nil
+}
+
+// spkiToCOSE converts a stored key to the COSE_Key form the library verifies with.
+func spkiToCOSE(spki []byte) ([]byte, error) {
+	pub, err := parseES256PublicKey(spki)
+	if err != nil {
+		return nil, err
 	}
-	return ad, nil
+	point, err := pub.Bytes()
+	if err != nil {
+		return nil, err
+	}
+	return webauthncbor.Marshal(webauthncose.EC2PublicKeyData{
+		PublicKeyData: webauthncose.PublicKeyData{KeyType: int64(webauthncose.EllipticKey), Algorithm: int64(webauthncose.AlgES256)},
+		Curve:         int64(webauthncose.P256),
+		XCoord:        point[1:33],
+		YCoord:        point[33:],
+	})
+}
+
+// coseToSPKI converts a newly registered ES256 COSE_Key to the stored SPKI form.
+func coseToSPKI(cose []byte) ([]byte, error) {
+	key, err := webauthncose.ParsePublicKey(cose)
+	if err != nil {
+		return nil, err
+	}
+	ec, ok := key.(webauthncose.EC2PublicKeyData)
+	if !ok || ec.Algorithm != int64(webauthncose.AlgES256) || ec.Curve != int64(webauthncose.P256) {
+		return nil, errors.New("credential public key is not ES256")
+	}
+	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), append(append([]byte{4}, ec.XCoord...), ec.YCoord...))
+	if err != nil {
+		return nil, err
+	}
+	return x509.MarshalPKIXPublicKey(pub)
 }
 
 // RPIDFromIssuer derives the relying party ID and the exact origin from the configured

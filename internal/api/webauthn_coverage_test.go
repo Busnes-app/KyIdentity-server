@@ -27,9 +27,8 @@ func covBeginRegistration(t *testing.T, f *stepUpFixture) (string, []string) {
 
 func covRegistrationBody(t *testing.T, a *testAuthenticator, challenge, name string) map[string]string {
 	t.Helper()
-	ad := a.authData("localhost", 0x01|0x04|0x40)
 	cdj := a.clientData(t, "webauthn.create", challenge, "http://localhost:5867")
-	return map[string]string{"credentialId": a.credID, "authenticatorData": b64(ad), "clientDataJSON": b64(cdj), "publicKey": a.spkiB64(t), "name": name}
+	return map[string]string{"credentialId": a.credID, "attestationObject": a.attestationObject(t, "localhost", 0x01|0x04|0x40), "clientDataJSON": b64(cdj), "name": name}
 }
 
 // Passkey enrolment refuses malformed ceremonies and unissued challenges, needs a step-up
@@ -48,7 +47,7 @@ func TestPasskeyRegistrationValidation(t *testing.T) {
 		t.Fatalf("finish without step-up: %d", r.StatusCode)
 	}
 	bad := covRegistrationBody(t, a, "c", "k")
-	bad["publicKey"] = "not base64url!"
+	bad["attestationObject"] = "not base64url!"
 	covRefused(t, f.post(t, "/api/user/passkeys/register/finish", bad, grant()), 400, "invalid_request")
 	long := covRegistrationBody(t, a, "c", "k")
 	long["credentialId"] = b64(make([]byte, 1024))
