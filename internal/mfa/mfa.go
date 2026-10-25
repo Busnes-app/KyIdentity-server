@@ -2,14 +2,11 @@ package mfa
 
 import (
 	"crypto/ecdh"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/totp"
 	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/netguard"
@@ -131,45 +129,14 @@ func (e *Engine) GenerateTOTPSecret(username, issuer string) (secretBase32, otpA
 	return secretBase32, uri, nil
 }
 
+// totpClock is a test seam for the TOTP window.
+var totpClock = time.Now
+
 // ValidateTOTP verifies a 6-digit TOTP code against a base32 secret with a +/- 1 step
 // grace window.
 func ValidateTOTP(secretBase32, code string) bool {
-	_, ok := matchTOTP(secretBase32, code)
+	_, ok := totp.Validate(secretBase32, code, totpClock())
 	return ok
-}
-
-// matchTOTP returns the time step a code belongs to, so the caller can spend that step and
-// stop the same code being replayed inside its window.
-func matchTOTP(secretBase32, code string) (int64, bool) {
-	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.TrimSpace(secretBase32)))
-	if err != nil {
-		return 0, false
-	}
-
-	currentCounter := time.Now().Unix() / 30
-	trimmed := strings.TrimSpace(code)
-	for i := int64(-1); i <= 1; i++ {
-		counter := currentCounter + i
-		if subtle.ConstantTimeCompare([]byte(calculateTOTPCode(secret, counter)), []byte(trimmed)) == 1 {
-			return counter, true
-		}
-	}
-	return 0, false
-}
-
-func calculateTOTPCode(secret []byte, counter int64) string {
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, uint64(counter))
-
-	h := hmac.New(sha1.New, secret)
-	h.Write(buf)
-	sum := h.Sum(nil)
-
-	offset := sum[len(sum)-1] & 0x0F
-	truncated := binary.BigEndian.Uint32(sum[offset:offset+4]) & 0x7FFFFFFF
-	codeInt := truncated % 1000000
-
-	return fmt.Sprintf("%06d", codeInt)
 }
 
 // SaveUserTOTP encrypts and saves a user's TOTP secret.
@@ -205,7 +172,8 @@ func (e *Engine) VerifyUserTOTP(userID, code string) (bool, error) {
 		return false, fmt.Errorf("failed to decrypt TOTP secret: %w", err)
 	}
 
-	counter, ok := matchTOTP(string(decrypted), code)
+	// The matched step comes back so it can be spent below.
+	counter, ok := totp.Validate(string(decrypted), code, totpClock())
 	if !ok {
 		return false, nil
 	}

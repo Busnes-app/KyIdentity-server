@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -19,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/totp"
 	"github.com/Busnes-app/kyidentity-server/internal/attest"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
@@ -79,13 +79,56 @@ func TestTOTPEnrollmentAndVerification(t *testing.T) {
 		t.Fatalf("SaveUserTOTP failed: %v", err)
 	}
 
-	// Calculate valid code for current counter
-	timeStep := time.Now().Unix() / 30
-
-	// Validate TOTP algorithm with calculated code
-	code := calculateTOTPCode([]byte("12345678901234567890"), timeStep)
-	if !ValidateTOTP("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", code) {
+	// RFC 6238 appendix B, SHA-1 at T=59: 94287082, of which an authenticator shows 287082.
+	setTOTPClock(t, time.Unix(59, 0))
+	if !ValidateTOTP("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "287082") {
 		t.Fatal("ValidateTOTP failed for RFC 6238 sample secret")
+	}
+}
+
+func setTOTPClock(t *testing.T, at time.Time) {
+	t.Helper()
+	totpClock = func() time.Time { return at }
+	t.Cleanup(func() { totpClock = time.Now })
+}
+
+// One step either side is accepted and two are not, a matched step is spent, and an
+// earlier step cannot be used once a later one has been.
+func TestVerifyUserTOTPWindowAndReplay(t *testing.T) {
+	engine, _, user, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	// A fixed secret and clock keep the five codes below distinct on every run.
+	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	if err := engine.SaveUserTOTP(user.ID, secret, nil); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0) // a step boundary
+	setTOTPClock(t, now)
+	codeAt := func(offset time.Duration) string {
+		code, err := totp.Code(secret, now.Add(offset))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return code
+	}
+	for _, step := range []struct {
+		name   string
+		offset time.Duration
+		want   bool
+	}{
+		{"two steps back", -60 * time.Second, false},
+		{"two steps ahead", 60 * time.Second, false},
+		{"one step back", -30 * time.Second, true},
+		{"one step back replayed", -30 * time.Second, false},
+		{"last second of previous step, already spent", -time.Second, false},
+		{"current", 0, true},
+		{"current replayed", 29 * time.Second, false},
+		{"one step ahead", 30 * time.Second, true},
+		{"earlier step after a later one", 0, false},
+	} {
+		if ok, err := engine.VerifyUserTOTP(user.ID, codeAt(step.offset)); ok != step.want || err != nil {
+			t.Fatalf("%s: ok=%v err=%v, want %v", step.name, ok, err, step.want)
+		}
 	}
 }
 
@@ -118,8 +161,10 @@ func TestTOTPSecretSwappedBetweenUsersDoesNotOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(string(plain))
-	code := calculateTOTPCode(raw, time.Now().Unix()/30)
+	code, err := totp.Code(string(plain), totpClock())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ok, err := engine.VerifyUserTOTP(victim.ID, code); ok || err == nil {
 		t.Fatalf("swapped secret verified for the victim: ok=%v err=%v", ok, err)
 	}
