@@ -5,7 +5,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base32"
 	"encoding/base64"
 	"errors"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/totp"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
@@ -56,11 +56,11 @@ func signingKey(t *testing.T) (*ecdsa.PrivateKey, string) {
 // currentTOTPCode computes the code a correctly configured authenticator would show now.
 func currentTOTPCode(t *testing.T, secretBase32 string) string {
 	t.Helper()
-	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secretBase32)
+	code, err := totp.Code(secretBase32, totpClock())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return calculateTOTPCode(secret, time.Now().Unix()/30)
+	return code
 }
 
 func sign(t *testing.T, key *ecdsa.PrivateKey, msg []byte) string {
