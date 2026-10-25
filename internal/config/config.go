@@ -137,6 +137,14 @@ var DefaultKyAuthCertSHA256 = []string{
 // DefaultAppAttestAppIDs is KyAuth iOS, so App Attest grading is on unless an operator turns it off.
 var DefaultAppAttestAppIDs = []string{"TATYN4X57D.org.kysecurity.authenticator"}
 
+// The Busnes.app relays KyAuth's published builds are wired to, so FCM and APNs push work
+// without operator setup. The APNs relay is KyAuth's own: APNs rejects a token for another
+// app's bundle ID, so KyPost's relay cannot deliver to KyAuth.
+const (
+	DefaultPushRelayURL = "https://fcm.relay.kysecurity.org"
+	DefaultAPNSRelayURL = "https://kyauth-push-apns.kysecurity.workers.dev"
+)
+
 var ubuntuAppIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*_[a-z0-9][a-z0-9+.-]*$`)
 
 // appIDRE is an Apple App ID: a ten-character Team ID, a dot, and a bundle ID.
@@ -203,11 +211,11 @@ func Load() (*Config, error) {
 	if !ValidSessionLimits(sessionTTL, sessionIdleTTL) {
 		return nil, fmt.Errorf("KYIDENTITY_SESSION_TTL must be %v to %v and KYIDENTITY_SESSION_IDLE_TTL %v to %v", MinSessionTTL, MaxSessionTTL, MinSessionIdleTTL, MaxSessionIdleTTL)
 	}
-	pushRelayURL, err := loadRelayURL("PUSH_RELAY_URL")
+	pushRelayURL, err := loadRelayURL("PUSH_RELAY_URL", DefaultPushRelayURL)
 	if err != nil {
 		return nil, err
 	}
-	apnsRelayURL, err := loadRelayURL("APNS_RELAY_URL")
+	apnsRelayURL, err := loadRelayURL("APNS_RELAY_URL", DefaultAPNSRelayURL)
 	if err != nil {
 		return nil, err
 	}
@@ -382,8 +390,13 @@ func loadBackupDir() (string, int, error) {
 	return dir, keep, nil
 }
 
-func loadRelayURL(name string) (string, error) {
-	raw := strings.TrimRight(strings.TrimSpace(os.Getenv(name)), "/")
+// loadRelayURL keeps defaultURL when name is unset; set but empty turns the relay off.
+func loadRelayURL(name, defaultURL string) (string, error) {
+	v, ok := os.LookupEnv(name)
+	if !ok {
+		return defaultURL, nil
+	}
+	raw := strings.TrimRight(strings.TrimSpace(v), "/")
 	if raw == "" {
 		return "", nil
 	}

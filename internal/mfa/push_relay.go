@@ -31,6 +31,9 @@ type RelayConfig struct {
 	Key     string
 	KeyFile string
 	Label   string
+	// Optional leaves this transport off when self-registration fails, instead of failing
+	// startup. For the built-in relays, whose outage must not stop the server.
+	Optional bool
 }
 
 type RelaySender struct {
@@ -98,6 +101,10 @@ func prepareRelay(cfg RelayConfig) (*relayEndpoint, error) {
 	}
 	key, err := registerRelayKey(cfg.URL, cfg.Label)
 	if err != nil {
+		if cfg.Optional {
+			log.Printf("mfa push relay: %s unavailable, push over it stays off until restart: %v", cfg.URL, err)
+			return nil, nil
+		}
 		return nil, err
 	}
 	if cfg.KeyFile != "" {

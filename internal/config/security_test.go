@@ -224,6 +224,28 @@ func TestRelayURLsRequireHTTPS(t *testing.T) {
 	}
 }
 
+// Unset relays use the Busnes.app ones so KyAuth push works out of the box; set but empty
+// turns a relay off.
+func TestRelayURLDefaults(t *testing.T) {
+	withEnv(t, map[string]string{"KYIDENTITY_DATA_DIR": t.TempDir(), "PUSH_RELAY_URL": "", "APNS_RELAY_URL": ""})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PushRelayURL != "" || cfg.APNSRelayURL != "" {
+		t.Fatalf("empty relay URLs were not turned off: %q / %q", cfg.PushRelayURL, cfg.APNSRelayURL)
+	}
+
+	os.Unsetenv("PUSH_RELAY_URL")
+	os.Unsetenv("APNS_RELAY_URL")
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PushRelayURL != DefaultPushRelayURL || cfg.APNSRelayURL != DefaultAPNSRelayURL {
+		t.Fatalf("unset relay URLs did not default: %q / %q", cfg.PushRelayURL, cfg.APNSRelayURL)
+	}
+}
+
 // A CIDR that does not parse must be reported, not skipped, or an operator's typo
 // silently drops their proxy out of the trusted set.
 func TestMalformedTrustedProxyCIDRIsRejected(t *testing.T) {
