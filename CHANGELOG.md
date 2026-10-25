@@ -8,6 +8,7 @@
 
 ### Changes
 
+- Passkey ceremonies are verified by [go-webauthn](https://github.com/go-webauthn/webauthn) instead of a hand-rolled verifier. Enrolment now sends the authenticator's `attestationObject` to `POST /api/user/passkeys/register/finish` in place of `authenticatorData` and `publicKey`; the bundled web app does this. Enrolled passkeys keep working without re-registration. Still ES256 only. Newly refused: assertions with `crossOrigin: true`, a backup-eligible flag that differs from enrolment, or backup state without backup eligibility, and attestation statements that are present but invalid.
 - Security: the image is built with Go 1.27.3 (was 1.27.2) for GO-2026-6809: `crypto/x509` now distrusts compromised intermediate certificates. `go.mod` sets `toolchain go1.27.3` so `go build` from source uses it too.
 
 ## 0.4.7 — 2026-10-23

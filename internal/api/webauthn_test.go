@@ -17,6 +17,7 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/mfa"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
+	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
 	"github.com/google/uuid"
 )
 
@@ -52,6 +53,31 @@ func (a *testAuthenticator) authData(rpID string, flags byte) []byte {
 	b[32] = flags
 	binary.BigEndian.PutUint32(b[33:37], a.signCount)
 	return b
+}
+
+// attestationObject is a "none" attestation carrying this key as attested credential data.
+func (a *testAuthenticator) attestationObject(t *testing.T, rpID string, flags byte) string {
+	t.Helper()
+	id, err := base64.RawURLEncoding.DecodeString(a.credID)
+	if err != nil {
+		t.Fatalf("credential id: %v", err)
+	}
+	point, err := a.key.PublicKey.Bytes()
+	if err != nil {
+		t.Fatalf("public key: %v", err)
+	}
+	cose, err := webauthncbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: point[1:33], -3: point[33:]})
+	if err != nil {
+		t.Fatalf("marshal COSE key: %v", err)
+	}
+	ad := append(a.authData(rpID, flags), make([]byte, 16)...)
+	ad = binary.BigEndian.AppendUint16(ad, uint16(len(id)))
+	ad = append(append(ad, id...), cose...)
+	obj, err := webauthncbor.Marshal(map[string]any{"fmt": "none", "attStmt": map[string]any{}, "authData": ad})
+	if err != nil {
+		t.Fatalf("marshal attestation object: %v", err)
+	}
+	return b64(obj)
 }
 
 func (a *testAuthenticator) clientData(t *testing.T, typ, challenge, origin string) []byte {
@@ -150,13 +176,11 @@ func TestPasskeyRegistrationRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected begin response: %+v", begun)
 	}
 
-	ad := a.authData(begun.RPID, 0x01|0x04|0x40)
 	cdj := a.clientData(t, "webauthn.create", begun.Challenge, "http://localhost:5867")
 	rec = f.post(t, "/api/user/passkeys/register/finish", map[string]string{
 		"credentialId":      a.credID,
-		"authenticatorData": b64(ad),
+		"attestationObject": a.attestationObject(t, begun.RPID, 0x01|0x04|0x40),
 		"clientDataJSON":    b64(cdj),
-		"publicKey":         a.spkiB64(t),
 		"name":              "KyAuth on Pixel",
 	}, f.grant(t, "POST /api/user/passkeys/register/finish"))
 	if rec.Code != http.StatusOK {
@@ -169,6 +193,15 @@ func TestPasskeyRegistrationRoundTrip(t *testing.T) {
 	}
 	if creds[0].Name != "KyAuth on Pixel" {
 		t.Fatalf("credential name = %q", creds[0].Name)
+	}
+	if creds[0].PublicKeySPKI != a.spkiB64(t) {
+		t.Fatal("the stored key must be the attested key in SPKI form")
+	}
+
+	// The enrolled credential then answers a login, closing the loop through storage.
+	mfaToken := passwordLogin(t, f.srv, f.user.Username, f.pass)
+	if rec := anonPost(t, f.srv, "/api/auth/mfa/webauthn/verify", assertionFields(t, f.srv, mfaToken, a, true)); rec.Code != http.StatusOK {
+		t.Fatalf("login with the enrolled passkey returned %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -187,13 +220,11 @@ func TestPasskeyRegistrationRejectsForeignOrigin(t *testing.T) {
 		t.Fatalf("decode begin response: %v", err)
 	}
 
-	ad := a.authData(begun.RPID, 0x01)
 	cdj := a.clientData(t, "webauthn.create", begun.Challenge, "https://evil.example.com")
 	rec = f.post(t, "/api/user/passkeys/register/finish", map[string]string{
 		"credentialId":      a.credID,
-		"authenticatorData": b64(ad),
+		"attestationObject": a.attestationObject(t, begun.RPID, 0x01|0x40),
 		"clientDataJSON":    b64(cdj),
-		"publicKey":         a.spkiB64(t),
 		"name":              "evil",
 	}, f.grant(t, "POST /api/user/passkeys/register/finish"))
 

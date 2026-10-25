@@ -8,16 +8,22 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
+
+	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
 )
 
-const testRPID = "auth.example.com"
-const testOrigin = "https://auth.example.com"
+const (
+	testRPID      = "auth.example.com"
+	testOrigin    = "https://auth.example.com"
+	testChallenge = "Q0hBTExFTkdFLUNIQUxMRU5HRS0zMg" // 22 bytes, above the library's 16-byte floor
+)
 
-// authData builds a 37-byte authenticator data header for rpID with the given flags and
-// signature counter. Registration responses append attested credential data after it;
-// nothing this package does reads past byte 37, so the tests do not synthesise it.
+var testCredID = []byte("credential-0001")
+
+// authData builds the 37-byte authenticator data header for rpID.
 func authData(rpID string, flags byte, count uint32) []byte {
 	h := sha256.Sum256([]byte(rpID))
 	b := make([]byte, 37)
@@ -29,12 +35,7 @@ func authData(rpID string, flags byte, count uint32) []byte {
 
 func clientDataJSON(t *testing.T, typ, challenge, origin string) []byte {
 	t.Helper()
-	b, err := json.Marshal(map[string]any{
-		"type":        typ,
-		"challenge":   challenge,
-		"origin":      origin,
-		"crossOrigin": false,
-	})
+	b, err := json.Marshal(map[string]any{"type": typ, "challenge": challenge, "origin": origin, "crossOrigin": false})
 	if err != nil {
 		t.Fatalf("marshal client data: %v", err)
 	}
@@ -54,8 +55,7 @@ func testKey(t *testing.T) (*ecdsa.PrivateKey, []byte) {
 	return key, spki
 }
 
-// signAssertion produces the signature a real authenticator would: over the authenticator
-// data concatenated with the SHA-256 of the client data JSON.
+// signAssertion signs authenticator data concatenated with the client data hash.
 func signAssertion(t *testing.T, key *ecdsa.PrivateKey, ad, cdj []byte) []byte {
 	t.Helper()
 	cdHash := sha256.Sum256(cdj)
@@ -67,77 +67,70 @@ func signAssertion(t *testing.T, key *ecdsa.PrivateKey, ad, cdj []byte) []byte {
 	return sig
 }
 
-func TestParseAuthenticatorDataFlags(t *testing.T) {
-	ad, err := ParseAuthenticatorData(authData(testRPID, FlagUserPresent|FlagUserVerified|FlagBackupEligible|FlagBackupState, 7))
+// attestationObject is a "none" attestation carrying cose as attested credential data.
+func attestationObject(t *testing.T, rpID string, flags byte, cose []byte) []byte {
+	t.Helper()
+	ad := append(authData(rpID, flags|0x40, 0), make([]byte, 16)...)
+	ad = binary.BigEndian.AppendUint16(ad, uint16(len(testCredID)))
+	ad = append(append(ad, testCredID...), cose...)
+	obj, err := webauthncbor.Marshal(map[string]any{"fmt": "none", "attStmt": map[string]any{}, "authData": ad})
 	if err != nil {
-		t.Fatalf("ParseAuthenticatorData: %v", err)
+		t.Fatalf("marshal attestation object: %v", err)
 	}
-	if !ad.UserPresent() || !ad.UserVerified() || !ad.BackupEligible() || !ad.BackupState() {
-		t.Fatalf("expected all four flags set, got %#x", ad.Flags)
-	}
-	if ad.SignCount != 7 {
-		t.Fatalf("SignCount = %d, want 7", ad.SignCount)
-	}
+	return obj
 }
 
-func TestParseAuthenticatorDataRejectsShortInput(t *testing.T) {
-	if _, err := ParseAuthenticatorData(make([]byte, 36)); err == nil {
-		t.Fatal("expected an error for 36 bytes of authenticator data")
-	}
-}
-
-func TestVerifyAssertionAcceptsGenuineSignature(t *testing.T) {
-	key, spki := testKey(t)
-	ad := authData(testRPID, FlagUserPresent|FlagUserVerified, 5)
-	cdj := clientDataJSON(t, "webauthn.get", "Q0hBTExFTkdF", testOrigin)
-
-	got, err := VerifyAssertion(AssertionInput{
+func assertion(t *testing.T, key *ecdsa.PrivateKey, spki []byte, flags byte, count, stored uint32) AssertionInput {
+	t.Helper()
+	ad := authData(testRPID, flags, count)
+	cdj := clientDataJSON(t, "webauthn.get", testChallenge, testOrigin)
+	return AssertionInput{
+		CredentialID:      testCredID,
+		UserHandle:        []byte("user-1"),
 		AuthenticatorData: ad,
 		ClientDataJSON:    cdj,
 		Signature:         signAssertion(t, key, ad, cdj),
 		PublicKeySPKI:     spki,
-		Challenge:         "Q0hBTExFTkdF",
+		Challenge:         testChallenge,
 		Origin:            testOrigin,
 		RPID:              testRPID,
-		StoredSignCount:   4,
-	})
-	if err != nil {
-		t.Fatalf("VerifyAssertion: %v", err)
+		StoredSignCount:   stored,
 	}
-	if got.SignCount != 5 {
-		t.Fatalf("SignCount = %d, want 5", got.SignCount)
+}
+
+// A row written before go-webauthn stores the browser's getPublicKey() SPKI, base64url. This
+// literal is such a row for the RFC 6979 P-256 test key; it must still authenticate.
+func TestVerifyAssertionAcceptsLegacyStoredCredential(t *testing.T) {
+	const storedRow = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEYP7UuiVanTHJYet0xjVtaMBJuJI7Yfps5mliLmDyn7Z5A_4QCLi8maQa6elWKLxk8vGyDC1-n1F3o8KU1EYimQ"
+	d, _ := hex.DecodeString("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721")
+	key, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), d)
+	if err != nil {
+		t.Fatalf("ParseRawPrivateKey: %v", err)
+	}
+	spki, err := base64.RawURLEncoding.DecodeString(storedRow)
+	if err != nil {
+		t.Fatalf("decode stored row: %v", err)
+	}
+	got, err := VerifyAssertion(assertion(t, key, spki, FlagUserPresent|FlagUserVerified, 5, 4))
+	if err != nil {
+		t.Fatalf("legacy SPKI credential must authenticate: %v", err)
+	}
+	if got.SignCount != 5 || !got.UserVerified() {
+		t.Fatalf("verified data = %+v", got)
 	}
 }
 
 func TestVerifyAssertionRejects(t *testing.T) {
 	key, spki := testKey(t)
-	otherKey, _ := testKey(t)
-
-	base := func() AssertionInput {
-		ad := authData(testRPID, FlagUserPresent, 5)
-		cdj := clientDataJSON(t, "webauthn.get", "Q0hBTExFTkdF", testOrigin)
-		return AssertionInput{
-			AuthenticatorData: ad,
-			ClientDataJSON:    cdj,
-			Signature:         signAssertion(t, key, ad, cdj),
-			PublicKeySPKI:     spki,
-			Challenge:         "Q0hBTExFTkdF",
-			Origin:            testOrigin,
-			RPID:              testRPID,
-			StoredSignCount:   4,
-		}
-	}
+	otherKey, otherSPKI := testKey(t)
 
 	cases := map[string]func(*AssertionInput){
-		"wrong challenge": func(in *AssertionInput) { in.Challenge = "T1RIRVJT" },
+		"wrong challenge": func(in *AssertionInput) { in.Challenge = "T1RIRVItQ0hBTExFTkdFLU9USEVSUw" },
 		"wrong origin":    func(in *AssertionInput) { in.Origin = "https://evil.example.com" },
 		"wrong rp id":     func(in *AssertionInput) { in.RPID = "evil.example.com" },
-		"wrong key": func(in *AssertionInput) {
-			spki, err := x509.MarshalPKIXPublicKey(&otherKey.PublicKey)
-			if err != nil {
-				t.Fatalf("MarshalPKIXPublicKey: %v", err)
-			}
-			in.PublicKeySPKI = spki
+		"wrong key":       func(in *AssertionInput) { in.PublicKeySPKI = otherSPKI },
+		"bad signature": func(in *AssertionInput) {
+			in.Signature = signAssertion(t, otherKey, in.AuthenticatorData, in.ClientDataJSON)
 		},
 		"tampered authenticator data": func(in *AssertionInput) {
 			in.AuthenticatorData = authData(testRPID, FlagUserPresent|FlagUserVerified, 5)
@@ -145,20 +138,24 @@ func TestVerifyAssertionRejects(t *testing.T) {
 		"replayed sign count":  func(in *AssertionInput) { in.StoredSignCount = 5 },
 		"regressed sign count": func(in *AssertionInput) { in.StoredSignCount = 9 },
 		"user not present": func(in *AssertionInput) {
-			ad := authData(testRPID, 0x00, 5)
-			in.AuthenticatorData = ad
-			in.Signature = signAssertion(t, key, ad, in.ClientDataJSON)
+			in.AuthenticatorData = authData(testRPID, 0x00, 5)
+			in.Signature = signAssertion(t, key, in.AuthenticatorData, in.ClientDataJSON)
 		},
 		"wrong ceremony type": func(in *AssertionInput) {
-			cdj := clientDataJSON(t, "webauthn.create", "Q0hBTExFTkdF", testOrigin)
-			in.ClientDataJSON = cdj
-			in.Signature = signAssertion(t, key, in.AuthenticatorData, cdj)
+			in.ClientDataJSON = clientDataJSON(t, "webauthn.create", testChallenge, testOrigin)
+			in.Signature = signAssertion(t, key, in.AuthenticatorData, in.ClientDataJSON)
+		},
+		"non-P-256 stored key":       func(in *AssertionInput) { in.PublicKeySPKI = []byte("not a key") },
+		"backup eligibility changed": func(in *AssertionInput) { in.BackupEligible = true },
+		"cross-origin client data": func(in *AssertionInput) {
+			in.ClientDataJSON = []byte(`{"type":"webauthn.get","challenge":"` + testChallenge + `","origin":"` + testOrigin + `","crossOrigin":true}`)
+			in.Signature = signAssertion(t, key, in.AuthenticatorData, in.ClientDataJSON)
 		},
 	}
 
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			in := base()
+			in := assertion(t, key, spki, FlagUserPresent, 5, 4)
 			mutate(&in)
 			if _, err := VerifyAssertion(in); err == nil {
 				t.Fatalf("expected VerifyAssertion to reject %s", name)
@@ -169,91 +166,88 @@ func TestVerifyAssertionRejects(t *testing.T) {
 
 func TestVerifyAssertionAcceptsBothCountersZero(t *testing.T) {
 	key, spki := testKey(t)
-	ad := authData(testRPID, FlagUserPresent, 0)
-	cdj := clientDataJSON(t, "webauthn.get", "Q0hBTExFTkdF", testOrigin)
-
-	if _, err := VerifyAssertion(AssertionInput{
-		AuthenticatorData: ad,
-		ClientDataJSON:    cdj,
-		Signature:         signAssertion(t, key, ad, cdj),
-		PublicKeySPKI:     spki,
-		Challenge:         "Q0hBTExFTkdF",
-		Origin:            testOrigin,
-		RPID:              testRPID,
-		StoredSignCount:   0,
-	}); err != nil {
+	if _, err := VerifyAssertion(assertion(t, key, spki, FlagUserPresent, 0, 0)); err != nil {
 		t.Fatalf("an authenticator that never increments its counter must be accepted: %v", err)
 	}
 }
 
-// TestVerifyAssertionBackupEligibleCounterExemption proves both halves of the fix: a
-// backup-eligible (cloud-synced) credential must authenticate even when a sibling device's
-// counter fails to advance past the stored value, while a device-bound credential must
-// still be rejected in that same situation — that is where clone detection means something.
+// A synced sibling of a backup-eligible credential may report a lower counter than the one
+// on record; a device-bound credential doing the same is a clone or replay.
 func TestVerifyAssertionBackupEligibleCounterExemption(t *testing.T) {
 	key, spki := testKey(t)
-	cdj := clientDataJSON(t, "webauthn.get", "Q0hBTExFTkdF", testOrigin)
-	// A sibling device reports a lower counter than the one on record — the normal case
-	// for a passkey synced across several devices that each keep their own counter.
-	ad := authData(testRPID, FlagUserPresent, 2)
 
-	base := AssertionInput{
-		AuthenticatorData: ad,
-		ClientDataJSON:    cdj,
-		Signature:         signAssertion(t, key, ad, cdj),
-		PublicKeySPKI:     spki,
-		Challenge:         "Q0hBTExFTkdF",
-		Origin:            testOrigin,
-		RPID:              testRPID,
-		StoredSignCount:   9,
-	}
-
-	backupEligible := base
-	backupEligible.BackupEligible = true
-	if _, err := VerifyAssertion(backupEligible); err != nil {
+	synced := assertion(t, key, spki, FlagUserPresent|FlagBackupEligible|FlagBackupState, 2, 9)
+	synced.BackupEligible = true
+	if _, err := VerifyAssertion(synced); err != nil {
 		t.Fatalf("a backup-eligible credential must authenticate despite a non-advancing counter: %v", err)
 	}
 
-	deviceBound := base
-	deviceBound.BackupEligible = false
+	deviceBound := assertion(t, key, spki, FlagUserPresent, 2, 9)
 	if _, err := VerifyAssertion(deviceBound); err == nil {
 		t.Fatal("a device-bound credential must still be rejected when its counter fails to advance")
 	}
 }
 
-func TestVerifyRegistrationRequiresUserPresence(t *testing.T) {
-	_, spki := testKey(t)
-	cdj := clientDataJSON(t, "webauthn.create", "Q0hBTExFTkdF", testOrigin)
-
-	in := RegistrationInput{
-		AuthenticatorData: authData(testRPID, FlagUserPresent, 0),
-		ClientDataJSON:    cdj,
-		PublicKeySPKI:     spki,
-		Challenge:         "Q0hBTExFTkdF",
-		Origin:            testOrigin,
-		RPID:              testRPID,
+func TestVerifyRegistration(t *testing.T) {
+	key, spki := testKey(t)
+	point, err := key.PublicKey.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
 	}
-	if _, err := VerifyRegistration(in); err != nil {
+	es256, err := webauthncbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: point[1:33], -3: point[33:]})
+	if err != nil {
+		t.Fatalf("marshal COSE key: %v", err)
+	}
+	base := func() RegistrationInput {
+		return RegistrationInput{
+			CredentialID:      testCredID,
+			AttestationObject: attestationObject(t, testRPID, FlagUserPresent|FlagBackupEligible, es256),
+			ClientDataJSON:    clientDataJSON(t, "webauthn.create", testChallenge, testOrigin),
+			UserHandle:        []byte("user-1"),
+			Challenge:         testChallenge,
+			Origin:            testOrigin,
+			RPID:              testRPID,
+		}
+	}
+
+	got, err := VerifyRegistration(base())
+	if err != nil {
 		t.Fatalf("VerifyRegistration: %v", err)
 	}
-
-	in.AuthenticatorData = authData(testRPID, 0x00, 0)
-	if _, err := VerifyRegistration(in); err == nil {
-		t.Fatal("expected registration without the user-present bit to be rejected")
+	if string(got.PublicKeySPKI) != string(spki) || !got.BackupEligible() || got.UserVerified() {
+		t.Fatalf("registration = %+v", got)
 	}
-}
 
-func TestVerifyRegistrationRejectsNonES256Key(t *testing.T) {
-	cdj := clientDataJSON(t, "webauthn.create", "Q0hBTExFTkdF", testOrigin)
-	if _, err := VerifyRegistration(RegistrationInput{
-		AuthenticatorData: authData(testRPID, FlagUserPresent, 0),
-		ClientDataJSON:    cdj,
-		PublicKeySPKI:     []byte("not a key"),
-		Challenge:         "Q0hBTExFTkdF",
-		Origin:            testOrigin,
-		RPID:              testRPID,
-	}); err == nil {
-		t.Fatal("expected an unparseable public key to be rejected")
+	// The key registered here verifies an assertion, so storage round-trips through SPKI.
+	if _, err := VerifyAssertion(assertion(t, key, got.PublicKeySPKI, FlagUserPresent, 1, got.SignCount)); err != nil {
+		t.Fatalf("registered key does not verify: %v", err)
+	}
+
+	ed25519 := []byte{0xa4, 0x01, 0x01, 0x03, 0x27, 0x20, 0x06, 0x21, 0x58, 0x20}
+	ed25519 = append(ed25519, make([]byte, 32)...)
+	cases := map[string]func(*RegistrationInput){
+		"wrong challenge": func(in *RegistrationInput) { in.Challenge = "T1RIRVItQ0hBTExFTkdFLU9USEVSUw" },
+		"wrong origin":    func(in *RegistrationInput) { in.Origin = "https://evil.example.com" },
+		"wrong rp id":     func(in *RegistrationInput) { in.RPID = "evil.example.com" },
+		"user not present": func(in *RegistrationInput) {
+			in.AttestationObject = attestationObject(t, testRPID, 0x00, es256)
+		},
+		"credential id not attested": func(in *RegistrationInput) { in.CredentialID = []byte("credential-0002") },
+		"wrong ceremony type": func(in *RegistrationInput) {
+			in.ClientDataJSON = clientDataJSON(t, "webauthn.get", testChallenge, testOrigin)
+		},
+		"non-ES256 key": func(in *RegistrationInput) {
+			in.AttestationObject = attestationObject(t, testRPID, FlagUserPresent, ed25519)
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := base()
+			mutate(&in)
+			if _, err := VerifyRegistration(in); err == nil {
+				t.Fatalf("expected VerifyRegistration to reject %s", name)
+			}
+		})
 	}
 }
 
@@ -277,16 +271,5 @@ func TestRPIDFromIssuer(t *testing.T) {
 
 	if _, _, err := RPIDFromIssuer("not a url"); err == nil {
 		t.Fatal("expected an error for an issuer URL with no host")
-	}
-}
-
-func TestVerifyClientDataRejectsBase64Variants(t *testing.T) {
-	// The challenge is compared as the exact base64url string the browser echoes. A
-	// padded or standard-alphabet variant of the same bytes is a different string and
-	// must not be accepted, or a lookup keyed on the challenge could miss.
-	cdj := clientDataJSON(t, "webauthn.get", "Q0hBTExFTkdFUw", testOrigin)
-	padded := base64.StdEncoding.EncodeToString([]byte("CHALLENGES"))
-	if err := VerifyClientData(cdj, "webauthn.get", padded, testOrigin); err == nil {
-		t.Fatal("expected a padded challenge encoding to be rejected")
 	}
 }

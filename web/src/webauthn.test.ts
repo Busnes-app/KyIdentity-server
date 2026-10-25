@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { fromBase64Url, toBase64Url } from './webauthn';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createPasskey, fromBase64Url, toBase64Url } from './webauthn';
 
 describe('base64url codecs', () => {
   it('round-trips arbitrary bytes', () => {
@@ -26,5 +26,25 @@ describe('base64url codecs', () => {
 
   it('decodes a string the server would have produced', () => {
     expect(new TextDecoder().decode(fromBase64Url('Q0hBTExFTkdF'))).toBe('CHALLENGE');
+  });
+});
+
+describe('createPasskey', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('sends the attestation object the server verifies', async () => {
+    const create = vi.fn().mockResolvedValue({
+      rawId: new Uint8Array([1, 2]).buffer,
+      response: { attestationObject: new Uint8Array([3, 4]).buffer, clientDataJSON: new Uint8Array([5]).buffer },
+    });
+    vi.stubGlobal('navigator', { credentials: { create } });
+
+    const finished = await createPasskey({
+      challenge: 'Q0hBTExFTkdF', rpId: 'auth.example.com', rpName: 'KyIdentity',
+      userHandle: 'dXNlcg', username: 'user', excludeCredentials: [],
+    });
+
+    expect(finished).toEqual({ credentialId: 'AQI', attestationObject: 'AwQ', clientDataJSON: 'BQ' });
+    expect(create.mock.calls[0][0].publicKey.attestation).toBe('none');
   });
 });
