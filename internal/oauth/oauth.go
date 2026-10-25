@@ -548,15 +548,9 @@ func hasScope(scope, want string) bool {
 // verifyAccessToken validates a bearer token as an access token issued by this server and
 // still present on the revocation list.
 func (e *Engine) verifyAccessToken(tokenString string) (map[string]any, error) {
-	claims, err := e.keyManager.VerifyJWT(tokenString)
+	claims, err := e.keyManager.VerifyJWT(tokenString, e.issuerURL, "access_token")
 	if err != nil {
 		return nil, err
-	}
-	if claims["token_use"] != "access_token" {
-		return nil, errors.New("token is not an access token")
-	}
-	if claims["iss"] != e.issuerURL {
-		return nil, errors.New("token was issued by a different issuer")
 	}
 
 	jti, _ := claims["jti"].(string)
@@ -661,9 +655,9 @@ func (e *Engine) RevokeToken(tokenString, clientID, clientSecret string) error {
 
 	// RFC 7009 §2.2: an invalid token is not an error, to avoid an oracle. Only an
 	// unauthenticated caller is rejected, and that already happened above.
-	claims, err := e.keyManager.VerifyJWT(tokenString)
+	claims, err := e.keyManager.VerifyJWT(tokenString, e.issuerURL, "access_token")
 	if err != nil {
-		// Not a JWT: perhaps a refresh token, which ends its whole family.
+		// Not an access token: perhaps a refresh token, which ends its whole family.
 		return e.store.RevokeRefreshFamily(crypto.HashSHA256(tokenString), clientID)
 	}
 	if claims["aud"] != clientID {

@@ -65,7 +65,7 @@ func TestAppStepUpWithMaxAgeAndACR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := srv.keyManager.VerifyJWT(resp.IDToken)
+	claims, err := srv.keyManager.VerifyJWT(resp.IDToken, srv.cfg.IssuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}

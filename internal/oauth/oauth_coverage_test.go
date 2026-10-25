@@ -101,7 +101,7 @@ func TestRevokeTokenEndsAccessTokenOnlyForItsOwnClient(t *testing.T) {
 func TestUserinfoRefusesMalformedAndOrphanedTokens(t *testing.T) {
 	f := newRefreshFixture(t)
 	resp := f.login("openid profile")
-	claims, err := f.e.keyManager.VerifyJWT(resp.AccessToken)
+	claims, err := f.e.keyManager.VerifyJWT(resp.AccessToken, f.e.issuerURL, "access_token")
 	if err != nil {
 		t.Fatal(err)
 	}

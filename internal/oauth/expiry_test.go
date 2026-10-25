@@ -34,7 +34,7 @@ func TestTokensEndWithTheAccessTheyCarry(t *testing.T) {
 	if resp.ExpiresIn <= 0 || resp.ExpiresIn > 300 {
 		t.Fatalf("expires_in = %d, want at most the grant's 300s", resp.ExpiresIn)
 	}
-	claims, err := e.keyManager.VerifyJWT(resp.IDToken)
+	claims, err := e.keyManager.VerifyJWT(resp.IDToken, e.issuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}

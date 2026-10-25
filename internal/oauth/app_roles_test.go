@@ -28,7 +28,7 @@ func exchangeFor(t *testing.T, e *Engine, db *store.Store, user *store.User, cli
 	if err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
-	claims, err := e.keyManager.VerifyJWT(resp.IDToken)
+	claims, err := e.keyManager.VerifyJWT(resp.IDToken, e.issuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}

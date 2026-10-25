@@ -2,13 +2,9 @@ package oauth
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/url"
 	"strconv"
 	"strings"
@@ -16,6 +12,7 @@ import (
 
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
@@ -94,80 +91,61 @@ func registeredOrigin(redirectURIsJSON, origin string) bool {
 	return false
 }
 
-// parseDeviceAssertion splits a compact JWS and pins the header to exactly what
-// KyAuth emits. It verifies nothing about the signature; that needs the device row.
-func parseDeviceAssertion(compact string) (*deviceAssertion, []byte, []byte, error) {
-	if len(compact) > maxAssertionLen {
-		return nil, nil, nil, errors.New("assertion too long")
-	}
-	parts := strings.Split(compact, ".")
-	if len(parts) != 3 {
-		return nil, nil, nil, errors.New("assertion is not a compact JWS")
-	}
-	headerJSON, err := base64.RawURLEncoding.Strict().DecodeString(parts[0])
-	if err != nil {
-		return nil, nil, nil, errors.New("bad header encoding")
-	}
-	var header map[string]json.RawMessage
-	if err := json.Unmarshal(headerJSON, &header); err != nil {
-		return nil, nil, nil, errors.New("bad header")
-	}
-	var alg, typ, kid string
-	_ = json.Unmarshal(header["alg"], &alg)
-	_ = json.Unmarshal(header["typ"], &typ)
-	_ = json.Unmarshal(header["kid"], &kid)
-	if alg != "ES256" || typ != "JWT" || kid == "" || len(header) != 3 {
-		return nil, nil, nil, errors.New("header must be exactly alg=ES256, typ=JWT, kid")
-	}
-	claimsJSON, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
-	if err != nil {
-		return nil, nil, nil, errors.New("bad claims encoding")
-	}
-	var c struct {
-		Iss      string `json:"iss"`
-		Sub      string `json:"sub"`
-		Aud      string `json:"aud"`
-		ClientID string `json:"client_id"`
-		Origin   string `json:"origin"`
-		JTI      string `json:"jti"`
-		Iat      int64  `json:"iat"`
-		Exp      int64  `json:"exp"`
-	}
-	if err := json.Unmarshal(claimsJSON, &c); err != nil {
-		return nil, nil, nil, errors.New("bad claims")
-	}
-	if c.Iss != "device:"+kid {
-		return nil, nil, nil, errors.New("iss does not name the kid device")
-	}
-	if c.Sub == "" || c.Aud == "" || c.ClientID == "" || c.JTI == "" || c.Iat == 0 || c.Exp == 0 {
-		return nil, nil, nil, errors.New("missing claim")
-	}
-	origin, ok := canonicalOrigin(c.Origin)
-	if !ok {
-		return nil, nil, nil, errors.New("origin must be a bare https origin")
-	}
-	sig, err := base64.RawURLEncoding.Strict().DecodeString(parts[2])
-	if err != nil {
-		return nil, nil, nil, errors.New("bad signature encoding")
-	}
-	a := &deviceAssertion{DeviceID: kid, Subject: c.Sub, Audience: c.Aud, ClientID: c.ClientID, Origin: origin, JTI: c.JTI, IssuedAt: c.Iat, ExpiresAt: c.Exp}
-	return a, []byte(parts[0] + "." + parts[1]), sig, nil
+type assertionClaims struct {
+	jwt.RegisteredClaims
+	ClientID string `json:"client_id"`
+	Origin   string `json:"origin"`
 }
 
-// verifyES256 checks a JWS raw r||s signature over signingInput. DER input is
-// refused by length; r and s outside [1, n) are refused before the curve math.
-func verifyES256(pub *ecdsa.PublicKey, signingInput, sig []byte) bool {
-	if pub == nil || pub.Curve != elliptic.P256() || len(sig) != 64 {
-		return false
+// parseDeviceAssertion verifies a compact JWS against the key that key returns for its
+// kid and subject, pinning the header to exactly what KyAuth emits. exp and iat are
+// checked against now with deviceAssertionSkew; aud must be audience.
+func parseDeviceAssertion(compact, audience string, now time.Time, key func(kid, sub string) (*ecdsa.PublicKey, error)) (*deviceAssertion, error) {
+	if len(compact) > maxAssertionLen {
+		return nil, errors.New("assertion too long")
 	}
-	r := new(big.Int).SetBytes(sig[:32])
-	s := new(big.Int).SetBytes(sig[32:])
-	n := elliptic.P256().Params().N
-	if r.Sign() <= 0 || s.Sign() <= 0 || r.Cmp(n) >= 0 || s.Cmp(n) >= 0 {
-		return false
+	var c assertionClaims
+	var kid, origin string
+	_, err := jwt.ParseWithClaims(compact, &c, func(t *jwt.Token) (any, error) {
+		kid, _ = t.Header["kid"].(string)
+		if t.Header["typ"] != "JWT" || kid == "" || len(t.Header) != 3 {
+			return nil, errors.New("header must be exactly alg=ES256, typ=JWT, kid")
+		}
+		if c.Issuer != "device:"+kid {
+			return nil, errors.New("iss does not name the kid device")
+		}
+		if c.Subject == "" || c.ClientID == "" || c.ID == "" || c.IssuedAt == nil || c.IssuedAt.Unix() == 0 || len(c.Audience) != 1 {
+			return nil, errors.New("missing claim")
+		}
+		var ok bool
+		if origin, ok = canonicalOrigin(c.Origin); !ok {
+			return nil, errors.New("origin must be a bare https origin")
+		}
+		return key(kid, c.Subject)
+	},
+		jwt.WithValidMethods([]string{"ES256"}),
+		jwt.WithStrictDecoding(),
+		jwt.WithAudience(audience),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithLeeway(deviceAssertionSkew),
+		jwt.WithTimeFunc(func() time.Time { return now }),
+	)
+	// The checks below run only once the signature verified, so the reasons stay audit-only.
+	switch {
+	case err == nil:
+	case errors.Is(err, jwt.ErrTokenSignatureInvalid):
+		return nil, errAssertionSignature
+	case errors.Is(err, jwt.ErrTokenInvalidAudience):
+		return nil, errAssertionAudience
+	case errors.Is(err, jwt.ErrTokenUsedBeforeIssued):
+		return nil, errAssertionFuture
+	case errors.Is(err, jwt.ErrTokenExpired):
+		return nil, errAssertionExpired
+	default:
+		return nil, err
 	}
-	digest := sha256.Sum256(signingInput)
-	return ecdsa.Verify(pub, digest[:], r, s)
+	return &deviceAssertion{DeviceID: kid, Subject: c.Subject, Audience: c.Audience[0], ClientID: c.ClientID, Origin: origin, JTI: c.ID, IssuedAt: c.IssuedAt.Unix(), ExpiresAt: c.ExpiresAt.Unix()}, nil
 }
 
 const (
@@ -216,34 +194,32 @@ var beforeDeviceTokenRecord = func() {}
 // returned identity is empty until the signature has verified, and Username is
 // filled once the user row is loaded.
 func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string) (*TokenResponse, DeviceSignOnActor, error) {
-	a, input, sig, err := parseDeviceAssertion(compact)
+	now := time.Now().UTC()
+	var dev *store.NativeDevice
+	a, err := parseDeviceAssertion(compact, e.issuerURL+"/oauth/token", now, func(kid, sub string) (*ecdsa.PublicKey, error) {
+		d, err := e.store.GetNativeDevice(kid)
+		if err != nil {
+			return nil, err
+		}
+		if d == nil || d.UserID != sub || d.PublicKey == "" {
+			return nil, errUnknownDevice
+		}
+		pub, err := crypto.ParseP256PublicKey(d.PublicKey)
+		if err != nil {
+			return nil, errAssertionSignature
+		}
+		dev = d
+		return pub, nil
+	})
 	if err != nil {
 		return nil, DeviceSignOnActor{}, err
 	}
-	now := time.Now().UTC()
 	iat, assertionExp := time.Unix(a.IssuedAt, 0), time.Unix(a.ExpiresAt, 0)
 	switch {
 	case a.ClientID != clientID:
 		return nil, DeviceSignOnActor{}, errAssertionClient
-	case a.Audience != e.issuerURL+"/oauth/token":
-		return nil, DeviceSignOnActor{}, errAssertionAudience
-	case iat.After(now.Add(deviceAssertionSkew)):
-		return nil, DeviceSignOnActor{}, errAssertionFuture
-	case assertionExp.Before(now.Add(-deviceAssertionSkew)):
-		return nil, DeviceSignOnActor{}, errAssertionExpired
 	case !assertionExp.After(iat) || assertionExp.Sub(iat) > deviceAssertionMaxWindow:
 		return nil, DeviceSignOnActor{}, errAssertionWindow
-	}
-	dev, err := e.store.GetNativeDevice(a.DeviceID)
-	if err != nil {
-		return nil, DeviceSignOnActor{}, err
-	}
-	if dev == nil || dev.UserID != a.Subject || dev.PublicKey == "" {
-		return nil, DeviceSignOnActor{}, errUnknownDevice
-	}
-	pub, err := crypto.ParseP256PublicKey(dev.PublicKey)
-	if err != nil || !verifyES256(pub, input, sig) {
-		return nil, DeviceSignOnActor{}, errAssertionSignature
 	}
 	// Past this point the device is authenticated, so its identity is safe to audit.
 	who := DeviceSignOnActor{DeviceID: dev.ID, UserID: dev.UserID, Origin: a.Origin}

@@ -365,7 +365,7 @@ func TestNonceIsEchoedIntoIDToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := e.keyManager.VerifyJWT(resp.IDToken)
+	claims, err := e.keyManager.VerifyJWT(resp.IDToken, e.issuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}

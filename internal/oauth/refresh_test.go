@@ -173,8 +173,8 @@ func TestRefreshedIDTokenKeepsOriginalLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, _ := f.e.keyManager.VerifyJWT(first.IDToken)
-	b, err := f.e.keyManager.VerifyJWT(second.IDToken)
+	a, _ := f.e.keyManager.VerifyJWT(first.IDToken, f.e.issuerURL, "id_token")
+	b, err := f.e.keyManager.VerifyJWT(second.IDToken, f.e.issuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}

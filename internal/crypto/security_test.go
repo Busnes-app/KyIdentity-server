@@ -72,11 +72,11 @@ func TestVerifyJWTRejectsTokenWithoutExp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := km.SignJWT(map[string]any{"sub": "u1"})
+	token, err := km.SignJWT(map[string]any{"sub": "u1", "iss": testIss, "token_use": "access_token"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := km.VerifyJWT(token); err == nil {
+	if _, err := km.VerifyJWT(token, testIss, "access_token"); err == nil {
 		t.Error("a token with no exp claim was accepted; it would never expire")
 	}
 }
@@ -86,12 +86,12 @@ func TestVerifyJWTRejectsExpiredAndAcceptsLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expired, _ := km.SignJWT(map[string]any{"sub": "u1", "exp": 1000})
-	if _, err := km.VerifyJWT(expired); err == nil {
+	expired, _ := km.SignJWT(map[string]any{"sub": "u1", "iss": testIss, "token_use": "access_token", "exp": 1000})
+	if _, err := km.VerifyJWT(expired, testIss, "access_token"); err == nil {
 		t.Error("expired token accepted")
 	}
-	live, _ := km.SignJWT(map[string]any{"sub": "u1", "exp": 1 << 40})
-	if _, err := km.VerifyJWT(live); err != nil {
+	live, _ := km.SignJWT(map[string]any{"sub": "u1", "iss": testIss, "token_use": "access_token", "exp": 1 << 40})
+	if _, err := km.VerifyJWT(live, testIss, "access_token"); err != nil {
 		t.Errorf("live token rejected: %v", err)
 	}
 }

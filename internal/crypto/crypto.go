@@ -1,7 +1,6 @@
 package crypto
 
 import (
-	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -14,14 +13,14 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
 	"strings"
-	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // GenerateRandomBytes returns cryptographically secure random bytes.
@@ -373,84 +372,52 @@ func (m *JWTKeyManager) SignJWT(claims map[string]any) (string, error) {
 // SignJWTWithType signs claims under an explicit `typ` header, so tokens with a different
 // purpose (logout tokens are `logout+jwt`) are distinguishable before their claims are read.
 func (m *JWTKeyManager) SignJWTWithType(typ string, claims map[string]any) (string, error) {
-	header := map[string]any{
-		"typ": typ,
-		"alg": "RS256",
-		"kid": m.KeyID,
-	}
-
-	headerJSON, err := json.Marshal(header)
-	if err != nil {
-		return "", err
-	}
-	claimsJSON, err := json.Marshal(claims)
-	if err != nil {
-		return "", err
-	}
-
-	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
-	claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
-
-	signingInput := headerB64 + "." + claimsB64
-	hashed := sha256.Sum256([]byte(signingInput))
-
-	sig, err := rsa.SignPKCS1v15(rand.Reader, m.PrivateKey, crypto.SHA256, hashed[:])
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims(claims))
+	token.Header["typ"] = typ
+	token.Header["kid"] = m.KeyID
+	signed, err := token.SignedString(m.PrivateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign JWT: %w", err)
 	}
-
-	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
-	return signingInput + "." + sigB64, nil
+	return signed, nil
 }
 
-// VerifyJWT validates the signature and expiration of an RS256 signed JWT.
-func (m *JWTKeyManager) VerifyJWT(tokenString string) (map[string]any, error) {
-	return m.verifyJWT(tokenString, false)
+// VerifyJWT verifies an RS256 token signed by this key: exp is required and must not have
+// passed, and iss and token_use must equal the given values.
+func (m *JWTKeyManager) VerifyJWT(tokenString, issuer, tokenUse string) (map[string]any, error) {
+	return m.verifyJWT(tokenString, issuer, tokenUse, false)
 }
 
-// VerifyExpiredJWT validates the signature of an RS256 signed JWT but tolerates a past
-// exp. It exists for RP-initiated logout, where an ID token hint identifies a login
-// after the token itself has expired; it must never gate access.
-func (m *JWTKeyManager) VerifyExpiredJWT(tokenString string) (map[string]any, error) {
-	return m.verifyJWT(tokenString, true)
+// VerifyExpiredJWT is VerifyJWT tolerating a past exp. It exists for RP-initiated logout,
+// where an ID token hint identifies a login after the token itself has expired; it must
+// never gate access.
+func (m *JWTKeyManager) VerifyExpiredJWT(tokenString, issuer, tokenUse string) (map[string]any, error) {
+	return m.verifyJWT(tokenString, issuer, tokenUse, true)
 }
 
-func (m *JWTKeyManager) verifyJWT(tokenString string, allowExpired bool) (map[string]any, error) {
-	parts := strings.Split(tokenString, ".")
-	if len(parts) != 3 {
-		return nil, errors.New("invalid token format")
+func (m *JWTKeyManager) verifyJWT(tokenString, issuer, tokenUse string, allowExpired bool) (map[string]any, error) {
+	if issuer == "" || tokenUse == "" {
+		return nil, errors.New("verifier needs an issuer and token_use")
 	}
-
-	signingInput := parts[0] + "." + parts[1]
-	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return nil, errors.New("invalid signature encoding")
+	opts := []jwt.ParserOption{jwt.WithValidMethods([]string{"RS256"}), jwt.WithExpirationRequired(), jwt.WithIssuer(issuer)}
+	if allowExpired {
+		// This also drops the exp-required and issuer options; both are rechecked below.
+		opts = append(opts, jwt.WithoutClaimsValidation())
 	}
-
-	hashed := sha256.Sum256([]byte(signingInput))
-	if err := rsa.VerifyPKCS1v15(m.PublicKey, crypto.SHA256, hashed[:], sig); err != nil {
-		return nil, errors.New("invalid token signature")
+	claims := jwt.MapClaims{}
+	if _, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (any, error) { return m.PublicKey, nil }, opts...); err != nil {
+		return nil, err
 	}
-
-	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, errors.New("invalid claims encoding")
-	}
-
-	var claims map[string]any
-	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
-		return nil, errors.New("invalid claims json")
-	}
-
 	// A missing exp is not "no expiry", it is a malformed token. Fail closed.
-	exp, ok := claims["exp"].(float64)
-	if !ok {
+	if exp, err := claims.GetExpirationTime(); err != nil || exp == nil {
 		return nil, errors.New("token has no exp claim")
 	}
-	if !allowExpired && time.Now().Unix() > int64(exp) {
-		return nil, errors.New("token expired")
+	if claims["iss"] != issuer {
+		return nil, errors.New("token was issued by a different issuer")
 	}
-
+	if claims["token_use"] != tokenUse {
+		return nil, fmt.Errorf("token is not an %s", tokenUse)
+	}
 	return claims, nil
 }
 

@@ -100,9 +100,10 @@ func TestRSAKeyAndJWTSigning(t *testing.T) {
 	}
 
 	claims := map[string]any{
-		"sub": "user-uuid-123",
-		"iss": "http://localhost:5867",
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"sub":       "user-uuid-123",
+		"iss":       "http://localhost:5867",
+		"exp":       time.Now().Add(1 * time.Hour).Unix(),
+		"token_use": "access_token",
 	}
 
 	tokenStr, err := km.SignJWT(claims)
@@ -110,7 +111,7 @@ func TestRSAKeyAndJWTSigning(t *testing.T) {
 		t.Fatalf("SignJWT failed: %v", err)
 	}
 
-	parsedClaims, err := km.VerifyJWT(tokenStr)
+	parsedClaims, err := km.VerifyJWT(tokenStr, "http://localhost:5867", "access_token")
 	if err != nil {
 		t.Fatalf("VerifyJWT failed: %v", err)
 	}
