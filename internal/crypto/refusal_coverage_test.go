@@ -11,12 +11,16 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // writePEM writes one PEM block to a fresh key file and returns its path.
@@ -108,8 +112,11 @@ func signRaw(t *testing.T, m *JWTKeyManager, header, claims string) string {
 	return input + "." + base64.RawURLEncoding.EncodeToString(sig)
 }
 
-// A token is accepted only when it has three parts, a valid signature by this key, JSON
-// claims and an exp; the expired-tolerant variant relaxes exp and nothing else.
+const testIss = "https://id.example"
+
+// A token is accepted only when it has three parts, a valid RS256 signature by this key,
+// JSON claims, an exp, and the expected iss and token_use; the expired-tolerant variant
+// relaxes exp and nothing else.
 func TestVerifyJWTRefusals(t *testing.T) {
 	dir := t.TempDir()
 	m, err := LoadOrCreateRSAKey(filepath.Join(dir, "a.key"))
@@ -120,44 +127,111 @@ func TestVerifyJWTRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := m.SignJWT(map[string]any{"sub": "u", "exp": time.Now().Add(time.Hour).Unix()})
-	if err != nil {
-		t.Fatal(err)
+	claims := func(mutate func(map[string]any)) map[string]any {
+		c := map[string]any{"iss": testIss, "sub": "u", "token_use": "access_token", "exp": time.Now().Add(time.Hour).Unix()}
+		if mutate != nil {
+			mutate(c)
+		}
+		return c
 	}
-	foreign, err := other.SignJWT(map[string]any{"sub": "u", "exp": time.Now().Add(time.Hour).Unix()})
-	if err != nil {
-		t.Fatal(err)
+	sign := func(m *JWTKeyManager, c map[string]any) string {
+		token, err := m.SignJWT(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
 	}
+	live := sign(m, claims(nil))
 	parts := strings.Split(live, ".")
-	tampered := parts[0] + "." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"admin","exp":9999999999}`)) + "." + parts[2]
-	cases := map[string]struct {
-		token string
-		want  string
-	}{
-		"two parts":         {parts[0] + "." + parts[1], "invalid token format"},
-		"bad sig encoding":  {parts[0] + "." + parts[1] + ".!!!", "invalid signature encoding"},
-		"other key":         {foreign, "invalid token signature"},
-		"tampered claims":   {tampered, "invalid token signature"},
-		"claims not base64": {signRawInput(t, m, parts[0]+".!!!"), "invalid claims encoding"},
-		"claims not JSON":   {signRaw(t, m, `{"alg":"RS256"}`, "not json"), "invalid claims json"},
-		"string exp":        {signRaw(t, m, `{"alg":"RS256"}`, `{"exp":"tomorrow"}`), "no exp claim"},
+	tampered := parts[0] + "." + base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"`+testIss+`","sub":"admin","token_use":"access_token","exp":9999999999}`)) + "." + parts[2]
+	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: mustMarshalPKIX(t, m.PublicKey)})
+	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	es256 := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims(claims(nil)))
+	cases := map[string]string{
+		"two parts":         parts[0] + "." + parts[1],
+		"bad sig encoding":  parts[0] + "." + parts[1] + ".!!!",
+		"other key":         sign(other, claims(nil)),
+		"tampered claims":   tampered,
+		"claims not base64": signRawInput(t, m, parts[0]+".!!!"),
+		"claims not JSON":   signRaw(t, m, `{"alg":"RS256"}`, "not json"),
+		"string exp":        signRaw(t, m, `{"alg":"RS256"}`, `{"iss":"`+testIss+`","token_use":"access_token","exp":"tomorrow"}`),
+		"no exp":            sign(m, claims(func(c map[string]any) { delete(c, "exp") })),
+		"wrong iss":         sign(m, claims(func(c map[string]any) { c["iss"] = "https://evil.example" })),
+		"no iss":            sign(m, claims(func(c map[string]any) { delete(c, "iss") })),
+		"wrong token_use":   sign(m, claims(func(c map[string]any) { c["token_use"] = "id_token" })),
+		"no token_use":      sign(m, claims(func(c map[string]any) { delete(c, "token_use") })),
+		"alg none":          mustSign(t, jwt.NewWithClaims(jwt.SigningMethodNone, jwt.MapClaims(claims(nil))), jwt.UnsafeAllowNoneSignatureType),
+		"HS256 with pubkey": mustSign(t, jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims(claims(nil))), pubPEM),
+		"ES256":             mustSign(t, es256, ecKey),
+		"RS256 header lies": signRaw(t, m, `{"alg":"HS256"}`, `{"iss":"`+testIss+`","token_use":"access_token","exp":9999999999}`),
 	}
-	for name, c := range cases {
+	for name, token := range cases {
 		t.Run(name, func(t *testing.T) {
-			for _, verify := range []func(string) (map[string]any, error){m.VerifyJWT, m.VerifyExpiredJWT} {
-				if claims, err := verify(c.token); err == nil || claims != nil || !strings.Contains(err.Error(), c.want) {
-					t.Fatalf("claims %v err = %v, want %q", claims, err, c.want)
+			for _, verify := range []func(string, string, string) (map[string]any, error){m.VerifyJWT, m.VerifyExpiredJWT} {
+				if claims, err := verify(token, testIss, "access_token"); err == nil || claims != nil {
+					t.Fatalf("accepted: claims %v err %v", claims, err)
 				}
 			}
 		})
 	}
-	expired := signRaw(t, m, `{"alg":"RS256"}`, `{"sub":"u","exp":1}`)
-	if _, err := m.VerifyJWT(expired); err == nil || !strings.Contains(err.Error(), "token expired") {
+	for _, verify := range []func(string, string, string) (map[string]any, error){m.VerifyJWT, m.VerifyExpiredJWT} {
+		if _, err := verify(live, testIss, "access_token"); err != nil {
+			t.Fatalf("live token refused: %v", err)
+		}
+		if _, err := verify(live, "", "access_token"); err == nil {
+			t.Fatal("verified with no expected issuer")
+		}
+		if _, err := verify(live, testIss, ""); err == nil {
+			t.Fatal("verified with no expected token_use")
+		}
+	}
+	expired := sign(m, claims(func(c map[string]any) { c["exp"] = 1 }))
+	if _, err := m.VerifyJWT(expired, testIss, "access_token"); !errors.Is(err, jwt.ErrTokenExpired) {
 		t.Fatalf("VerifyJWT accepted an expired token: %v", err)
 	}
-	if claims, err := m.VerifyExpiredJWT(expired); err != nil || claims["sub"] != "u" {
+	if claims, err := m.VerifyExpiredJWT(expired, testIss, "access_token"); err != nil || claims["sub"] != "u" {
 		t.Fatalf("VerifyExpiredJWT refused a validly signed expired token: %v %v", claims, err)
 	}
+}
+
+// Tokens must stay byte-identical to the hand-rolled encoding verifiers already accept:
+// header {alg,kid,typ} and claims as sorted JSON, RS256 over the raw-url-base64 input.
+func TestSignJWTMatchesLegacyEncoding(t *testing.T) {
+	m, err := LoadOrCreateRSAKey(filepath.Join(t.TempDir(), "k.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := map[string]any{"iss": testIss, "sub": "u", "aud": "app", "exp": int64(1 << 40), "roles": []string{"a"}, "events": map[string]any{"x": map[string]any{}}}
+	for _, typ := range []string{"JWT", "logout+jwt"} {
+		got, err := m.SignJWTWithType(typ, claims)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, _ := json.Marshal(map[string]any{"typ": typ, "alg": "RS256", "kid": m.KeyID})
+		c, _ := json.Marshal(claims)
+		want := signRaw(t, m, string(h), string(c))
+		if got != want {
+			t.Fatalf("%s token changed encoding:\n got %s\nwant %s", typ, got, want)
+		}
+	}
+}
+
+func mustSign(t *testing.T, tok *jwt.Token, key any) string {
+	t.Helper()
+	s, err := tok.SignedString(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func mustMarshalPKIX(t *testing.T, pub any) []byte {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
 }
 
 // signRawInput signs an already-encoded signing input verbatim.

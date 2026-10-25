@@ -92,7 +92,7 @@ func TestExchangeDeviceAssertionBoundedByAccessGrant(t *testing.T) {
 	if resp.ExpiresIn <= 0 || resp.ExpiresIn > 300 {
 		t.Fatalf("expires_in %d outlives the 300s grant", resp.ExpiresIn)
 	}
-	claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken)
+	claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken, f.engine.issuerURL, "id_token")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,17 @@ import (
 
 	"github.com/Busnes-app/kyidentity-server/internal/netguard"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
+	"github.com/golang-jwt/jwt/v5"
 )
+
+// logoutClaims verifies a logout token as a relying party would: RS256 under this
+// engine's key, from this issuer, with an exp.
+func logoutClaims(e *Engine, token string) (jwt.MapClaims, error) {
+	claims := jwt.MapClaims{}
+	_, err := jwt.ParseWithClaims(token, claims, func(*jwt.Token) (any, error) { return e.keyManager.PublicKey, nil },
+		jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(e.issuerURL), jwt.WithExpirationRequired())
+	return claims, err
+}
 
 func jwtHeader(t *testing.T, token string) map[string]any {
 	t.Helper()
@@ -41,7 +51,7 @@ func TestLogoutTokenShapeAndSeparationFromLoginTokens(t *testing.T) {
 	if h := jwtHeader(t, token); h["typ"] != "logout+jwt" || h["alg"] != "RS256" {
 		t.Fatalf("header = %v", h)
 	}
-	claims, err := e.keyManager.VerifyJWT(token)
+	claims, err := logoutClaims(e, token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +141,7 @@ func TestBackchannelDeliveryPostsASignedLogoutTokenAndRecordsTheOutcome(t *testi
 		t.Fatalf("deliver: %v %v", did, err)
 	}
 	form := rcv.last.Load().(interface{ Get(string) string })
-	claims, err := e.keyManager.VerifyJWT(form.Get("logout_token"))
+	claims, err := logoutClaims(e, form.Get("logout_token"))
 	if err != nil || claims["sid"] != sid || claims["sub"] != u.ID || claims["aud"] != "app" {
 		t.Fatalf("posted token: %v %v", claims, err)
 	}

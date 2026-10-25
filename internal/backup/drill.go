@@ -245,15 +245,16 @@ func proveRestoreIsUsable(ctx context.Context, scratchDir string, recipe map[str
 			return
 		}
 		token, err := km.SignJWT(map[string]any{
-			"iss": "kyidentity-restore-drill",
-			"sub": "drill",
-			"exp": time.Now().Add(time.Minute).Unix(),
+			"iss":       "kyidentity-restore-drill",
+			"sub":       "drill",
+			"exp":       time.Now().Add(time.Minute).Unix(),
+			"token_use": "restore_drill",
 		})
 		if err != nil {
 			fail("Token Signing", fmt.Sprintf("Restored signing key could not sign a token: %v", err))
 			return
 		}
-		if _, err := km.VerifyJWT(token); err != nil {
+		if _, err := km.VerifyJWT(token, "kyidentity-restore-drill", "restore_drill"); err != nil {
 			fail("Token Signing", fmt.Sprintf("Token signed by the restored key did not verify: %v", err))
 			return
 		}
