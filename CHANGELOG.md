@@ -4,7 +4,8 @@
 
 ### Upgrading
 
-- `PUSH_RELAY_URL` and `APNS_RELAY_URL` now default to the Busnes.app relays (`https://fcm.relay.kysecurity.org` and `https://kyauth-push-apns.kysecurity.workers.dev`) when unset, so push MFA on KyAuth for Android and iOS works with no setup. Set one empty to turn it off. If self-registration with a default relay fails, startup logs it and continues without that transport; a relay you set yourself still fails startup. (#153)
+- `PUSH_RELAY_URL` and `APNS_RELAY_URL` now default to the Busnes.app relays (`https://fcm.relay.kyauth.busnes.app` and `https://apn.relay.kyauth.busnes.app`) when unset, so push MFA on KyAuth for Android and iOS works with no setup. Set one empty to turn it off. If self-registration with a default relay fails, startup logs it and continues without that transport; a relay you set yourself still fails startup. (#153)
+- The push relays moved to `https://fcm.relay.kyauth.busnes.app` (Android) and `https://apn.relay.kyauth.busnes.app` (iOS). KyIdentity's Android relay now runs on its own Worker: it shared KyPost's, whose one-key-per-public-IP rule let a KyPost server behind the same address revoke KyIdentity's key. Self-registered keys are now kept per relay host (`push-relay-<fcm|apns>-<host>.key` in the data directory), so an upgraded server registers with the new relay by itself; the old `push-relay-fcm.key` and `push-relay-apns.key` are ignored and can be deleted. Servers that set `PUSH_RELAY_URL`, `APNS_RELAY_URL` or a pinned key are unaffected.
 
 ### Changes
 

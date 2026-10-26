@@ -353,3 +353,25 @@ func TestRelaySenderRefusesBadDeviceKeys(t *testing.T) {
 		t.Fatalf("err = %v, want an encryption failure before any send", err)
 	}
 }
+
+// A key belongs to the relay host that issued it: a server moved to another relay registers
+// there instead of presenting the old relay's key, which the new one refuses as revoked.
+func TestRelayKeyFilePerHost(t *testing.T) {
+	dir := "/data"
+	for _, c := range []struct{ transport, url, want string }{
+		{"fcm", "https://fcm.relay.kyauth.busnes.app", "/data/push-relay-fcm-fcm.relay.kyauth.busnes.app.key"},
+		{"apns", "https://APN.relay.kyauth.busnes.app:443/", "/data/push-relay-apns-apn.relay.kyauth.busnes.app.key"},
+		{"fcm", "", "/data/push-relay-fcm.key"},
+		{"fcm", "https://../evil/", "/data/push-relay-fcm-...key"},
+	} {
+		if got := RelayKeyFile(dir, c.transport, c.url); got != c.want {
+			t.Errorf("RelayKeyFile(%q, %q) = %q, want %q", c.transport, c.url, got, c.want)
+		}
+		if filepath.Dir(RelayKeyFile(dir, c.transport, c.url)) != dir {
+			t.Errorf("RelayKeyFile(%q) leaves %s", c.url, dir)
+		}
+	}
+	if RelayKeyFile(dir, "fcm", "https://a.example") == RelayKeyFile(dir, "fcm", "https://b.example") {
+		t.Fatal("two relays share one key file")
+	}
+}

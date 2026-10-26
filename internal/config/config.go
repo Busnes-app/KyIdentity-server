@@ -141,8 +141,8 @@ var DefaultAppAttestAppIDs = []string{"TATYN4X57D.org.kysecurity.authenticator"}
 // without operator setup. The APNs relay is KyAuth's own: APNs rejects a token for another
 // app's bundle ID, so KyPost's relay cannot deliver to KyAuth.
 const (
-	DefaultPushRelayURL = "https://fcm.relay.kysecurity.org"
-	DefaultAPNSRelayURL = "https://kyauth-push-apns.kysecurity.workers.dev"
+	DefaultPushRelayURL = "https://fcm.relay.kyauth.busnes.app"
+	DefaultAPNSRelayURL = "https://apn.relay.kyauth.busnes.app"
 )
 
 var ubuntuAppIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*_[a-z0-9][a-z0-9+.-]*$`)

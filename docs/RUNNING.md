@@ -37,8 +37,8 @@ BOOTSTRAP_ADMIN_USER=admin
 # platform does not work (TOTP, passkeys and UnifiedPush still do). Without a
 # *_RELAY_KEY the server self-registers, keeps the key under the data directory, and
 # re-registers once if the relay reports it superseded.
-# PUSH_RELAY_URL=https://fcm.relay.kysecurity.org
-# APNS_RELAY_URL=https://kyauth-push-apns.kysecurity.workers.dev
+# PUSH_RELAY_URL=https://fcm.relay.kyauth.busnes.app
+# APNS_RELAY_URL=https://apn.relay.kyauth.busnes.app
 
 # Optional: Ubuntu Touch push (defaults shown; HTTPS only)
 # KYIDENTITY_UBUNTU_PUSH_URL=https://push.ubports.com/notify
