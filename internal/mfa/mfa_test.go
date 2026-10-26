@@ -326,7 +326,11 @@ func TestPushChallengeNumberMatching(t *testing.T) {
 	}
 
 	// Wrong match number, correctly signed: denied.
-	ok, _, err := engine.RespondPushChallenge(challenge.ID, device.id, "99", true, device.sign(t, challenge, true, "99"))
+	wrongDigits := "99"
+	if challenge.MatchDigits == wrongDigits {
+		wrongDigits = "98"
+	}
+	ok, _, err := engine.RespondPushChallenge(challenge.ID, device.id, wrongDigits, true, device.sign(t, challenge, true, wrongDigits))
 	if err != nil || ok {
 		t.Fatalf("expected incorrect number response to fail, got ok=%v err=%v", ok, err)
 	}
