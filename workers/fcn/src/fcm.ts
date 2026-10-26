@@ -7,6 +7,7 @@
  */
 
 import { base64UrlEncode, base64UrlEncodeString, pemToDer } from "../../../push-relay-shared/base64url";
+import { cachedToken, dropToken } from "../../../push-relay-shared/token-cache";
 
 const FCM_OAUTH_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -118,15 +119,13 @@ export function oauthErrorCode(body: string): string {
 }
 
 /**
- * Return a valid Google OAuth access token, using the KV cache when possible.
+ * Return a valid Google OAuth access token, cached when possible.
  */
-async function getAccessToken(config: FcmConfig, cache: KVNamespace, fresh = false): Promise<string> {
-  // `fresh` skips the read: a KV delete is not guaranteed visible to the next get.
-  const cached = fresh ? null : await cache.get(accessTokenCacheKey(config));
-  if (cached) {
-    return cached;
-  }
+function getAccessToken(config: FcmConfig, cache: KVNamespace, fresh = false): Promise<string> {
+  return cachedToken(cache, accessTokenCacheKey(config), fresh, () => mintAccessToken(config));
+}
 
+async function mintAccessToken(config: FcmConfig): Promise<{ token: string; ttlSeconds: number }> {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const assertion = await signServiceAccountAssertion(config, nowSeconds);
 
@@ -172,9 +171,7 @@ async function getAccessToken(config: FcmConfig, cache: KVNamespace, fresh = fal
   }
   const expiresIn = parsed.expires_in && parsed.expires_in > 0 ? parsed.expires_in : 3600;
   // Refresh a minute early, and respect KV's 60s minimum TTL.
-  const ttl = Math.max(60, expiresIn - 60);
-  await cache.put(accessTokenCacheKey(config), token, { expirationTtl: ttl });
-  return token;
+  return { token, ttlSeconds: Math.max(60, expiresIn - 60) };
 }
 
 /**
@@ -296,7 +293,7 @@ export async function sendFcmMessage(
     const detail = (await resp.text()).trim();
     // Google refused the cached access token (revoked or rotated early): drop it and retry once.
     if (resp.status === 401) {
-      await cache.delete(accessTokenCacheKey(config));
+      await dropToken(cache, accessTokenCacheKey(config));
       if (attempt === 0) {
         continue;
       }

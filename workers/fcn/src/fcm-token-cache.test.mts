@@ -83,3 +83,31 @@ test("a second 401 fails after one retry and leaves no cached token", async () =
   assert.equal(bearers.length, 2);
   assert.equal(store.has(accessTokenCacheKey(config)), false);
 });
+
+test("a KV write over quota still sends, and later sends reuse the token", async () => {
+  const quotaCache = {
+    get: async () => null,
+    put: async () => {
+      throw new Error("KV put() limit exceeded for the day.");
+    },
+    delete: async () => {},
+  } as unknown as KVNamespace;
+  const quotaConfig = { ...config, clientEmail: "quota@example.iam.gserviceaccount.com" };
+  let mints = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    if (url.startsWith("https://oauth2.googleapis.com/")) {
+      mints++;
+      return new Response(JSON.stringify({ access_token: "fresh-token", expires_in: 3600 }), { status: 200 });
+    }
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    const message = { token: "t", title: "t", body: "b" };
+    assert.deepEqual(await sendFcmMessage(quotaConfig, quotaCache, message), { ok: true });
+    assert.deepEqual(await sendFcmMessage(quotaConfig, quotaCache, message), { ok: true });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(mints, 1);
+});

@@ -17,7 +17,7 @@ test("native Worker refuses literal short RSA keys and retains valid signing/cac
   const dir = await mkdtemp(join(tmpdir(), "kyidentity-fcm-"));
   try {
     const modules = [];
-    for (const name of ["workers/fcn/src/fcm", "push-relay-shared/base64url"]) {
+    for (const name of ["workers/fcn/src/fcm", "push-relay-shared/base64url", "push-relay-shared/token-cache"]) {
       const source = await readFile(new URL(name + ".ts", new URL("../../../", import.meta.url)), "utf8");
       const file = "module-" + modules.length + ".js";
       await writeFile(join(dir, file), stripTypeScriptTypes(source));
