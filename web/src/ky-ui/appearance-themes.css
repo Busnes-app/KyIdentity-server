@@ -15,8 +15,9 @@
 [data-ky-preview="sky"] { --ky-preview-bg: #dff1ff; --ky-preview-sidebar: #d3ecfa; --ky-preview-ink: #183142; --ky-preview-accent: #6db3d6; }
 [data-ky-preview="forest"] { --ky-preview-bg: #142018; --ky-preview-sidebar: #18261c; --ky-preview-ink: #e3f0df; --ky-preview-accent: #8faa74; }
 [data-ky-preview="sun"] { --ky-preview-bg: #fff3dc; --ky-preview-sidebar: #f8e7c5; --ky-preview-ink: #392611; --ky-preview-accent: #e0ab4f; }
-[data-ky-preview="patina"] { --ky-preview-bg: #0d0f14; --ky-preview-sidebar: #0d0f14; --ky-preview-ink: #e2e8f0; --ky-preview-accent: #4deeea; }
+[data-ky-preview="patina-ky"] { --ky-preview-bg: #0d0f14; --ky-preview-sidebar: #0d0f14; --ky-preview-ink: #e2e8f0; --ky-preview-accent: #4deeea; }
 [data-ky-preview="polished-ky"] { --ky-preview-bg: #eef2f6; --ky-preview-sidebar: #f1f5f9; --ky-preview-ink: #0f172a; --ky-preview-accent: #0891b2; }
+[data-ky-preview="patina"] { --ky-preview-bg: #0d0f14; --ky-preview-sidebar: #161a22; --ky-preview-ink: #f1f5f9; --ky-preview-accent: #4deeea; }
 [data-ky-preview="cyber"] { --ky-preview-bg: #05070a; --ky-preview-sidebar: #0d121d; --ky-preview-ink: #eef6f5; --ky-preview-accent: #00d9bd; }
 [data-ky-preview="nord"] { --ky-preview-bg: #2e3440; --ky-preview-sidebar: #3b4252; --ky-preview-ink: #eceff4; --ky-preview-accent: #88c0d0; }
 [data-ky-preview="paper"] { --ky-preview-bg: #f8fafc; --ky-preview-sidebar: #ffffff; --ky-preview-ink: #0f172a; --ky-preview-accent: #0284c7; }

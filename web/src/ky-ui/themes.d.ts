@@ -1,7 +1,7 @@
 export type ThemeId =
   | 'busnes-light' | 'busnes-dark' | 'dark-matter' | 'light-matter' | 'tropics' | 'tropic-night'
   | 'ocean' | 'coffee' | 'white-cliffs' | 'cyber-punk' | 'neon-purple' | 'space' | 'sky' | 'forest'
-  | 'sun' | 'patina' | 'polished-ky' | 'cyber' | 'nord' | 'paper' | 'oled';
+  | 'sun' | 'patina-ky' | 'polished-ky' | 'patina' | 'cyber' | 'nord' | 'paper' | 'oled';
 export type NamedThemeId = Exclude<ThemeId, 'busnes-light' | 'busnes-dark'>;
 export interface CatalogTheme {
   readonly id: ThemeId;
@@ -29,6 +29,9 @@ export interface ThemePalette {
   readonly buttonText: string;
   readonly panelHover: string;
   readonly lineStrong: string;
+  /** Base-family themes only. */
+  readonly danger?: string;
+  readonly success?: string;
 }
 export const SYSTEM_THEME: SystemTheme;
 export const THEME_CATALOG: readonly CatalogTheme[];
