@@ -3,7 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { here, run, waitReady } from './capture-core.mjs';
+import { here, main, waitReady } from './capture-core.mjs';
 
 const repo = join(here(import.meta.url), '../..');
 const PORT = '5871';
@@ -17,7 +17,7 @@ const nav = (name) => async (page) => {
   await page.getByRole('heading', { level: 1 }).first().waitFor();
 };
 
-await run({
+await main({
   product: 'kyidentity',
   repo,
   dist: join(repo, 'web/dist/index.html'),
@@ -63,6 +63,7 @@ await run({
     }
     await page.getByRole('navigation').first().waitFor();
   },
+  hoverTarget: (page) => page.getByRole('button', { name: 'Users', exact: true }),
   surfaces: {
     applications: nav('Applications'),
     users: nav('Users'),

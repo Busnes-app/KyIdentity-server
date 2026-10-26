@@ -102,3 +102,81 @@ export async function run(adapter) {
 }
 
 export const here = (url) => dirname(new URL(url).pathname);
+
+// In-app theme transition check: named light theme with a hovered idle nav row and a
+// keyboard-focused card, then Busnes Dark, Busnes Light and Match system. Asserts computed
+// colours in the real product CSS, which the shared fixture cannot show.
+// Usage: node capture.mjs --verify <prefix>
+const luminance = (rgb) => {
+  // rgb() is 0-255; color(srgb ...) from color-mix() is 0-1.
+  const scale = rgb.startsWith('color(') ? 1 : 255;
+  const [r, g, b] = rgb.match(/[\d.]+/g).slice(0, 3).map(Number).map((v) => v / scale).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+export async function verify(adapter) {
+  const prefix = process.argv[3];
+  if (!prefix) throw new Error('usage: node capture.mjs --verify <prefix>');
+  const repo = adapter.repo;
+  const out = join(repo, 'docs/ui-fleet-2026-10-26/screenshots');
+  await mkdir(out, { recursive: true });
+  const scratch = await mkdtemp(join(tmpdir(), `ky-fleet-${adapter.product}-`));
+  const { chromium } = await playwright(repo);
+  const server = await adapter.start(scratch);
+  const browser = await chromium.launch();
+  const results = [];
+  const check = (name, ok, detail) => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${JSON.stringify(detail)}`); };
+  try {
+    const context = await browser.newContext({ baseURL: server.baseURL, viewport: { width: 1280, height: 900 }, colorScheme: 'dark', deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    await adapter.signIn(page, server);
+    await adapter.surfaces[adapter.appearanceSurface ?? 'appearance'](page, { device: 'desktop', theme: 'dark', server });
+    const radio = (name) => page.getByRole('radio', { name: new RegExp(`^${name}\\b`) }).first();
+    const probe = async () => page.evaluate(() => {
+      const root = document.documentElement;
+      return { inlineBg: root.style.getPropertyValue('--bg'), body: getComputedStyle(document.body).backgroundColor, scheme: getComputedStyle(root).colorScheme };
+    });
+    for (const [name, light] of [['Sky', true], ['Sun', true], ['Busnes Dark', false], ['Busnes Light', true], ['Match system', false]]) {
+      await radio(name).check();
+      await page.waitForTimeout(500); // body has a 0.2s colour transition
+      const state = await probe();
+      check(`${name}: page background`, (luminance(state.body) > 0.4) === light, state);
+      const item = adapter.hoverTarget(page);
+      await item.hover();
+      await page.waitForTimeout(400);
+      const hovered = await item.evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, ink: getComputedStyle(el).color }));
+      const bg = hovered.bg === 'rgba(0, 0, 0, 0)' ? state.body : hovered.bg;
+      const [hi, lo] = [luminance(bg), luminance(hovered.ink)].sort((a, b) => b - a);
+      check(`${name}: hovered nav row contrast`, (hi + 0.05) / (lo + 0.05) >= 4.5, { ...hovered, ratio: ((hi + 0.05) / (lo + 0.05)).toFixed(2) });
+      const current = page.locator('[aria-current="page"]').first();
+      if (await current.count()) {
+        const sel = await current.evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, ink: getComputedStyle(el).color }));
+        const [shi, slo] = [luminance(sel.bg === 'rgba(0, 0, 0, 0)' ? state.body : sel.bg), luminance(sel.ink)].sort((a, b) => b - a);
+        check(`${name}: selected nav row contrast`, (shi + 0.05) / (slo + 0.05) >= 4.5, { ...sel, ratio: ((shi + 0.05) / (slo + 0.05)).toFixed(2) });
+      }
+      if (name === 'Sky') await page.screenshot({ path: join(out, `${prefix}-sky-hover-desktop.png`) });
+    }
+    await page.mouse.move(0, 0);
+    // Keyboard: focus the checked card, arrow to the next one, and see the focus ring.
+    await radio('Match system').focus();
+    await page.keyboard.press('ArrowRight');
+    const keyed = await page.evaluate(() => {
+      const el = document.activeElement;
+      const card = el?.closest('.ky-appearance-option');
+      return { value: el?.value, checked: el?.checked, outline: card ? getComputedStyle(card).outlineStyle : null };
+    });
+    check('keyboard arrow selects the next card with a visible focus ring', keyed.checked && keyed.value !== 'system' && keyed.outline !== 'none', keyed);
+    await page.screenshot({ path: join(out, `${prefix}-keyboard-focus-desktop.png`) });
+    await context.close();
+  } finally {
+    await browser.close();
+    await server.stop();
+    await rm(scratch, { recursive: true, force: true });
+  }
+  const head = git(repo, 'rev-parse', 'HEAD').toString().trim();
+  const diff = git(repo, 'diff', 'HEAD', '--', '.', ':(exclude)docs/ui-fleet-2026-10-26');
+  await writeFile(join(out, `${prefix}-verify.json`), JSON.stringify({ prefix, product: adapter.product, head, uncommitted_diff_sha256: diff.length ? sha256(diff) : null, run: new Date().toISOString(), viewport: '1280x900', colorScheme: 'dark', results }, null, 2) + '\n');
+  if (results.some((r) => !r.ok)) process.exitCode = 1;
+}
+
+export const main = (adapter) => (process.argv[2] === '--verify' ? verify(adapter) : run(adapter));
