@@ -1978,4 +1978,7 @@ dialog.modal-backdrop::backdrop {
   .side-who { max-width: 7rem; overflow-wrap: anywhere; }
   .side-nav { grid-column: 1 / -1; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; min-width: 0; padding-block: 0.25rem; }
   .side-nav button { flex: none; white-space: nowrap; min-height: 40px; }
+  /* Appearance sits 16px from the screen edge, as in the other suite products:
+     room for two shared 172px cards at 390px. */
+  .appearance-page { margin-inline: -0.25rem; }
 }

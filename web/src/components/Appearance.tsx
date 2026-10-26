@@ -13,7 +13,7 @@ export const Appearance: React.FC = () => {
   };
 
   return (
-    <div>
+    <div className="appearance-page">
       <div className="page-header">
         <h1 className="page-title">Appearance</h1>
       </div>
