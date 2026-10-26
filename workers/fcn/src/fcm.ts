@@ -38,18 +38,30 @@ export type FcmResult =
  * Import a PKCS8 PEM RSA private key for RS256 signing.
  */
 async function importPrivateKey(pem: string): Promise<CryptoKey> {
+  const der = pemToDer(pem);
+  const algorithm = { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" };
   const key = await crypto.subtle.importKey(
     "pkcs8",
-    pemToDer(pem),
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
+    der,
+    algorithm,
+    true,
     ["sign"],
   );
-  const algorithm = key.algorithm;
-  if (!("modulusLength" in algorithm) || typeof algorithm.modulusLength !== "number" || algorithm.modulusLength < 2048) {
+  // workerd rounds algorithm.modulusLength to bytes. Inspect the JWK's actual
+  // public modulus instead; the configured private PEM is already held here.
+  const jwk = await crypto.subtle.exportKey("jwk", key);
+  if (!("n" in jwk) || typeof jwk.n !== "string") {
+    throw new Error("fcm RSA signing key has no public modulus");
+  }
+  const modulus = atob(jwk.n.replace(/-/g, "+").replace(/_/g, "/"));
+  let first = 0;
+  while (first < modulus.length && modulus.charCodeAt(first) === 0) first++;
+  const bits = (modulus.length - first - 1) * 8 + 32 - Math.clz32(modulus.charCodeAt(first) || 0);
+  if (bits < 2048) {
     throw new Error("fcm RSA signing keys must be at least 2048 bits");
   }
-  return key;
+  // Retain the non-extractable signing-key contract after inspecting metadata.
+  return crypto.subtle.importKey("pkcs8", der, algorithm, false, ["sign"]);
 }
 
 async function signServiceAccountAssertion(config: FcmConfig, nowSeconds: number): Promise<string> {

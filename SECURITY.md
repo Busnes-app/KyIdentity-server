@@ -276,6 +276,9 @@ Security-sensitive PRs should include:
 optional process TLS/Compose configuration. TOTP enrollment/verification refuses
 undersized secrets while retaining existing records; attestation checks CA keys
 outside TLS, including the actual trust anchor. FCM signing requires RSA-2048.
+The Worker measures the exported JWK public modulus; its runtime can byte-round
+`algorithm.modulusLength`. Signing retains a non-extractable key, and the native
+runtime regression includes short-key refusal, valid signatures and cached tokens.
 The Go policy does not configure the HTTPS edge or Cloudflare Worker TLS; those
 limits are explicit and must be verified independently before a whole-project
 key-strength attestation. No key, factor or recovery pin is rotated implicitly.

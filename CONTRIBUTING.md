@@ -167,7 +167,7 @@ if a job is genuinely flaky, that is a bug to fix in the job.
 |---|---|
 | `go` | `gofmt -l`, `go build`, `go vet`, `govulncheck`, `go test -race ./...`, and two builds of the release binary that must be byte-identical |
 | `web` | Runtime dependency audit, TypeScript/Vite build, committed asset check, and Vitest |
-| `relay` | Runtime dependency audits, both Worker typechecks, and all relay behavior tests |
+| `relay` | Runtime dependency audits, both Worker typechecks, all relay behavior tests and the FCM key-floor/signature regression in the lockfile's native workerd runtime |
 | `docker` | Production image build, `/readyz` smoke test, and rejection of a public HTTP issuer |
 
 Notes that trip people up:
