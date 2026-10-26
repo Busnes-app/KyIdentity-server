@@ -37,3 +37,21 @@ See [UI-POLISH.md](UI-POLISH.md) for the implemented changes, preservation scope
 ## Fleet Appearance — 2026-10-26
 
 Shared ky-ui 0.4 Appearance radio cards over the suite catalog, plus the suite shell scale. Staged before/after captures (light/dark × 1280×900/390×844, synthetic fixture), manifests with revisions and hashes, in-app theme transition checks, CSV results and the recorded check runs are in [docs/ui-fleet-2026-10-26](docs/ui-fleet-2026-10-26/README.md). Scores are not self-assigned; the council rates the captures separately.
+
+## Upstream merge verification — 2026-10-26
+
+Merged `master` at `f5c3ff2` into the fleet branch after PR #166 changed the
+administrator backup action. Source files merged cleanly; conflicting generated
+JavaScript and `dist/index.html` were rebuilt from the combined source.
+
+`npm run build --prefix web` (including TypeScript), all 194 web tests, the vendor
+check and the race-enabled API tests `TestAdminBackupEndpoints` and
+`TestDepositNeedsAdminButNotStepUp` passed. Appearance/sidebar/theme styles and
+frontend dependency inputs are unchanged by this merge, so the earlier staged
+Appearance captures retain their recorded source revisions. Full current-head CI
+and autonomous clearance are still required.
+
+Two pre-existing Vite notices remain: `/css/styles.css` is served by Go outside
+the Vite source tree, and the generated application bundle exceeds Vite's default
+500 kB advisory threshold. Both parent bundles already exceeded that threshold
+(536,717 and 537,697 bytes); this merge does not introduce that warning.
