@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -114,6 +115,25 @@ func prepareRelay(cfg RelayConfig) (*relayEndpoint, error) {
 	}
 	e.key = key
 	return e, nil
+}
+
+// RelayKeyFile is where a self-registered key for relayURL is kept: one file per relay host,
+// so a server moved to another relay registers there instead of presenting the old relay's
+// key, which the new one refuses with the plain 401 a revocation gets (never re-registered).
+func RelayKeyFile(dataDir, transport, relayURL string) string {
+	host := ""
+	if u, err := url.Parse(relayURL); err == nil {
+		host = strings.Map(func(r rune) rune {
+			if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '-' {
+				return r
+			}
+			return '_'
+		}, strings.ToLower(u.Hostname()))
+	}
+	if host == "" {
+		return filepath.Join(dataDir, "push-relay-"+transport+".key")
+	}
+	return filepath.Join(dataDir, "push-relay-"+transport+"-"+host+".key")
 }
 
 // writeRelayKey replaces path through a synced temp file and a rename, so a crash never

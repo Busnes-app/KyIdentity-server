@@ -100,9 +100,9 @@ services:
       KYIDENTITY_ENCRYPTION_KEY: ${KYIDENTITY_ENCRYPTION_KEY:-}
       # Native push relays for KyAuth on Android (FCM) and iOS (APNs). Unset uses the
       # Busnes.app relays; set one to an empty value to turn it off.
-      PUSH_RELAY_URL: ${PUSH_RELAY_URL-https://fcm.relay.kysecurity.org}
+      PUSH_RELAY_URL: ${PUSH_RELAY_URL-https://fcm.relay.kyauth.busnes.app}
       PUSH_RELAY_KEY: ${PUSH_RELAY_KEY:-}
-      APNS_RELAY_URL: ${APNS_RELAY_URL-https://kyauth-push-apns.kysecurity.workers.dev}
+      APNS_RELAY_URL: ${APNS_RELAY_URL-https://apn.relay.kyauth.busnes.app}
       APNS_RELAY_KEY: ${APNS_RELAY_KEY:-}
       KYIDENTITY_UBUNTU_PUSH_URL: ${KYIDENTITY_UBUNTU_PUSH_URL:-https://push.ubports.com/notify}
       KYIDENTITY_UBUNTU_PUSH_APPID: ${KYIDENTITY_UBUNTU_PUSH_APPID:-kyauth.busnes_kyauth}

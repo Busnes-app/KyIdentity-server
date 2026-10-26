@@ -130,14 +130,14 @@ func main() {
 		mfa.RelayConfig{
 			URL:      cfg.PushRelayURL,
 			Key:      cfg.PushRelayKey,
-			KeyFile:  filepath.Join(cfg.DataDir, "push-relay-fcm.key"),
+			KeyFile:  mfa.RelayKeyFile(cfg.DataDir, "fcm", cfg.PushRelayURL),
 			Label:    "kyidentity-" + cfg.IssuerURL,
 			Optional: cfg.PushRelayURL == config.DefaultPushRelayURL,
 		},
 		mfa.RelayConfig{
 			URL:      cfg.APNSRelayURL,
 			Key:      cfg.APNSRelayKey,
-			KeyFile:  filepath.Join(cfg.DataDir, "push-relay-apns.key"),
+			KeyFile:  mfa.RelayKeyFile(cfg.DataDir, "apns", cfg.APNSRelayURL),
 			Label:    "kyidentity-" + cfg.IssuerURL,
 			Optional: cfg.APNSRelayURL == config.DefaultAPNSRelayURL,
 		},
