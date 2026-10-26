@@ -12,7 +12,7 @@ const manifests = readdirSync(shots).filter((f) => f.endsWith('-manifest.json'))
 const key = (f) => `${f.surface}|${f.viewport}|${f.theme}`;
 const before = manifests.find((m) => m.prefix.endsWith('-00-before'));
 const rows = [['product', 'stage', 'surface', 'viewport', 'theme', 'before_file', 'before_head', 'before_sha256', 'after_file', 'after_head', 'after_diff_sha256', 'after_sha256', 'after_overflow_px', 'driver', 'captured']];
-for (const after of manifests.filter((m) => m.prefix.includes('-after'))) {
+for (const after of manifests.filter((m) => m !== before)) {
   for (const f of after.files) {
     const b = before?.files.find((x) => key(x) === key(f));
     rows.push([after.product, after.prefix.split('-')[1], f.surface, f.viewport, f.theme, b?.file ?? 'none (new surface)', before?.head, b?.sha256, f.file, after.head, after.uncommitted_diff_sha256, f.sha256, f.overflow_px, after.driver, after.captured]);
