@@ -35,7 +35,7 @@ an older archive or custody record.
 | Android attestation | The successfully verified certificate chain, including an omitted trust anchor selected from configured roots, must use RSA-2048+, EC-224+ or fixed Ed25519 keys. Device signing keys remain P-256. This is separate from TLS and applies to extra/fetched roots too. Failure grades the attestation `none`; it does not delete the device or grant hardware MFA. |
 | Apple App Attest | At least one verified chain to the pinned Apple root must meet the same certificate-key floor, including every intermediate/root. The actual leaf key remains P-256. An App Attest grade proves app integrity, not hardware/user-presence MFA. |
 | Push payloads and VAPID | RFC 8291 uses P-256, a 16-byte authentication secret, HKDF-SHA256 and AES-128-GCM; VAPID is P-256/ES256. Imported push points/auth bytes are checked at registration/refresh. Existing VAPID keys are retained. |
-| Bundled FCM Worker | WebCrypto imports the service-account key as RS256, then checks the actual RSA modulus is at least 2048 bits before signing/contacting Google. Replace an undersized credential with a provider-issued strong one; do not alter device registrations. Already cached Google bearer tokens keep their existing expiration/revocation behavior. |
+| Bundled FCM Worker | WebCrypto imports the service-account key as RS256, then measures the exported JWK public modulus to require at least 2048 actual bits before signing/contacting Google. Its `algorithm.modulusLength` can round to whole bytes. The temporary metadata import stays within the Worker; signing uses a second, non-extractable import. Replace an undersized credential with a provider-issued strong one; do not alter device registrations. Already cached Google bearer tokens keep their existing expiration/revocation behavior. |
 | Bundled APNs Worker | WebCrypto imports only P-256 ECDSA keys for ES256 provider tokens. Keep the provider key ID/team binding when rotating a credential. |
 | Recovery | Products seal fixed-suite `kycap/3` containers to the pinned suite public key. KyIdentity's server does not open them. Restore is an explicit offline CLI action requiring the recorded digest and custodian shares. Transport changes never replace the pin or change historical decryptability. |
 
@@ -119,6 +119,12 @@ this guide as whole-repository OpenSSF key-length evidence. No Worker secret,
 provider deployment, device enrollment or production TLS edge is changed here.
 
 ## Verification and rollout
+
+The existing relay job runs `fcm-workerd-key-floor.test.mts` in the lockfile's native
+workerd runtime with the example's compatibility date. It refuses RSA-1024/2040/2041/2047,
+verifies real RSA-2048/3072 provider-token signatures through a synthetic provider service,
+and retains an already cached token with an older configured key. No real Google endpoint
+or hosted Worker is contacted. Node-only key metadata tests do not replace this check.
 
 Run the complete ordinary and `GODEBUG=fips140=on` race suites, build/vet and
 module/vulnerability checks, full web and Worker checks, Compose preservation,

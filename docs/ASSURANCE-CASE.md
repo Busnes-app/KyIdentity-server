@@ -124,7 +124,13 @@ moves one must update this page in the same change.
 [STRONG-CRYPTO.md](STRONG-CRYPTO.md) inventories every key boundary and the optional
 Go TLS configuration. The source refuses short TOTP keys, attestation CA keys
 (including omitted trust anchors), RSA token-signing keys and FCM signing keys;
-regressions use real signatures and retained enrollment records. The process
-profile covers Go certificate policy, not the HTTPS edge or Cloudflare's Worker
+regressions use real signatures and retained enrollment records.
+The FCM regression also runs the actual provider function in the lockfile-native
+workerd runtime: byte-rounded short keys are refused, RSA-2048/3072 signatures
+verify and an already issued cached token remains usable. Its temporary JWK
+inspection stays within the process already holding the private PEM; the signing
+key is re-imported non-extractable. This checks signing keys, not TLS peers.
+
+The process profile covers Go certificate policy, not the HTTPS edge or Cloudflare's Worker
 TLS implementation. The latter remains a separate evidence gap; no complete
 whole-repository key-length claim follows from these source checks alone.

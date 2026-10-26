@@ -47,6 +47,18 @@ self-hosted Go server  --(Bearer per-server key)-->  this Worker  --(service acc
    npx wrangler deploy
    ```
 
+## Service-account key policy
+
+New provider tokens require an RSA key with at least 2048 actual modulus bits.
+The Worker checks the JWK public modulus because runtime metadata can round a
+2041–2047-bit key up to 2048. Inspection stays inside the Worker; the signing key
+is imported as non-extractable. Replace an undersized service-account credential
+through Google and update the protected Worker secret; do not remove relay keys,
+device registrations or cached tokens to bypass a refusal. Already issued Google
+tokens keep their normal cache expiry/revocation behavior. The existing CI relay
+suite checks this with real signatures in the lockfile's native workerd runtime.
+TLS peer-key policy is separate; see [platform limits](../../docs/STRONG-CRYPTO.md#worker-and-platform-limits).
+
 ## Self-registration (no maintainer involvement)
 
 **Off by default.** `/register` is an unauthenticated key-minting endpoint, so it

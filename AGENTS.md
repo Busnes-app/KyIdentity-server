@@ -229,7 +229,9 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 - CI runs Go formatting, build, vet, vulnerability scanning, and race-enabled tests. SCIM fixtures cover remote IDs, lost responses, malformed/ambiguous lookup pages, throttling, token isolation, legacy review, and mapping durability; API tests cover step-up and secret redaction.
 - App-access regression tests cover sole-grant group deletion revoking tokens and codes, and enabled/disabled previews with unfiltered loss counts and strict API boolean validation.
 - CI builds, audits, and tests the web app, and rejects stale committed `web/dist` assets.
-- CI audits and typechecks both push Workers and runs their shared and provider behavior tests.
+- CI audits and typechecks both push Workers and runs their shared and provider behavior tests,
+  including the lockfile-native FCM key-floor regression. Keep real RSA-2041/2047 refusal,
+  RSA-2048/3072 signed-token controls and retained cached-token behavior.
 - CI builds the production image, probes `/readyz`, and verifies public HTTP issuers fail closed.
 - On a push to `master` that passes every job, `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/kyidentity-server:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `kyidentity-server:local`) so every compose command, recovery docs included, uses the local build.
 - The version has one source: `internal/appversion/VERSION` (`X.Y.Z`, the release line; `web/package.json` has no version). Go code calls `appversion.String()`; a release image build sets the tag's full version through `-ldflags -X …/internal/appversion.release`, so images report `X.Y.Z` or `X.Y.Z.N` and source builds report the line.
@@ -288,7 +290,8 @@ Keep `README.md` as the concise product overview and navigation. Detailed proced
 - `crypto.CheckCertificateKeys` checks complete verified attestation chains,
   including selected trust anchors outside the supplied chain. App Attest needs
   one valid strong chain. This is separate from Go TLS and preserves grade semantics.
-- Bundled FCM signing checks the imported WebCrypto RSA modulus before use;
+- Bundled FCM signing measures the exported JWK public modulus before use; workerd's
+  `algorithm.modulusLength` is byte-rounded. Return a non-extractable signing key;
   APNs stays P-256. Preserve provider cache expiry/revocation and device records.
 - `docker-compose.strong-crypto.yml` changes only GODEBUG; the synthetic checker
   `docs/check-strong-crypto-compose.py` verifies base/build/LAN-DNS combinations.
