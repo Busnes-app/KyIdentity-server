@@ -16,6 +16,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,67 @@ func TestLoadOrCreateRSAKeyAcceptsPKCS8(t *testing.T) {
 	}
 	if !m.PrivateKey.Equal(key) {
 		t.Fatal("a PKCS#8 key was replaced by another key")
+	}
+}
+
+func TestLoadOrCreateRSAKeyMinimumSize(t *testing.T) {
+	for _, tc := range []struct {
+		bits    int
+		refused bool
+	}{{1024, true}, {2047, true}, {2048, false}, {3072, false}} {
+		t.Run(strconv.Itoa(tc.bits), func(t *testing.T) {
+			key, err := rsa.GenerateKey(rand.Reader, tc.bits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, encoding := range []struct {
+				name string
+				der  []byte
+			}{{"RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(key)}, {"PRIVATE KEY", pkcs8}} {
+				t.Run(encoding.name, func(t *testing.T) {
+					path := writePEM(t, encoding.name, encoding.der)
+					before, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					manager, err := LoadOrCreateRSAKey(path)
+					if tc.refused {
+						if manager != nil || err == nil || !strings.Contains(err.Error(), "at least 2048 bits") {
+							t.Fatalf("undersized signing key: manager present=%v, error=%v", manager != nil, err)
+						}
+					} else {
+						if err != nil {
+							t.Fatal(err)
+						}
+						if !manager.PrivateKey.Equal(key) {
+							t.Fatal("accepted signing key was replaced")
+						}
+						token, err := manager.SignJWT(map[string]any{
+							"sub": "size-test", "iss": testIss, "token_use": "access_token",
+							"exp": time.Now().Add(time.Hour).Unix(),
+						})
+						if err != nil {
+							t.Fatal(err)
+						}
+						claims, err := manager.VerifyJWT(token, testIss, "access_token")
+						if err != nil || claims["sub"] != "size-test" {
+							t.Fatalf("accepted signing key cannot round-trip a token: %v", err)
+						}
+					}
+					after, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Fatal("existing signing key was changed on disk")
+					}
+				})
+			}
+		})
 	}
 }
 

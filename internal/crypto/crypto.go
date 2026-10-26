@@ -267,7 +267,9 @@ type JWTKeyManager struct {
 	KeyID      string
 }
 
-// LoadOrCreateRSAKey loads an RSA private key from disk or creates a new 2048-bit key.
+const minimumRSASigningKeyBits = 2048
+
+// LoadOrCreateRSAKey loads an RSA private key of at least 2048 bits or creates a new one.
 func LoadOrCreateRSAKey(keyPath string) (*JWTKeyManager, error) {
 	var privKey *rsa.PrivateKey
 
@@ -291,13 +293,16 @@ func LoadOrCreateRSAKey(keyPath string) (*JWTKeyManager, error) {
 		if privKey, ok = parsedKey.(*rsa.PrivateKey); !ok {
 			return nil, fmt.Errorf("signing key %s is not RSA", keyPath)
 		}
+		if bits := privKey.N.BitLen(); bits < minimumRSASigningKeyBits {
+			return nil, fmt.Errorf("signing key %s has %d bits; RSA signing keys must be at least %d bits", keyPath, bits, minimumRSASigningKeyBits)
+		}
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to read signing key %s: %w", keyPath, err)
 	}
 
 	if privKey == nil {
 		var err error
-		privKey, err = rsa.GenerateKey(rand.Reader, 2048)
+		privKey, err = rsa.GenerateKey(rand.Reader, minimumRSASigningKeyBits)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate RSA key: %w", err)
 		}
