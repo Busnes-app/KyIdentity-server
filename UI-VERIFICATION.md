@@ -55,3 +55,16 @@ Two pre-existing Vite notices remain: `/css/styles.css` is served by Go outside
 the Vite source tree, and the generated application bundle exceeds Vite's default
 500 kB advisory threshold. Both parent bundles already exceeded that threshold
 (536,717 and 537,697 bytes); this merge does not introduce that warning.
+
+## Visual refinement — 2026-10-26
+
+Round-3 release review, gap 2: shell and Users hierarchy, with no route, role, copy or Go change. Evidence, stages, fixture and limits are in [docs/ui-visual-refinement-2026-10-26](docs/ui-visual-refinement-2026-10-26/README.md).
+
+- **Font:** round 3's Arial-like face was a capture-fixture artifact. The server serves `./css` and `./fonts` from its working directory, and the old driver ran from a bare scratch directory, so both returned 404. With the corrected fixture, every capture (BEFORE included) loads Space Grotesk and IBM Plex Mono. The real defect it uncovered, a mono wordmark leaking in from `/css/styles.css`, is fixed in `index.css`.
+- **Users:** the nine icon actions are one labelled "Manage" disclosure, with delete set apart; on phones rows stack as labelled blocks. Chromium keeps the table roles (`table-roles.mjs`). In-app `--verify`: 23/23 before, after and at the confirm recapture.
+- **Checks** at `f36ea7d` plus this change:
+  - `node web/src/ky-ui/check-vendor.mjs` and `npm run build` pass; the committed `web/dist` equals a fresh build.
+  - `npm test` (vitest) and `npm audit --omit=dev` pass (0 vulnerabilities).
+  - `go build ./...`, `go vet ./...`, gofmt, and `go test -p 2 -race -count=1 ./...` (18 packages) pass.
+  - Push relay workers are untouched and were not run; CI runs them.
+- Ratings belong to the independent reviewer; no 9/10 is claimed.

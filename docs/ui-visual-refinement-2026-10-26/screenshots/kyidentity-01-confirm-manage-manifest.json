@@ -1,0 +1,72 @@
+{
+  "prefix": "kyidentity-01-confirm-manage",
+  "product": "kyidentity",
+  "branch": "ui/fleet-visual-refinement",
+  "head": "f36ea7d50dbaa4ffab705d418c380327ea63f0cf",
+  "uncommitted_diff_sha256": "7880c556c5aebf47620e243edf7edf57dd7867782e226e16f7191d7f9ecee1b0",
+  "uncommitted_diff_bytes": 588831,
+  "server_binary_sha256": "f3a291dac521f86cb5a85184b5bf967f01c1b6d30ae5fb548c995ecd33f7a5c7",
+  "embedded_index_sha256": "22ea47e7846d8298816c57a62a198a74f113302fa3a41378b41b3efee478aa4c",
+  "captured": "2026-10-26T16:26:07.399Z",
+  "os": "linux 7.2.10-1-cachyos",
+  "driver": "playwright chromium 153.0.8010.12 (headless)",
+  "device_scale_factor": 1,
+  "timezone": "America/Chicago",
+  "locale": "en-US",
+  "theme_source": "context colorScheme emulation with no saved theme choice (OS-following default)",
+  "fixture": "fresh data dir with generated secret/encryption keys; bootstrap-admin \"admin\" (generated password on stdin, replaced through the required password-change screen at first sign-in); no applications, groups, users or mail; KYIDENTITY_ISSUER_URL on loopback http",
+  "files": [
+    {
+      "file": "kyidentity-01-confirm-manage-users-manage-desktop-light.png",
+      "sha256": "06c360417c3239df567857e25d6232192bdb439e702189f441b2e8526d27c0e0",
+      "surface": "users-manage",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-manage-users-manage-mobile-light.png",
+      "sha256": "ef58429bf3f99f03634005624d8e08a84f09442cc46b69a222fe749e595cd676",
+      "surface": "users-manage",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-manage-users-manage-desktop-dark.png",
+      "sha256": "324edd94a639359e26b56078d1ebfe4db240d4c488b3d1bf5639647fe6761871",
+      "surface": "users-manage",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-manage-users-manage-mobile-dark.png",
+      "sha256": "db1e435167c5bddb9a0d635503eb2765dd45ca566260b777aec6280ad70d888f",
+      "surface": "users-manage",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    }
+  ]
+}

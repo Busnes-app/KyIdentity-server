@@ -1,0 +1,176 @@
+{
+  "prefix": "kyidentity-00-before",
+  "product": "kyidentity",
+  "branch": "ui/fleet-visual-refinement",
+  "head": "f36ea7d50dbaa4ffab705d418c380327ea63f0cf",
+  "uncommitted_diff_sha256": null,
+  "uncommitted_diff_bytes": 0,
+  "server_binary_sha256": "5c7c9fde6e845a1dfc093b50f7f22b4891aaec1e4948c8d3d8e9bd313aac7805",
+  "embedded_index_sha256": "4d454972c16a7d32b0bd2dfe72afea763973d361ff6ba97be6114ed89d72fbe2",
+  "captured": "2026-10-26T16:12:33.787Z",
+  "os": "linux 7.2.10-1-cachyos",
+  "driver": "playwright chromium 153.0.8010.12 (headless)",
+  "device_scale_factor": 1,
+  "timezone": "America/Chicago",
+  "locale": "en-US",
+  "theme_source": "context colorScheme emulation with no saved theme choice (OS-following default)",
+  "fixture": "fresh data dir with generated secret/encryption keys; bootstrap-admin \"admin\" (generated password on stdin, replaced through the required password-change screen at first sign-in); no applications, groups, users or mail; KYIDENTITY_ISSUER_URL on loopback http",
+  "files": [
+    {
+      "file": "kyidentity-00-before-applications-desktop-light.png",
+      "sha256": "4cbd28c77eedf415ece49d078049da15c39281d8756b040128b1bbae290fb71f",
+      "surface": "applications",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-users-desktop-light.png",
+      "sha256": "255c70e261f6d7ef9bd63076e29785d48da3f35a73c306ae0aa06186fa8475f7",
+      "surface": "users",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-appearance-desktop-light.png",
+      "sha256": "dbe70ad1cefdac34b8116a2642891db5fd67cb159ec4a39a50d299a64edecdc8",
+      "surface": "appearance",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-applications-mobile-light.png",
+      "sha256": "5788108283af68d04d59fa59eba2be047cfe862766aed70454a877794a5a1228",
+      "surface": "applications",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-users-mobile-light.png",
+      "sha256": "bc8e962ec1602cf5bfb24ad7231bd6c40086a2cbfe78897a9e03b0509650b10f",
+      "surface": "users",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-appearance-mobile-light.png",
+      "sha256": "c2020e69505dea7c23e3d57efb7b137ef99a62b905fda3bb48905b65cf6c636d",
+      "surface": "appearance",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-applications-desktop-dark.png",
+      "sha256": "cd2011029079030cd1cdb8a8a1d4b1d3a3c7c56548e57aef1e205b71029a6959",
+      "surface": "applications",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-users-desktop-dark.png",
+      "sha256": "d9c5fcf8f7f59d0c286a46bd822517c44485f5383b3750e20afbc1d6f665857f",
+      "surface": "users",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-appearance-desktop-dark.png",
+      "sha256": "8d3fdcc0912fff66d92ba93323428b2e2c277e4009f0b07116329446e7b7fd5e",
+      "surface": "appearance",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-applications-mobile-dark.png",
+      "sha256": "d4664bd95760182d4e9a52ec47ccb16a698c258a8e5c2e542609ac9cda5e6cb5",
+      "surface": "applications",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-users-mobile-dark.png",
+      "sha256": "e69b45b839f1767809c970962c583c58b588d54a11e6b1753784f80cc810623d",
+      "surface": "users",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-00-before-appearance-mobile-dark.png",
+      "sha256": "1312881d2a6db8d9bdb7ac4ebc0c6e8297ddc3a07261f2b84f345fc42e6f7d2c",
+      "surface": "appearance",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    }
+  ]
+}
