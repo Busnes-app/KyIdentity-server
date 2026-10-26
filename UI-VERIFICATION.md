@@ -61,10 +61,23 @@ the Vite source tree, and the generated application bundle exceeds Vite's defaul
 Round-3 release review, gap 2: shell and Users hierarchy, with no route, role, copy or Go change. Evidence, stages, fixture and limits are in [docs/ui-visual-refinement-2026-10-26](docs/ui-visual-refinement-2026-10-26/README.md).
 
 - **Font:** round 3's Arial-like face was a capture-fixture artifact. The server serves `./css` and `./fonts` from its working directory, and the old driver ran from a bare scratch directory, so both returned 404. With the corrected fixture, every capture (BEFORE included) loads Space Grotesk and IBM Plex Mono. The real defect it uncovered, a mono wordmark leaking in from `/css/styles.css`, is fixed in `index.css`.
-- **Users:** the nine icon actions are one labelled "Manage" disclosure, with delete set apart; on phones rows stack as labelled blocks. Chromium keeps the table roles (`table-roles.mjs`). In-app `--verify`: 23/23 before, after and at the confirm recapture.
+- **Users:** the nine icon actions are one labelled "Manage" disclosure, with delete set apart; on phones rows stack as labelled blocks. `table-roles.mjs` measured DOM roles through Playwright on synthetic HTML, not the accessibility tree; the independent review later confirmed the real app's Chromium accessibility tree at 390px (CDP `Accessibility.getFullAXTree`). Firefox and WebKit are untested. In-app `--verify`: 23/23 before, after and at the confirm recapture.
 - **Checks** at `f36ea7d` plus this change:
   - `node web/src/ky-ui/check-vendor.mjs` and `npm run build` pass; the committed `web/dist` equals a fresh build.
   - `npm test` (vitest) and `npm audit --omit=dev` pass (0 vulnerabilities).
   - `go build ./...`, `go vet ./...`, gofmt, and `go test -p 2 -race -count=1 ./...` (18 packages) pass.
   - Push relay workers are untouched and were not run; CI runs them.
 - Ratings belong to the independent reviewer; no 9/10 is claimed.
+
+## Review follow-up R1 — 2026-10-26
+
+From the independent refinement review. Evidence, stages and limits are in [docs/ui-review-followups-2026-10-26](docs/ui-review-followups-2026-10-26/README.md).
+
+- **R1:** a delegate no longer sees an empty "Manage" menu on an Administrator row. `UserRowActions` renders nothing when no action applies; the nine handlers, guards and role conditions are unchanged. On phones that row's empty Actions cell is hidden.
+- **Test:** `web/src/components/AdminUsers.test.tsx` covers a full administrator (nine actions), a delegate on an administrator row (nothing) and a delegate on an ordinary row (five). Removing the guard fails it.
+- **Real app:** a real Helpdesk delegate, created and delegated through the UI. Before, the Administrator row's Manage opened with 0 actions; after, there is no Manage, while ordinary rows keep 5 and a full administrator keeps 9 on every row. This holds at 1280×900 and 390×844, light and dark. The full administrator's `--verify` passes 23/23 before, after and on the committed build.
+- **Checks** at `858eb70` plus this change:
+  - `check-vendor` and `npm run build` pass; the committed `web/dist` equals a fresh build.
+  - vitest passes 198/198, and `npm audit --omit=dev` finds 0 vulnerabilities.
+  - `go build`, `go vet`, gofmt and `go test -p 2 -race -count=1 ./...` pass; Go code is unchanged.
+- **Limits:** N2 (Escape does not close the menu) and N3 (phone cell names repeat their label) are left as recorded.

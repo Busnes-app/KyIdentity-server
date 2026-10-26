@@ -1998,6 +1998,7 @@ dialog.modal-backdrop::backdrop {
   .users-table, .users-table tbody, .users-table tr { display: block; width: 100%; }
   .users-table tr { padding: 0.75rem 1rem; border-bottom: 1px solid var(--line); }
   .users-table td { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: 0.5rem; align-items: start; justify-items: start; padding: 0.35rem 0; border: 0; text-align: left; overflow-wrap: anywhere; }
+  .users-table td:empty { display: none; }
   .users-table td::before { content: attr(data-label); color: var(--ink); font-family: var(--font-display); font-weight: 400; font-size: var(--ky-type-meta); }
   .users-table tr:hover td { background: none; }
   .row-actions-menu { min-width: 0; }
