@@ -108,8 +108,7 @@ export const AdminBackup: React.FC = () => {
     setRunMessage('');
     setRunError('');
     try {
-      const grant = await requestGrant('Backing up seals the whole directory and its keys to the suite recovery key and sends the capsule to every configured destination.', 'POST /api/admin/backup/deposit');
-      const res = await apiJson('/api/admin/backup/deposit', parseBackupRun, { method: 'POST', stepUpToken: grant });
+      const res = await apiJson('/api/admin/backup/deposit', parseBackupRun, { method: 'POST' });
       const went: string[] = [];
       if (res.localPath) went.push(`written to ${res.localPath}`);
       if (res.receipt) went.push(`deposited with KyRecovery at ${when(res.receipt.depositedAt)}`);
@@ -117,7 +116,6 @@ export const AdminBackup: React.FC = () => {
       if (res.localError) setRunError(`The local copy failed: ${res.localError}`);
       await fetchStatus();
     } catch (err) {
-      if (isCancelled(err)) return;
       setRunError(errorMessage(err, 'Backup failed'));
       await fetchStatus();
     } finally {

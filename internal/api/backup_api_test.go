@@ -140,7 +140,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 		if w := do("GET", "/api/admin/backup/export-capsule", nil, true); w.Code != http.StatusPreconditionFailed {
 			t.Errorf("export: got %d: %s", w.Code, w.Body.String())
 		}
-		if w := do("POST", "/api/admin/backup/deposit", nil, true); w.Code != http.StatusPreconditionFailed {
+		if w := do("POST", "/api/admin/backup/deposit", nil, false); w.Code != http.StatusPreconditionFailed {
 			t.Errorf("deposit: got %d: %s", w.Code, w.Body.String())
 		}
 		if fake.got != nil {
@@ -186,7 +186,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 	})
 
 	t.Run("deposit seals to the pinned key, records the receipt, audits", func(t *testing.T) {
-		w := do("POST", "/api/admin/backup/deposit", nil, true)
+		w := do("POST", "/api/admin/backup/deposit", nil, false)
 		if w.Code != http.StatusOK {
 			t.Fatalf("got %d: %s", w.Code, w.Body.String())
 		}
@@ -207,7 +207,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 		}
 		fake.deposit = errors.New(backup.ErrRemote.Error() + ": deposit rejected (429)")
 		fake.deposit = errors.Join(backup.ErrRemote, fake.deposit)
-		if w := do("POST", "/api/admin/backup/deposit", nil, true); w.Code != http.StatusBadGateway {
+		if w := do("POST", "/api/admin/backup/deposit", nil, false); w.Code != http.StatusBadGateway {
 			t.Errorf("refused deposit: got %d: %s", w.Code, w.Body.String())
 		}
 		if again, _, _ := backup.LastDeposit(dbStore); again.CapsuleID != rcpt.CapsuleID {
@@ -300,7 +300,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 			t.Errorf("token still stored: %v", err)
 		}
 		fake.got = nil
-		if w := do("POST", "/api/admin/backup/deposit", nil, true); w.Code != http.StatusPreconditionFailed || fake.got != nil {
+		if w := do("POST", "/api/admin/backup/deposit", nil, false); w.Code != http.StatusPreconditionFailed || fake.got != nil {
 			t.Errorf("deposit after unpair: got %d sent=%v: %s", w.Code, fake.got != nil, w.Body.String())
 		}
 		if w := do("DELETE", "/api/admin/backup/pairing", nil, true); w.Code != http.StatusPreconditionFailed {
@@ -318,7 +318,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 	})
 
 	t.Run("step-up is required on the secret-bearing routes", func(t *testing.T) {
-		for _, tc := range []struct{ method, path string }{{"GET", "/api/admin/backup/export-capsule"}, {"POST", "/api/admin/backup/deposit"}, {"POST", "/api/admin/backup/pair-remote"}, {"DELETE", "/api/admin/backup/pairing"}, {"POST", "/api/admin/backup/pin-key"}, {"PUT", "/api/admin/backup/schedule"}} {
+		for _, tc := range []struct{ method, path string }{{"GET", "/api/admin/backup/export-capsule"}, {"POST", "/api/admin/backup/pair-remote"}, {"DELETE", "/api/admin/backup/pairing"}, {"POST", "/api/admin/backup/pin-key"}, {"PUT", "/api/admin/backup/schedule"}} {
 			if w := do(tc.method, tc.path, []byte(`{}`), false); w.Code != http.StatusForbidden && w.Code != http.StatusUnauthorized {
 				t.Errorf("%s %s without step-up: got %d", tc.method, tc.path, w.Code)
 			}
@@ -380,5 +380,50 @@ func TestPinnedKeyBacksUpLocallyWithoutKyRecovery(t *testing.T) {
 	copies, _ := status["local_copies"].([]any)
 	if status["paired"] != false || status["key_pinned"] != true || len(copies) != 1 {
 		t.Errorf("status %v", status)
+	}
+}
+
+// Back up now is an administrator action without step-up: a deposit only seals the
+// directory to the recovery key this server already pinned, so it can neither redirect nor
+// reveal data. The other Ky products gate it the same way. Exporting the capsule, which
+// hands the sealed bytes to the caller, still needs a fresh grant.
+func TestDepositNeedsAdminButNotStepUp(t *testing.T) {
+	priv, err := recoverykey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeRecovery{}
+	prev := newRecoveryClient
+	newRecoveryClient = func(*config.Config) recoveryClient { return fake }
+	t.Cleanup(func() { newRecoveryClient = prev })
+
+	srv, dbStore, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	srv.cfg.BackupDir = filepath.Join(t.TempDir(), "capsules")
+	srv.cfg.BackupKeep = 3
+	admin := newUser(t, dbStore, "admin")
+	cookie := newSession(t, dbStore, admin, time.Now().UTC().Add(time.Hour))
+
+	pub := base64.StdEncoding.EncodeToString(priv.Public().Bytes())
+	body, _ := json.Marshal(map[string]any{"public_key": pub, "threshold": 2, "total_shares": 3})
+	if w := adminRequest(t, srv, "POST", "/api/admin/backup/pin-key", cookie, string(body)); w.Code != http.StatusOK {
+		t.Fatalf("pin: got %d: %s", w.Code, w.Body.String())
+	}
+
+	if w := adminRequestNoStepUp(t, srv, "POST", "/api/admin/backup/deposit", cookie, ""); w.Code != http.StatusOK {
+		t.Fatalf("deposit without step-up: got %d: %s", w.Code, w.Body.String())
+	}
+
+	w := adminRequestNoStepUp(t, srv, "GET", "/api/admin/backup/export-capsule", cookie, "")
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if w.Code != http.StatusForbidden || resp["error"] != "step_up_required" {
+		t.Fatalf("export-capsule without step-up: got %d %v", w.Code, resp["error"])
+	}
+
+	user := newUser(t, dbStore, "user")
+	userCookie := newSession(t, dbStore, user, time.Now().UTC().Add(time.Hour))
+	if w := adminRequestNoStepUp(t, srv, "POST", "/api/admin/backup/deposit", userCookie, ""); w.Code != http.StatusForbidden {
+		t.Fatalf("deposit by a non-admin: got %d: %s", w.Code, w.Body.String())
 	}
 }

@@ -294,7 +294,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/backup/drill", permAdmin, false, http.HandlerFunc(backupH.RunDrill)},
 		{"GET", "/api/admin/backup/export-capsule", permAdmin, true, http.HandlerFunc(backupH.ExportCapsule)},
 		{"POST", "/api/admin/backup/pair-remote", permAdmin, true, http.HandlerFunc(backupH.PairRemote)},
-		{"POST", "/api/admin/backup/deposit", permAdmin, true, http.HandlerFunc(backupH.Deposit)},
+		{"POST", "/api/admin/backup/deposit", permAdmin, false, http.HandlerFunc(backupH.Deposit)},
 		{"DELETE", "/api/admin/backup/pairing", permAdmin, true, http.HandlerFunc(backupH.Unpair)},
 		{"POST", "/api/admin/backup/pin-key", permAdmin, true, http.HandlerFunc(backupH.PinKey)},
 		{"PUT", "/api/admin/backup/schedule", permAdmin, true, http.HandlerFunc(backupH.SetSchedule)},
