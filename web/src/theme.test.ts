@@ -27,7 +27,7 @@ describe('theme', () => {
     expect(html.match(/type="radio"/g)).toHaveLength(THEMES.length);
     expect(html.match(/data-ky-preview="/g)).toHaveLength(THEMES.length);
     expect(html).toContain('checked="" value="system"');
-    expect(html).toContain('remembered by this browser only');
+    expect(html).toContain('class="ky-appearance-description"');
     expect(html).not.toContain('style=');
   });
 });

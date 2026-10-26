@@ -15,9 +15,9 @@ export const Appearance: React.FC = () => {
   return (
     <div>
       <div className="page-header">
-        <div><h1 className="page-title">Appearance</h1>
-          <p>Pick a theme. It applies straight away and is remembered by this browser only.</p></div>
+        <h1 className="page-title">Appearance</h1>
       </div>
+      <p className="ky-appearance-description">Pick a theme. It applies straight away and is saved in this browser only. Match system follows your device’s light or dark setting.</p>
       <fieldset className="ky-appearance">
         <legend className="ky-appearance-legend">Theme</legend>
         <div className="ky-appearance-grid">
