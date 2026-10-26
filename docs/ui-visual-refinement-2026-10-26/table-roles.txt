@@ -1,0 +1,10 @@
+{"table":1,"row":2,"cell":2,"columnheader":2}
+- table:
+  - rowgroup:
+    - row "Account Email":
+      - columnheader "Account"
+      - columnheader "Email"
+  - rowgroup:
+    - row "Account admin Email admin@local":
+      - cell "Account admin"
+      - cell "Email admin@local"
