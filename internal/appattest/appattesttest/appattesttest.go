@@ -3,6 +3,7 @@
 package appattesttest
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -31,24 +32,33 @@ var (
 type CA struct {
 	Root     *x509.Certificate
 	inter    *x509.Certificate
-	interKey *ecdsa.PrivateKey
+	interKey crypto.Signer
 	interDER []byte
 }
 
-func NewCA(t testing.TB) *CA {
+// Optional signers select the root and intermediate keys for chain-policy tests.
+func NewCA(t testing.TB, signers ...crypto.Signer) *CA {
 	t.Helper()
-	rk, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	defaultRoot, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	var rk crypto.Signer = defaultRoot
+	if len(signers) > 0 {
+		rk = signers[0]
+	}
 	root := mkCert(t, &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test app attestation root"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
-	}, nil, &rk.PublicKey, rk)
-	ik, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	}, nil, rk.Public(), rk)
+	defaultInter, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	var ik crypto.Signer = defaultInter
+	if len(signers) > 1 {
+		ik = signers[1]
+	}
 	interDER := mkDER(t, &x509.Certificate{
 		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "test app attestation ca"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
-	}, root, &ik.PublicKey, rk)
+	}, root, ik.Public(), rk)
 	inter, _ := x509.ParseCertificate(interDER)
 	return &CA{Root: root, inter: inter, interKey: ik, interDER: interDER}
 }
@@ -142,7 +152,7 @@ func (c *CA) Attest(t testing.TB, o Options) (keyID string, object []byte) {
 	return keyID, obj
 }
 
-func mkDER(t testing.TB, tmpl, parent *x509.Certificate, pub *ecdsa.PublicKey, signer *ecdsa.PrivateKey) []byte {
+func mkDER(t testing.TB, tmpl, parent *x509.Certificate, pub crypto.PublicKey, signer crypto.Signer) []byte {
 	t.Helper()
 	if parent == nil {
 		parent = tmpl
@@ -154,7 +164,7 @@ func mkDER(t testing.TB, tmpl, parent *x509.Certificate, pub *ecdsa.PublicKey, s
 	return der
 }
 
-func mkCert(t testing.TB, tmpl, parent *x509.Certificate, pub *ecdsa.PublicKey, signer *ecdsa.PrivateKey) *x509.Certificate {
+func mkCert(t testing.TB, tmpl, parent *x509.Certificate, pub crypto.PublicKey, signer crypto.Signer) *x509.Certificate {
 	t.Helper()
 	c, err := x509.ParseCertificate(mkDER(t, tmpl, parent, pub, signer))
 	if err != nil {

@@ -91,11 +91,11 @@ test("oauthErrorCode survives JSON that is not an object", () => {
 // ---- end to end through sendFcmMessage -----------------------------------
 
 /** A throwaway RSA key, so the assertion really is signed rather than stubbed. */
-async function testPrivateKeyPem(): Promise<string> {
+async function testPrivateKeyPem(modulusLength = 2048): Promise<string> {
   const pair = (await crypto.subtle.generateKey(
     {
       name: "RSASSA-PKCS1-v1_5",
-      modulusLength: 2048,
+      modulusLength,
       publicExponent: new Uint8Array([1, 0, 1]),
       hash: "SHA-256",
     },
@@ -180,4 +180,38 @@ test("an unparsable 200 does not leak a prefix of the access token", async () =>
     `a prefix of the body leaked into: ${err.message}`,
   );
   assert.match(err.message, /was not json/);
+});
+
+
+test("FCM signing requires RSA-2048 before contacting Google", async () => {
+  for (const bits of [1024, 2047, 2048]) {
+    const config = {
+      clientEmail: "key-floor@example.iam.gserviceaccount.com",
+      privateKeyPem: await testPrivateKeyPem(bits),
+      projectId: "key-floor-fixture",
+    };
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async (input) => {
+      calls++;
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === "https://oauth2.googleapis.com/token") {
+        return Response.json({ access_token: "fixture-access-token", expires_in: 3600 });
+      }
+      assert.equal(url, "https://fcm.googleapis.com/v1/projects/key-floor-fixture/messages:send");
+      return Response.json({ name: "fixture-message" });
+    };
+    try {
+      const sending = sendFcmMessage(config, emptyCache(), { token: "device-token", title: "fixture", body: "fixture" });
+      if (bits < 2048) {
+        await assert.rejects(sending, /RSA.*2048/);
+        assert.equal(calls, 0, "weak signing key reached Google");
+      } else {
+        assert.deepEqual(await sending, { ok: true });
+        assert.equal(calls, 2);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
 });

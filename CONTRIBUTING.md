@@ -387,3 +387,13 @@ KyIdentity is licensed under the MIT License. By
 contributing, you agree that your contribution is licensed under the same
 terms, and that you have the right to submit it — including the right to submit
 anything an AI tool produced on your behalf.
+
+## Strong-key configuration verification
+
+For crypto/profile changes, run the full race suite in ordinary mode and with
+`GODEBUG=fips140=on`, retaining all existing web, Worker, Docker and backup
+checks. `python3 docs/check-strong-crypto-compose.py` verifies the optional
+overlay with synthetic inputs. Keep attestation/TOTP refusal and record-retention
+regressions and real netguard TLS checks. Source/Node tests do not certify a
+hosted Worker platform or a deployed HTTPS edge; see
+[STRONG-CRYPTO.md](docs/STRONG-CRYPTO.md).

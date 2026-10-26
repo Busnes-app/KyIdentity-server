@@ -43,4 +43,5 @@ startup without being overwritten; read the [signing-key upgrade guidance](docs/
 - [Integrations](docs/INTEGRATIONS.md) — Integration Requirements. <a id="integration-requirements"></a>
 - [Provisioning](docs/PROVISIONING.md) — Outbound provisioning, Inbound SCIM. <a id="outbound-provisioning"></a><a id="provisioning-scope"></a><a id="reconciliation"></a><a id="offboarding"></a><a id="scim-groups"></a><a id="inbound-scim"></a>
 - [Verifying releases](docs/VERIFYING-RELEASES.md) — Check a release image's signature and source commit, and rebuild its binary to the same bytes.
+- [Key strength and Go TLS profile](docs/STRONG-CRYPTO.md) — Key floors, safe migration, Compose configuration and independent Worker/edge limits.
 - [Assurance case](docs/ASSURANCE-CASE.md) — Threat model, trust boundaries, and why the security requirements are met.

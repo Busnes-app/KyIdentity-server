@@ -141,6 +141,9 @@ func ValidateTOTP(secretBase32, code string) bool {
 
 // SaveUserTOTP encrypts and saves a user's TOTP secret.
 func (e *Engine) SaveUserTOTP(userID, secretBase32 string, audit *store.AuditEvent) error {
+	if _, err := totp.Code(secretBase32, time.Unix(0, 0)); err != nil {
+		return fmt.Errorf("invalid TOTP secret: %w", err)
+	}
 	encrypted, err := crypto.Seal(e.encryptionKey, store.SealTOTP, userID, []byte(secretBase32))
 	if err != nil {
 		return fmt.Errorf("failed to encrypt TOTP secret: %w", err)

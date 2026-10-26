@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -186,11 +187,22 @@ func (v *Verifier) Verify(keyID string, attestation, clientDataHash []byte) erro
 	for _, c := range certs[1:] {
 		inter.AddCert(c)
 	}
-	if _, err := leaf.Verify(x509.VerifyOptions{
+	chains, err := leaf.Verify(x509.VerifyOptions{
 		Roots: v.roots, Intermediates: inter, CurrentTime: v.now(),
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	}); err != nil {
+	})
+	if err != nil {
 		return fail(ReasonChain, err.Error())
+	}
+	strongChain := false
+	for _, chain := range chains {
+		if crypto.CheckCertificateKeys(chain...) == nil {
+			strongChain = true
+			break
+		}
+	}
+	if !strongChain {
+		return fail(ReasonChain, "certificate keys do not meet the strength policy")
 	}
 
 	// 3. Nonce = SHA256(authData || clientDataHash) must equal the leaf extension.

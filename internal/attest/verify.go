@@ -5,6 +5,8 @@ import (
 	"crypto/x509"
 	"fmt"
 	"time"
+
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 )
 
 type Expectation struct {
@@ -49,6 +51,9 @@ func Verify(chainDER [][]byte, want Expectation, roots Roots, status Status) Res
 	_, trusted := roots.Pool()
 	root, err := chainToTrustedRoot(certs, trusted)
 	if err != nil {
+		return none(err.Error(), serials)
+	}
+	if err := crypto.CheckCertificateKeys(append(certs, root)...); err != nil {
 		return none(err.Error(), serials)
 	}
 	legacy := root.Subject.SerialNumber == LegacyRSARootSerialNumber

@@ -40,7 +40,9 @@ jobs:
           # the pin block itself must carry both flags; a value elsewhere does not excuse it
           for f in docker-compose.yml $( [ -f docs/RESTORE.md ] && echo docs/RESTORE.md ); do
             if [ "$f" = docker-compose.yml ] || grep -qE -- '--(repo|cert-identity) ' "$f"; then
-              grep -q -- '--repo ' "$f" && grep -q -- '--cert-identity ' "$f" || { echo "$f lacks --repo or --cert-identity"; exit 1; }
+              if ! grep -q -- '--repo ' "$f" || ! grep -q -- '--cert-identity ' "$f"; then
+                echo "$f lacks --repo or --cert-identity"; exit 1
+              fi
             fi
           done
           # every --repo and the whole of every --cert-identity (workflow file and ref included),
@@ -69,6 +71,12 @@ jobs:
       # Go's default is 10 minutes per package, which the api suite under -race now
       # exceeds on a runner. This is a hang detector, not a performance budget.
       - run: go test -race -count=1 -timeout 20m ./...
+      - name: test supported strong-key profile
+        env:
+          GODEBUG: fips140=on
+        run: go test -race -count=1 -timeout 20m ./...
+      - name: profile preserves Compose configuration
+        run: python3 docs/check-strong-crypto-compose.py
       # The release binary must not depend on where it is built: build it the way the
       # Dockerfile does (no .git in the context, -trimpath) from two directories and require
       # identical bytes. docs/VERIFYING-RELEASES.md tells users how to repeat this.
