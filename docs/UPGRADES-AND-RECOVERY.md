@@ -53,3 +53,19 @@ Procedures are in [docs/RUNBOOKS.md](RUNBOOKS.md) and
 [docs/RESTORE.md](RESTORE.md); what has and has not been verified for a release is
 in [docs/RELEASE-EVIDENCE.md](RELEASE-EVIDENCE.md). Device attestation checks that need a
 physical phone are in [docs/attestation-verification-plan.md](attestation-verification-plan.md).
+
+## RSA signing-key minimum
+
+KyIdentity loads only RSA signing keys with a modulus of at least 2048 bits,
+in either PKCS#1 or PKCS#8 PEM format. First start still generates a 2048-bit
+key when the configured key file does not exist. Larger existing keys are
+retained. There is no opt-out for undersized keys.
+
+An installation using a smaller key now stops with a size error. Its existing
+key file is preserved; it is not automatically replaced or upgraded. Before
+upgrading such an installation, back up the existing state and arrange a
+deliberate signing-key rotation with the administrators of dependent clients.
+Replacing the signing key changes its JWKS key ID and makes tokens signed by
+the old key fail verification against the new key. Do not delete the key file
+as a troubleshooting shortcut. Recovery from an older backup with an
+undersized key also requires this planned rotation before the server can start.

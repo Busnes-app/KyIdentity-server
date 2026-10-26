@@ -26,6 +26,9 @@ Built in Go with a focus on simplicity, minimal external dependencies, and nativ
 
 Refer to [SECURITY.md](SECURITY.md) for vulnerability disclosure procedures and [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
+RSA token-signing keys must be at least 2048 bits. Existing smaller keys stop
+startup without being overwritten; read the [signing-key upgrade guidance](docs/UPGRADES-AND-RECOVERY.md#rsa-signing-key-minimum) before upgrading such an installation.
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — Architecture & Standard Library Philosophy. <a id="architecture--standard-library-philosophy"></a><a id="standard-library-implementations"></a><a id="direct-dependencies"></a>

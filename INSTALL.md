@@ -71,6 +71,11 @@ described in the [README](README.md). Recovery: [restore runbook](docs/RESTORE.m
 
 ## Keep it recoverable
 
+If reusing an RSA token-signing key, it must be at least 2048 bits (PKCS#1 or
+PKCS#8). Startup refuses a smaller key and preserves its file. Follow the
+[signing-key upgrade guidance](docs/UPGRADES-AND-RECOVERY.md#rsa-signing-key-minimum)
+before replacing one; a signing-key change affects previously issued tokens.
+
 Preserve the database **and deployment keys**, not just the image. Configure recovery using
 the linked restore runbook, retain an independent copy, and complete a scratch restore with
 custodian cards before treating recovery as verified. A synthetic drill uses a throwaway

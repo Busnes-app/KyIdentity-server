@@ -147,6 +147,7 @@ Everything KyIdentity needs to keep secret lives in its data volume (`/data` in 
 
 - Keys not supplied through the environment are generated on first start, written `0600` in a `0700` directory, and reused.
 - A key of the wrong length is a startup error, never a silently weakened key. There is no key rotation: losing or replacing `encryption.key` makes the data sealed under it unrecoverable.
+- RSA signing keys must be at least 2048 bits, whether loaded as PKCS#1 or PKCS#8. An undersized existing key is refused and preserved; startup never replaces it. See [signing-key upgrades](docs/UPGRADES-AND-RECOVERY.md#rsa-signing-key-minimum) before replacing an old key.
 - **Back up the whole volume and protect it like the keys it holds.** See [docs/RESTORE.md](docs/RESTORE.md).
 
 ### First Run & Bootstrap
