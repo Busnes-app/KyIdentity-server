@@ -1,10 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { THEMES, Theme, applyTheme, saveTheme, storedTheme } from '../theme';
 
-const mode = (scheme: string) => scheme === 'system' ? 'Light or dark' : scheme === 'light' ? 'Light' : 'Dark';
+const mode = (scheme: string) => scheme === 'system' ? 'Follows device' : scheme === 'light' ? 'Light' : 'Dark';
 
 export const Appearance: React.FC = () => {
   const [current, setCurrent] = useState<Theme>(storedTheme);
+  // Another tab's choice: theme.ts applies it; keep the checked card in step.
+  useEffect(() => {
+    const sync = () => setCurrent(storedTheme());
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
 
   const choose = (theme: Theme) => {
     applyTheme(theme);
