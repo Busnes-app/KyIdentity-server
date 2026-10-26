@@ -8,6 +8,8 @@ Applies the approved Busnes look to KyIdentity's web shell and gives it the shar
 - **01 after**: suite shell scale (240px sidebar, 24px title, 40px controls and nav rows, shared field border and type) and the Appearance cards.
 - **02 after**: owner correction — shared description class and copy, consistent wrapping, preview hairline, no theme selector in the shell navigation. Only affected Appearance/shell views were recaptured.
 - **02 confirm**: one confirmation recapture after the single stage 02 fix batch, where a fix was needed.
+- **03 after**: owner decisions on the reported conflicts (phone inset for two card columns at 390px, preview fidelity for KyDrive's shipped themes, KyYard's Polished Ky kept), light/dark × desktop/phone Appearance only. Its before is the latest stage 02 batch of the same view (`previous_file` in `results.csv`). The in-app check gained three assertions: every named preview matches the applied palette, two columns with no overflow at 390px, and a keyboard choice survives a reload.
+- **03 confirm**: one confirmation recapture after the single stage 03 fix, where a fix was needed.
 
 Surfaces: Applications (main view), Users (administration task view) and Appearance.
 
@@ -19,6 +21,7 @@ Surfaces: Applications (main view), Users (administration task view) and Appeara
 ## Product notes
 
 - Appearance is in the sidebar under Your account, so every signed-in role reaches it. No selector sits in the navigation.
+- On phones Appearance sits 16px from the screen edge (`.appearance-page`), so the shared 172px cards fit two columns at 390px (358px grid). Other pages keep their spacing.
 - Fixed in passing: on phones the shell grid stretched the header rows when a page was short (visible in the stage 00 users capture).
 
 ## Capture batches
@@ -30,6 +33,7 @@ Every manifest in `screenshots/` lists the source commit, a hash of any uncommit
 | `kyidentity-00-before` | `ba43fbe982` | none | 12 | appearance, applications, users | 2026-10-26T10:55Z |
 | `kyidentity-01-after` | `e7a40de3ed` | `6c39307a0aaa…` | 12 | appearance, applications, users | 2026-10-26T11:20Z |
 | `kyidentity-02-after` | `70c147d6d8` | none | 4 | appearance | 2026-10-26T11:36Z |
+| `kyidentity-03-after` | `29783e4875` | none | 4 | appearance | 2026-10-26T12:07Z |
 
 Conditions: linux 7.2.10-1-cachyos, playwright chromium 156.0.8078.4 (headless), device scale 1, 1280×900 and 390×844, light/dark by OS emulation with no saved choice, America/Chicago, en-US. Fixture: fresh data dir with generated secret/encryption keys; bootstrap-admin "admin" (generated password on stdin, replaced through the required password-change screen at first sign-in); no applications, groups, users or mail; KYIDENTITY_ISSUER_URL on loopback http.
 
@@ -41,19 +45,20 @@ Conditions: linux 7.2.10-1-cachyos, playwright chromium 156.0.8078.4 (headless),
 | --- | --- | --- |
 | `kyidentity-01-after` | `e7a40de3ed` | 16/16 |
 | `kyidentity-02-after` | `70c147d6d8` | 16/16 |
+| `kyidentity-03-after` | `29783e4875` | 19/19 |
 
 ## Checks
 
 | Check | Result |
 | --- | --- |
-| Web unit tests (vitest) | 194/194 pass |
-| Web build (`tsc` + Vite) and committed `web/dist` equals a fresh build | pass |
+| Web unit tests (vitest) | 194/194 pass at stage 03 |
+| Web build and committed `web/dist` equals a fresh build | pass |
 | `npm audit` (all and `--omit=dev`) | 0 vulnerabilities |
-| Vendored ky-ui check (`check-vendor.mjs`, `sync-consumers --check`) | pass at 4f83f34 |
+| Vendored ky-ui check | pass at 4f83f34 |
 | `docs/check-strong-crypto-compose.py` | pass |
-| Push relay workers typecheck/tests | not run: untouched by this change; CI runs them |
+| Push relay workers typecheck/tests | not run: untouched; CI runs them |
 
-Go: `go build ./...`, `go vet ./...`, gofmt and the full `go test -race -count=1 ./...` passed locally on this machine (CachyOS, Go 1.27.1); Go code is unchanged by this work. Docker image, publish and attestation jobs were not run locally: CI runs them on this PR.
+Go: `go build ./...`, `go vet ./...`, gofmt and the full `go test -race -count=1 ./...` passed locally (CachyOS, Go 1.27.1) at stage 02; Go code is unchanged since then and by this work, so those results stand. Docker image, publish and attestation jobs were not run locally: CI runs them.
 
 ## Reproduce
 

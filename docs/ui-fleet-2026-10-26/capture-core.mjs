@@ -167,7 +167,49 @@ export async function verify(adapter) {
     });
     check('keyboard arrow selects the next card with a visible focus ring', keyed.checked && keyed.value !== 'system' && keyed.outline !== 'none', keyed);
     await page.screenshot({ path: join(out, `${prefix}-keyboard-focus-desktop.png`) });
+    // Every named card previews the palette the app applies when it is chosen.
+    const mismatches = [];
+    for (const value of await page.locator('.ky-appearance-radio').evaluateAll((els) => els.map((el) => el.value))) {
+      if (value === 'system') continue; // previews both schemes; the applied one depends on the device
+      await page.locator(`.ky-appearance-radio[value="${value}"]`).check();
+      await page.waitForTimeout(100);
+      const got = await page.evaluate((v) => {
+        const preview = getComputedStyle(document.querySelector(`[data-ky-preview="${v}"]`));
+        const root = getComputedStyle(document.documentElement);
+        const pairs = [['--ky-preview-bg', '--bg'], ['--ky-preview-ink', '--ink-strong'], ['--ky-preview-accent', '--accent']];
+        // Compare resolved colours, so #000 and #000000 are equal.
+        const probe = document.body.appendChild(document.createElement('i'));
+        const rgb = (value) => { probe.style.color = ''; probe.style.color = value; return getComputedStyle(probe).color; };
+        const out = pairs.map(([a, b]) => [b, rgb(preview.getPropertyValue(a).trim()), rgb(root.getPropertyValue(b).trim())]).filter(([, x, y]) => x !== y);
+        probe.remove();
+        return out;
+      }, value);
+      if (got.length) mismatches.push({ value, got });
+    }
+    check('every named preview matches the applied palette', mismatches.length === 0, mismatches);
+    await radio('Match system').check();
     await context.close();
+    // Phone: two card columns, no page overflow, and a keyboard choice survives a reload.
+    const phone = await browser.newContext({ baseURL: server.baseURL, viewport: { width: 390, height: 844 }, colorScheme: 'light', deviceScaleFactor: 1 });
+    const mobile = await phone.newPage();
+    await adapter.signIn(mobile, server);
+    const open = () => adapter.surfaces[adapter.appearanceSurface ?? 'appearance'](mobile, { device: 'mobile', theme: 'light', server });
+    await open();
+    const layout = await mobile.evaluate(() => {
+      const tops = [...document.querySelectorAll('.ky-appearance-option')].map((el) => el.getBoundingClientRect());
+      const grid = document.querySelector('.ky-appearance-grid').getBoundingClientRect();
+      return { columns: tops.filter((r) => Math.abs(r.top - tops[0].top) < 1).length, grid_px: Math.round(grid.width), left_px: Math.round(grid.left), overflow_px: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    });
+    check('phone: two card columns and no overflow at 390px', layout.columns === 2 && layout.overflow_px === 0, layout);
+    await mobile.screenshot({ path: join(out, `${prefix}-phone-grid-mobile.png`) });
+    await mobile.locator('.ky-appearance-radio:checked').focus();
+    await mobile.keyboard.press('ArrowRight');
+    const chosen = await mobile.evaluate(() => document.activeElement?.value);
+    await mobile.reload();
+    await open();
+    const kept = await mobile.locator('.ky-appearance-radio:checked').evaluate((el) => el.value);
+    check('phone: keyboard choice survives a reload', !!chosen && kept === chosen, { chosen, kept });
+    await phone.close();
   } finally {
     await browser.close();
     await server.stop();

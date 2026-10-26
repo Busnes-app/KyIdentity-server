@@ -1,0 +1,56 @@
+{
+  "prefix": "kyidentity-03-after",
+  "product": "kyidentity",
+  "branch": "ui/fleet-appearance",
+  "head": "29783e487579fbd942c4bff73c479b79d56aab11",
+  "uncommitted_diff_sha256": null,
+  "uncommitted_diff_bytes": 0,
+  "server_binary_sha256": "621d0132d29179add6af510a90acffa1be54c618fe497d326fbf1db6cdc807e5",
+  "embedded_index_sha256": "0fa5ff40c575c53a453a3c40028beeb8ad65928651a0e7f61ad706bb01ca9071",
+  "captured": "2026-10-26T12:07:33.685Z",
+  "os": "linux 7.2.10-1-cachyos",
+  "driver": "playwright chromium 156.0.8078.4 (headless)",
+  "device_scale_factor": 1,
+  "timezone": "America/Chicago",
+  "locale": "en-US",
+  "theme_source": "context colorScheme emulation with no saved theme choice (OS-following default)",
+  "fixture": "fresh data dir with generated secret/encryption keys; bootstrap-admin \"admin\" (generated password on stdin, replaced through the required password-change screen at first sign-in); no applications, groups, users or mail; KYIDENTITY_ISSUER_URL on loopback http",
+  "files": [
+    {
+      "file": "kyidentity-03-after-appearance-desktop-light.png",
+      "sha256": "eeea5c2ed97abad770f78813099b92005ed3fede0a6ff9056d6cbfd7069399ae",
+      "surface": "appearance",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-03-after-appearance-mobile-light.png",
+      "sha256": "2a5dde0c1b88bb3a04f58dbd0a62f3aa1f34fefdf829a1f92969c8ed15e60700",
+      "surface": "appearance",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-03-after-appearance-desktop-dark.png",
+      "sha256": "defb7a2eb2edb105b3457491195fe86dc5dc0a60c4d1d710047e4c0b6c953b38",
+      "surface": "appearance",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-03-after-appearance-mobile-dark.png",
+      "sha256": "bcdde43d089db250904fda6bc378a6bcc06a20f193fd511f58b0a05890c08348",
+      "surface": "appearance",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    }
+  ]
+}
