@@ -100,6 +100,8 @@ button {
   gap: 0.75rem;
   align-items: center;
   padding: 0.25rem 0.5rem 1.25rem;
+  /* The pre-bundle /css/styles.css sets a mono .brand; the app wordmark uses the display face. */
+  font-family: var(--font-display);
 }
 
 .brand-tile {
@@ -122,19 +124,12 @@ button {
   line-height: 1.1;
 }
 
-/* Accent as text on the dark palettes; on the light ones it fails contrast. */
+/* The product descriptor reads as quiet secondary text, not an accent eyebrow. */
 .brand small {
   display: block;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
+  font-size: var(--ky-type-meta);
+  color: var(--ink);
   margin-top: 0.15rem;
-}
-
-:root[data-scheme="light"] .brand small {
-  color: var(--ink-strong);
 }
 
 /* Sidebar navigation */
@@ -164,7 +159,6 @@ button {
   padding: 0.45rem 0.6rem;
   color: var(--ink-strong);
   font-size: var(--ky-type-nav);
-  border-left: 2px solid transparent;
 }
 
 .side-nav button svg {
@@ -178,7 +172,6 @@ button {
 
 .side-nav button[aria-current="page"] {
   background: var(--accent-soft);
-  border-left-color: var(--accent);
   font-weight: 500;
 }
 
@@ -1981,4 +1974,32 @@ dialog.modal-backdrop::backdrop {
   /* Appearance sits 16px from the screen edge, as in the other suite products:
      room for two shared 172px cards at 390px. */
   .appearance-page { margin-inline: -0.25rem; }
+}
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Users: each row's actions sit behind one labelled "Manage" disclosure, so the table fits and
+   every action names itself; delete is set apart in the danger colour. */
+.row-actions { display: inline-block; text-align: left; }
+.row-actions > summary { list-style: none; }
+.row-actions > summary::-webkit-details-marker { display: none; }
+.row-actions-menu { display: grid; gap: 2px; min-width: 14rem; margin-top: 0.5rem; padding: 0.25rem; border: 1px solid var(--line); border-radius: var(--ky-control-radius); background: var(--panel); }
+.row-action { display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: var(--ky-control-size); padding: 0 0.6rem; border: 0; border-radius: var(--ky-control-radius); background: none; color: var(--ink-strong); font-size: 0.875rem; text-align: left; white-space: nowrap; }
+.row-action svg { flex: none; color: var(--ink); }
+.row-action:hover:not(:disabled) { background: var(--panel-hover); }
+.row-action:disabled { opacity: 0.55; cursor: not-allowed; }
+.row-action.danger { margin-top: 0.25rem; border-top: 1px solid var(--line); border-radius: 0 0 var(--ky-control-radius) var(--ky-control-radius); color: var(--danger); }
+.row-action.danger svg { color: var(--danger); }
+.row-action.danger:hover:not(:disabled) { background: var(--danger-soft); }
+
+/* Phones: each user becomes a labelled block, so email, role, status and actions stay on screen. */
+@media (max-width: 52rem) {
+  .users-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .users-table, .users-table tbody, .users-table tr { display: block; width: 100%; }
+  .users-table tr { padding: 0.75rem 1rem; border-bottom: 1px solid var(--line); }
+  .users-table td { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: 0.5rem; align-items: start; justify-items: start; padding: 0.35rem 0; border: 0; text-align: left; overflow-wrap: anywhere; }
+  .users-table td::before { content: attr(data-label); color: var(--ink); font-family: var(--font-display); font-weight: 400; font-size: var(--ky-type-meta); }
+  .users-table tr:hover td { background: none; }
+  .row-actions-menu { min-width: 0; }
+  .row-action { white-space: normal; }
 }

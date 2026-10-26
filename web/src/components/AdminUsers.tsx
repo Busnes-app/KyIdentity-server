@@ -253,7 +253,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
       {listError && <div className="alert-box error" role="alert">{listError}<button className="secondary-btn sm" onClick={fetchUsers}>Retry</button></div>}
 
       <div className="table-card">
-        <table className="admin-table">
+        <table className="admin-table users-table">
           <thead>
             <tr>
               <th>Account</th>
@@ -269,13 +269,13 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
               const busy = busyIds.has(u.id);
               return (
                 <tr key={u.id}>
-                  <td className="font-mono font-bold text-cyan">{u.username}{u.sourceConnectorId && <span className="status-badge warn" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</td>
-                  <td>{u.displayName || u.username}</td>
-                  <td className="text-muted">{u.email}</td>
-                  <td>
+                  <td data-label="Account" className="font-mono font-bold text-cyan">{u.username}{u.sourceConnectorId && <span className="status-badge warn" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</td>
+                  <td data-label="Display Name">{u.displayName || u.username}</td>
+                  <td data-label="Email" className="text-muted">{u.email}</td>
+                  <td data-label="Role">
                     {u.role === 'admin' ? 'Administrator' : 'User'}
                   </td>
-                  <td>
+                  <td data-label="Status">
                     {u.pending ? (
                       <span className="status-badge warn">
                         <Clock size={12} /> Pending
@@ -291,38 +291,42 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                     )}
                     {u.endsAt && <div className="text-muted text-sm">Ends {describeInstant(u.endsAt)}</div>}
                   </td>
-                  <td className="text-right">
-                    <div className="action-buttons-wrap">
-                      {full && <button className="icon-btn" onClick={() => onManageGroups(u)} title="Manage groups" aria-label={`Manage groups for ${u.username}`}>
-                        <Users size={15} />
-                      </button>}
-                      {full && <button className="icon-btn" disabled={busy} onClick={() => openEditModal(u)} title="Edit User">
-                        <Edit size={15} />
-                      </button>}
-                      {full && <button className="icon-btn" onClick={() => setDelegating(u)} title="Delegated administration" aria-label={`Delegation for ${u.username}`}>
-                        <UserCog size={15} />
-                      </button>}
-                      {(full || u.role !== 'admin') && <>
-                      <button className="icon-btn" disabled={busy} onClick={() => handleResetMFA(u)} title="Reset MFA">
-                        <KeyRound size={15} />
-                      </button>
-                      <button className="icon-btn" onClick={() => openSessions(u)} title="Sessions and apps" aria-label={`Sessions for ${u.username}`}>
-                        <Monitor size={15} />
-                      </button>
-                      <button className="icon-btn" disabled={busy} onClick={() => handleRevokeSessions(u)} title="Revoke Sessions">
-                        <LogOut size={15} />
-                      </button>
-                      <button className="icon-btn" onClick={() => issueLink(u, false)} title={u.pending ? 'Activation link' : 'Password reset link'} aria-label={`${u.pending ? 'Activation' : 'Password reset'} link for ${u.username}`}>
-                        <Link size={15} />
-                      </button>
-                      <button className="icon-btn" onClick={() => setOffboarding({ id: u.id, username: u.username })} title="Offboarding status" aria-label={`Offboarding status for ${u.username}`}>
-                        <UserX size={15} />
-                      </button>
-                      </>}
-                      {full && <button className="icon-btn danger" disabled={busy} onClick={() => handleDeleteUser(u)} title="Delete User">
-                        <Trash2 size={15} />
-                      </button>}
-                    </div>
+                  <td data-label="Actions" className="text-right">
+                    {/* Every action stays one disclosure away, labelled; delete is set apart. */}
+                    <details className="row-actions">
+                      <summary className="secondary-btn sm">Manage<span className="sr-only"> {u.username}</span></summary>
+                      <div className="row-actions-menu">
+                        {full && <button className="row-action" onClick={() => onManageGroups(u)} aria-label={`Manage groups for ${u.username}`}>
+                          <Users size={15} />Groups
+                        </button>}
+                        {full && <button className="row-action" disabled={busy} onClick={() => openEditModal(u)}>
+                          <Edit size={15} />Edit user
+                        </button>}
+                        {full && <button className="row-action" onClick={() => setDelegating(u)} aria-label={`Delegated administration for ${u.username}`}>
+                          <UserCog size={15} />Delegated administration
+                        </button>}
+                        {(full || u.role !== 'admin') && <>
+                        <button className="row-action" disabled={busy} onClick={() => handleResetMFA(u)}>
+                          <KeyRound size={15} />Reset MFA
+                        </button>
+                        <button className="row-action" onClick={() => openSessions(u)} aria-label={`Sessions and apps for ${u.username}`}>
+                          <Monitor size={15} />Sessions and apps
+                        </button>
+                        <button className="row-action" disabled={busy} onClick={() => handleRevokeSessions(u)}>
+                          <LogOut size={15} />Revoke sessions
+                        </button>
+                        <button className="row-action" onClick={() => issueLink(u, false)} aria-label={`${u.pending ? 'Activation' : 'Password reset'} link for ${u.username}`}>
+                          <Link size={15} />{u.pending ? 'Activation link' : 'Password reset link'}
+                        </button>
+                        <button className="row-action" onClick={() => setOffboarding({ id: u.id, username: u.username })} aria-label={`Offboarding status for ${u.username}`}>
+                          <UserX size={15} />Offboarding status
+                        </button>
+                        </>}
+                        {full && <button className="row-action danger" disabled={busy} onClick={() => handleDeleteUser(u)}>
+                          <Trash2 size={15} />Delete user
+                        </button>}
+                      </div>
+                    </details>
                   </td>
                 </tr>
               );
