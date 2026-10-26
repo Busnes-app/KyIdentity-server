@@ -1,0 +1,210 @@
+{
+  "prefix": "kyidentity-01-after",
+  "product": "kyidentity",
+  "head": "858eb70281a83df9664acbde92510f605a534217",
+  "uncommitted_diff_sha256": "431e7e1e6d2a8b6f619a5739976e8199d4577ed3d8365c3641084cbe573b2058",
+  "run": "2026-10-26T18:06:29.324Z",
+  "viewport": "1280x900",
+  "colorScheme": "dark",
+  "results": [
+    {
+      "name": "Sky: page background",
+      "ok": true,
+      "detail": {
+        "inlineBg": "#dff1ff",
+        "body": "rgb(223, 241, 255)",
+        "scheme": "light"
+      }
+    },
+    {
+      "name": "Sky: hovered nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(182, 220, 237)",
+        "ink": "rgb(24, 49, 66)",
+        "ratio": "9.28"
+      }
+    },
+    {
+      "name": "Sky: selected nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(182, 220, 237)",
+        "ink": "rgb(24, 49, 66)",
+        "ratio": "9.28"
+      }
+    },
+    {
+      "name": "Sun: page background",
+      "ok": true,
+      "detail": {
+        "inlineBg": "#fff3dc",
+        "body": "rgb(255, 243, 220)",
+        "scheme": "light"
+      }
+    },
+    {
+      "name": "Sun: hovered nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(241, 217, 162)",
+        "ink": "rgb(57, 38, 17)",
+        "ratio": "10.41"
+      }
+    },
+    {
+      "name": "Sun: selected nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(241, 217, 162)",
+        "ink": "rgb(57, 38, 17)",
+        "ratio": "10.41"
+      }
+    },
+    {
+      "name": "Busnes Dark: page background",
+      "ok": true,
+      "detail": {
+        "inlineBg": "",
+        "body": "rgb(24, 35, 38)",
+        "scheme": "dark"
+      }
+    },
+    {
+      "name": "Busnes Dark: hovered nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(43, 38, 34)",
+        "ink": "rgb(242, 239, 232)",
+        "ratio": "13.03"
+      }
+    },
+    {
+      "name": "Busnes Dark: selected nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(43, 38, 34)",
+        "ink": "rgb(242, 239, 232)",
+        "ratio": "13.03"
+      }
+    },
+    {
+      "name": "Busnes Light: page background",
+      "ok": true,
+      "detail": {
+        "inlineBg": "",
+        "body": "rgb(248, 246, 240)",
+        "scheme": "light"
+      }
+    },
+    {
+      "name": "Busnes Light: hovered nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(251, 240, 236)",
+        "ink": "rgb(24, 35, 38)",
+        "ratio": "14.36"
+      }
+    },
+    {
+      "name": "Busnes Light: selected nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(251, 240, 236)",
+        "ink": "rgb(24, 35, 38)",
+        "ratio": "14.36"
+      }
+    },
+    {
+      "name": "Match system: page background",
+      "ok": true,
+      "detail": {
+        "inlineBg": "",
+        "body": "rgb(24, 35, 38)",
+        "scheme": "dark"
+      }
+    },
+    {
+      "name": "Match system: hovered nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(43, 38, 34)",
+        "ink": "rgb(242, 239, 232)",
+        "ratio": "13.03"
+      }
+    },
+    {
+      "name": "Match system: selected nav row contrast",
+      "ok": true,
+      "detail": {
+        "bg": "rgb(43, 38, 34)",
+        "ink": "rgb(242, 239, 232)",
+        "ratio": "13.03"
+      }
+    },
+    {
+      "name": "keyboard arrow selects the next card with a visible focus ring",
+      "ok": true,
+      "detail": {
+        "value": "busnes-light",
+        "checked": true,
+        "outline": "solid"
+      }
+    },
+    {
+      "name": "every named preview matches the applied palette",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "phone: two card columns and no overflow at 390px",
+      "ok": true,
+      "detail": {
+        "columns": 2,
+        "grid_px": 358,
+        "left_px": 16,
+        "overflow_px": 0
+      }
+    },
+    {
+      "name": "phone: keyboard choice survives a reload",
+      "ok": true,
+      "detail": {
+        "chosen": "busnes-light",
+        "kept": "busnes-light"
+      }
+    },
+    {
+      "name": "cross-tab desktop light: another tab's choice checks the matching card",
+      "ok": true,
+      "detail": {
+        "stored": "Sun",
+        "checked": "sun"
+      }
+    },
+    {
+      "name": "cross-tab mobile light: another tab's choice checks the matching card",
+      "ok": true,
+      "detail": {
+        "stored": "Sun",
+        "checked": "sun"
+      }
+    },
+    {
+      "name": "cross-tab desktop dark: another tab's choice checks the matching card",
+      "ok": true,
+      "detail": {
+        "stored": "Sun",
+        "checked": "sun"
+      }
+    },
+    {
+      "name": "cross-tab mobile dark: another tab's choice checks the matching card",
+      "ok": true,
+      "detail": {
+        "stored": "Sun",
+        "checked": "sun"
+      }
+    }
+  ]
+}

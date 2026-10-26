@@ -1,0 +1,176 @@
+{
+  "prefix": "kyidentity-01-confirm-delegate",
+  "product": "kyidentity",
+  "branch": "ui/fleet-review-followups",
+  "head": "858eb70281a83df9664acbde92510f605a534217",
+  "uncommitted_diff_sha256": "f4e248b8f3ef3a961fe500d1034f221b38cc3618e6f97f11c8fb536087c31b5a",
+  "uncommitted_diff_bytes": 586563,
+  "server_binary_sha256": "e7fb5a0cd99cb7adcfd656cb3c7f5281d630c1ae100275d36eaccf0f71461e16",
+  "embedded_index_sha256": "7ff014818e3f43397d8efe876e6bcaa81f391f95bca5411801ee0e8c10e2a1bb",
+  "captured": "2026-10-26T18:07:08.321Z",
+  "os": "linux 7.2.10-1-cachyos",
+  "driver": "playwright chromium 153.0.8010.12 (headless)",
+  "device_scale_factor": 1,
+  "timezone": "America/Chicago",
+  "locale": "en-US",
+  "theme_source": "context colorScheme emulation with no saved theme choice (OS-following default)",
+  "fixture": "fresh data dir with generated secret/encryption keys; bootstrap-admin \"admin\" and two users (\"helpdesk\", \"member\", role user) created through the Create User form with generated passwords, each replaced at first sign-in; \"helpdesk\" holds the Helpdesk delegation set through the delegation editor; signed in as \"helpdesk\"; no applications, groups or mail",
+  "files": [
+    {
+      "file": "kyidentity-01-confirm-delegate-users-desktop-light.png",
+      "sha256": "c345e7c7a3e39d1a807594a3d042d917dc43883fef588edbef575f53e4a01596",
+      "surface": "users",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-manage-admin-row-desktop-light.png",
+      "sha256": "c345e7c7a3e39d1a807594a3d042d917dc43883fef588edbef575f53e4a01596",
+      "surface": "manage-admin-row",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-manage-member-row-desktop-light.png",
+      "sha256": "107a3731e7f951737d63d7cff74932728f543f0eb10433fc0a84eb7268d3dc48",
+      "surface": "manage-member-row",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-users-mobile-light.png",
+      "sha256": "3218467fd999e4c4880c26803f4a03c84f2d02466ba5bea141b9f7cdcd16e697",
+      "surface": "users",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-manage-admin-row-mobile-light.png",
+      "sha256": "3218467fd999e4c4880c26803f4a03c84f2d02466ba5bea141b9f7cdcd16e697",
+      "surface": "manage-admin-row",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-manage-member-row-mobile-light.png",
+      "sha256": "8400f49b0012bca0e918930bc1ba3bba5366079e7500915544c20f0ac6bcccbd",
+      "surface": "manage-member-row",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-users-desktop-dark.png",
+      "sha256": "4941bbb6343d9b6aaacb8e426199715fba747c0f6c36d24e802c8868d9333827",
+      "surface": "users",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-manage-admin-row-desktop-dark.png",
+      "sha256": "4941bbb6343d9b6aaacb8e426199715fba747c0f6c36d24e802c8868d9333827",
+      "surface": "manage-admin-row",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-manage-member-row-desktop-dark.png",
+      "sha256": "6b0c9e66845611f3424a74b3e108a1a4b8fee4e4b8bfa848a02f3ca58c58464e",
+      "surface": "manage-member-row",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-users-mobile-dark.png",
+      "sha256": "fe9970dafd2cf8dd9c570352bb5cb9713a7dc649ef0abb2b7fe9cb963fc1fa5c",
+      "surface": "users",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-manage-admin-row-mobile-dark.png",
+      "sha256": "fe9970dafd2cf8dd9c570352bb5cb9713a7dc649ef0abb2b7fe9cb963fc1fa5c",
+      "surface": "manage-admin-row",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-confirm-delegate-manage-member-row-mobile-dark.png",
+      "sha256": "14f5d1efba0821c3d1bee17d0ae606fe7c7e1b7a9f2958b77c8f5451cfc9cc88",
+      "surface": "manage-member-row",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "loaded_fonts": [
+        "IBM Plex Mono",
+        "Space Grotesk"
+      ],
+      "full_page": false
+    }
+  ]
+}
