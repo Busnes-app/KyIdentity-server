@@ -45,6 +45,7 @@ body {
   background-color: var(--bg);
   color: var(--ink-strong);
   font-family: var(--font-display);
+  font-size: var(--ky-type-body);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.2s, color 0.2s;
@@ -71,7 +72,7 @@ button {
 /* Shell: suite sidebar plus content column */
 .shell {
   display: grid;
-  grid-template-columns: 15.5rem 1fr;
+  grid-template-columns: var(--ky-sidebar-size) 1fr;
   min-height: 100vh;
 }
 
@@ -158,10 +159,11 @@ button {
   text-align: left;
   border: 0;
   background: none;
-  border-radius: 6px;
+  border-radius: var(--ky-control-radius);
+  min-height: var(--ky-control-size);
   padding: 0.45rem 0.6rem;
   color: var(--ink-strong);
-  font-size: 0.925rem;
+  font-size: var(--ky-type-nav);
   border-left: 2px solid transparent;
 }
 
@@ -222,11 +224,16 @@ button {
   gap: 1rem;
 }
 
+.page-header p {
+  margin: 0.5rem 0 0;
+  color: var(--ink);
+  max-width: 75ch;
+}
+
 .page-title {
-  font-size: 1.75rem;
+  font-size: var(--ky-type-title);
   font-weight: 600;
   margin: 0;
-  letter-spacing: -0.015em;
   line-height: 1.2;
 }
 
@@ -724,68 +731,6 @@ button {
   color: var(--danger);
 }
 
-/* Appearance */
-.theme-grid {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-  gap: 0.75rem;
-}
-
-.swatch {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  padding: 0.5rem;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.swatch:hover {
-  border-color: var(--accent);
-}
-
-.swatch[aria-pressed="true"] {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--glow);
-}
-
-.swatch-preview {
-  height: 3.25rem;
-  border-radius: 5px;
-  position: relative;
-  overflow: hidden;
-}
-
-.swatch-preview i {
-  position: absolute;
-  left: 38%;
-  top: 0.6rem;
-  height: 0.35rem;
-  width: 35%;
-  border-radius: 2px;
-}
-
-.swatch-preview i:last-child {
-  top: 1.3rem;
-  width: 50%;
-  opacity: 0.55;
-}
-
-.swatch span:not(.swatch-preview) {
-  font-size: 0.9rem;
-}
-
-.swatch small {
-  color: var(--ink);
-  font-size: 0.78rem;
-}
-
 /* Tables */
 .table-card {
   background: var(--panel);
@@ -988,12 +933,13 @@ button {
 .form-input, .form-select, .form-textarea {
   width: 100%;
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--ky-field-border);
+  border-radius: var(--ky-control-radius);
+  min-height: var(--ky-control-size);
+  padding: 0.5rem 0.85rem;
   color: var(--ink-strong);
   font-family: var(--font-display);
-  font-size: 0.95rem;
+  font-size: var(--ky-type-body);
   transition: all 0.15s ease;
 }
 
@@ -1797,6 +1743,8 @@ dialog.modal-backdrop::backdrop {
 @media (max-width: 52rem) {
   .shell {
     grid-template-columns: 1fr;
+    /* Short pages must not stretch the header rows. */
+    grid-template-rows: auto 1fr;
   }
 
   .side {
@@ -2030,4 +1978,7 @@ dialog.modal-backdrop::backdrop {
   .side-who { max-width: 7rem; overflow-wrap: anywhere; }
   .side-nav { grid-column: 1 / -1; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; min-width: 0; padding-block: 0.25rem; }
   .side-nav button { flex: none; white-space: nowrap; min-height: 40px; }
+  /* Appearance sits 16px from the screen edge, as in the other suite products:
+     room for two shared 172px cards at 390px. */
+  .appearance-page { margin-inline: -0.25rem; }
 }

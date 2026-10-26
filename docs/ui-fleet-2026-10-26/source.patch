@@ -1,0 +1,435 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index c5e88a6..a839ab8 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -8,7 +8,7 @@ KyIdentity Server is the single-organization SSO provider and central identity a
+ 2. **Outbound SCIM 2.0**: Generic `scim` connectors use the target-issued Bearer token encrypted at rest and `ky-primitives/scim` resource writes; known suite types and explicit `suite_webhook` retain signed webhooks. Legacy custom/unknown types pause delivery until an administrator selects a protocol; paused/disabled connectors are excluded from event claims so they cannot starve active targets. Remote IDs and uncertain-create markers persist per connector/local user, surviving local user deletion. Strict bounded externalId lookup recovers lost create responses; unresolved outcomes never trigger another create. Generic deletion uses `active=false` PATCH, preserving downstream data. Writes through stored remote mappings recheck externalId ownership. Configuration review/token replacement requires step-up and atomic success audit; rejected changes record a separate failure audit. Connection tests only prove Users lookup, not write permissions. Setup and limitations: README.md, Outbound provisioning.
+ 3. **OpenID Connect & OAuth 2.0**: Standard authorization-code flow with S256 PKCE required for every client (confidential too; checked at authorize, code creation and exchange), RS256 ID tokens, and JWKS discovery.
+ 4. **Native Device Pairing & Push MFA**: Natively hosts device pairing (`/api/notifications/native/register`) using 90s PIN/QR codes, push challenge dispatch through FCM/APNs relay Workers, direct UnifiedPush, or the UBports push service (Linux) with 2-digit number matching, and TOTP/recovery code support.
+-5. **Dashboard & Application Launcher**: Suite sidebar layout in Space Grotesk and IBM Plex Mono, themed with Busnes light/dark defaults and the existing KyPost palettes (`web/src/theme.ts`, chosen under Appearance and kept in this browser). Accent is a fill colour only; as text it fails contrast on the light palettes. `css/styles.css` serves the fonts and the pre-bundle fallback page.
++5. **Dashboard & Application Launcher**: Suite sidebar layout in Space Grotesk and IBM Plex Mono, themed with Busnes light/dark defaults and the ky-ui suite catalog (`web/src/theme.ts` over `web/src/ky-ui/themes.js`). Appearance shows Match system and every catalog theme as the shared native radio cards (`ky-appearance`), applied at once and kept in this browser under `kyidentity-theme`; names saved by earlier versions still select their theme and new choices are saved by name. On phones Appearance sits 16px from the screen edge so two shared cards fit at 390px. Accent is a fill colour only; as text it fails contrast on the light palettes. `css/styles.css` serves the fonts and the pre-bundle fallback page.
+    The client table exposes each app's copyable OIDC connection details from the configured issuer, including its client ID, human-readable `username` claim, and compatible credential style; it never displays stored secret hashes. The logout URL it shows is the implemented RP-initiated `end_session_endpoint`.
+    Administrators can add non-KySecurity launcher applications and select a built-in icon or an HTTPS site favicon; favicon loading stays in the browser rather than creating a server-side fetch path.
+ 6. **Disaster Recovery & KyBackup (Feature 0)**: `kycap/3` capsules sealed to the suite recovery public key (received at KyRecovery pairing or pinned by hand from the ceremony page), scheduled and on-demand delivery to a local backup directory and to KyRecovery, a schedule set in the admin UI, automated sandboxed live restore drills, and a `restore` command that takes custodian shares from the KyRecovery ceremony (operator runbook: `docs/RESTORE.md`). The recovery public key is not secret, so a capsule that opens proves nothing about its origin: `restore` requires `-expect-digest` (the SHA-256 KyRecovery recorded at deposit, or printed by `export-capsule`), checks it before reading shares and opens a private copy of the checked bytes. `-accept-unauthenticated-capsule` is the only bypass; it warns and the marker/`system.restored` audit records `authenticated: false`. The wire contract is `kyrecovery-server/zero_code_pairing_handoff_spec.md`.
+diff --git a/UI-VERIFICATION.md b/UI-VERIFICATION.md
+index 194629d..8aaba75 100644
+--- a/UI-VERIFICATION.md
++++ b/UI-VERIFICATION.md
+@@ -33,3 +33,7 @@ Run npm ci, npm test (where configured), and npm run build in web/, then start t
+ ## Approved interface polish — 2026-10-19
+ 
+ See [UI-POLISH.md](UI-POLISH.md) for the implemented changes, preservation scope, checks, actual before/after screenshots and disposable capture conditions. Earlier captures above remain historical evidence.
++
++## Fleet Appearance — 2026-10-26
++
++Shared ky-ui 0.4 Appearance radio cards over the suite catalog, plus the suite shell scale. Staged before/after captures (light/dark × 1280×900/390×844, synthetic fixture), manifests with revisions and hashes, in-app theme transition checks, CSV results and the recorded check runs are in [docs/ui-fleet-2026-10-26](docs/ui-fleet-2026-10-26/README.md). Scores are not self-assigned; the council rates the captures separately.
+diff --git a/web/src/components/Appearance.tsx b/web/src/components/Appearance.tsx
+index 6118e73..117aa88 100644
+--- a/web/src/components/Appearance.tsx
++++ b/web/src/components/Appearance.tsx
+@@ -1,37 +1,36 @@
+ import React, { useState } from 'react';
+-import { THEMES, THEME_NAMES, ThemeName, applyTheme, isLight, saveTheme, storedTheme } from '../theme';
++import { THEMES, Theme, applyTheme, saveTheme, storedTheme } from '../theme';
++
++const mode = (scheme: string) => scheme === 'system' ? 'Light or dark' : scheme === 'light' ? 'Light' : 'Dark';
+ 
+ export const Appearance: React.FC = () => {
+-  const [current, setCurrent] = useState<ThemeName>(storedTheme);
++  const [current, setCurrent] = useState<Theme>(storedTheme);
+ 
+-  const choose = (name: ThemeName) => {
+-    applyTheme(name);
+-    saveTheme(name);
+-    setCurrent(name);
++  const choose = (theme: Theme) => {
++    applyTheme(theme);
++    saveTheme(theme);
++    setCurrent(theme);
+   };
+ 
+   return (
+-    <div>
++    <div className="appearance-page">
+       <div className="page-header">
+         <h1 className="page-title">Appearance</h1>
+       </div>
+-      <ul className="theme-grid">
+-        {THEME_NAMES.map((name) => {
+-          const t = THEMES[name];
+-          return (
+-            <li key={name}>
+-              <button type="button" className="swatch" aria-pressed={name === current} onClick={() => choose(name)}>
+-                <span className="swatch-preview" style={{ background: `linear-gradient(90deg, ${t.sidebarStart} 30%, ${t.bg} 30%)` }}>
+-                  <i style={{ background: t.accent }} />
+-                  <i style={{ background: t.inkStrong }} />
+-                </span>
+-                <span>{name}</span>
+-                <small>{isLight(t.bg) ? 'Light' : 'Dark'}</small>
+-              </button>
+-            </li>
+-          );
+-        })}
+-      </ul>
++      <p className="ky-appearance-description">Pick a theme. It applies straight away and is saved in this browser only. Match system follows your device’s light or dark setting.</p>
++      <fieldset className="ky-appearance">
++        <legend className="ky-appearance-legend">Theme</legend>
++        <div className="ky-appearance-grid">
++          {THEMES.map((theme) => (
++            <label key={theme.id} className="ky-appearance-option">
++              <input className="ky-appearance-radio" type="radio" name="kyidentity-theme" value={theme.id} checked={theme.id === current.id} onChange={() => choose(theme)} />
++              <span className="ky-appearance-preview" aria-hidden="true" data-ky-preview={theme.id} />
++              <span className="ky-appearance-name">{theme.name}</span>
++              <small className="ky-appearance-mode">{mode(theme.scheme)}</small>
++            </label>
++          ))}
++        </div>
++      </fieldset>
+     </div>
+   );
+ };
+diff --git a/web/src/index.css b/web/src/index.css
+index 63f46f8..c400a41 100644
+--- a/web/src/index.css
++++ b/web/src/index.css
+@@ -45,6 +45,7 @@ body {
+   background-color: var(--bg);
+   color: var(--ink-strong);
+   font-family: var(--font-display);
++  font-size: var(--ky-type-body);
+   line-height: 1.5;
+   -webkit-font-smoothing: antialiased;
+   transition: background-color 0.2s, color 0.2s;
+@@ -71,7 +72,7 @@ button {
+ /* Shell: suite sidebar plus content column */
+ .shell {
+   display: grid;
+-  grid-template-columns: 15.5rem 1fr;
++  grid-template-columns: var(--ky-sidebar-size) 1fr;
+   min-height: 100vh;
+ }
+ 
+@@ -158,10 +159,11 @@ button {
+   text-align: left;
+   border: 0;
+   background: none;
+-  border-radius: 6px;
++  border-radius: var(--ky-control-radius);
++  min-height: var(--ky-control-size);
+   padding: 0.45rem 0.6rem;
+   color: var(--ink-strong);
+-  font-size: 0.925rem;
++  font-size: var(--ky-type-nav);
+   border-left: 2px solid transparent;
+ }
+ 
+@@ -222,11 +224,16 @@ button {
+   gap: 1rem;
+ }
+ 
++.page-header p {
++  margin: 0.5rem 0 0;
++  color: var(--ink);
++  max-width: 75ch;
++}
++
+ .page-title {
+-  font-size: 1.75rem;
++  font-size: var(--ky-type-title);
+   font-weight: 600;
+   margin: 0;
+-  letter-spacing: -0.015em;
+   line-height: 1.2;
+ }
+ 
+@@ -724,68 +731,6 @@ button {
+   color: var(--danger);
+ }
+ 
+-/* Appearance */
+-.theme-grid {
+-  list-style: none;
+-  margin: 0;
+-  padding: 0;
+-  display: grid;
+-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+-  gap: 0.75rem;
+-}
+-
+-.swatch {
+-  width: 100%;
+-  border: 1px solid var(--line);
+-  border-radius: 8px;
+-  background: var(--panel);
+-  padding: 0.5rem;
+-  text-align: left;
+-  display: flex;
+-  flex-direction: column;
+-  gap: 0.5rem;
+-}
+-
+-.swatch:hover {
+-  border-color: var(--accent);
+-}
+-
+-.swatch[aria-pressed="true"] {
+-  border-color: var(--accent);
+-  box-shadow: 0 0 0 3px var(--glow);
+-}
+-
+-.swatch-preview {
+-  height: 3.25rem;
+-  border-radius: 5px;
+-  position: relative;
+-  overflow: hidden;
+-}
+-
+-.swatch-preview i {
+-  position: absolute;
+-  left: 38%;
+-  top: 0.6rem;
+-  height: 0.35rem;
+-  width: 35%;
+-  border-radius: 2px;
+-}
+-
+-.swatch-preview i:last-child {
+-  top: 1.3rem;
+-  width: 50%;
+-  opacity: 0.55;
+-}
+-
+-.swatch span:not(.swatch-preview) {
+-  font-size: 0.9rem;
+-}
+-
+-.swatch small {
+-  color: var(--ink);
+-  font-size: 0.78rem;
+-}
+-
+ /* Tables */
+ .table-card {
+   background: var(--panel);
+@@ -988,12 +933,13 @@ button {
+ .form-input, .form-select, .form-textarea {
+   width: 100%;
+   background: var(--bg);
+-  border: 1px solid var(--line);
+-  border-radius: 6px;
+-  padding: 0.65rem 0.85rem;
++  border: 1px solid var(--ky-field-border);
++  border-radius: var(--ky-control-radius);
++  min-height: var(--ky-control-size);
++  padding: 0.5rem 0.85rem;
+   color: var(--ink-strong);
+   font-family: var(--font-display);
+-  font-size: 0.95rem;
++  font-size: var(--ky-type-body);
+   transition: all 0.15s ease;
+ }
+ 
+@@ -1797,6 +1743,8 @@ dialog.modal-backdrop::backdrop {
+ @media (max-width: 52rem) {
+   .shell {
+     grid-template-columns: 1fr;
++    /* Short pages must not stretch the header rows. */
++    grid-template-rows: auto 1fr;
+   }
+ 
+   .side {
+@@ -2030,4 +1978,7 @@ dialog.modal-backdrop::backdrop {
+   .side-who { max-width: 7rem; overflow-wrap: anywhere; }
+   .side-nav { grid-column: 1 / -1; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; min-width: 0; padding-block: 0.25rem; }
+   .side-nav button { flex: none; white-space: nowrap; min-height: 40px; }
++  /* Appearance sits 16px from the screen edge, as in the other suite products:
++     room for two shared 172px cards at 390px. */
++  .appearance-page { margin-inline: -0.25rem; }
+ }
+diff --git a/web/src/main.tsx b/web/src/main.tsx
+index cdb7a7b..d6e5020 100644
+--- a/web/src/main.tsx
++++ b/web/src/main.tsx
+@@ -4,6 +4,8 @@ import { App } from './App';
+ import './index.css';
+ import './ky-ui/tokens.css';
+ import './ky-ui/navigation.css';
++import './ky-ui/appearance.css';
++import './ky-ui/appearance-themes.css';
+ import { applyTheme, storedTheme } from './theme';
+ 
+ applyTheme(storedTheme());
+diff --git a/web/src/theme.test.ts b/web/src/theme.test.ts
+index c775418..09f367f 100644
+--- a/web/src/theme.test.ts
++++ b/web/src/theme.test.ts
+@@ -1,29 +1,33 @@
++import { renderToStaticMarkup } from 'react-dom/server';
++import { createElement } from 'react';
+ import { describe, expect, it } from 'vitest';
+-import { THEMES, THEME_NAMES, isLight, isThemeName, themeVars } from './theme';
++import { THEME_CATALOG, findTheme } from './ky-ui/themes';
++import { THEMES, storedTheme } from './theme';
++import { Appearance } from './components/Appearance';
++
++// Every name earlier versions saved under kyidentity-theme.
++const SAVED = ['Busnes Light', 'Busnes Dark', 'Dark Matter', 'Light Matter', 'Tropics', 'Tropic Night', 'Ocean', 'Coffee', 'White Cliffs', 'Cyber Punk', 'Neon Purple', 'Space', 'Sky', 'Forest', 'Sun', 'Patina Ky', 'Polished Ky'];
+ 
+ describe('theme', () => {
+-  it('ships Busnes defaults alongside the existing suite palettes', () => {
+-    expect(THEME_NAMES).toHaveLength(17);
+-    expect(isThemeName('Patina Ky')).toBe(true);
++  it('offers Match system first, then the suite catalog', () => {
++    expect(THEMES).toHaveLength(THEME_CATALOG.length + 1);
++    expect(THEMES[0].id).toBe('system');
+   });
+ 
+-  it('rejects stored values that are not palette names, including prototype keys', () => {
+-    for (const bad of ['constructor', '__proto__', 'toString', '', null, undefined, 42]) {
+-      expect(isThemeName(bad)).toBe(false);
+-    }
++  it('still recognises every saved name and keeps it as the saved value', () => {
++    for (const name of SAVED) expect(findTheme(name)?.name).toBe(name);
+   });
+ 
+-  it('classifies backgrounds by luminance', () => {
+-    expect(isLight(THEMES['Patina Ky'].bg)).toBe(false);
+-    expect(isLight(THEMES['Polished Ky'].bg)).toBe(true);
+-    expect(isLight('#ffffff')).toBe(true);
++  it('follows the system without browser storage', () => {
++    expect(storedTheme().id).toBe('system');
+   });
+ 
+-  it('maps camelCase tokens onto kebab-case custom properties', () => {
+-    const vars = themeVars('Patina Ky');
+-    expect(vars['--ink-strong']).toBe('#e2e8f0');
+-    expect(vars['--sidebar-end']).toBe('#1b212c');
+-    expect(vars['--button-text']).toBe('#04120d');
+-    expect(Object.keys(vars)).toHaveLength(11);
++  it('renders native radio cards with shared previews and no inline styles', () => {
++    const html = renderToStaticMarkup(createElement(Appearance));
++    expect(html.match(/type="radio"/g)).toHaveLength(THEMES.length);
++    expect(html.match(/data-ky-preview="/g)).toHaveLength(THEMES.length);
++    expect(html).toContain('checked="" value="system"');
++    expect(html).toContain('class="ky-appearance-description"');
++    expect(html).not.toContain('style=');
+   });
+ });
+diff --git a/web/src/theme.ts b/web/src/theme.ts
+index bd14b3d..89c341e 100644
+--- a/web/src/theme.ts
++++ b/web/src/theme.ts
+@@ -1,90 +1,43 @@
+ import { readChoice, saveChoice, watchChoice } from './ky-ui/theme';
+-import { busnesPalettes } from './ky-ui/palettes';
+-// The suite palettes, byte for byte from kypost-server frontend/src/theme.ts (the eleven
+-// tokens the web apps share; the mail-only ones are dropped, as KyNotes and KyDNS do).
+-export const THEMES = {
+-  "Busnes Light": busnesPalettes["Busnes Light"],
+-  "Busnes Dark": busnesPalettes["Busnes Dark"],
+-  'Dark Matter': { bg: '#1a1a1e', panel: '#252530', ink: '#d4c5e2', inkStrong: '#e8ddf5', accent: '#c29a72', accentSoft: '#5a3f31', line: '#404050', glow: 'rgba(107, 74, 66, 0.25)', sidebarStart: '#1f1f24', sidebarEnd: '#2a2530', buttonText: '#24170f' },
+-  'Light Matter': { bg: '#f5efe5', panel: '#fff8ee', ink: '#4c3d32', inkStrong: '#2d1f15', accent: '#c29a72', accentSoft: '#e6d2be', line: '#c5b29d', glow: 'rgba(175, 126, 92, 0.2)', sidebarStart: '#ede2d2', sidebarEnd: '#e4d6c3', buttonText: '#24170f' },
+-  'Tropics': { bg: '#f4f1eb', panel: '#fffaf0', ink: '#43362d', inkStrong: '#241a14', accent: '#9bc400', accentSoft: '#d4e3a0', line: '#c4b7a3', glow: 'rgba(123, 165, 31, 0.2)', sidebarStart: '#ece5d8', sidebarEnd: '#e3dacb', buttonText: '#243100' },
+-  'Tropic Night': { bg: '#15131a', panel: '#221f2b', ink: '#cdbde0', inkStrong: '#e8ddf5', accent: '#9bc400', accentSoft: '#6b4a42', line: '#3c3650', glow: 'rgba(107, 74, 66, 0.28)', sidebarStart: '#1d1a24', sidebarEnd: '#292233', buttonText: '#1a2400' },
+-  'Ocean': { bg: '#0f1b24', panel: '#152a36', ink: '#b8d8e8', inkStrong: '#e0f2fb', accent: '#5ea9be', accentSoft: '#214657', line: '#2f5567', glow: 'rgba(58, 130, 155, 0.24)', sidebarStart: '#112430', sidebarEnd: '#173342', buttonText: '#0a1b22' },
+-  'Coffee': { bg: '#1d1714', panel: '#2a211d', ink: '#d6c0b3', inkStrong: '#f0ded2', accent: '#b47f5c', accentSoft: '#5f3f2f', line: '#4a3830', glow: 'rgba(132, 86, 61, 0.24)', sidebarStart: '#231a16', sidebarEnd: '#32251f', buttonText: '#220f08' },
+-  'White Cliffs': { bg: '#f7f9fb', panel: '#ffffff', ink: '#2e4c63', inkStrong: '#163246', accent: '#5ea8d8', accentSoft: '#dff1fb', line: '#8fc3df', glow: 'rgba(94, 168, 216, 0.2)', sidebarStart: '#f1f8fd', sidebarEnd: '#e7f3fb', buttonText: '#103246' },
+-  'Cyber Punk': { bg: '#120918', panel: '#1e1028', ink: '#f5d0ff', inkStrong: '#ffe9ff', accent: '#00f5d4', accentSoft: '#3b1760', line: '#5c2d84', glow: 'rgba(255, 0, 153, 0.2)', sidebarStart: '#1b0d24', sidebarEnd: '#281236', buttonText: '#051d1a' },
+-  'Neon Purple': { bg: '#130b1d', panel: '#231233', ink: '#e4ccff', inkStrong: '#f2e6ff', accent: '#c86cff', accentSoft: '#47206c', line: '#63358a', glow: 'rgba(200, 108, 255, 0.2)', sidebarStart: '#1b1029', sidebarEnd: '#2a1740', buttonText: '#210a35' },
+-  'Space': { bg: '#0b0f1a', panel: '#151c2d', ink: '#c8d5f0', inkStrong: '#e7efff', accent: '#86a8ff', accentSoft: '#263e74', line: '#34496f', glow: 'rgba(92, 126, 220, 0.18)', sidebarStart: '#0f1625', sidebarEnd: '#18233a', buttonText: '#101930' },
+-  'Sky': { bg: '#dff1ff', panel: '#f4fbff', ink: '#2f4f64', inkStrong: '#183142', accent: '#6db3d6', accentSoft: '#b6dced', line: '#93bdd2', glow: 'rgba(109, 179, 214, 0.28)', sidebarStart: '#d3ecfa', sidebarEnd: '#c2e2f4', buttonText: '#0f2e3f' },
+-  'Forest': { bg: '#142018', panel: '#1f2f24', ink: '#c7dbc7', inkStrong: '#e3f0df', accent: '#8faa74', accentSoft: '#3a5837', line: '#4f694f', glow: 'rgba(118, 148, 95, 0.24)', sidebarStart: '#18261c', sidebarEnd: '#223629', buttonText: '#12200f' },
+-  'Sun': { bg: '#fff3dc', panel: '#fff9ec', ink: '#5a4024', inkStrong: '#392611', accent: '#e0ab4f', accentSoft: '#f1d9a2', line: '#d4b27a', glow: 'rgba(224, 171, 79, 0.28)', sidebarStart: '#f8e7c5', sidebarEnd: '#f2dab1', buttonText: '#2a1808' },
+-  'Patina Ky': { bg: '#0d0f14', panel: '#161a22', ink: '#94a3b8', inkStrong: '#e2e8f0', accent: '#4deeea', accentSoft: '#0e4a48', line: '#1e293b', glow: 'rgba(77, 238, 234, 0.22)', sidebarStart: '#0d0f14', sidebarEnd: '#1b212c', buttonText: '#04120d' },
+-  'Polished Ky': { bg: '#eef2f6', panel: '#ffffff', ink: '#475569', inkStrong: '#0f172a', accent: '#0891b2', accentSoft: '#cffafe', line: '#cbd5e1', glow: 'rgba(8, 145, 178, 0.18)', sidebarStart: '#f1f5f9', sidebarEnd: '#e2e8f0', buttonText: '#042f2e' },
+-} as const;
++import { SYSTEM_THEME, THEME_CATALOG, applyThemeVariables, findTheme } from './ky-ui/themes';
++import type { CatalogTheme, SystemTheme } from './ky-ui/themes';
+ 
+-export type ThemeName = keyof typeof THEMES;
+-export const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
+-export const DEFAULT_THEME: ThemeName = 'Busnes Light';
+-function defaultTheme(): ThemeName { return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'Busnes Dark' : DEFAULT_THEME; }
++// The suite catalog: Match system, Busnes Light/Dark and every named palette.
++export type Theme = CatalogTheme | SystemTheme;
++export const THEMES: readonly Theme[] = [SYSTEM_THEME, ...THEME_CATALOG];
+ export const THEME_KEY = 'kyidentity-theme';
++const prefersDark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+ 
+-export function isThemeName(value: unknown): value is ThemeName {
+-  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(THEMES, value);
+-}
+-
+-// Same rule as the desktop clients: a background above 0.55 luminance is a light theme,
+-// and native controls and scrollbars should follow it.
+-export function isLight(hex: string): boolean {
+-  const n = parseInt(hex.slice(1), 16);
+-  const r = (n >> 16) / 255;
+-  const g = ((n >> 8) & 255) / 255;
+-  const b = (n & 255) / 255;
+-  return 0.299 * r + 0.587 * g + 0.114 * b > 0.55;
+-}
+-
+-/** The custom properties a theme sets on the root element. */
+-export function themeVars(name: ThemeName): Record<string, string> {
+-  const vars: Record<string, string> = {};
+-  for (const [key, value] of Object.entries(THEMES[name])) {
+-    vars['--' + key.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())] = value;
+-  }
+-  return vars;
+-}
+-
+-export function applyTheme(name: ThemeName): void {
++export function applyTheme(theme: Theme): void {
+   const root = document.documentElement;
+-  const sharedName = name === 'Busnes Light' ? 'busnes-light' : name === 'Busnes Dark' ? 'busnes-dark' : undefined;
+-  for (const key of Object.keys(themeVars('Busnes Light'))) root.style.removeProperty(key);
+-  if (sharedName) {
+-    root.dataset.theme = sharedName;
+-    delete root.dataset.scheme;
+-    root.style.colorScheme = sharedName === 'busnes-dark' ? 'dark' : 'light';
++  const scheme = applyThemeVariables(theme.id, root);
++  if (scheme) {
++    delete root.dataset.theme;
++    root.dataset.scheme = scheme;
+     return;
+   }
+-  delete root.dataset.theme;
+-  for (const [key, value] of Object.entries(themeVars(name))) {
+-    root.style.setProperty(key, value);
+-  }
+-  const scheme = isLight(THEMES[name].bg) ? 'light' : 'dark';
+-  root.style.colorScheme = scheme;
+-  root.dataset.scheme = scheme;
++  const busnes = theme.id === 'system' ? (prefersDark() ? 'busnes-dark' : 'busnes-light') : theme.id;
++  root.dataset.theme = busnes;
++  delete root.dataset.scheme;
++  root.style.colorScheme = busnes === 'busnes-dark' ? 'dark' : 'light';
+ }
+ 
+-export function storedTheme(): ThemeName {
++/** The saved choice (names saved by earlier versions included), else Match system. */
++export function storedTheme(): Theme {
+   try {
+-    const value = readChoice(THEME_KEY);
+-    return isThemeName(value) ? value : defaultTheme();
++    return findTheme(readChoice(THEME_KEY)) ?? SYSTEM_THEME;
+   } catch {
+-    return defaultTheme();
++    return SYSTEM_THEME;
+   }
+ }
+ 
+-export function saveTheme(name: ThemeName): void {
++export function saveTheme(theme: Theme): void {
+   try {
+-    saveChoice(THEME_KEY, name);
++    // Names are what earlier versions saved; keep writing them.
++    saveChoice(THEME_KEY, theme.id === 'system' ? 'system' : theme.name);
+   } catch {
+     // Storage off: the theme still applies for this page.
+   }
+ }
+ 
+-if (typeof window !== 'undefined') watchChoice(THEME_KEY, () => applyTheme(storedTheme()), () => isThemeName(readChoice(THEME_KEY)));
++if (typeof window !== 'undefined') watchChoice(THEME_KEY, () => applyTheme(storedTheme()), () => storedTheme().id !== 'system');

@@ -1,37 +1,42 @@
-import React, { useState } from 'react';
-import { THEMES, THEME_NAMES, ThemeName, applyTheme, isLight, saveTheme, storedTheme } from '../theme';
+import React, { useEffect, useState } from 'react';
+import { THEMES, Theme, applyTheme, saveTheme, storedTheme } from '../theme';
+
+const mode = (scheme: string) => scheme === 'system' ? 'Follows device' : scheme === 'light' ? 'Light' : 'Dark';
 
 export const Appearance: React.FC = () => {
-  const [current, setCurrent] = useState<ThemeName>(storedTheme);
+  const [current, setCurrent] = useState<Theme>(storedTheme);
+  // Another tab's choice: theme.ts applies it; keep the checked card in step.
+  useEffect(() => {
+    const sync = () => setCurrent(storedTheme());
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
 
-  const choose = (name: ThemeName) => {
-    applyTheme(name);
-    saveTheme(name);
-    setCurrent(name);
+  const choose = (theme: Theme) => {
+    applyTheme(theme);
+    saveTheme(theme);
+    setCurrent(theme);
   };
 
   return (
-    <div>
+    <div className="appearance-page">
       <div className="page-header">
         <h1 className="page-title">Appearance</h1>
       </div>
-      <ul className="theme-grid">
-        {THEME_NAMES.map((name) => {
-          const t = THEMES[name];
-          return (
-            <li key={name}>
-              <button type="button" className="swatch" aria-pressed={name === current} onClick={() => choose(name)}>
-                <span className="swatch-preview" style={{ background: `linear-gradient(90deg, ${t.sidebarStart} 30%, ${t.bg} 30%)` }}>
-                  <i style={{ background: t.accent }} />
-                  <i style={{ background: t.inkStrong }} />
-                </span>
-                <span>{name}</span>
-                <small>{isLight(t.bg) ? 'Light' : 'Dark'}</small>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <p className="ky-appearance-description">Pick a theme. It applies straight away and is saved in this browser only. Match system follows your device’s light or dark setting.</p>
+      <fieldset className="ky-appearance">
+        <legend className="ky-appearance-legend">Theme</legend>
+        <div className="ky-appearance-grid">
+          {THEMES.map((theme) => (
+            <label key={theme.id} className="ky-appearance-option">
+              <input className="ky-appearance-radio" type="radio" name="kyidentity-theme" value={theme.id} checked={theme.id === current.id} onChange={() => choose(theme)} />
+              <span className="ky-appearance-preview" aria-hidden="true" data-ky-preview={theme.id} />
+              <span className="ky-appearance-name">{theme.name}</span>
+              <small className="ky-appearance-mode">{mode(theme.scheme)}</small>
+            </label>
+          ))}
+        </div>
+      </fieldset>
     </div>
   );
 };

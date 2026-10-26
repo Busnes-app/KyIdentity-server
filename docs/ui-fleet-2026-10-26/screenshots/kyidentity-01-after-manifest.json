@@ -1,0 +1,128 @@
+{
+  "prefix": "kyidentity-01-after",
+  "product": "kyidentity",
+  "branch": "ui/fleet-appearance",
+  "head": "e7a40de3edd5f5312043fdaff814992ddda07021",
+  "uncommitted_diff_sha256": "6c39307a0aaa42373a3fda8dc684b0469d4f0bbe7ee99f4172be615bc11cd970",
+  "uncommitted_diff_bytes": 587524,
+  "server_binary_sha256": "f65488e1aca23ab18c96956477a0843c25b6c754537dddc00daafe4a8a05257e",
+  "embedded_index_sha256": "74bc166594b213f6a37784bd7179a90dfd00c4d7b2cb5949b4640dd24a561638",
+  "captured": "2026-10-26T11:20:50.448Z",
+  "os": "linux 7.2.10-1-cachyos",
+  "driver": "playwright chromium 156.0.8078.4 (headless)",
+  "device_scale_factor": 1,
+  "timezone": "America/Chicago",
+  "locale": "en-US",
+  "theme_source": "context colorScheme emulation with no saved theme choice (OS-following default)",
+  "fixture": "fresh data dir with generated secret/encryption keys; bootstrap-admin \"admin\" (generated password on stdin, replaced through the required password-change screen at first sign-in); no applications, groups, users or mail; KYIDENTITY_ISSUER_URL on loopback http",
+  "files": [
+    {
+      "file": "kyidentity-01-after-applications-desktop-light.png",
+      "sha256": "fdb20de97a0374348f82d712533f09436296b394fee76fbbefa477fb960e7e16",
+      "surface": "applications",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-users-desktop-light.png",
+      "sha256": "f008b0b3cd58d2905be2496f3581a63f161bd7b5771abb06e2c680eea239aa8e",
+      "surface": "users",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-appearance-desktop-light.png",
+      "sha256": "8df716db837c2159e8fb5d0ac0b2532a87c03c76fa0477d14cf6c33160a19f9d",
+      "surface": "appearance",
+      "viewport": "1280x900",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-applications-mobile-light.png",
+      "sha256": "c2f3bbb898d3b3f828049d374c354cc192dfb502a9204419127c0554f2278f94",
+      "surface": "applications",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-users-mobile-light.png",
+      "sha256": "44c17b3961c5d423b3b63f81397ada5f014133d883d63de705bd9e9f3649d16b",
+      "surface": "users",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-appearance-mobile-light.png",
+      "sha256": "446de68ec929c0acae0b233f8ebd040a62e12b0a5a8257b27961e77d70314c02",
+      "surface": "appearance",
+      "viewport": "390x844",
+      "theme": "os-light (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-applications-desktop-dark.png",
+      "sha256": "df985d3c02e3f1bdeaa6176bd182a612ee3a2ed5c5825360b87e19618d331f19",
+      "surface": "applications",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-users-desktop-dark.png",
+      "sha256": "4af2c7796f45c93d731e3a0d79f35a8468bb261561efa966fd201ac1a25fcf30",
+      "surface": "users",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-appearance-desktop-dark.png",
+      "sha256": "592c4d718e1f3afc5b1defe073c77998bd82deffff8caf22e6dc332bacf505db",
+      "surface": "appearance",
+      "viewport": "1280x900",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-applications-mobile-dark.png",
+      "sha256": "4f8a17cda308ac39a5478c22f8ec5b5caabc98d7815d37adcdce7e95d185b9f0",
+      "surface": "applications",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-users-mobile-dark.png",
+      "sha256": "31ed7f1121030b089c6037352d8820179e1a78231a97e920f495fc3890eec225",
+      "surface": "users",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    },
+    {
+      "file": "kyidentity-01-after-appearance-mobile-dark.png",
+      "sha256": "f982c79d5c8197c7e19046f3f26bc4dda81d4e88eb759195bb87c0904d7fb61d",
+      "surface": "appearance",
+      "viewport": "390x844",
+      "theme": "os-dark (no saved choice)",
+      "overflow_px": 0,
+      "full_page": false
+    }
+  ]
+}

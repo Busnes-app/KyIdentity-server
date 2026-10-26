@@ -1,0 +1,78 @@
+# KyIdentity fleet Appearance — 2026-10-26
+
+Applies the approved Busnes look to KyIdentity's web shell and gives it the shared ky-ui 0.4.0 Appearance theme-preview cards (native radios) over the suite catalog: Match system plus every catalog theme, read dynamically from `web/src/ky-ui/themes.js`. Shared files come from ky-ui `4f83f34` and pass `sync-consumers --check`; they are generated, never hand-edited. No score is claimed here: the council rates these captures.
+
+## Stages
+
+- **00 before**: base commit, current theme control and main view.
+- **01 after**: suite shell scale (240px sidebar, 24px title, 40px controls and nav rows, shared field border and type) and the Appearance cards.
+- **02 after**: owner correction — shared description class and copy, consistent wrapping, preview hairline, no theme selector in the shell navigation. Only affected Appearance/shell views were recaptured.
+- **02 confirm**: one confirmation recapture after the single stage 02 fix batch, where a fix was needed.
+- **03 after**: owner decisions on the reported conflicts (phone inset for two card columns at 390px, preview fidelity for KyDrive's shipped themes, KyYard's Polished Ky kept), light/dark × desktop/phone Appearance only. Its before is the latest stage 02 batch of the same view (`previous_file` in `results.csv`). The in-app check gained three assertions: every named preview matches the applied palette, two columns with no overflow at 390px, and a keyboard choice survives a reload.
+- **03 confirm**: one confirmation recapture after the single stage 03 fix, where a fix was needed.
+- **04 before / 04 after**: fleet review F4 and copy consistency, with Appearance only plus `--verify`. Before: `3ae5681` with its committed `web/dist` (embedded index SHA-256 in the manifest; the source edit was not yet built). After: the rebuilt `web/dist`. The new cross-tab check saves `Sun` from a second tab: before, Match system stays checked (4/4 FAIL); after, Sun is checked (4/4 PASS), at both widths and schemes, with `cross-tab-*` screenshots. The Match system mode label changes from "Light or dark" to "Follows device"; nothing else in the Appearance captures changes. Stage 04 ran Chromium 153.0.8010.12 from ky-ui's Playwright 1.63 (`KY_PLAYWRIGHT`).
+
+Surfaces: Applications (main view), Users (administration task view) and Appearance.
+
+## Catalog and saved choice
+
+- Storage key `kyidentity-theme`; theme names saved by earlier versions (the 17 suite names) still select their theme; new choices are saved by catalog name, and Match system as `system`.
+- Match system follows the device until a choice is saved; that default is unchanged.
+
+## Product notes
+
+- Appearance is in the sidebar under Your account, so every signed-in role reaches it. No selector sits in the navigation.
+- On phones Appearance sits 16px from the screen edge (`.appearance-page`), so the shared 172px cards fit two columns at 390px (358px grid). Other pages keep their spacing.
+- Fixed in passing: on phones the shell grid stretched the header rows when a page was short (visible in the stage 00 users capture).
+
+## Capture batches
+
+Every manifest in `screenshots/` lists the source commit, a hash of any uncommitted diff, OS, driver, viewport, theme source, fixture and the SHA-256 of every PNG. `results.csv` pairs each after image with its stage 00 before; `checks.csv` holds the in-app checks. `source.patch` is the source-only diff (no vendored or built files) for independent review.
+
+| Batch | Source commit | Uncommitted diff | Images | Surfaces | Captured |
+| --- | --- | --- | --- | --- | --- |
+| `kyidentity-00-before` | `ba43fbe982` | none | 12 | appearance, applications, users | 2026-10-26T10:55Z |
+| `kyidentity-01-after` | `e7a40de3ed` | `6c39307a0aaa…` | 12 | appearance, applications, users | 2026-10-26T11:20Z |
+| `kyidentity-02-after` | `70c147d6d8` | none | 4 | appearance | 2026-10-26T11:36Z |
+| `kyidentity-03-after` | `29783e4875` | none | 4 | appearance | 2026-10-26T12:07Z |
+| `kyidentity-04-before` | `3ae56815b3` | `6f79ca9b73e6…` | 4 | appearance | 2026-10-26T13:44Z |
+| `kyidentity-04-after` | `3ae56815b3` | `2c95b99ba715…` | 4 | appearance | 2026-10-26T13:45Z |
+
+Conditions: linux 7.2.10-1-cachyos, playwright chromium 156.0.8078.4 (headless), device scale 1, 1280×900 and 390×844, light/dark by OS emulation with no saved choice, America/Chicago, en-US. Fixture: fresh data dir with generated secret/encryption keys; bootstrap-admin "admin" (generated password on stdin, replaced through the required password-change screen at first sign-in); no applications, groups, users or mail; KYIDENTITY_ISSUER_URL on loopback http.
+
+## In-app theme check
+
+`node docs/ui-fleet-2026-10-26/capture.mjs --verify <prefix>`: Sky and Sun (light named themes), Busnes Dark, Busnes Light and Match system, asserting the page background, the hovered idle navigation row and the selected row at 4.5:1 or better from computed colours in the running product, then arrow-key selection with a visible focus ring.
+
+| Run | Source commit | Passed |
+| --- | --- | --- |
+| `kyidentity-01-after` | `e7a40de3ed` | 16/16 |
+| `kyidentity-02-after` | `70c147d6d8` | 16/16 |
+| `kyidentity-03-after` | `29783e4875` | 19/19 |
+| `kyidentity-04-before` | `3ae5681` (HEAD `web/dist`) | 19/23 (cross-tab 0/4) |
+| `kyidentity-04-after` | `3ae5681` + F4 build | 23/23 |
+
+## Checks
+
+| Check | Result |
+| --- | --- |
+| Web unit tests (vitest) | 194/194 pass at stage 03 |
+| Web build and committed `web/dist` equals a fresh build | pass |
+| `npm audit` (all and `--omit=dev`) | 0 vulnerabilities |
+| Vendored ky-ui check | pass at 4f83f34 |
+| `docs/check-strong-crypto-compose.py` | pass |
+| Push relay workers typecheck/tests | not run: untouched; CI runs them |
+
+Go: `go build ./...`, `go vet ./...`, gofmt and the full `go test -race -count=1 ./...` passed locally (CachyOS, Go 1.27.1) at stage 02; Go code is unchanged since then and by this work, so those results stand. Docker image, publish and attestation jobs were not run locally: CI runs them.
+
+## Reproduce
+
+```sh
+cd web && npm ci && npm run build   # then any product-specific bundle step in AGENTS.md
+cd .. && KY_PLAYWRIGHT=<path to @playwright/test/index.mjs, if web/ has none> \
+  node docs/ui-fleet-2026-10-26/capture.mjs <prefix> [surface,...]
+node docs/ui-fleet-2026-10-26/capture.mjs --verify <prefix>
+node docs/ui-fleet-2026-10-26/results.mjs
+```
+
+Each run starts a disposable loopback server on its own port with generated secrets and removes its data directory afterwards. No live service, personal data or authentication bypass is used.
