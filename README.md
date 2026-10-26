@@ -1,5 +1,7 @@
 # KyIdentity Server
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15843/badge)](https://www.bestpractices.dev/projects/15843)
+
 **Start here:** [Standalone installation](INSTALL.md). Local accounts, groups, MFA and the identity provider run without other Ky servers. Configure an SMTP sender separately for activation and password-reset email; KyAuth is optional for push MFA and app sign-on.
 
 KyIdentity is a self-hosted, single-organization identity provider and user directory for the Busnes.app Ky products. Manage people, groups, application access and MFA in one place; connected products use OpenID Connect for sign-in and configured connectors for provisioning and offboarding.
