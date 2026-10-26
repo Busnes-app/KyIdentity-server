@@ -194,9 +194,12 @@ test("FCM signing requires RSA-2048 before contacting Google", async () => {
     let calls = 0;
     globalThis.fetch = async (input) => {
       calls++;
-      return String(input).includes("oauth2.googleapis.com")
-        ? Response.json({ access_token: "fixture-access-token", expires_in: 3600 })
-        : Response.json({ name: "fixture-message" });
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === "https://oauth2.googleapis.com/token") {
+        return Response.json({ access_token: "fixture-access-token", expires_in: 3600 });
+      }
+      assert.equal(url, "https://fcm.googleapis.com/v1/projects/key-floor-fixture/messages:send");
+      return Response.json({ name: "fixture-message" });
     };
     try {
       const sending = sendFcmMessage(config, emptyCache(), { token: "device-token", title: "fixture", body: "fixture" });
