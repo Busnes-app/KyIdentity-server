@@ -292,41 +292,11 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                     {u.endsAt && <div className="text-muted text-sm">Ends {describeInstant(u.endsAt)}</div>}
                   </td>
                   <td data-label="Actions" className="text-right">
-                    {/* Every action stays one disclosure away, labelled; delete is set apart. */}
-                    <details className="row-actions">
-                      <summary className="secondary-btn sm">Manage<span className="sr-only"> {u.username}</span></summary>
-                      <div className="row-actions-menu">
-                        {full && <button className="row-action" onClick={() => onManageGroups(u)} aria-label={`Manage groups for ${u.username}`}>
-                          <Users size={15} />Groups
-                        </button>}
-                        {full && <button className="row-action" disabled={busy} onClick={() => openEditModal(u)}>
-                          <Edit size={15} />Edit user
-                        </button>}
-                        {full && <button className="row-action" onClick={() => setDelegating(u)} aria-label={`Delegated administration for ${u.username}`}>
-                          <UserCog size={15} />Delegated administration
-                        </button>}
-                        {(full || u.role !== 'admin') && <>
-                        <button className="row-action" disabled={busy} onClick={() => handleResetMFA(u)}>
-                          <KeyRound size={15} />Reset MFA
-                        </button>
-                        <button className="row-action" onClick={() => openSessions(u)} aria-label={`Sessions and apps for ${u.username}`}>
-                          <Monitor size={15} />Sessions and apps
-                        </button>
-                        <button className="row-action" disabled={busy} onClick={() => handleRevokeSessions(u)}>
-                          <LogOut size={15} />Revoke sessions
-                        </button>
-                        <button className="row-action" onClick={() => issueLink(u, false)} aria-label={`${u.pending ? 'Activation' : 'Password reset'} link for ${u.username}`}>
-                          <Link size={15} />{u.pending ? 'Activation link' : 'Password reset link'}
-                        </button>
-                        <button className="row-action" onClick={() => setOffboarding({ id: u.id, username: u.username })} aria-label={`Offboarding status for ${u.username}`}>
-                          <UserX size={15} />Offboarding status
-                        </button>
-                        </>}
-                        {full && <button className="row-action danger" disabled={busy} onClick={() => handleDeleteUser(u)}>
-                          <Trash2 size={15} />Delete user
-                        </button>}
-                      </div>
-                    </details>
+                    <UserRowActions u={u} full={full} busy={busy} act={{
+                      groups: onManageGroups, edit: openEditModal, delegate: setDelegating, resetMFA: handleResetMFA,
+                      sessions: openSessions, revoke: handleRevokeSessions, link: (x) => issueLink(x, false),
+                      offboarding: (x) => setOffboarding({ id: x.id, username: x.username }), remove: handleDeleteUser,
+                    }} />
                   </td>
                 </tr>
               );
@@ -566,5 +536,50 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
         </Modal>
       )}
     </div>
+  );
+};
+
+type RowAction = (user: User) => void;
+
+/** Every action stays one disclosure away, labelled; delete is set apart. Nothing renders when
+ *  the viewer may act on none of them (a delegate looking at an administrator). */
+export const UserRowActions: React.FC<{
+  u: User; full: boolean; busy: boolean;
+  act: Record<'groups' | 'edit' | 'delegate' | 'resetMFA' | 'sessions' | 'revoke' | 'link' | 'offboarding' | 'remove', RowAction>;
+}> = ({ u, full, busy, act }) => {
+  if (!full && u.role === 'admin') return null;
+  return (
+    <details className="row-actions">
+      <summary className="secondary-btn sm">Manage<span className="sr-only"> {u.username}</span></summary>
+      <div className="row-actions-menu">
+        {full && <button className="row-action" onClick={() => act.groups(u)} aria-label={`Manage groups for ${u.username}`}>
+          <Users size={15} />Groups
+        </button>}
+        {full && <button className="row-action" disabled={busy} onClick={() => act.edit(u)}>
+          <Edit size={15} />Edit user
+        </button>}
+        {full && <button className="row-action" onClick={() => act.delegate(u)} aria-label={`Delegated administration for ${u.username}`}>
+          <UserCog size={15} />Delegated administration
+        </button>}
+        <button className="row-action" disabled={busy} onClick={() => act.resetMFA(u)}>
+          <KeyRound size={15} />Reset MFA
+        </button>
+        <button className="row-action" onClick={() => act.sessions(u)} aria-label={`Sessions and apps for ${u.username}`}>
+          <Monitor size={15} />Sessions and apps
+        </button>
+        <button className="row-action" disabled={busy} onClick={() => act.revoke(u)}>
+          <LogOut size={15} />Revoke sessions
+        </button>
+        <button className="row-action" onClick={() => act.link(u)} aria-label={`${u.pending ? 'Activation' : 'Password reset'} link for ${u.username}`}>
+          <Link size={15} />{u.pending ? 'Activation link' : 'Password reset link'}
+        </button>
+        <button className="row-action" onClick={() => act.offboarding(u)} aria-label={`Offboarding status for ${u.username}`}>
+          <UserX size={15} />Offboarding status
+        </button>
+        {full && <button className="row-action danger" disabled={busy} onClick={() => act.remove(u)}>
+          <Trash2 size={15} />Delete user
+        </button>}
+      </div>
+    </details>
   );
 };
