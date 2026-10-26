@@ -38,13 +38,18 @@ export type FcmResult =
  * Import a PKCS8 PEM RSA private key for RS256 signing.
  */
 async function importPrivateKey(pem: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
+  const key = await crypto.subtle.importKey(
     "pkcs8",
     pemToDer(pem),
     { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
     false,
     ["sign"],
   );
+  const algorithm = key.algorithm;
+  if (!("modulusLength" in algorithm) || typeof algorithm.modulusLength !== "number" || algorithm.modulusLength < 2048) {
+    throw new Error("fcm RSA signing keys must be at least 2048 bits");
+  }
+  return key;
 }
 
 async function signServiceAccountAssertion(config: FcmConfig, nowSeconds: number): Promise<string> {

@@ -24,6 +24,13 @@ matching public origins. For remote users, provide a TLS reverse proxy and a hos
 control. Trust only the proxy’s actual peer address, and forward the original scheme/client
 address according to the product’s proxy guide.
 
+## Key strength and TLS
+
+Read [the key-strength configuration](docs/STRONG-CRYPTO.md) before upgrading
+existing credentials or enabling the optional process TLS overlay. Preserve the
+original data volume, keys, issuer and Compose chain; verify the external TLS
+proxy separately. The guide identifies independent Worker/platform limits.
+
 ## Install the identity provider
 
 No other Ky product is required. An SMTP service is needed for account email, and push

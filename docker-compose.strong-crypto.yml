@@ -1,0 +1,5 @@
+# Append to the existing Compose chain; retain data, image and network choices.
+services:
+  kyidentity-server:
+    environment:
+      GODEBUG: fips140=on

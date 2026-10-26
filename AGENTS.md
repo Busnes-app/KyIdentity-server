@@ -265,7 +265,9 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## Child DOX Index
 
-- [internal/backup/AGENTS.md](file:///home/yoshi/busness.app/kyidentity-server/internal/backup/AGENTS.md): adapter over ky-primitives/recoveryclient: what KyIdentity seals, its drill checks, store/key/config glue.
+- `docs/STRONG-CRYPTO.md`, `docker-compose.strong-crypto.yml` and `docs/check-strong-crypto-compose.py` — key-strength configuration, preservation proof and platform limits.
+
+- [internal/backup/AGENTS.md](internal/backup/AGENTS.md): adapter over ky-primitives/recoveryclient: what KyIdentity seals, its drill checks, store/key/config glue.
 
 ## Operator documentation
 
@@ -275,3 +277,20 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 ## README and topic guides
 
 Keep `README.md` as the concise product overview and navigation. Detailed procedures live in `docs/ARCHITECTURE.md`, `docs/RUNNING.md`, `docs/ACCOUNTS-AND-ACCESS.md`, `docs/APPLICATIONS.md`, `docs/AUDIT-AND-ALERTS.md`, `docs/UPGRADES-AND-RECOVERY.md`, `docs/INTEGRATIONS.md`, `docs/PROVISIONING.md`. Update the owning topic guide and preserve README links when a procedure changes. Commands in these guides run from the repository root.
+
+## Key strength and TLS profile
+
+- `docs/STRONG-CRYPTO.md` owns key floors, migration and explicit Worker/HTTPS-edge
+  limits. Read it before changing cryptographic inputs or the optional process profile.
+- TOTP uses the pinned shared primitive’s 16-decoded-byte floor for enrollment
+  and verification. Retain rejected/legacy records and all other factors; never
+  regenerate keys or weaken replay consumption to make an old factor work.
+- `crypto.CheckCertificateKeys` checks complete verified attestation chains,
+  including selected trust anchors outside the supplied chain. App Attest needs
+  one valid strong chain. This is separate from Go TLS and preserves grade semantics.
+- Bundled FCM signing checks the imported WebCrypto RSA modulus before use;
+  APNs stays P-256. Preserve provider cache expiry/revocation and device records.
+- `docker-compose.strong-crypto.yml` changes only GODEBUG; the synthetic checker
+  `docs/check-strong-crypto-compose.py` verifies base/build/LAN-DNS combinations.
+  Run full ordinary/configured race suites and existing web/Worker/Docker/backup
+  checks. Local Go/Node results do not prove a hosted Worker’s TLS key policy.

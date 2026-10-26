@@ -269,3 +269,13 @@ Security-sensitive PRs should include:
 - [docs/ASSURANCE-CASE.md](docs/ASSURANCE-CASE.md) — threat model and the argument that the protections above hold
 - [LOGGING.md](LOGGING.md) — logging contract
 - OWASP guidelines on secure development practices
+
+## Key strength and Go TLS configuration
+
+[docs/STRONG-CRYPTO.md](docs/STRONG-CRYPTO.md) owns key floors, migration and the
+optional process TLS/Compose configuration. TOTP enrollment/verification refuses
+undersized secrets while retaining existing records; attestation checks CA keys
+outside TLS, including the actual trust anchor. FCM signing requires RSA-2048.
+The Go policy does not configure the HTTPS edge or Cloudflare Worker TLS; those
+limits are explicit and must be verified independently before a whole-project
+key-strength attestation. No key, factor or recovery pin is rotated implicitly.

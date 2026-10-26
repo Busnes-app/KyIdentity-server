@@ -15,7 +15,7 @@ import (
 func enrollmentAPIAdmin(t *testing.T, srv *Server, db *store.Store) string {
 	t.Helper()
 	u := newUser(t, db, "admin")
-	if err := srv.mfaEngine.SaveUserTOTP(u.ID, "JBSWY3DPEHPK3PXP", nil); err != nil {
+	if err := srv.mfaEngine.SaveUserTOTP(u.ID, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", nil); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -147,7 +147,7 @@ func TestEnrollmentRestrictedHTTPAndTOTPCompletion(t *testing.T) {
 	if token == "" {
 		t.Fatal("missing grant", r.Body.String())
 	}
-	secret := "JBSWY3DPEHPK3PXP"
+	secret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 	proof := testTOTPCode(t, secret)
 	enrollmentBody, _ := json.Marshal(map[string]string{"secret": secret, "code": proof})
 	r = adminRequestWithStepUp(t, srv, "POST", "/api/user/mfa/totp/enable", cookie.Value, string(enrollmentBody), token)
@@ -235,7 +235,7 @@ func TestEnrollmentInteractionCannotSkipExistingFactor(t *testing.T) {
 				t.Fatal(err)
 			}
 			u := newUser(t, db, "user")
-			if err := srv.mfaEngine.SaveUserTOTP(u.ID, "JBSWY3DPEHPK3PXP", nil); err != nil {
+			if err := srv.mfaEngine.SaveUserTOTP(u.ID, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", nil); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.SetEnrollmentPolicy(store.EnrollmentPolicy{Scope: "organization", Required: true, AllowedMethods: []string{allowed}, Revision: 1}, "policy-admin", nil); err != nil {
@@ -269,7 +269,7 @@ func TestEnrollmentInteractionCannotSkipExistingFactor(t *testing.T) {
 			if err := json.Unmarshal(r.Body.Bytes(), &step); err != nil || !step.MFARequired {
 				t.Fatal("existing factor not required", r.Body.String())
 			}
-			r = browser("POST", "/api/auth/mfa/totp/verify", map[string]string{"mfaToken": step.MFAToken, "code": testTOTPCode(t, "JBSWY3DPEHPK3PXP")})
+			r = browser("POST", "/api/auth/mfa/totp/verify", map[string]string{"mfaToken": step.MFAToken, "code": testTOTPCode(t, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")})
 			if r.Code != 200 || !strings.Contains(r.Body.String(), `"restricted":true`) {
 				t.Fatal("verified factor enrollment access", r.Code, r.Body.String())
 			}

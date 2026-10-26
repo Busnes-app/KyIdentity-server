@@ -47,9 +47,10 @@ guidance, not by the software. See [Known limitations](../SECURITY.md#known-limi
    read right to left (`internal/api/middleware.go`). Startup refuses a non-loopback `http://`
    issuer, and the `docker` CI job proves it.
 2. **KyIdentity → outbound targets** (SCIM and suite connectors, back-channel logout, UnifiedPush,
-   UBports, push relays). Every call goes through one guarded client, `internal/netguard`: HTTPS only,
-   no redirects, the destination checked at connect time, loopback, link-local and metadata
-   addresses always refused.
+   UBports, push relays). Calls use the guarded `internal/netguard` client: HTTPS by
+   default, no redirects, and destination checks at connect time. Explicit private-callback
+   compatibility may permit HTTP, outside the supported TLS configuration; loopback,
+   link-local and metadata remain refused.
 3. **KyIdentity ↔ paired devices.** Pairing needs a 90-second token and PIN, stored only as
    hashes. Approvals are signed by a device key; Android keys are graded from a Keystore
    attestation chain (`internal/attest`), iOS from App Attest (`internal/appattest`).
@@ -68,8 +69,8 @@ guidance, not by the software. See [Known limitations](../SECURITY.md#known-limi
   weaker key. A full rate-limit table refuses new buckets rather than evicting old ones.
 - **Complete mediation.** Permissions are never cached in the session; every request recomputes
   them, so a demotion or disable takes effect on the next request.
-- **Economy of mechanism.** The standard library implements HTTP, JWT signing, TOTP and
-  AES-GCM; six direct modules in total ([ARCHITECTURE.md](ARCHITECTURE.md)).
+- **Economy of mechanism.** Go’s standard library and established FLOSS libraries
+  implement HTTP, JWT signing, TOTP and AES-GCM ([ARCHITECTURE.md](ARCHITECTURE.md)).
 - **Separation of privilege.** Multi-factor sign-in, step-up for destructive admin actions, and
   KyIdentity refusing to remove the last active administrator.
 - **Open design.** Only published algorithms (Argon2id, AES-256-GCM, HMAC-SHA-256, RSA and ECDSA
@@ -117,3 +118,13 @@ pairings, `appattest` not counting as MFA, process-local rate limits, no key rot
 
 This case is updated when a trust boundary or a security requirement changes. A pull request that
 moves one must update this page in the same change.
+
+## Key-strength evidence and limits
+
+[STRONG-CRYPTO.md](STRONG-CRYPTO.md) inventories every key boundary and the optional
+Go TLS configuration. The source refuses short TOTP keys, attestation CA keys
+(including omitted trust anchors), RSA token-signing keys and FCM signing keys;
+regressions use real signatures and retained enrollment records. The process
+profile covers Go certificate policy, not the HTTPS edge or Cloudflare's Worker
+TLS implementation. The latter remains a separate evidence gap; no complete
+whole-repository key-length claim follows from these source checks alone.
