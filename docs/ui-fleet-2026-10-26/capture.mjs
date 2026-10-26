@@ -18,6 +18,8 @@ const nav = (name) => async (page) => {
 };
 
 await main({
+  // Saved as the theme name, as the product writes it.
+  crossTab: ['kyidentity-theme', 'Sun', 'sun'],
   product: 'kyidentity',
   repo,
   dist: join(repo, 'web/dist/index.html'),

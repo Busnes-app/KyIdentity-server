@@ -210,6 +210,28 @@ export async function verify(adapter) {
     const kept = await mobile.locator('.ky-appearance-radio:checked').evaluate((el) => el.value);
     check('phone: keyboard choice survives a reload', !!chosen && kept === chosen, { chosen, kept });
     await phone.close();
+    // Fleet review F4 (opt-in): another tab saves a choice in the product's own format; this
+    // tab's checked card must follow without a reload. Both widths and schemes.
+    if (adapter.crossTab) {
+      const [key, stored, id] = adapter.crossTab;
+      for (const theme of ['light', 'dark']) {
+        for (const [device, viewport] of [['desktop', { width: 1280, height: 900 }], ['mobile', { width: 390, height: 844 }]]) {
+          const tabs = await browser.newContext({ baseURL: server.baseURL, viewport, colorScheme: theme, deviceScaleFactor: 1 });
+          const shown = await tabs.newPage();
+          await adapter.signIn(shown, server);
+          await adapter.surfaces[adapter.appearanceSurface ?? 'appearance'](shown, { device, theme, server });
+          const other = await tabs.newPage();
+          await other.goto('/');
+          await other.evaluate(([k, v]) => localStorage.setItem(k, v), [key, stored]);
+          await shown.waitForTimeout(500);
+          const checked = await shown.locator('.ky-appearance-radio:checked').evaluate((el) => el.value);
+          check(`cross-tab ${device} ${theme}: another tab's choice checks the matching card`, checked === id, { stored, checked });
+          await shown.locator(`.ky-appearance-radio[value="${id}"]`).scrollIntoViewIfNeeded();
+          await shown.screenshot({ path: join(out, `${prefix}-cross-tab-${device}-${theme}.png`) });
+          await tabs.close();
+        }
+      }
+    }
   } finally {
     await browser.close();
     await server.stop();
