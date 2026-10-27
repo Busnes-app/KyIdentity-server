@@ -1989,7 +1989,7 @@ dialog.modal-backdrop::backdrop {
 .row-actions-menu:popover-open { display: grid; gap: 2px; }
 @media (min-width: 52.001rem) {
   @supports (top: anchor(bottom)) {
-    .row-actions-menu { inset: auto; top: anchor(bottom); left: anchor(right); translate: -100% 0; margin: 8px 0; position-try-fallbacks: flip-block; max-height: min(70dvh, 32rem); }
+    .row-actions-menu { position-anchor: auto; inset: auto; top: anchor(bottom); left: anchor(right); translate: -100% 0; margin: 8px 0; position-try-fallbacks: flip-block; max-height: min(70dvh, 32rem); }
   }
 }
 .row-action { display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: var(--ky-control-size); padding: 0 0.6rem; border: 0; border-radius: var(--ky-control-radius); background: none; color: var(--ink-strong); font-size: 0.875rem; text-align: left; white-space: nowrap; }

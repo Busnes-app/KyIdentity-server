@@ -20,7 +20,7 @@ Record staged UI changes and independent covered visual progression toward8/10.
 ## Work Guidance
 
 - Stage00 covers nine initial-view surfaces in both Busnes OS themes at1280×900/390×844,DPR1. Users has five synthetic accounts; applications/groups/connections are unconfigured. Open forms are unsubmitted.
-- Stage01 captures the native action popover, meaningful list empty states and shared control/Security composition; its surfaces, fixture and capture conditions match baseline00.
+- Stage01 captures the native action popover, meaningful list empty states and shared control/Security composition; its surfaces, fixture and capture conditions match baseline00. Stage02 is the bounded confirmation after correcting the desktop popover anchor; preserve stage01 and mark its off-screen desktop menu as superseded evidence.
 - Preserve captures and disclose absent workflows/roles/states; this set does not establish whole-product or competitive acceptance.
 - Fixtures bind127.0.0.1, use private random credentials and normal local tool/browser caches. Stop only owned processes.
 
