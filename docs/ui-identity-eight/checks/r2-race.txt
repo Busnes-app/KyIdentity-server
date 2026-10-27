@@ -1,0 +1,21 @@
+Command: go test -p 2 -race -count=1 -timeout 20m ./...
+?   	github.com/Busnes-app/kyidentity-server	[no test files]
+ok  	github.com/Busnes-app/kyidentity-server/cmd/kyidentity	106.682s
+ok  	github.com/Busnes-app/kyidentity-server/internal/api	436.853s
+ok  	github.com/Busnes-app/kyidentity-server/internal/appattest	1.690s
+ok  	github.com/Busnes-app/kyidentity-server/internal/appattest/appattesttest	1.118s
+ok  	github.com/Busnes-app/kyidentity-server/internal/appversion	1.018s
+ok  	github.com/Busnes-app/kyidentity-server/internal/attest	1.246s
+ok  	github.com/Busnes-app/kyidentity-server/internal/audit	7.104s
+ok  	github.com/Busnes-app/kyidentity-server/internal/auth	2.800s
+ok  	github.com/Busnes-app/kyidentity-server/internal/backup	41.319s
+ok  	github.com/Busnes-app/kyidentity-server/internal/config	1.023s
+ok  	github.com/Busnes-app/kyidentity-server/internal/crypto	2.444s
+ok  	github.com/Busnes-app/kyidentity-server/internal/mail	5.232s
+ok  	github.com/Busnes-app/kyidentity-server/internal/mfa	82.136s
+ok  	github.com/Busnes-app/kyidentity-server/internal/netguard	1.216s
+ok  	github.com/Busnes-app/kyidentity-server/internal/oauth	148.009s
+ok  	github.com/Busnes-app/kyidentity-server/internal/store	464.845s
+ok  	github.com/Busnes-app/kyidentity-server/internal/sync	170.622s
+ok  	github.com/Busnes-app/kyidentity-server/internal/webauthn	1.020s
+?   	github.com/Busnes-app/kyidentity-server/web	[no test files]

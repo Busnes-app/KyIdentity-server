@@ -1,0 +1,10 @@
+Command: mkdir -p "/tmp/kyidentity-repeatable-d667jgjc/a/src"
+git archive HEAD | tar -x -C "/tmp/kyidentity-repeatable-d667jgjc/a/src"
+(cd "/tmp/kyidentity-repeatable-d667jgjc/a/src" && CGO_ENABLED=0 GOOS=linux go build -p 2 -trimpath -ldflags="-s -w -X github.com/Busnes-app/kyidentity-server/internal/appversion.release=0.0.0" -o "/tmp/kyidentity-repeatable-d667jgjc/a/kyidentity" ./cmd/kyidentity)
+mkdir -p "/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/src"
+git archive HEAD | tar -x -C "/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/src"
+(cd "/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/src" && CGO_ENABLED=0 GOOS=linux go build -p 2 -trimpath -ldflags="-s -w -X github.com/Busnes-app/kyidentity-server/internal/appversion.release=0.0.0" -o "/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/kyidentity" ./cmd/kyidentity)
+sha256sum "/tmp/kyidentity-repeatable-d667jgjc/a/kyidentity" "/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/kyidentity"
+cmp "/tmp/kyidentity-repeatable-d667jgjc/a/kyidentity" "/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/kyidentity"
+4be85469be444f454ea232def7f2d51579afd92c7119a02af3442274b6602353  /tmp/kyidentity-repeatable-d667jgjc/a/kyidentity
+4be85469be444f454ea232def7f2d51579afd92c7119a02af3442274b6602353  /tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/kyidentity

@@ -1,0 +1,170 @@
+Command: npm ci --prefix workers/apns
+npm audit --prefix workers/apns --omit=dev --audit-level=low
+npm run typecheck --prefix workers/apns
+npm ci --prefix workers/fcn
+npm audit --prefix workers/fcn --omit=dev --audit-level=low
+npm run typecheck --prefix workers/fcn
+node --test push-relay-shared/*.test.mts workers/apns/src/*.test.mts workers/fcn/src/*.test.mts
+
+added 38 packages, and audited 39 packages in 1s
+
+7 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+npm warn install-scripts 2 packages had install scripts blocked because they are not covered by allowScripts:
+npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+npm warn install-scripts   workerd@1.20261019.1 (postinstall: node install.js)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+found 0 vulnerabilities
+npm notice run kysecurity-mobile-push-apns@1.0.0 typecheck
+npm notice run tsc --noEmit
+
+added 38 packages, and audited 39 packages in 1s
+
+7 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+npm warn install-scripts 2 packages had install scripts blocked because they are not covered by allowScripts:
+npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+npm warn install-scripts   workerd@1.20261019.1 (postinstall: node install.js)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+found 0 vulnerabilities
+npm notice run kysecurity-mobile-push-fcm@1.0.0 typecheck
+npm notice run tsc --noEmit
+✔ spends the budget and refuses the send that would exceed it (1.617075ms)
+✔ a refused send does not consume budget it was denied (0.270246ms)
+✔ the budget resets on the next UTC day (0.225492ms)
+✔ every key shares one budget, so minting more keys buys nothing (0.223739ms)
+✔ no configured budget leaves sends unmetered (0.320099ms)
+✔ a budget of 0 refuses everything rather than reading as unlimited (0.134512ms)
+✔ a missing coordinator binding fails closed (0.141635ms)
+✔ a failed send does not release ownership a concurrent successful send earned (5.845526ms)
+✔ a claim under which nothing delivered is released once the last send settles (1.147156ms)
+✔ a claim written before this schema existed survives a failed send (0.49675ms)
+✔ a settle from a displaced key cannot disturb the current claim (0.43801ms)
+✔ a claim inherited from the legacy KV index survives a failed send (0.448098ms)
+✔ a claim of unknown age counts as fresh, once, and its stamp does not slide (0.959626ms)
+✔ a legacy claim is not taken over on a KV read that may not have converged (25.185677ms)
+✔ takeover is refused while the owner's key record may not have converged in KV (5.658736ms)
+✔ an aged claim whose key is gone is taken over, one whose key is active is not (4.571462ms)
+✔ a pre-existing KV claim is adopted rather than treated as free (2.484227ms)
+✔ ipBucket returns a bucket only for something that is actually an address (1.407343ms)
+✔ a /send body over the ceiling is refused before it is parsed (29.967453ms)
+✔ an oversized Content-Length is refused without reading the body at all (0.553285ms)
+✔ /send fields are type-checked, not coerced (2.900286ms)
+✔ /send text fields are clamped rather than refused, and unknown fields are ignored (0.650407ms)
+✔ clamping a text field never splits a surrogate pair (0.477484ms)
+✔ an APNs token has one spelling: aliases are refused, case and padding fold (1.359553ms)
+✔ an FCM token has one spelling: aliases are refused, case is preserved (2.312266ms)
+{"ts":"2026-10-27T15:35:07.227Z","requestId":"75646ff4-f4fc-4035-865f-f24c0daf0483","level":"info","event":"request","method":"GET","path":"/admin/keys","status":404,"durationMs":2}
+{"ts":"2026-10-27T15:35:07.228Z","requestId":"04990cc9-256b-458c-93f9-b37ebf242d42","level":"info","event":"request","method":"POST","path":"/admin/keys","status":404,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.228Z","requestId":"1da2b19a-2cc2-4979-b8c7-301c12a103e1","level":"info","event":"request","method":"DELETE","path":"/admin/keys/some-id","status":404,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.228Z","requestId":"7472bb3d-bba0-4a82-a47b-134a320e90e3","level":"info","event":"request","method":"PUT","path":"/admin/keys","status":404,"durationMs":0}
+✔ every spelling of one APNs token lands on the same pin (3.528211ms)
+✔ the admin routes are gone, for every method and with any credential (3.705663ms)
+✔ a registration displaced while minting leaves no second active key (5.76202ms)
+✔ the surviving key is the last to claim, whichever order the mints finish in (1.657421ms)
+✔ three racing registrations from one address leave exactly one key (2.002797ms)
+✔ registrations from one IPv6 /64 share a coordinator and so share the one key (1.2566ms)
+✔ a key displaced by re-registration answers key_superseded; an unknown key does not (1.612036ms)
+✔ APNS_ENVIRONMENT names a host or is a configuration failure (0.888643ms)
+{"ts":"2026-10-27T15:35:07.208Z","requestId":"401bec56-6fb7-4655-a4e9-59e34e939a8d","level":"info","event":"request","method":"GET","path":"/health","status":200,"durationMs":3}
+{"ts":"2026-10-27T15:35:07.211Z","requestId":"b387dc93-49c7-44f9-a820-da0514762887","level":"info","event":"request","method":"GET","path":"/health","status":200,"durationMs":0}
+✔ an unparseable APNS_ENVIRONMENT reports unconfigured rather than defaulting (43.438805ms)
+{"ts":"2026-10-27T15:35:07.215Z","requestId":"c653dcc3-0fb2-4560-a53c-42e30475717d","level":"error","event":"send.misconfigured","keyId":"key-a"}
+{"ts":"2026-10-27T15:35:07.215Z","requestId":"c653dcc3-0fb2-4560-a53c-42e30475717d","level":"error","event":"request","method":"POST","path":"/send","status":500,"durationMs":2}
+✔ an unparseable APNS_ENVIRONMENT refuses the send instead of picking a host (3.186621ms)
+{"ts":"2026-10-27T15:35:07.217Z","requestId":"142edefa-18d8-4826-bc47-986558441fe8","level":"info","event":"request","method":"GET","path":"/health","status":200,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.218Z","requestId":"01c10eee-23bd-403c-a3d0-24172ff21f4b","level":"error","event":"send.misconfigured","keyId":"key-a"}
+{"ts":"2026-10-27T15:35:07.218Z","requestId":"01c10eee-23bd-403c-a3d0-24172ff21f4b","level":"error","event":"request","method":"POST","path":"/send","status":500,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.218Z","requestId":"def46e54-3793-4bc9-8146-e85fbee5a173","level":"info","event":"request","method":"GET","path":"/health","status":200,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.219Z","requestId":"6e26771f-0202-4f9a-9507-6c55b9592142","level":"error","event":"send.misconfigured","keyId":"key-a"}
+{"ts":"2026-10-27T15:35:07.220Z","requestId":"6e26771f-0202-4f9a-9507-6c55b9592142","level":"error","event":"request","method":"POST","path":"/send","status":500,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.220Z","requestId":"5a9c4250-0003-4176-a5d6-1b7fbdbba76a","level":"info","event":"request","method":"GET","path":"/health","status":200,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.221Z","requestId":"c70054c2-e93f-4736-bb2d-f7ff41a5ad0f","level":"error","event":"send.misconfigured","keyId":"key-a"}
+{"ts":"2026-10-27T15:35:07.221Z","requestId":"c70054c2-e93f-4736-bb2d-f7ff41a5ad0f","level":"error","event":"request","method":"POST","path":"/send","status":500,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.221Z","requestId":"91594e06-cc8e-425b-98fa-992c5d1510b5","level":"info","event":"request","method":"GET","path":"/health","status":200,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.222Z","requestId":"fb76bd7e-45b0-4568-8376-ad0d26fd1a52","level":"error","event":"send.misconfigured","keyId":"key-a"}
+{"ts":"2026-10-27T15:35:07.222Z","requestId":"fb76bd7e-45b0-4568-8376-ad0d26fd1a52","level":"error","event":"request","method":"POST","path":"/send","status":500,"durationMs":1}
+✔ a missing credential is still a configuration failure (6.65519ms)
+✔ a sealed sign-in push runs the notification service extension (1.414696ms)
+✔ only a sign-in push gets the approval category (0.198041ms)
+✔ the cache key names the signing team and key (1.510976ms)
+✔ reasons are matched exactly, not by substring (0.441286ms)
+✔ 403 ExpiredProviderToken drops the cached token and retries once with a fresh one (43.281941ms)
+✔ 403 InvalidProviderToken drops the cached token and retries once with a fresh one (2.288612ms)
+✔ a second rejection stops after one retry and leaves no cached token (2.894915ms)
+✔ other 403 reasons are not retried (1.575417ms)
+✔ 410 Unregistered is the only verdict that may delete a device (1.398787ms)
+✔ a 400 naming the device token is a relay fault, not a dead device (0.394789ms)
+✔ a 400 that merely contains the word Unregistered does not delete a device (0.195956ms)
+✔ provider-token and server faults are never stale (0.211706ms)
+{"ts":"2026-10-27T15:35:07.162Z","requestId":"a7c906e6-da8d-4ea9-91ea-0c5fb8cbc1d5","level":"warn","event":"send.denied","reason":"token_claim_too_recent","keyId":"key-under-test"}
+{"ts":"2026-10-27T15:35:07.163Z","requestId":"a7c906e6-da8d-4ea9-91ea-0c5fb8cbc1d5","level":"info","event":"request","method":"POST","path":"/send","status":403,"durationMs":5}
+{"ts":"2026-10-27T15:35:07.164Z","requestId":"32019060-02d7-4b83-af1d-68f26fd26a80","level":"info","event":"send.ok","keyId":"key-under-test"}
+{"ts":"2026-10-27T15:35:07.164Z","requestId":"32019060-02d7-4b83-af1d-68f26fd26a80","level":"info","event":"request","method":"POST","path":"/send","status":200,"durationMs":1}
+✔ a send refused at the ownership claim does not spend the daily budget (29.627136ms)
+{"ts":"2026-10-27T15:35:07.167Z","requestId":"ea2fba62-cdc3-4e89-888e-6dc481dabb8f","level":"info","event":"send.ok","keyId":"key-under-test"}
+{"ts":"2026-10-27T15:35:07.167Z","requestId":"ea2fba62-cdc3-4e89-888e-6dc481dabb8f","level":"info","event":"request","method":"POST","path":"/send","status":200,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.167Z","requestId":"bbfdaed8-9de3-4778-b993-ea4f89f2e8fe","level":"warn","event":"budget.exhausted","used":1,"limit":1,"day":"2026-10-27"}
+{"ts":"2026-10-27T15:35:07.168Z","requestId":"bbfdaed8-9de3-4778-b993-ea4f89f2e8fe","level":"warn","event":"send.denied","reason":"daily_budget","keyId":"key-under-test","window":"day"}
+{"ts":"2026-10-27T15:35:07.168Z","requestId":"bbfdaed8-9de3-4778-b993-ea4f89f2e8fe","level":"info","event":"request","method":"POST","path":"/send","status":429,"durationMs":1}
+✔ the budget still bounds sends that do reach the provider (2.600194ms)
+{"ts":"2026-10-27T15:35:07.169Z","requestId":"2fe8dcc7-832f-4d8b-afbe-125ef971ee14","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.170Z","requestId":"49654288-5fd5-4bfb-8ddd-d381106ab3e4","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.170Z","requestId":"a2694004-f0d6-45b5-a595-e9fd7a141ed1","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.171Z","requestId":"27ef546f-abf0-42ba-9354-866df0bcdaa9","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.172Z","requestId":"9d703b34-c217-401a-836e-ce711ee93712","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.173Z","requestId":"5fc5e5d2-2472-41e9-86e6-ab7c9acae2da","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.173Z","requestId":"7cd017b4-d135-406c-9965-6cc536f7d9c8","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.173Z","requestId":"f7a2ee4f-02bc-4bc8-a00b-3c34d2af4df7","level":"warn","event":"send.denied","reason":"token_claim_too_recent","keyId":"key-under-test"}
+{"ts":"2026-10-27T15:35:07.173Z","requestId":"f7a2ee4f-02bc-4bc8-a00b-3c34d2af4df7","level":"info","event":"request","method":"POST","path":"/send","status":403,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.174Z","requestId":"8a97fab3-938b-4760-8705-12e7ab907fb3","level":"info","event":"send.ok","keyId":"key-under-test"}
+{"ts":"2026-10-27T15:35:07.174Z","requestId":"8a97fab3-938b-4760-8705-12e7ab907fb3","level":"info","event":"request","method":"POST","path":"/send","status":200,"durationMs":1}
+✔ an aliased or malformed token is refused before the claim, the budget or Apple (6.913824ms)
+✔ oauthErrorCode keeps the RFC 6749 enum and drops everything else (1.916485ms)
+✔ oauthErrorCode refuses an error field that is not a short identifier (0.530112ms)
+✔ oauthErrorCode reports a placeholder for a non-JSON body (2.07904ms)
+✔ oauthErrorCode survives JSON that is not an object (0.491489ms)
+✔ a failed token exchange never carries the response body (101.242863ms)
+✔ an unparsable token-endpoint failure still says nothing about the body (38.032931ms)
+✔ an unparsable 200 does not leak a prefix of the access token (21.99618ms)
+✔ FCM signing requires RSA-2048 before contacting Google (82.58095ms)
+✔ 404 UNREGISTERED is a dead token (0.904482ms)
+✔ a malformed or mismatched token is a caller error, not a dead device (0.175639ms)
+✔ auth and quota faults are never stale (1.914922ms)
+✔ the word alone does not delete a device without the status to back it (0.176671ms)
+✔ a 404 that is not about registration does not delete a device (0.132438ms)
+✔ a 404 needs the structured errorCode, not the word somewhere in the body (0.147085ms)
+✔ the errorCode is read from the structured details, wherever it sits (0.127078ms)
+✔ the cache key names the service account (0.701563ms)
+✔ a 401 drops the cached access token and retries once with a fresh one (25.535411ms)
+✔ a second 401 fails after one retry and leaves no cached token (2.427932ms)
+✔ a KV write over quota still sends, and later sends reuse the token (2.843219ms)
+(node:2087870) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ native Worker refuses literal short RSA keys and retains valid signing/cache (450.353349ms)
+{"ts":"2026-10-27T15:35:07.210Z","requestId":"34674129-f4cc-4648-aad8-f6d08d868446","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":2}
+{"ts":"2026-10-27T15:35:07.211Z","requestId":"7fdc8804-d7fd-420f-8e03-fe22c3ed9611","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.212Z","requestId":"36de4b30-04b4-4de0-9e96-ef72aa0f33d0","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.213Z","requestId":"89d448ac-ebfb-4c1b-b70f-edfddd0bd9f9","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.213Z","requestId":"f873cc4d-8ba9-48b5-9646-24a28b4948df","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.214Z","requestId":"30a6b29c-9cb2-4546-a672-9b9a8c4ec9c9","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.214Z","requestId":"9a82e8ee-dfa8-4268-9974-d535ccab65e4","level":"info","event":"request","method":"POST","path":"/send","status":400,"durationMs":0}
+{"ts":"2026-10-27T15:35:07.215Z","requestId":"ab17709c-9dad-497c-95e9-394f4018fb6c","level":"warn","event":"send.denied","reason":"token_claim_too_recent","keyId":"key-under-test"}
+{"ts":"2026-10-27T15:35:07.215Z","requestId":"ab17709c-9dad-497c-95e9-394f4018fb6c","level":"info","event":"request","method":"POST","path":"/send","status":403,"durationMs":1}
+{"ts":"2026-10-27T15:35:07.216Z","requestId":"07654a2f-9896-4f6a-a0c7-39a7569682a6","level":"info","event":"send.ok","keyId":"key-under-test"}
+{"ts":"2026-10-27T15:35:07.216Z","requestId":"07654a2f-9896-4f6a-a0c7-39a7569682a6","level":"info","event":"request","method":"POST","path":"/send","status":200,"durationMs":1}
+✔ an aliased or malformed token is refused before the claim, the budget or Google (33.393562ms)
+ℹ tests 72
+ℹ suites 0
+ℹ pass 72
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 647.73215

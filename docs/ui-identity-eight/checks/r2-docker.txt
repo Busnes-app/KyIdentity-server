@@ -1,0 +1,171 @@
+Command: docker build -t kyidentity-ui-r2:2063542 .
+ container_id=$(docker run -d -e PUSH_RELAY_URL= -e APNS_RELAY_URL= kyidentity-ui-r2:2063542)
+ trap 'docker rm -f "$container_id" >/dev/null' EXIT
+ ready=0
+ for attempt in $(seq 1 30); do
+  if docker exec "$container_id" wget -q --spider http://localhost:5867/readyz; then ready=1; break; fi
+  sleep 1
+ done
+ test "$ready" = 1
+ if docker run --rm -e KYIDENTITY_ISSUER_URL=http://auth.example.test kyidentity-ui-r2:2063542; then exit 1; fi
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.71kB done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/library/golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c
+#3 ...
+
+#4 [internal] load metadata for docker.io/library/node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797
+#4 DONE 0.4s
+
+#3 [internal] load metadata for docker.io/library/golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c
+#3 DONE 0.4s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 142B done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 ...
+
+#7 [stage-2 1/6] FROM docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#7 resolve docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 0.1s done
+#7 DONE 0.1s
+
+#8 [frontend-builder 1/6] FROM docker.io/library/node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797
+#8 resolve docker.io/library/node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 0.1s done
+#8 DONE 0.1s
+
+#9 [backend-builder 1/8] FROM docker.io/library/golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c
+#9 resolve docker.io/library/golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c 0.1s done
+#9 DONE 0.1s
+
+#10 [frontend-builder 2/6] WORKDIR /app/web
+#10 CACHED
+
+#11 [backend-builder 2/8] WORKDIR /app
+#11 CACHED
+
+#6 [internal] load build context
+#6 ...
+
+#12 [backend-builder 3/8] RUN apk add --no-cache git ca-certificates tzdata
+#12 0.980 ( 1/13) Installing brotli-libs (1.2.1-r0)
+#12 1.020 ( 2/13) Installing c-ares (1.34.9-r0)
+#12 1.036 ( 3/13) Installing libunistring (1.4.2-r0)
+#12 1.065 ( 4/13) Installing libidn2 (2.3.8-r0)
+#12 1.084 ( 5/13) Installing nghttp2-libs (1.70.0-r0)
+#12 1.098 ( 6/13) Installing libpsl (0.21.5-r3)
+#12 1.111 ( 7/13) Installing zstd-libs (1.5.7-r2)
+#12 1.129 ( 8/13) Installing libcurl (8.23.0-r0)
+#12 1.148 ( 9/13) Installing libexpat (2.9.0-r0)
+#12 1.161 (10/13) Installing pcre2 (10.49-r0)
+#12 1.181 (11/13) Installing git (2.54.0-r0)
+#12 1.252 (12/13) Installing git-init-template (2.54.0-r0)
+#12 1.265 (13/13) Installing tzdata (2026e-r0)
+#12 1.334 Executing busybox-1.37.0-r31.trigger
+#12 1.341 OK: 21.1 MiB in 30 packages
+#12 DONE 1.5s
+
+#6 [internal] load build context
+#6 transferring context: 512.18MB 2.1s done
+#6 DONE 2.4s
+
+#13 [frontend-builder 3/6] COPY web/package.json web/package-lock.json ./
+#13 ...
+
+#14 [backend-builder 4/8] COPY go.mod go.sum ./
+#14 DONE 0.2s
+
+#13 [frontend-builder 3/6] COPY web/package.json web/package-lock.json ./
+#13 DONE 0.2s
+
+#15 [frontend-builder 4/6] RUN npm ci
+#15 1.986
+#15 1.986 added 77 packages, and audited 78 packages in 2s
+#15 1.986
+#15 1.986 14 packages are looking for funding
+#15 1.986   run `npm fund` for details
+#15 1.987
+#15 1.987 found 0 vulnerabilities
+#15 1.988 npm notice
+#15 1.988 npm notice New major version of npm available! 11.20.0 -> 12.2.1
+#15 1.988 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+#15 1.988 npm notice To update run: npm install -g npm@12.2.1
+#15 1.988 npm notice
+#15 DONE 2.4s
+
+#16 [backend-builder 5/8] RUN go mod download
+#16 DONE 3.5s
+
+#17 [frontend-builder 5/6] COPY web/ ./
+#17 DONE 4.1s
+
+#18 [backend-builder 6/8] COPY . .
+#18 DONE 3.4s
+
+#19 [frontend-builder 6/6] RUN npm run build
+#19 0.264
+#19 0.264 > prebuild
+#19 0.264 > node src/ky-ui/check-vendor.mjs
+#19 0.264
+#19 0.295 ky-ui 0.4.1: vendor files verified
+#19 0.303
+#19 0.303 > build
+#19 0.303 > tsc -b && vite build
+#19 0.303
+#19 0.864 vite v8.3.5 building client environment for production...
+#19 0.873 transforming...
+#19 0.886
+#19 0.886 /css/styles.css doesn't exist at build time, it will remain unchanged to be resolved at runtime
+#19 1.016 ✓ 2013 modules transformed.
+#19 1.091 rendering chunks...
+#19 1.145 computing gzip size...
+#19 1.155 dist/index.html                   0.61 kB │ gzip:   0.36 kB
+#19 1.155 dist/assets/index-DuPbJdy3.css   43.48 kB │ gzip:   9.06 kB
+#19 1.155 dist/assets/index-2UNHPLTh.js   539.32 kB │ gzip: 150.91 kB
+#19 1.155
+#19 1.156 [plugin builtin:vite-reporter]
+#19 1.156 (!) Some chunks are larger than 500 kB after minification. Consider:
+#19 1.156 - Using dynamic import() to code-split the application
+#19 1.156 - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+#19 1.156 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+#19 1.156 ✓ built in 291ms
+#19 DONE 1.3s
+
+#20 [backend-builder 7/8] COPY --from=frontend-builder /app/web/dist ./web/dist
+#20 DONE 0.1s
+
+#21 [backend-builder 8/8] RUN CGO_ENABLED=0 GOOS=linux go build -trimpath     -ldflags="-s -w -X github.com/Busnes-app/kyidentity-server/internal/appversion.release="     -o /kyidentity ./cmd/kyidentity
+#21 DONE 14.3s
+
+#22 [stage-2 2/6] RUN apk add --no-cache ca-certificates tzdata     && addgroup -S kyidentity && adduser -S kyidentity -G kyidentity     && mkdir -p /data /css /fonts     && chown -R kyidentity:kyidentity /data /css /fonts
+#22 CACHED
+
+#23 [stage-2 3/6] COPY --from=backend-builder /kyidentity /usr/local/bin/kyidentity
+#23 DONE 0.1s
+
+#24 [stage-2 4/6] COPY css/ /css/
+#24 DONE 0.1s
+
+#25 [stage-2 5/6] COPY fonts/ /fonts/
+#25 DONE 0.1s
+
+#26 exporting to image
+#26 exporting layers
+#26 exporting layers 0.4s done
+#26 exporting manifest sha256:e2ff3a8b6b4c9d0e15f6e815c947c6ac42ea17d671fa80c69e97a9d7957fd800 0.0s done
+#26 exporting config sha256:a40e710e5aca59a0a85805c7c150a6639c4d8a5e5ea24e8170f25987510ad9ce done
+#26 exporting attestation manifest sha256:3432c75247f3f6cab4779b706694ee8d36bbc2f885e7b1533c693742159ba7b1 0.0s done
+#26 exporting manifest list sha256:cc33c86197a35e1c941c1dc72446fbf710fb38473802764eec72e210296cad4e 0.0s done
+#26 naming to docker.io/library/kyidentity-ui-r2:2063542 done
+#26 unpacking to docker.io/library/kyidentity-ui-r2:2063542
+#26 unpacking to docker.io/library/kyidentity-ui-r2:2063542 0.2s done
+#26 DONE 0.8s
+wget: can't connect to remote host: Connection refused
+2026/10/27 15:35:49 Failed to load configuration: KYIDENTITY_ISSUER_URL must be an https URL (http is allowed only on loopback)

@@ -18,7 +18,7 @@ KyRecovery is owner-accepted and PR#81 is green at48389ec3a2a319ecbf24e6a267fe0e
 - Stage01 desktop menu anchor was off-screen; explicit position-anchor:auto corrected in UI df8daef1cc7c2c11eccab288334ef0ee20f6634b. Stage01 preserved as superseded. Stage02 is the single bounded confirmation,not another design review round.
 - Frozen confirmation41982e901a817ad602fc50f73a3e4a50ac74bb04:manifest-02-after.json,inventory-v2.json,duplicate-audit-v2.json.36 originals,306 same-size comparisons,no duplicates/overflow. Parent individually inspected all36.
 -198web tests and final build passed. Browser regression check-ui.mjs passes4size/theme cases:stable row geometry,menu within viewport,one open,keyboard/outside dismissal,Escape/Edit-dialog focus return,empty/search states,full membership policy retained,40pxSecurity targets. Impeccable final source scan0findings. Vite has a >500kB uncompressed-bundle advisory (~151kB gzip),not a compiler/typecheck failure.
-- Full local verifier /tmp/kyidentity-r2-verify.py is running,log /tmp/kyidentity-r2-full.log;ordinary race passed. It started at0e5cee3 before CSS cleanup,so results are not a fresh all-final-source run. Do not mislabel freshness; final-head hosted CI must qualify current source. Do not stage partial check logs/results while runner writes them.
+- Full local verifier /tmp/kyidentity-r2-verify.py completed,log /tmp/kyidentity-r2-full.log;all eight groups passed. It started at0e5cee3 before CSS cleanup,so results are not a fresh all-final-source run. Do not mislabel freshness; final-head hosted CI must qualify current source. Completed logs/results are now committed with explicit runner-start provenance.
 - Offline gallery /home/yoshi/Pictures/KyPost-UI-Councel/exports/2026-10-27-changes-gallery/KyIdentity-Round2-Changes.html has36 matched comparisons,R1/R2scores and accepted progression. Checker:self-contained,contrast passes.
 
 ## Pending
@@ -39,4 +39,4 @@ KyRecovery is owner-accepted and PR#81 is green at48389ec3a2a319ecbf24e6a267fe0e
 
 ## Latest checkpoint
 
-R2 covered visual progression is accepted under the owner rule. PR#174 is linked/watched; current-head CI and autonomous security remain pending. Local full verifier remains active; do not stage its partial logs. Next product selection follows the worst remaining app from the suite handoff. No merge/deploy authorized. MySlop remains known401; do not retry unchanged credentials.
+R2 covered visual progression is accepted under the owner rule. PR#174 is linked/watched; current-head CI and autonomous security remain pending. Local full verifier completed all eight groups successfully; exact per-group source was not recorded, so source_commit in results means runner-start provenance. Final-head hosted CI/security remain required. Next product selection follows the worst remaining app from the suite handoff. No merge/deploy authorized. MySlop remains known401; do not retry unchanged credentials.

@@ -1,0 +1,40 @@
+Command: npm audit --prefix web --omit=dev --audit-level=low
+npm run build --prefix web
+git diff --exit-code -- web/dist
+npm test --prefix web
+found 0 vulnerabilities
+npm notice run prebuild
+npm notice run node src/ky-ui/check-vendor.mjs
+ky-ui 0.4.1: vendor files verified
+npm notice run build
+npm notice run tsc -b && vite build
+vite v8.3.5 building client environment for production...
+transforming...
+
+/css/styles.css doesn't exist at build time, it will remain unchanged to be resolved at runtime
+✓ 2013 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.61 kB │ gzip:   0.36 kB
+dist/assets/index-DuPbJdy3.css   43.48 kB │ gzip:   9.06 kB
+dist/assets/index-2UNHPLTh.js   539.32 kB │ gzip: 150.91 kB
+
+[plugin builtin:vite-reporter]
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 515ms
+npm notice run pretest
+npm notice run node src/ky-ui/check-vendor.mjs
+ky-ui 0.4.1: vendor files verified
+npm notice run test
+npm notice run vitest run
+
+ RUN  v5.0.5 /home/yoshi/git/busnes.app/KyIdentity-server/.claude/worktrees/ui-identity-eight/web
+
+
+ Test Files  14 passed (14)
+      Tests  198 passed (198)
+   Start at  11:35:03
+   Duration  379ms (import 52%, tests 23%, transform 19%, worker 6%)
