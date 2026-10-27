@@ -15,6 +15,7 @@ Record staged UI changes and independent covered visual progression toward8/10.
 - Use ky-suite-v2, exact separate cohort arithmetic and independent brand fit. Freeze raw publisher bytes.
 - Opus5.5 and GPT Sol first; Gemini4Argon advisory only after both are satisfied, with parent audit.
 - Record every round and pending/unused reviewers. An owner progression decision stays separate from measured scores.
+- Progression follows the parent's combined Claude/Sol average, rounded half-up to one decimal;8.0 or higher passes. Retain individual/cohort scores without making tiny deficits a veto.
 
 ## Work Guidance
 
