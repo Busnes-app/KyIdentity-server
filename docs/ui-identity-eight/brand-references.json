@@ -1,0 +1,30 @@
+[
+  {
+    "repository": "/home/yoshi/git/busnes.app/kyrecovery-server",
+    "commit": "247c10ee8e9f88266fce64b9393a0e8455216a1c",
+    "file": "docs/ui-recovery-eight/screenshots/kyrecovery-05-after-overview-desktop-light.png",
+    "sha256": "2f25fa268b226de855136c1fd660c7c2c4b3d1c9ebc8edb136eaad7b5c025979",
+    "purpose": "Ky brand fit only; no competitor or quality input"
+  },
+  {
+    "repository": "/home/yoshi/git/busnes.app/kyrecovery-server",
+    "commit": "247c10ee8e9f88266fce64b9393a0e8455216a1c",
+    "file": "docs/ui-recovery-eight/screenshots/kyrecovery-05-after-overview-desktop-dark.png",
+    "sha256": "4df42c23a36fa8f4262d59704cae257e72b8a32afa71d75ef4c2b1a1810cdae7",
+    "purpose": "Ky brand fit only; no competitor or quality input"
+  },
+  {
+    "repository": "/home/yoshi/git/busnes.app/kyrecovery-server",
+    "commit": "247c10ee8e9f88266fce64b9393a0e8455216a1c",
+    "file": "docs/ui-recovery-eight/screenshots/kyrecovery-05-after-appearance-desktop-light.png",
+    "sha256": "4da60275522d0af07c8bdfcd58de64f0e51d42b9c7274cbd1a21496a4ddc1582",
+    "purpose": "Ky brand fit only; no competitor or quality input"
+  },
+  {
+    "repository": "/home/yoshi/git/busnes.app/kyrecovery-server",
+    "commit": "247c10ee8e9f88266fce64b9393a0e8455216a1c",
+    "file": "docs/ui-recovery-eight/screenshots/kyrecovery-05-after-appearance-desktop-dark.png",
+    "sha256": "665ce9d9fd6d15901d6bc9e0df5c764d00c2d937026d2697473af8b938fb3b7d",
+    "purpose": "Ky brand fit only; no competitor or quality input"
+  }
+]

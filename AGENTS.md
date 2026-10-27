@@ -267,6 +267,8 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## Child DOX Index
 
+- `docs/ui-identity-eight/AGENTS.md` — staged Ky product UI captures, Council reviews and progression decisions.
+
 - `docs/STRONG-CRYPTO.md`, `docker-compose.strong-crypto.yml` and `docs/check-strong-crypto-compose.py` — key-strength configuration, preservation proof and platform limits.
 
 - [internal/backup/AGENTS.md](internal/backup/AGENTS.md): adapter over ky-primitives/recoveryclient: what KyIdentity seals, its drill checks, store/key/config glue.
