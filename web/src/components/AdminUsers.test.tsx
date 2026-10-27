@@ -13,7 +13,7 @@ const actions = (html: string) => [...html.matchAll(/class="row-action[^"]*"[^>]
 describe('user row actions', () => {
   it('give a full administrator all nine, with delete last', () => {
     const html = render(admin, true);
-    expect(html).toContain('<details class="row-actions">');
+    expect(html).toContain('popover="auto"');
     expect(actions(html)).toEqual(['Groups', 'Edit user', 'Delegated administration', 'Reset MFA', 'Sessions and apps',
       'Revoke sessions', 'Password reset link', 'Offboarding status', 'Delete user']);
   });
@@ -24,7 +24,7 @@ describe('user row actions', () => {
 
   it('give a delegate the five recovery actions on an ordinary row', () => {
     const html = render(member, false);
-    expect(html).toContain('<details class="row-actions">');
+    expect(html).toContain('popover="auto"');
     expect(actions(html)).toEqual(['Reset MFA', 'Sessions and apps', 'Revoke sessions', 'Password reset link', 'Offboarding status']);
   });
 

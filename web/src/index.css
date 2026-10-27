@@ -809,6 +809,7 @@ button {
 
 /* Buttons */
 .primary-btn {
+  min-height: var(--ky-control-size);
   background: var(--accent);
   color: var(--button-text);
   font-family: var(--font-display);
@@ -835,6 +836,7 @@ button {
 }
 
 .secondary-btn {
+  min-height: var(--ky-control-size);
   background: transparent;
   border: 1px solid var(--line);
   color: var(--ink-strong);
@@ -861,6 +863,8 @@ button {
 }
 
 .icon-btn {
+  min-width: var(--ky-control-size);
+  min-height: var(--ky-control-size);
   background: transparent;
   border: 1px solid var(--line);
   color: var(--ink);
@@ -1981,9 +1985,13 @@ dialog.modal-backdrop::backdrop {
 /* Users: each row's actions sit behind one labelled "Manage" disclosure, so the table fits and
    every action names itself; delete is set apart in the danger colour. */
 .row-actions { display: inline-block; text-align: left; }
-.row-actions > summary { list-style: none; }
-.row-actions > summary::-webkit-details-marker { display: none; }
-.row-actions-menu { display: grid; gap: 2px; min-width: 14rem; margin-top: 0.5rem; padding: 0.25rem; border: 1px solid var(--line); border-radius: var(--ky-control-radius); background: var(--panel); }
+.row-actions-menu { display: none; position: fixed; width: 16rem; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; padding: 8px; border: 1px solid var(--ky-field-border); border-radius: var(--ky-control-radius); background: var(--panel); color: var(--ink-strong); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.row-actions-menu:popover-open { display: grid; gap: 2px; }
+@media (min-width: 52.001rem) {
+  @supports (top: anchor(bottom)) {
+    .row-actions-menu { position-anchor: auto; inset: auto; top: anchor(bottom); left: anchor(right); translate: -100% 0; margin: 8px 0; position-try-fallbacks: flip-block; max-height: min(70dvh, 32rem); }
+  }
+}
 .row-action { display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: var(--ky-control-size); padding: 0 0.6rem; border: 0; border-radius: var(--ky-control-radius); background: none; color: var(--ink-strong); font-size: 0.875rem; text-align: left; white-space: nowrap; }
 .row-action svg { flex: none; color: var(--ink); }
 .row-action:hover:not(:disabled) { background: var(--panel-hover); }
@@ -2001,6 +2009,44 @@ dialog.modal-backdrop::backdrop {
   .users-table td:empty { display: none; }
   .users-table td::before { content: attr(data-label); color: var(--ink); font-family: var(--font-display); font-weight: 400; font-size: var(--ky-type-meta); }
   .users-table tr:hover td { background: none; }
-  .row-actions-menu { min-width: 0; }
+  .row-actions-menu { inset: auto 16px 16px; width: auto; margin: 0; }
   .row-action { white-space: normal; }
+}
+
+/* Product task composition consumes the shared suite control geometry. */
+.primary-btn, .secondary-btn, .icon-btn { border-radius: var(--ky-control-radius); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+.page-header { align-items: flex-start; }
+.page-intro { max-width: 72ch; margin: -8px 0 24px; color: var(--ink); }
+.page-intro p { margin: 8px 0; }
+.policy-note { margin: 0 0 24px; color: var(--ink); font-size: var(--ky-type-meta); max-width: 72ch; }
+.policy-note summary { min-height: var(--ky-control-size); cursor: pointer; padding: 8px 0; }
+.policy-note p { margin: 8px 0; }
+.list-empty { border-block: 1px solid var(--line); padding: 32px 0; margin: 16px 0; }
+.list-empty h2 { font-size: var(--ky-type-section); font-weight: 600; margin: 0 0 8px; }
+.list-empty p { margin: 0; color: var(--ink); }
+.side-navigation { min-height: 0; overflow-y: auto; }
+.security-page > .settings-section { background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 24px 0 0; margin-bottom: 24px; }
+.security-page .section-header { padding: 0 0 16px; align-items: center; }
+.security-page .section-header h2 { font-size: var(--ky-type-section); }
+.security-page .empty-box { border: 0; padding: 16px 0; margin: 0; text-align: left; }
+.security-page .empty-box .empty-icon { display: none; }
+.security-page .empty-box p { margin: 0; }
+.security-page .pair-signon { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 16px; padding: 0; }
+.security-page .pair-signon input { margin-top: 4px; flex: none; }
+.security-page .settings-section > .form-group, .security-page .settings-section > .alert-box { margin-inline: 0; }
+.security-page .password-change-form { padding-inline: 0; }
+@media (max-width: 52rem) {
+  .side-navigation { grid-column: 1 / -1; display: flex; gap: 16px; overflow-x: auto; overflow-y: hidden; }
+  .side-navigation .side-nav { flex: none; overflow: visible; max-width: none; padding: 0; }
+  .side-navigation .side-nav + .side-nav { border-left: 1px solid var(--line); padding-left: 16px; }
+  .side-navigation .side-nav h4 { display: flex; align-items: center; margin: 0; padding: 0 8px; white-space: nowrap; }
+  .app-records-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .app-records-table, .app-records-table tbody, .app-records-table tr { display: block; width: 100%; }
+  .app-records-table tr { padding: 16px; border-bottom: 1px solid var(--line); }
+  .app-records-table td { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: 8px; padding: 8px 0; border: 0; max-width: none !important; overflow-wrap: anywhere; }
+  .app-records-table td::before { content: attr(data-label); color: var(--ink); font-size: var(--ky-type-meta); }
+  .app-records-table .action-buttons-wrap { flex-direction: column; align-items: stretch; }
+  .users-table td[data-label="Account"] { display: block; font-family: var(--font-display); font-size: var(--ky-type-section); font-weight: 600; padding-bottom: 8px; }
+  .users-table td[data-label="Account"]::before { content: none; }
 }

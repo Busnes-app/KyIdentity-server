@@ -1,0 +1,31 @@
+{
+  "round": 1,
+  "raw_reports": {
+    "opus-round1.json": "152a64bd253f2cc90463f56d4329642dcb8398846805867f5fcaf589071546a3",
+    "opus-round1.md": "dc367a7b24771485ce7c4fe572b1cbdfe8ad91d71e82e276c84d93b53f65a566",
+    "sol-round1.json": "05f7b68bf780b93ca2a1f825b111f03c83eff983a54f858aebce4522d999b01a",
+    "sol-round1.md": "a24b9249424e633ba8f2c59e744993b9000c09610a11bfba5ca604a828c85eb3"
+  },
+  "arithmetic": "All36 original memberships, dimensions, SHA256, integer dimension weights, half-up totals and exact reported cohort means validated.",
+  "spread_audit": "20 dimensions with spread>=2 on8 originals: App connections/Groups, all sizes/themes. Parent viewed every affected original individually. Opus penalizes fragmented empty table/search/pager composition more heavily; Sol agrees with practical fixes. Keep independent scores unchanged.",
+  "combined_progression": {
+    "claude": "643/90",
+    "sol": "118/15",
+    "combined_exact": "1351/180",
+    "rounded": "7.5",
+    "accepted": false,
+    "policy": "Owner combined mean, half-up to one decimal;8.0 passes. Cohort/reviewer deficits do not independently veto progression."
+  },
+  "accepted_batches": [
+    "Native out-of-flow action popover with one open, Escape/outside dismissal and existing action/step-up preservation.",
+    "Consistent list headers and truthful empty states with no empty table/pager; phone connection fields remain reachable.",
+    "Shared40px controls/native checkbox accent and flat Security sections; reduce redundant phone chrome without changing roles or account state."
+  ],
+  "rejected_or_scoped": [
+    "Do not delete MFA policy consequences to shorten Groups; retain complete text in native disclosure.",
+    "Do not change account/factor defaults, provisioning, assignments or backend behavior.",
+    "Old design.md palette/MVP drift is reported,not repaired as an unrequested side effect.",
+    "Missing full behavior/roles/states/competition is coverage absence,not an inferred defect."
+  ],
+  "gemini": "unused; primaries not satisfied and combined gate below8"
+}

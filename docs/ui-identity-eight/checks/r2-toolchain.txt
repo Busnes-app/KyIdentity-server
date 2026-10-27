@@ -1,0 +1,7 @@
+Command: test -z "$(gofmt -l $(git ls-files "*.go"))"
+go mod verify
+go build -p 2 ./...
+go vet -p 2 ./...
+python3 docs/check-strong-crypto-compose.py
+all modules verified
+All four Compose chains retain data, keys, credentials, image/build, network and DNS configuration.

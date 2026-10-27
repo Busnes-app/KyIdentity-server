@@ -1,0 +1,14 @@
+{
+  "source_commit": "95799c4",
+  "harnesses": {
+    "harness/baseline-capture.mjs": "a4c1f764904862b47740fcc2a42b64bb822ea5596f9b8b10f754413f63267a03",
+    "harness/fixture.py": "1d7adfc7e0f465c5c5bfb04bb76f16340b5d0876573ddf8b42071df6d7f392a8"
+  },
+  "commands": [
+    "python3 /tmp/kyidentity-ui-fixture.py",
+    "GOMAXPROCS=2 node /tmp/kyidentity-baseline-capture.mjs"
+  ],
+  "note": "Exact executed harness bytes archived; worktree/ephemeral fixture paths are explicit inside. A future run starts its own fixture and updates those paths. The first failed attempt left no published manifest; it is excluded. The complete second run is baseline00.",
+  "product_code_changed": false,
+  "checks": "Owned loopback server built from recorded source; real sign-in/password change/step-up/user creation succeeded; 36 capture hashes/dimensions and 306 duplicate pairs validated. No fresh product test suite for evidence-only changes."
+}

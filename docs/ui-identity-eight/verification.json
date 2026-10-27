@@ -1,0 +1,62 @@
+{
+  "source_ui": "df8daef",
+  "checks": {
+    "web_unit": {
+      "status": "pass",
+      "count": 198,
+      "evidence": "checks/r2-web-unit.txt"
+    },
+    "web_build": {
+      "status": "pass",
+      "evidence": "checks/r2-web-build.txt",
+      "advisory": "Vite reports a >500kB uncompressed bundle; emitted gzip is150.91kB. No compiler/typecheck failure; no claim of a new performance optimization."
+    },
+    "browser": {
+      "status": "pass",
+      "cases": 4,
+      "evidence": "checks/r2-browser.json",
+      "scope": "Desktop/phone\u00d7light/dark: stable row geometry, viewport-contained native popover, one open, keyboard/outside dismissal, focus return including Edit dialog, truthful empty state/search, full policy retained and40px Security controls."
+    },
+    "impeccable": {
+      "status": "pass",
+      "findings": 0,
+      "evidence": "checks/r2-impeccable.json",
+      "note": "Rerun after the explicit native-anchor cleanup; no findings."
+    },
+    "full_required": {
+      "status": "pass_with_source_provenance_limit",
+      "results": "checks/r2-results.json",
+      "source_commit": "0e5cee3",
+      "scope": "All eight local groups passed. The runner captured source_commit once at start, before final desktop CSS cleanup. Later groups used the then-current worktree; exact per-group source was not recorded. Treat result source_commit fields as runner-start provenance, not an attestation of every executed file. Final-head hosted CI and security still required.",
+      "groups": 8,
+      "runner_start_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+      "evidence_sha256": {
+        "r2-toolchain.txt": "25e6e8e364358b7ae7fbff887a8752e9c0264caa2231886b25f1870caad2b311",
+        "r2-race.txt": "d9bbd151f1eac02564547784be1b663c1f4d72dc1e881acc828913a3b751b112",
+        "r2-fips-race.txt": "db9782394bd5dad350fbe0fd5f086150c6f43fb30fb3f874b0e5e781c29ce640",
+        "r2-web.txt": "ab3689cc879288ee50a938ec2ae172fed5c8f9c302658c91ac39ca68b3b9f366",
+        "r2-workers.txt": "c88f8c4561a75e321270fa24673c4ef330859e26a89ddd5871ca951ea1d5011e",
+        "r2-vulnerabilities.txt": "1d875b2fec09906ad73046db10d006fa84b6d17aeb6fd3a9539e1798ff975cb0",
+        "r2-repeatable.txt": "69959d4124e6570965906cd0a9de3f37469ee32867e9cafe651c64f4e5a30505",
+        "r2-docker.txt": "29405584ea54babffdadb73fd4ac22ed0af9e1672a521241a7655741dde5ecd3"
+      }
+    }
+  },
+  "visual_evidence": {
+    "manifest": "manifest-02-after.json",
+    "source_commit": "df8daef",
+    "originals": 36,
+    "overflows": 0,
+    "duplicates": 0,
+    "parent_viewed": 36,
+    "bounded_confirmation": "Stage01 preserved as superseded; desktop popover had an offscreen anchor. Stage02 is the single bounded cleanup capture."
+  },
+  "gate": "Round2 accepted:Claude116/15,Sol376/45,combined362/45=8.044444\u2026 rounds8.0. Preserve individual satisfaction:Claude false,Sol true. Gemini unused.",
+  "limitations": [
+    "Full keyboard/focus/state/contrast matrix untested",
+    "Other roles and populated connection/group workflows not independently captured",
+    "No competitive or whole-product acceptance"
+  ],
+  "mySlop": "Known401; no board post succeeded; no retry with unchanged credential",
+  "merge_deploy": "Not authorized"
+}

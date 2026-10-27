@@ -97,11 +97,12 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
     <div className="page-header">
       <div><h1 className="page-title">Groups</h1>
         <p>{user ? `Membership for ${user.username}` : 'Organize directory users into groups.'}</p>
-        <p className="text-muted text-sm">Administrator access is controlled by each user's role. Membership in a group with required MFA changes authentication requirements and cancels that user's OAuth grants. If your account requires MFA, sign in with a permitted factor within five minutes before changing such memberships.</p>
+
       </div>
       {user ? <button className="secondary-btn" disabled={busy} onClick={onClearUser}>All groups</button>
         : <button className="primary-btn" disabled={busy} onClick={() => edit()}>Create group</button>}
     </div>
+    <details className="policy-note"><summary>Membership and MFA rules</summary><p className="text-muted text-sm">Administrator access is controlled by each user's role. Membership in a group with required MFA changes authentication requirements and cancels that user's OAuth grants. If your account requires MFA, sign in with a permitted factor within five minutes before changing such memberships.</p></details>
     {(mutationError || error) && <div className="alert-box error" role="alert">{mutationError || error}{error && <button className="secondary-btn sm" onClick={reload}>Retry</button>}</div>}
     {editor && <section className="settings-section" aria-labelledby="group-editor-title">
       <div className="section-header"><h2 id="group-editor-title">{editor.kind === 'new' ? 'Create group' : `Edit ${editor.group.name}`}</h2></div>
@@ -126,7 +127,7 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
     <div className="form-group"><label className="form-label" htmlFor="group-search">Search groups</label>
       <input id="group-search" autoFocus className="form-input" value={query} maxLength={200} disabled={busy}
         onChange={e => { setQuery(e.target.value); setOffset(0); }} /></div>
-    <div className="table-card"><table className="admin-table">
+    {Boolean(page?.items.length) && <div className="table-card"><table className="admin-table">
       <thead><tr><th>Name</th><th>Description</th><th>Members</th><th>{user ? 'Membership' : 'Actions'}</th></tr></thead>
       <tbody>{page?.items.map(group => <tr key={group.id}>
         <td style={{ overflowWrap: 'anywhere' }}>{group.name}{group.sourceConnectorId && <span className="status-badge warn" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}</td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
@@ -145,9 +146,10 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
           </>}
         </div></td>
       </tr>)}</tbody>
-    </table></div>
-    {page?.items.length === 0 && <p className="empty-box">No matching groups.</p>}
-    <Pager page={page} offset={offset} onChange={setOffset} />
+    </table></div>}
+    {!page && !error && <p role="status">Loading groups…</p>}
+    {page?.items.length === 0 && <div className="list-empty"><h2>{query.trim() ? 'No matching groups' : 'No groups yet'}</h2><p>{user ? 'Create a group from All groups, then add this account.' : 'Create a group to organize directory users.'}</p></div>}
+    {Boolean(page?.total) && <Pager page={page} offset={offset} onChange={setOffset} />}
     </>}
     {selected && <GroupMembers key={selected.id} group={selected} busy={busy} mutate={mutate} onClose={() => setSelected(null)} />}
     {stepUpPrompt}

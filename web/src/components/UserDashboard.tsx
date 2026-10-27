@@ -14,6 +14,7 @@ interface UserDashboardProps {
   user: User;
   manage?: boolean;
   onNavigateToDevices: () => void;
+  onNavigateToConnections?: () => void;
 }
 
 /** The card being edited, or a blank one when adding. */
@@ -34,7 +35,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = (props) =>
   props.manage ? <ManageCards user={props.user} /> : <Applications {...props} />;
 
 /** The everyday launcher, arranged the way this user chose. */
-const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices }) => {
+const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices, onNavigateToConnections }) => {
   const [launcher, setLauncher] = useState<Launcher | null>(null);
   const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState('');
@@ -98,9 +99,6 @@ const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices 
       <div className="page-header">
         <div><h1 className="page-title">Applications</h1><p className="launcher-intro">Your workspace, connected.</p></div>
         <div className="launcher-who">
-          <span>
-            Signed in as <b>{user.username}</b> · {user.role === 'admin' ? 'Administrator' : 'User'}
-          </span>
           {apps.length > 0 && (
             <button type="button" className="secondary-btn sm" onClick={() => setEditing(true)}>
               Customize
@@ -124,6 +122,7 @@ const Applications: React.FC<UserDashboardProps> = ({ user, onNavigateToDevices 
             : 'No applications are available to you. Ask an administrator for access.'}
         </p>
       )}
+      {launcher && apps.length === 0 && onNavigateToConnections && <button type="button" className="secondary-btn" onClick={onNavigateToConnections}>Manage app connections</button>}
       {apps.length > 0 && <div className="launcher-search">
         <label htmlFor="application-search">Find an application</label>
         <div className="launcher-search-controls">

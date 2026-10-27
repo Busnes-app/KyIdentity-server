@@ -1,0 +1,2285 @@
+{
+ "schema": "ky-ui-council-scores/2",
+ "round": 1,
+ "stage": "00-before (baseline)",
+ "reviewer": {
+  "model": "claude-opus-5-5",
+  "name": "Claude Opus 5.5",
+  "role": "independent visual Council reviewer, read-only"
+ },
+ "rubric": {
+  "version": "ky-suite-v2",
+  "weights": {
+   "hierarchy": "0.20",
+   "typography": "0.15",
+   "density_layout": "0.20",
+   "color": "0.15",
+   "visible_affordances": "0.15",
+   "coherence": "0.15"
+  },
+  "rounding": "per-file Decimal(str(x)).quantize(Decimal('0.1'), ROUND_HALF_UP); cohort means exact over rounded per-file totals",
+  "ky_fit": {
+   "dimensions": [
+    "palette_tokens",
+    "type_geometry",
+    "shell",
+    "accent_discipline",
+    "suite_cohesion"
+   ],
+   "weight_each": "0.20",
+   "suite_cohesion_basis": "four KyRecovery stage-05 originals from brand-references.json (desktop overview/appearance, light/dark); no Recovery phone or sign-in reference",
+   "per_file_mean": "exact fraction of five integers, then half-up to one decimal"
+  }
+ },
+ "source": {
+  "captured_source_commit": "95799c4ab799dca8eb873a03129de9cf9d26ea22",
+  "evidence_commit": "f27d56b",
+  "worktree_head_at_review": "f16a734ec5b8bfcbddc47f6beceb8e209047e431 (adds only evidence guidance; screenshots unchanged since f27d56b)",
+  "uncommitted_source_sha256": null,
+  "ky_ui_runtime_vendor": "web/src/ky-ui/VERSION 0.4.1, sha256 a9415a1a35f65940ec546a7782a87ac7d0961770ccff87ce6f6cbb994247e3a9 (matches manifest); vendored tokens.css equals ky-ui@639e588 src/tokens.css",
+  "design_authority": "ky-ui@639e588 rubric/design contract/tokens plus explicit current owner requirements (Busnes cream/charcoal/orange, Space Grotesk, one left navigation region, shared Appearance cards)",
+  "product_design_md_conflicts": [
+   "design.md:24 says 'KySecurity Patina themed web interface'; current owner/contract requires Busnes cream/charcoal/orange.",
+   "design.md:425 specifies dark #0d0f14 background, #161a22 panels and #4deeea cyan accent; captured UI and tokens use Busnes #f8f6f0/#182326 with #bf3f18/#f5865f.",
+   "design.md:426 puts IBM Plex Mono on navigation; the contract limits mono to code, keys and fixed-width data, and captured navigation is Space Grotesk.",
+   "design.md:476 'Complete visual styling integration with KySecurity CSS and fonts' is stale against the shared ky-ui contract.",
+   "design.md:34 says generic SCIM 2.0 was replaced by native pairing in the MVP; AGENTS.md documents generic scim connectors as current (non-visual, reported only)."
+  ],
+  "docs_repaired": false
+ },
+ "conditions": {
+  "driver": "Playwright 1.63.0; Chromium 153.0.8010.12; DPR1; normal service workers",
+  "captured_at": "2026-10-27T14:38:56.861Z",
+  "locale": "en-US",
+  "timezone": "America/New_York",
+  "fixture": "owned loopback instance; administrator plus four ordinary synthetic users created through the real UI with step-up; apps/groups/connections/devices unconfigured; Create User open and unsubmitted",
+  "viewports": [
+   "desktop 1280x900",
+   "mobile 390x844"
+  ],
+  "theme_source": "OS light/dark, no saved theme",
+  "viewing": "each of the 36 originals opened individually at native resolution; no thumbnails or contact sheets; Recovery references extracted from git objects into owned scratch"
+ },
+ "inputs": {
+  "rubric": {
+   "path": "ky-ui@639e588:skills/ky-suite-ui/references/rubric.md",
+   "sha256": "ad3516620420fbdc30f5273f82b7c72c76e1365d1b6296fcaa56be3cbebf2c41"
+  },
+  "design_contract": {
+   "path": "ky-ui@639e588:skills/ky-suite-ui/references/design-contract.md",
+   "sha256": "392afb88c51fb3cfad6c94d6b841804b194d107a0431c31f35ff81d3a7a444d3"
+  },
+  "skill": {
+   "path": "ky-ui@639e588:skills/ky-suite-ui/SKILL.md",
+   "sha256": "6010ea39ac6e4e21926eb2a45d8a5a4894cd9e5e6eec07aca4cf60423233dcc2"
+  },
+  "tokens": {
+   "path": "ky-ui@639e588:src/tokens.css",
+   "sha256": "639f8e73259aca02119b98a5340539d5e8e16d65fd5f6124b939fdfe9c5f86af"
+  },
+  "manifest": {
+   "path": "docs/ui-identity-eight/manifest-00-before.json",
+   "sha256": "d7cd78a7a3fd9d109beb1330e05e95cb74bb78c270e3d33aafd5834201c68a60"
+  },
+  "inventory": {
+   "path": "docs/ui-identity-eight/inventory-v1.json",
+   "sha256": "7de3670ec298c47dda846f752856cd15dd463f2491fdf1eac2c6b06339baa82e"
+  },
+  "duplicate_audit": {
+   "path": "docs/ui-identity-eight/duplicate-audit-v1.json",
+   "sha256": "dd49da7eb4257703d1aba7d9360b159701fadf97b3c510586190d1089b73462a",
+   "result": "independently recomputed: 36 files, 0 exact duplicates, 306 same-size pairs, 0 near duplicates; closest pair users-manage-mobile-dark vs users-mobile-dark changed 4.36% of pixels, max channel delta 211"
+  },
+  "capture_provenance": {
+   "path": "docs/ui-identity-eight/capture-provenance.json",
+   "sha256": "33d3370971503ea45bed4a206044ba98a746917330bb3c3bd3cba7b78a725c02"
+  },
+  "evidence_agents": {
+   "path": "docs/ui-identity-eight/AGENTS.md",
+   "sha256": "966573642ef0d249648dede9c52aa39d80fd836bbdd031e362c9abcb571ff0e6"
+  },
+  "product_design_md": {
+   "path": "design.md",
+   "sha256": "7d0ca287461e29b3c630e8124b8a7d7c40226d7c76da7a439aaff9daf6747515"
+  },
+  "prior_own_report": {
+   "path": null,
+   "sha256": null,
+   "opened": "none exists for Identity; scored blind"
+  },
+  "peer_reports": "not opened (a sol-round1.json appeared untracked during review and was not read)",
+  "brand_references": {
+   "index": {
+    "path": "docs/ui-identity-eight/brand-references.json",
+    "sha256": "41a40465d8d51b184f5839812cb1b164a2d2c70beb270b31a520e5707c34dc72"
+   },
+   "kyrecovery_commit": "247c10ee8e9f88266fce64b9393a0e8455216a1c",
+   "files": [
+    {
+     "file": "kyrecovery-05-after-overview-desktop-light.png",
+     "sha256": "2f25fa268b226de855136c1fd660c7c2c4b3d1c9ebc8edb136eaad7b5c025979"
+    },
+    {
+     "file": "kyrecovery-05-after-overview-desktop-dark.png",
+     "sha256": "4df42c23a36fa8f4262d59704cae257e72b8a32afa71d75ef4c2b1a1810cdae7"
+    },
+    {
+     "file": "kyrecovery-05-after-appearance-desktop-light.png",
+     "sha256": "4da60275522d0af07c8bdfcd58de64f0e51d42b9c7274cbd1a21496a4ddc1582"
+    },
+    {
+     "file": "kyrecovery-05-after-appearance-desktop-dark.png",
+     "sha256": "665ce9d9fd6d15901d6bc9e0df5c764d00c2d937026d2697473af8b938fb3b7d"
+    }
+   ],
+   "verification": "git show of each object; sha256 and 1280x900 match the index; used for ky_fit only"
+  },
+  "scoring_scripts": {
+   "scores.py": "1708c06bab6fe48e2ead32dbaaea560d16b22fc86ae7e609b102c537154121c0",
+   "location": "owned scratch /tmp/opus-identity-r1 (not published)"
+  }
+ },
+ "inventory": {
+  "total": 36,
+  "unique": 36,
+  "exact_duplicates": 0,
+  "near_duplicates": 0,
+  "verification": "sha256, bytes and dimensions match inventory-v1.json and manifest-00-before.json for all 36; no extra or missing files",
+  "by_cohort": {
+   "admin-console": 20,
+   "auth": 4,
+   "member-home": 4,
+   "settings": 8
+  }
+ },
+ "files": [
+  {
+   "file": "screenshots/kyidentity-00-before-app-connections-desktop-dark.png",
+   "sha256": "8213a7551382462026b1c4f6f36115a972b38f39cf7cfee5f9b1e7ff894a331f",
+   "bytes": 73395,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "app-connections",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 5,
+    "typography": 7,
+    "density_layout": 5,
+    "color": 8,
+    "visible_affordances": 6,
+    "coherence": 5
+   },
+   "observations": {
+    "hierarchy": "No primary; the only button, 'Manage launcher cards', touches the bottom of the title (~3px gap) on the left.",
+    "typography": "Two stacked explanatory paragraphs; mono pager.",
+    "density_layout": "Button jammed under the title; header-only table card, dashed rule and floating empty message.",
+    "color": "Restrained.",
+    "visible_affordances": "Empty message tells the admin to add an OAuth client, launcher card or suite connection without links; disabled pager.",
+    "coherence": "Same assembled empty-table pattern as Groups; header pattern differs from Users and Groups."
+   },
+   "weighted_exact": "5.90",
+   "total": "5.9",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Title/button spacing off the 8px rhythm; mono pager.",
+     "shell": "Sidebar unchanged.",
+     "accent_discipline": "No orange in content.",
+     "suite_cohesion": "Header composition differs from Recovery's title-left/action-right."
+    },
+    "mean_exact": "39/5",
+    "mean": "7.8"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show a configured connection row, its actions or the launcher-card manager."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-app-connections-desktop-light.png",
+   "sha256": "e51b57523b259619326679e27a821a8cb3b0dc3a733e81c8b2ec2315e4a6678c",
+   "bytes": 72928,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "app-connections",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 5,
+    "typography": 7,
+    "density_layout": 5,
+    "color": 8,
+    "visible_affordances": 6,
+    "coherence": 5
+   },
+   "observations": {
+    "hierarchy": "No primary; the only button, 'Manage launcher cards', touches the bottom of the title (~3px gap) on the left.",
+    "typography": "Two stacked explanatory paragraphs; mono pager.",
+    "density_layout": "Button jammed under the title; header-only table card, dashed rule and floating empty message.",
+    "color": "Restrained.",
+    "visible_affordances": "Empty message tells the admin to add an OAuth client, launcher card or suite connection without links; disabled pager.",
+    "coherence": "Same assembled empty-table pattern as Groups; header pattern differs from Users and Groups."
+   },
+   "weighted_exact": "5.90",
+   "total": "5.9",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Title/button spacing off the 8px rhythm; mono pager.",
+     "shell": "Sidebar unchanged.",
+     "accent_discipline": "No orange in content.",
+     "suite_cohesion": "Header composition differs from Recovery's title-left/action-right."
+    },
+    "mean_exact": "39/5",
+    "mean": "7.8"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show a configured connection row, its actions or the launcher-card manager."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-app-connections-mobile-dark.png",
+   "sha256": "7f3dda89925c7ddf3fd9952fb1624eb3d6e86c1ad40918ce7a145386711599f7",
+   "bytes": 47548,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "app-connections",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 5,
+    "typography": 7,
+    "density_layout": 4,
+    "color": 8,
+    "visible_affordances": 6,
+    "coherence": 5
+   },
+   "observations": {
+    "hierarchy": "Same: no primary, button touches title.",
+    "typography": "Long paragraphs dominate the first screen.",
+    "density_layout": "Table header is clipped at 'Acc' inside its card (Actions not visible); button touches the title.",
+    "color": "Restrained.",
+    "visible_affordances": "Clipped columns hide the actions column; disabled pager.",
+    "coherence": "As desktop."
+   },
+   "weighted_exact": "5.70",
+   "total": "5.7",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 6,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Clipped header; off-rhythm spacing.",
+     "shell": "Unlabelled two-row phone nav, second row scrolled.",
+     "accent_discipline": "Tab only.",
+     "suite_cohesion": "As desktop."
+    },
+    "mean_exact": "37/5",
+    "mean": "7.4"
+   },
+   "confidence": "high",
+   "caveat": "Page-level overflow was 0 per manifest; the clipping is inside the table container."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-app-connections-mobile-light.png",
+   "sha256": "69cbf0bf3f274aac038eb230c32197a9ce629755f8c33c3d325fc9e681fda1b2",
+   "bytes": 47139,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "app-connections",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 5,
+    "typography": 7,
+    "density_layout": 4,
+    "color": 8,
+    "visible_affordances": 6,
+    "coherence": 5
+   },
+   "observations": {
+    "hierarchy": "Same: no primary, button touches title.",
+    "typography": "Long paragraphs dominate the first screen.",
+    "density_layout": "Table header is clipped at 'Acc' inside its card (Actions not visible); button touches the title.",
+    "color": "Restrained.",
+    "visible_affordances": "Clipped columns hide the actions column; disabled pager.",
+    "coherence": "As desktop."
+   },
+   "weighted_exact": "5.70",
+   "total": "5.7",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 6,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Clipped header; off-rhythm spacing.",
+     "shell": "Unlabelled two-row phone nav, second row scrolled.",
+     "accent_discipline": "Tab only.",
+     "suite_cohesion": "As desktop."
+    },
+    "mean_exact": "37/5",
+    "mean": "7.4"
+   },
+   "confidence": "high",
+   "caveat": "Page-level overflow was 0 per manifest; the clipping is inside the table container."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-appearance-desktop-dark.png",
+   "sha256": "260bede7c31ad826cc811957128c3621f84cc586f886b7c75c1f98b4ddcfdadd",
+   "bytes": 90370,
+   "width": 1280,
+   "height": 900,
+   "cohort": "settings",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "appearance",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 8,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 9
+   },
+   "observations": {
+    "hierarchy": "Title, one-sentence explanation, 'Theme' label, selected card obvious.",
+    "typography": "Card names 15px/600 with 13px light/dark meta; clean.",
+    "density_layout": "Even 5-column grid with consistent gaps; ~50px gap between title and description is larger than elsewhere.",
+    "color": "Preview hues are catalog data; chrome stays cream/orange.",
+    "visible_affordances": "Radio plus accent card border mark the selection unambiguously; idle radios in dark are faint grey.",
+    "coherence": "Shared ky-appearance cards, one vocabulary."
+   },
+   "weighted_exact": "8.15",
+   "total": "8.2",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 9,
+     "type_geometry": 9,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 9
+    },
+    "observations": {
+     "palette_tokens": "Token chrome; previews are catalog data.",
+     "type_geometry": "8px card radius, contract type sizes.",
+     "shell": "Same sidebar/account region.",
+     "accent_discipline": "Orange marks the selected card and nav only.",
+     "suite_cohesion": "Pixel-for-pixel the same card composition as the KyRecovery Appearance reference."
+    },
+    "mean_exact": "44/5",
+    "mean": "8.8"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show applying a theme, cross-tab sync or saved-choice behaviour."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-appearance-desktop-light.png",
+   "sha256": "70c16ec5fa498bec6d05f56b783cc2ac27013890a9d40c50cf9a8986d3f1cd4a",
+   "bytes": 89964,
+   "width": 1280,
+   "height": 900,
+   "cohort": "settings",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "appearance",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 8,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 9
+   },
+   "observations": {
+    "hierarchy": "Title, one-sentence explanation, 'Theme' label, selected card obvious.",
+    "typography": "Card names 15px/600 with 13px light/dark meta; clean.",
+    "density_layout": "Even 5-column grid with consistent gaps; ~50px gap between title and description is larger than elsewhere.",
+    "color": "Preview hues are catalog data; chrome stays cream/orange.",
+    "visible_affordances": "Radio plus accent card border mark the selection unambiguously; idle radios in dark are faint grey.",
+    "coherence": "Shared ky-appearance cards, one vocabulary."
+   },
+   "weighted_exact": "8.15",
+   "total": "8.2",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 9,
+     "type_geometry": 9,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 9
+    },
+    "observations": {
+     "palette_tokens": "Token chrome; previews are catalog data.",
+     "type_geometry": "8px card radius, contract type sizes.",
+     "shell": "Same sidebar/account region.",
+     "accent_discipline": "Orange marks the selected card and nav only.",
+     "suite_cohesion": "Pixel-for-pixel the same card composition as the KyRecovery Appearance reference."
+    },
+    "mean_exact": "44/5",
+    "mean": "8.8"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show applying a theme, cross-tab sync or saved-choice behaviour."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-appearance-mobile-dark.png",
+   "sha256": "eaa8f146d69b189e2f897702e22eb59a042ffda56108950980081cb8c3291ea7",
+   "bytes": 42479,
+   "width": 390,
+   "height": 844,
+   "cohort": "settings",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "appearance",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Title, explanation and selected card clear.",
+    "typography": "Same clean card type at 390px.",
+    "density_layout": "Two cards fit; the two nav rows take ~180px; 16px inset differs from the 20px used on other phone pages.",
+    "color": "Restrained chrome.",
+    "visible_affordances": "Selection unambiguous.",
+    "coherence": "Shared cards; inset differs from sibling pages."
+   },
+   "weighted_exact": "7.80",
+   "total": "7.8",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 9,
+     "type_geometry": 9,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 9
+    },
+    "observations": {
+     "palette_tokens": "Token chrome.",
+     "type_geometry": "Contract sizes.",
+     "shell": "Unlabelled two-row phone nav; first row scrolled so 'Applications' is clipped to 'ations'.",
+     "accent_discipline": "Orange on selected card/tab.",
+     "suite_cohesion": "Matches Recovery card language."
+    },
+    "mean_exact": "43/5",
+    "mean": "8.6"
+   },
+   "confidence": "high",
+   "caveat": "Shows only the first six cards."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-appearance-mobile-light.png",
+   "sha256": "3e199466db381567052b2ea40e24999487b882c748d153beb07b19b8bea57136",
+   "bytes": 41808,
+   "width": 390,
+   "height": 844,
+   "cohort": "settings",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "appearance",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Title, explanation and selected card clear.",
+    "typography": "Same clean card type at 390px.",
+    "density_layout": "Two cards fit; the two nav rows take ~180px; 16px inset differs from the 20px used on other phone pages.",
+    "color": "Restrained chrome.",
+    "visible_affordances": "Selection unambiguous.",
+    "coherence": "Shared cards; inset differs from sibling pages."
+   },
+   "weighted_exact": "7.80",
+   "total": "7.8",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 9,
+     "type_geometry": 9,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 9
+    },
+    "observations": {
+     "palette_tokens": "Token chrome.",
+     "type_geometry": "Contract sizes.",
+     "shell": "Unlabelled two-row phone nav; first row scrolled so 'Applications' is clipped to 'ations'.",
+     "accent_discipline": "Orange on selected card/tab.",
+     "suite_cohesion": "Matches Recovery card language."
+    },
+    "mean_exact": "43/5",
+    "mean": "8.6"
+   },
+   "confidence": "high",
+   "caveat": "Shows only the first six cards."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-applications-desktop-dark.png",
+   "sha256": "6958ac444ea825e1fe1176262c920f1d6de155e4f930ac705037c42bb40f9666",
+   "bytes": 59561,
+   "width": 1280,
+   "height": 900,
+   "cohort": "member-home",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "applications",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Clear 'Applications' title; no primary action; the second-factor banner's 'Set one up' link is the only action.",
+    "typography": "24px title, quiet tagline, mono 'admin' in the header line; consistent scale.",
+    "density_layout": "Empty state is one sentence at the top of an otherwise empty 960px canvas; it names App connections but gives no link or button.",
+    "color": "Warning tint banner with amber text is semantic; orange only on the selected nav row.",
+    "visible_affordances": "'Set one up' is underlined; 'App connections' in the empty message reads as plain text; sign-out is an icon-only ~30px button.",
+    "coherence": "'Signed in as admin \u00b7 Administrator' repeats the sidebar account region."
+   },
+   "weighted_exact": "7.45",
+   "total": "7.5",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 8,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces; warning tint is the only extra hue and is semantic.",
+     "type_geometry": "Contract title/nav sizes; nav rows 40px with 8px radius; sign-out control is below 40px.",
+     "shell": "240px single sidebar with wordmark, two titled groups, accent rail selection and bottom account region.",
+     "accent_discipline": "Orange only marks the selected navigation row.",
+     "suite_cohesion": "Sidebar treatment matches KyRecovery; account region differs (icon-only sign-out, no text buttons)."
+    },
+    "mean_exact": "41/5",
+    "mean": "8.2"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show a populated launcher, ordinary-user view, hover/focus or what 'Set one up' opens."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-applications-desktop-light.png",
+   "sha256": "afcbe526d96a92db183f60821c1e99545ebeffb7761bdd484dbef52365e170c8",
+   "bytes": 59263,
+   "width": 1280,
+   "height": 900,
+   "cohort": "member-home",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "applications",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Clear 'Applications' title; no primary action; the second-factor banner's 'Set one up' link is the only action.",
+    "typography": "24px title, quiet tagline, mono 'admin' in the header line; consistent scale.",
+    "density_layout": "Empty state is one sentence at the top of an otherwise empty 960px canvas; it names App connections but gives no link or button.",
+    "color": "Warning tint banner with amber text is semantic; orange only on the selected nav row.",
+    "visible_affordances": "'Set one up' is underlined; 'App connections' in the empty message reads as plain text; sign-out is an icon-only ~30px button.",
+    "coherence": "'Signed in as admin \u00b7 Administrator' repeats the sidebar account region."
+   },
+   "weighted_exact": "7.45",
+   "total": "7.5",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 8,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces; warning tint is the only extra hue and is semantic.",
+     "type_geometry": "Contract title/nav sizes; nav rows 40px with 8px radius; sign-out control is below 40px.",
+     "shell": "240px single sidebar with wordmark, two titled groups, accent rail selection and bottom account region.",
+     "accent_discipline": "Orange only marks the selected navigation row.",
+     "suite_cohesion": "Sidebar treatment matches KyRecovery; account region differs (icon-only sign-out, no text buttons)."
+    },
+    "mean_exact": "41/5",
+    "mean": "8.2"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show a populated launcher, ordinary-user view, hover/focus or what 'Set one up' opens."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-applications-mobile-dark.png",
+   "sha256": "32f8c4783653d633df58caadf0da9917db22c5b06b393e9bbdfcf1cbc1c5482f",
+   "bytes": 34958,
+   "width": 390,
+   "height": 844,
+   "cohort": "member-home",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "applications",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 7
+   },
+   "observations": {
+    "hierarchy": "Title clear; no primary; banner action wraps to two lines.",
+    "typography": "'Set one up' wraps across two lines inside the banner.",
+    "density_layout": "Two unlabelled horizontally scrolling nav rows take ~180px; 'Signed in as admin \u00b7 Administrator' repeats the header account block directly above.",
+    "color": "Same restrained palette as desktop.",
+    "visible_affordances": "Scroll is signalled only by clipped items at the right edge; the two rows' meaning (your account vs administration) is not labelled.",
+    "coherence": "Identity shown twice on one phone screen."
+   },
+   "weighted_exact": "6.95",
+   "total": "7.0",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 8,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces and semantic warning tint.",
+     "type_geometry": "Contract nav size; sign-out ~30px.",
+     "shell": "Header plus two stacked scroll rows without group labels; selection uses an underline rather than the desktop rail.",
+     "accent_discipline": "Orange only on the selected tab.",
+     "suite_cohesion": "Palette/type match Recovery; no Recovery phone reference supplied."
+    },
+    "mean_exact": "8/1",
+    "mean": "8.0"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show whether rows scroll smoothly, scroll position memory, or the hidden third+ items."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-applications-mobile-light.png",
+   "sha256": "139eed0bee0d6e7f24d16a42def23269a53a18c6290e814232a71833ab405f9b",
+   "bytes": 34760,
+   "width": 390,
+   "height": 844,
+   "cohort": "member-home",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "applications",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 7
+   },
+   "observations": {
+    "hierarchy": "Title clear; no primary; banner action wraps to two lines.",
+    "typography": "'Set one up' wraps across two lines inside the banner.",
+    "density_layout": "Two unlabelled horizontally scrolling nav rows take ~180px; 'Signed in as admin \u00b7 Administrator' repeats the header account block directly above.",
+    "color": "Same restrained palette as desktop.",
+    "visible_affordances": "Scroll is signalled only by clipped items at the right edge; the two rows' meaning (your account vs administration) is not labelled.",
+    "coherence": "Identity shown twice on one phone screen."
+   },
+   "weighted_exact": "6.95",
+   "total": "7.0",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 8,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces and semantic warning tint.",
+     "type_geometry": "Contract nav size; sign-out ~30px.",
+     "shell": "Header plus two stacked scroll rows without group labels; selection uses an underline rather than the desktop rail.",
+     "accent_discipline": "Orange only on the selected tab.",
+     "suite_cohesion": "Palette/type match Recovery; no Recovery phone reference supplied."
+    },
+    "mean_exact": "8/1",
+    "mean": "8.0"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show whether rows scroll smoothly, scroll position memory, or the hidden third+ items."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-create-user-desktop-dark.png",
+   "sha256": "652defbbde9e8d24eea8ca66dce0b0876b5b430567b600944c83a38be0364da2",
+   "bytes": 102969,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "create-user",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "Blank unsubmitted dialog over the populated Users list; Username focused; backdrop blur",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 7,
+    "density_layout": 8,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Titled dialog, 'Create & Replicate' primary right with Cancel beside.",
+    "typography": "Password label carries a full sentence of helper text in the label line.",
+    "density_layout": "Even field rhythm; Role/Status share a row; header rule but no footer rule.",
+    "color": "Orange on primary and focused field only; backdrop darkens and blurs the page.",
+    "visible_affordances": "40px fields, native selects, close X; required/optional is not marked in text.",
+    "coherence": "Consistent field style; Cancel (~44px) and primary (~42px) differ slightly in height."
+   },
+   "weighted_exact": "7.85",
+   "total": "7.9",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 8,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces; backdrop is a dark scrim.",
+     "type_geometry": "40px fields, 8px radius.",
+     "shell": "Shell visible behind the scrim.",
+     "accent_discipline": "Primary and focus only.",
+     "suite_cohesion": "Same field/button vocabulary as Recovery."
+    },
+    "mean_exact": "41/5",
+    "mean": "8.2"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show validation, step-up prompt, submission or focus trapping."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-create-user-desktop-light.png",
+   "sha256": "493c075697dfadc289a7e1d3b7d889e61814174498a7e68385e6e988ff745ebd",
+   "bytes": 100693,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "create-user",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "Blank unsubmitted dialog over the populated Users list; Username focused; backdrop blur",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 7,
+    "density_layout": 8,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Titled dialog, 'Create & Replicate' primary right with Cancel beside.",
+    "typography": "Password label carries a full sentence of helper text in the label line.",
+    "density_layout": "Even field rhythm; Role/Status share a row; header rule but no footer rule.",
+    "color": "Orange on primary and focused field only; backdrop darkens and blurs the page.",
+    "visible_affordances": "40px fields, native selects, close X; required/optional is not marked in text.",
+    "coherence": "Consistent field style; Cancel (~44px) and primary (~42px) differ slightly in height."
+   },
+   "weighted_exact": "7.85",
+   "total": "7.9",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 8,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces; backdrop is a dark scrim.",
+     "type_geometry": "40px fields, 8px radius.",
+     "shell": "Shell visible behind the scrim.",
+     "accent_discipline": "Primary and focus only.",
+     "suite_cohesion": "Same field/button vocabulary as Recovery."
+    },
+    "mean_exact": "41/5",
+    "mean": "8.2"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show validation, step-up prompt, submission or focus trapping."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-create-user-mobile-dark.png",
+   "sha256": "ee9f57b244a49b76e461a608820f5279c7322b378914976bd165794611ac4d04",
+   "bytes": 51410,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "create-user",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "Blank unsubmitted dialog; Username focused; backdrop blur",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 7,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Dialog title and primary clear.",
+    "typography": "Password label wraps to two lines.",
+    "density_layout": "Fits the viewport; password placeholder is cut off at 'one througl'.",
+    "color": "Restrained.",
+    "visible_affordances": "Clipped placeholder; no required/optional text.",
+    "coherence": "Consistent controls."
+   },
+   "weighted_exact": "7.50",
+   "total": "7.5",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 8,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "40px fields.",
+     "shell": "Phone nav visible behind scrim.",
+     "accent_discipline": "Primary and focus only.",
+     "suite_cohesion": "Same vocabulary as Recovery."
+    },
+    "mean_exact": "8/1",
+    "mean": "8.0"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show validation or on-screen keyboard overlap."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-create-user-mobile-light.png",
+   "sha256": "264d53786df4a32421d5153e3dc0ac6944c542077a7d1fa5d88ea8405ba1cf1a",
+   "bytes": 52515,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "create-user",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "Blank unsubmitted dialog; Username focused; backdrop blur",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 7,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Dialog title and primary clear.",
+    "typography": "Password label wraps to two lines.",
+    "density_layout": "Fits the viewport; password placeholder is cut off at 'one througl'.",
+    "color": "Restrained.",
+    "visible_affordances": "Clipped placeholder; no required/optional text.",
+    "coherence": "Consistent controls."
+   },
+   "weighted_exact": "7.50",
+   "total": "7.5",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 8,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "40px fields.",
+     "shell": "Phone nav visible behind scrim.",
+     "accent_discipline": "Primary and focus only.",
+     "suite_cohesion": "Same vocabulary as Recovery."
+    },
+    "mean_exact": "8/1",
+    "mean": "8.0"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show validation or on-screen keyboard overlap."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-groups-desktop-dark.png",
+   "sha256": "2ad4cca037e8e51e4b0016d60ac21beff34f171762bf56c6cba289f6b7442c38",
+   "bytes": 73103,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "groups",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "Search field focused",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 6,
+    "coherence": 5
+   },
+   "observations": {
+    "hierarchy": "Filled 'Create group' primary is clear, but it centres on a five-line policy paragraph rather than the title.",
+    "typography": "Dense 13px policy paragraph under the subtitle; mono '0 total \u00b7 Page 1'.",
+    "density_layout": "Header-only table card, then a dashed rule and a free-floating empty message, then a pager.",
+    "color": "Restrained; focused search shows orange border.",
+    "visible_affordances": "Disabled Previous/Next shown for an empty list; empty message says 'No matching groups' with no search entered; search has no placeholder.",
+    "coherence": "Primary here is ~42px without icon; on Users it is ~32px with a plus icon. Card, dashed and solid rules mix."
+   },
+   "weighted_exact": "6.50",
+   "total": "6.5",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Mono pager; button heights differ from Users.",
+     "shell": "Sidebar unchanged.",
+     "accent_discipline": "Primary, focus, nav.",
+     "suite_cohesion": "Empty-table composition has no Recovery counterpart and feels assembled."
+    },
+    "mean_exact": "39/5",
+    "mean": "7.8"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show a populated group list, the create dialog or membership step-up."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-groups-desktop-light.png",
+   "sha256": "7c58aed22257694914bdf66ef471ab1e7417cbffcf696b91a108634046a89cef",
+   "bytes": 72755,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "groups",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "Search field focused",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 6,
+    "coherence": 5
+   },
+   "observations": {
+    "hierarchy": "Filled 'Create group' primary is clear, but it centres on a five-line policy paragraph rather than the title.",
+    "typography": "Dense 13px policy paragraph under the subtitle; mono '0 total \u00b7 Page 1'.",
+    "density_layout": "Header-only table card, then a dashed rule and a free-floating empty message, then a pager.",
+    "color": "Restrained; focused search shows orange border.",
+    "visible_affordances": "Disabled Previous/Next shown for an empty list; empty message says 'No matching groups' with no search entered; search has no placeholder.",
+    "coherence": "Primary here is ~42px without icon; on Users it is ~32px with a plus icon. Card, dashed and solid rules mix."
+   },
+   "weighted_exact": "6.50",
+   "total": "6.5",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Mono pager; button heights differ from Users.",
+     "shell": "Sidebar unchanged.",
+     "accent_discipline": "Primary, focus, nav.",
+     "suite_cohesion": "Empty-table composition has no Recovery counterpart and feels assembled."
+    },
+    "mean_exact": "39/5",
+    "mean": "7.8"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show a populated group list, the create dialog or membership step-up."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-groups-mobile-dark.png",
+   "sha256": "17fe406a7069a3325bb605ced3b8a5287a3ed3549ce1bae9d73c51e6e863dde4",
+   "bytes": 45470,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "groups",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "Search field focused",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 6,
+    "coherence": 5
+   },
+   "observations": {
+    "hierarchy": "Primary sits below the paragraph, clear.",
+    "typography": "Six-line 13px paragraph; mono pager.",
+    "density_layout": "Same header-only table card; four column headers squeezed into 350px.",
+    "color": "Restrained.",
+    "visible_affordances": "Disabled pager and 'No matching groups' as on desktop.",
+    "coherence": "Keeps a table at 390px while Users switches to blocks."
+   },
+   "weighted_exact": "6.50",
+   "total": "6.5",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Mono pager.",
+     "shell": "Unlabelled two-row phone nav.",
+     "accent_discipline": "Primary, focus, tab.",
+     "suite_cohesion": "As desktop."
+    },
+    "mean_exact": "38/5",
+    "mean": "7.6"
+   },
+   "confidence": "high",
+   "caveat": "As desktop."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-groups-mobile-light.png",
+   "sha256": "2c06b010e919aac78a834a4d7d74a7818a8db2e28801e7081c51e0f644cd0b44",
+   "bytes": 45037,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "groups",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "Search field focused",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 6,
+    "coherence": 5
+   },
+   "observations": {
+    "hierarchy": "Primary sits below the paragraph, clear.",
+    "typography": "Six-line 13px paragraph; mono pager.",
+    "density_layout": "Same header-only table card; four column headers squeezed into 350px.",
+    "color": "Restrained.",
+    "visible_affordances": "Disabled pager and 'No matching groups' as on desktop.",
+    "coherence": "Keeps a table at 390px while Users switches to blocks."
+   },
+   "weighted_exact": "6.50",
+   "total": "6.5",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Mono pager.",
+     "shell": "Unlabelled two-row phone nav.",
+     "accent_discipline": "Primary, focus, tab.",
+     "suite_cohesion": "As desktop."
+    },
+    "mean_exact": "38/5",
+    "mean": "7.6"
+   },
+   "confidence": "high",
+   "caveat": "As desktop."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-login-desktop-dark.png",
+   "sha256": "4392f07f2bdb2e512cd7a040302404fdac412b7743bd534eaad8da580e6c669a",
+   "bytes": 26249,
+   "width": 1280,
+   "height": 900,
+   "cohort": "auth",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "login",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "Username field shows focus (autofocus at capture)",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Single filled 'Sign in' primary under a clear 'Sign in' form title; the larger brand headline on the left panel competes only mildly.",
+    "typography": "Space Grotesk throughout; hero ~30px, form title ~22px, 13px labels, restrained weights.",
+    "density_layout": "Left brand panel is ~45% of the width with nothing below the headline; 'Forgot your password?' is indented ~4px from the field edge and sits ~10px under the button.",
+    "color": "Cream/charcoal surfaces, one orange primary, orange border only on the focused Username field.",
+    "visible_affordances": "40px bordered fields, filled primary, underlined text link; focused field is distinguishable.",
+    "coherence": "One control vocabulary; no stray styles."
+   },
+   "weighted_exact": "7.80",
+   "total": "7.8",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 9,
+     "type_geometry": 8,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Surfaces, ink and accent read as Busnes tokens in this theme.",
+     "type_geometry": "40px fields, ~43px button, 8px radius, 13px labels; title ~22px rather than 24px.",
+     "shell": "Wordmark, stamp icon and 'ID Authority' descriptor at the suite size; no sidebar expected on sign-in. Dark stamp tile is nearly the panel colour.",
+     "accent_discipline": "Orange only on the primary and the focused field.",
+     "suite_cohesion": "Type, palette and button shapes match the KyRecovery references; no Recovery sign-in reference was supplied."
+    },
+    "mean_exact": "42/5",
+    "mean": "8.4"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show keyboard order, error/validation states, MFA step, password-manager behaviour or real contrast."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-login-desktop-light.png",
+   "sha256": "750e47a6c840c1b1828fa271545c0b1682d552fd242b5a6a71a655ffd57b163d",
+   "bytes": 26288,
+   "width": 1280,
+   "height": 900,
+   "cohort": "auth",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "login",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "Username field shows focus (autofocus at capture)",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Single filled 'Sign in' primary under a clear 'Sign in' form title; the larger brand headline on the left panel competes only mildly.",
+    "typography": "Space Grotesk throughout; hero ~30px, form title ~22px, 13px labels, restrained weights.",
+    "density_layout": "Left brand panel is ~45% of the width with nothing below the headline; 'Forgot your password?' is indented ~4px from the field edge and sits ~10px under the button.",
+    "color": "Cream/charcoal surfaces, one orange primary, orange border only on the focused Username field.",
+    "visible_affordances": "40px bordered fields, filled primary, underlined text link; focused field is distinguishable.",
+    "coherence": "One control vocabulary; no stray styles."
+   },
+   "weighted_exact": "7.80",
+   "total": "7.8",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 9,
+     "type_geometry": 8,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Surfaces, ink and accent read as Busnes tokens in this theme.",
+     "type_geometry": "40px fields, ~43px button, 8px radius, 13px labels; title ~22px rather than 24px.",
+     "shell": "Wordmark, stamp icon and 'ID Authority' descriptor at the suite size; no sidebar expected on sign-in. Dark stamp tile is nearly the panel colour.",
+     "accent_discipline": "Orange only on the primary and the focused field.",
+     "suite_cohesion": "Type, palette and button shapes match the KyRecovery references; no Recovery sign-in reference was supplied."
+    },
+    "mean_exact": "42/5",
+    "mean": "8.4"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show keyboard order, error/validation states, MFA step, password-manager behaviour or real contrast."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-login-mobile-dark.png",
+   "sha256": "e1f483e5d09d2259f2a261123bf7997b85f889cf8e07cb7defcc306f15fb494a",
+   "bytes": 22375,
+   "width": 390,
+   "height": 844,
+   "cohort": "auth",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "login",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "Username field shows focus (autofocus at capture)",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Single filled 'Sign in' primary under a clear 'Sign in' form title; the larger brand headline on the left panel competes only mildly.",
+    "typography": "Space Grotesk throughout; hero ~30px, form title ~22px, 13px labels, restrained weights.",
+    "density_layout": "Brand block fills the top 340px, then ~110px of empty space before the form; a 1px split-panel border remains at the right edge of the brand block.",
+    "color": "Cream/charcoal surfaces, one orange primary, orange border only on the focused Username field.",
+    "visible_affordances": "40px bordered fields, filled primary, underlined text link; focused field is distinguishable.",
+    "coherence": "One control vocabulary; no stray styles."
+   },
+   "weighted_exact": "7.80",
+   "total": "7.8",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 9,
+     "type_geometry": 8,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Surfaces, ink and accent read as Busnes tokens in this theme.",
+     "type_geometry": "40px fields, ~43px button, 8px radius, 13px labels; title ~22px rather than 24px.",
+     "shell": "Wordmark, stamp icon and 'ID Authority' descriptor at the suite size; no sidebar expected on sign-in. Dark stamp tile is nearly the panel colour.",
+     "accent_discipline": "Orange only on the primary and the focused field.",
+     "suite_cohesion": "Type, palette and button shapes match the KyRecovery references; no Recovery sign-in reference was supplied."
+    },
+    "mean_exact": "42/5",
+    "mean": "8.4"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show keyboard order, error/validation states, MFA step, password-manager behaviour or real contrast."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-login-mobile-light.png",
+   "sha256": "8e2ae8adc32865349a47acdab3a610c1064d2c5fea34a631d69ccce115f13ca8",
+   "bytes": 22368,
+   "width": 390,
+   "height": 844,
+   "cohort": "auth",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "login",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "Username field shows focus (autofocus at capture)",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Single filled 'Sign in' primary under a clear 'Sign in' form title; the larger brand headline on the left panel competes only mildly.",
+    "typography": "Space Grotesk throughout; hero ~30px, form title ~22px, 13px labels, restrained weights.",
+    "density_layout": "Brand block fills the top 340px, then ~110px of empty space before the form; a 1px split-panel border remains at the right edge of the brand block.",
+    "color": "Cream/charcoal surfaces, one orange primary, orange border only on the focused Username field.",
+    "visible_affordances": "40px bordered fields, filled primary, underlined text link; focused field is distinguishable.",
+    "coherence": "One control vocabulary; no stray styles."
+   },
+   "weighted_exact": "7.80",
+   "total": "7.8",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 9,
+     "type_geometry": 8,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Surfaces, ink and accent read as Busnes tokens in this theme.",
+     "type_geometry": "40px fields, ~43px button, 8px radius, 13px labels; title ~22px rather than 24px.",
+     "shell": "Wordmark, stamp icon and 'ID Authority' descriptor at the suite size; no sidebar expected on sign-in. Dark stamp tile is nearly the panel colour.",
+     "accent_discipline": "Orange only on the primary and the focused field.",
+     "suite_cohesion": "Type, palette and button shapes match the KyRecovery references; no Recovery sign-in reference was supplied."
+    },
+    "mean_exact": "42/5",
+    "mean": "8.4"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show keyboard order, error/validation states, MFA step, password-manager behaviour or real contrast."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-security-desktop-dark.png",
+   "sha256": "5a70754b5f74f0b8b35e2cfba888b6fef84a7d3f2af3174bf705689aee14e922",
+   "bytes": 86786,
+   "width": 1280,
+   "height": 900,
+   "cohort": "settings",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "security",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 7,
+    "visible_affordances": 7,
+    "coherence": 7
+   },
+   "observations": {
+    "hierarchy": "Clear title and five titled sections; every action is the same small secondary button, so nothing leads.",
+    "typography": "Consistent 19px section titles, 13px labels; good restraint.",
+    "density_layout": "Each section is its own bordered card; inner dashed dividers; 'Add passkey' sits in the header while its Name field is below, so the pairing reads loosely.",
+    "color": "Native checkbox renders Chromium blue in both themes, off the palette.",
+    "visible_affordances": "Buttons ~34px tall; checkbox state readable; inputs bordered.",
+    "coherence": "Solid card borders plus dashed inner rules plus a browser-default checkbox: three treatments on one screen."
+   },
+   "weighted_exact": "7.15",
+   "total": "7.2",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 7,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Blue native checkbox is off-palette.",
+     "type_geometry": "Secondary buttons ~34px instead of 40px; card around every section.",
+     "shell": "Same 240px sidebar and account region.",
+     "accent_discipline": "No orange in content; nav selection only.",
+     "suite_cohesion": "Boxed sections differ from KyRecovery's flat divided rows."
+    },
+    "mean_exact": "38/5",
+    "mean": "7.6"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show pairing, passkey or TOTP flows, step-up prompts, or the page below the fold."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-security-desktop-light.png",
+   "sha256": "145c54b24bc2882ec2e7dcb375916e44d8fd294253ee570279459539d9afb482",
+   "bytes": 86272,
+   "width": 1280,
+   "height": 900,
+   "cohort": "settings",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "security",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 8,
+    "density_layout": 7,
+    "color": 7,
+    "visible_affordances": 7,
+    "coherence": 7
+   },
+   "observations": {
+    "hierarchy": "Clear title and five titled sections; every action is the same small secondary button, so nothing leads.",
+    "typography": "Consistent 19px section titles, 13px labels; good restraint.",
+    "density_layout": "Each section is its own bordered card; inner dashed dividers; 'Add passkey' sits in the header while its Name field is below, so the pairing reads loosely.",
+    "color": "Native checkbox renders Chromium blue in both themes, off the palette.",
+    "visible_affordances": "Buttons ~34px tall; checkbox state readable; inputs bordered.",
+    "coherence": "Solid card borders plus dashed inner rules plus a browser-default checkbox: three treatments on one screen."
+   },
+   "weighted_exact": "7.15",
+   "total": "7.2",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 7,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Blue native checkbox is off-palette.",
+     "type_geometry": "Secondary buttons ~34px instead of 40px; card around every section.",
+     "shell": "Same 240px sidebar and account region.",
+     "accent_discipline": "No orange in content; nav selection only.",
+     "suite_cohesion": "Boxed sections differ from KyRecovery's flat divided rows."
+    },
+    "mean_exact": "38/5",
+    "mean": "7.6"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show pairing, passkey or TOTP flows, step-up prompts, or the page below the fold."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-security-mobile-dark.png",
+   "sha256": "1dd355520185c640552df957a6c860e4aea8e3ec5c5b6e5f5ed6ec9ca1aac6f4",
+   "bytes": 48370,
+   "width": 390,
+   "height": 844,
+   "cohort": "settings",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "security",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 7,
+    "visible_affordances": 7,
+    "coherence": 6
+   },
+   "observations": {
+    "hierarchy": "Title and sections clear; equal-weight secondary buttons.",
+    "typography": "Checkbox label wraps with its second line under the checkbox instead of under the text.",
+    "density_layout": "Cards plus 20px inner padding narrow content to ~310px; 'Pair a phone' drops below its title while 'Add passkey' stays beside its title.",
+    "color": "Blue native checkbox persists.",
+    "visible_affordances": "Buttons readable but ~34px.",
+    "coherence": "Two section-header layouts on one screen."
+   },
+   "weighted_exact": "6.65",
+   "total": "6.7",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 7,
+     "type_geometry": 7,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Blue native checkbox.",
+     "type_geometry": "Sub-40px buttons; boxed sections.",
+     "shell": "Unlabelled two-row phone nav.",
+     "accent_discipline": "Orange only on selected tab.",
+     "suite_cohesion": "Differs from Recovery's flat sections."
+    },
+    "mean_exact": "37/5",
+    "mean": "7.4"
+   },
+   "confidence": "high",
+   "caveat": "Only the first three sections are visible; cannot show the rest or any flow."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-security-mobile-light.png",
+   "sha256": "4a1f1c50862041c55fec102ef57c73a9601384b4efddbb6f77aec0258ed06a6e",
+   "bytes": 47817,
+   "width": 390,
+   "height": 844,
+   "cohort": "settings",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "security",
+   "filename_matches_content": true,
+   "state": "empty",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 7,
+    "visible_affordances": 7,
+    "coherence": 6
+   },
+   "observations": {
+    "hierarchy": "Title and sections clear; equal-weight secondary buttons.",
+    "typography": "Checkbox label wraps with its second line under the checkbox instead of under the text.",
+    "density_layout": "Cards plus 20px inner padding narrow content to ~310px; 'Pair a phone' drops below its title while 'Add passkey' stays beside its title.",
+    "color": "Blue native checkbox persists.",
+    "visible_affordances": "Buttons readable but ~34px.",
+    "coherence": "Two section-header layouts on one screen."
+   },
+   "weighted_exact": "6.65",
+   "total": "6.7",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 7,
+     "type_geometry": 7,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Blue native checkbox.",
+     "type_geometry": "Sub-40px buttons; boxed sections.",
+     "shell": "Unlabelled two-row phone nav.",
+     "accent_discipline": "Orange only on selected tab.",
+     "suite_cohesion": "Differs from Recovery's flat sections."
+    },
+    "mean_exact": "37/5",
+    "mean": "7.4"
+   },
+   "confidence": "high",
+   "caveat": "Only the first three sections are visible; cannot show the rest or any flow."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-users-desktop-dark.png",
+   "sha256": "77bf9e2b6f81151d693ff99d4b695a822ce5a63e1a6b3904c0b44d2e8f837dbe",
+   "bytes": 82115,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "users",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 8,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Title left, single filled 'Create User' primary right; table scans well.",
+    "typography": "Mono account IDs as fixed-width data; status pill text is also mono.",
+    "density_layout": "Even 62px rows, aligned columns, Manage buttons right-aligned in one column.",
+    "color": "Green 'Active' pills are semantic with icon+text; orange only on primary and nav.",
+    "visible_affordances": "Outlined Manage buttons, filled primary, clear headers.",
+    "coherence": "One table vocabulary; table sits in a rounded card rather than full-bleed rows."
+   },
+   "weighted_exact": "8.00",
+   "total": "8.0",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces; success tint for status.",
+     "type_geometry": "Create User ~32px and Manage ~34px tall, below 40px.",
+     "shell": "Sidebar/account region as elsewhere.",
+     "accent_discipline": "Orange on the one primary and selected nav.",
+     "suite_cohesion": "Reads as the same suite as Recovery."
+    },
+    "mean_exact": "8/1",
+    "mean": "8.0"
+   },
+   "confidence": "high",
+   "caveat": "Five synthetic users; cannot show scale, sorting, search or other roles' views."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-users-desktop-light.png",
+   "sha256": "71b87572257bd3d0167837764fc798984d94912746d583212de8eb6701693d20",
+   "bytes": 81791,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "users",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 8,
+    "typography": 8,
+    "density_layout": 8,
+    "color": 8,
+    "visible_affordances": 8,
+    "coherence": 8
+   },
+   "observations": {
+    "hierarchy": "Title left, single filled 'Create User' primary right; table scans well.",
+    "typography": "Mono account IDs as fixed-width data; status pill text is also mono.",
+    "density_layout": "Even 62px rows, aligned columns, Manage buttons right-aligned in one column.",
+    "color": "Green 'Active' pills are semantic with icon+text; orange only on primary and nav.",
+    "visible_affordances": "Outlined Manage buttons, filled primary, clear headers.",
+    "coherence": "One table vocabulary; table sits in a rounded card rather than full-bleed rows."
+   },
+   "weighted_exact": "8.00",
+   "total": "8.0",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces; success tint for status.",
+     "type_geometry": "Create User ~32px and Manage ~34px tall, below 40px.",
+     "shell": "Sidebar/account region as elsewhere.",
+     "accent_discipline": "Orange on the one primary and selected nav.",
+     "suite_cohesion": "Reads as the same suite as Recovery."
+    },
+    "mean_exact": "8/1",
+    "mean": "8.0"
+   },
+   "confidence": "high",
+   "caveat": "Five synthetic users; cannot show scale, sorting, search or other roles' views."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-users-manage-desktop-dark.png",
+   "sha256": "aa0ece9bffb068e221c0a28db07e6b4f8dc7635aab0a31fb6bb14c8d349dcedc",
+   "bytes": 98990,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "users-manage",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "dark",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "Manage disclosure open on the first (administrator) row",
+   "scores": {
+    "hierarchy": 6,
+    "typography": 8,
+    "density_layout": 5,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 6
+   },
+   "observations": {
+    "hierarchy": "The open menu is clear, but the admin row's data floats mid-row ~200px from its actions.",
+    "typography": "Menu items 15px with icons; legible.",
+    "density_layout": "The in-flow menu inflates the first row to ~460px, re-flows every column (Email moves from x\u2248566 to x\u2248522) and moves this row's Manage button ~150px left of the others.",
+    "color": "Danger red only on 'Delete user', set apart by a rule; open row tinted.",
+    "visible_affordances": "Menu items have icons and 42px rows; delete distinct.",
+    "coherence": "A menu rendered as table content, not an overlay; button position changes with state."
+   },
+   "weighted_exact": "6.55",
+   "total": "6.6",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces and danger.",
+     "type_geometry": "Sub-40px buttons; menu rows fine.",
+     "shell": "Sidebar unchanged.",
+     "accent_discipline": "No orange in the menu.",
+     "suite_cohesion": "In-flow disclosure has no Recovery equivalent and no overlay treatment."
+    },
+    "mean_exact": "39/5",
+    "mean": "7.8"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show keyboard/escape behaviour, focus return, the actions' dialogs or a delegate's reduced menu."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-users-manage-desktop-light.png",
+   "sha256": "e0975cf18f4be8af00b79072541a3d9441795b0b106d6c41de75c0087ba5cd38",
+   "bytes": 98452,
+   "width": 1280,
+   "height": 900,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "users-manage",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "light",
+   "viewport": "desktop 1280x900 DPR1",
+   "artifacts": "Manage disclosure open on the first (administrator) row",
+   "scores": {
+    "hierarchy": 6,
+    "typography": 8,
+    "density_layout": 5,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 6
+   },
+   "observations": {
+    "hierarchy": "The open menu is clear, but the admin row's data floats mid-row ~200px from its actions.",
+    "typography": "Menu items 15px with icons; legible.",
+    "density_layout": "The in-flow menu inflates the first row to ~460px, re-flows every column (Email moves from x\u2248566 to x\u2248522) and moves this row's Manage button ~150px left of the others.",
+    "color": "Danger red only on 'Delete user', set apart by a rule; open row tinted.",
+    "visible_affordances": "Menu items have icons and 42px rows; delete distinct.",
+    "coherence": "A menu rendered as table content, not an overlay; button position changes with state."
+   },
+   "weighted_exact": "6.55",
+   "total": "6.6",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 8,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces and danger.",
+     "type_geometry": "Sub-40px buttons; menu rows fine.",
+     "shell": "Sidebar unchanged.",
+     "accent_discipline": "No orange in the menu.",
+     "suite_cohesion": "In-flow disclosure has no Recovery equivalent and no overlay treatment."
+    },
+    "mean_exact": "39/5",
+    "mean": "7.8"
+   },
+   "confidence": "high",
+   "caveat": "Cannot show keyboard/escape behaviour, focus return, the actions' dialogs or a delegate's reduced menu."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-users-manage-mobile-dark.png",
+   "sha256": "c148f1a77d5fdebc526c832bb0fd5f47ff15b6309a2e8a6de9666c5645052879",
+   "bytes": 49383,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "users-manage",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "Manage disclosure open; trigger focused",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 7
+   },
+   "observations": {
+    "hierarchy": "Menu clearly belongs to the admin record.",
+    "typography": "'Delegated administration' wraps in the ~196px menu column.",
+    "density_layout": "Menu is confined to the value column with an empty label gutter; 'Delete user' falls below the fold.",
+    "color": "Restrained.",
+    "visible_affordances": "Manage button shows an accent border while open/focused.",
+    "coherence": "Same in-flow pattern as desktop; less damaging here."
+   },
+   "weighted_exact": "6.95",
+   "total": "7.0",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Sub-40px trigger.",
+     "shell": "Unlabelled two-row phone nav.",
+     "accent_discipline": "Accent border on the focused trigger only.",
+     "suite_cohesion": "No Recovery equivalent."
+    },
+    "mean_exact": "38/5",
+    "mean": "7.6"
+   },
+   "confidence": "high",
+   "caveat": "Delete item and remaining records are below the fold."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-users-manage-mobile-light.png",
+   "sha256": "84ffc1cab71fb6f5ab08811225fd4e89e5689d1598228d1dac7404325603c481",
+   "bytes": 48840,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "users-manage",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "Manage disclosure open; trigger focused",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 7
+   },
+   "observations": {
+    "hierarchy": "Menu clearly belongs to the admin record.",
+    "typography": "'Delegated administration' wraps in the ~196px menu column.",
+    "density_layout": "Menu is confined to the value column with an empty label gutter; 'Delete user' falls below the fold.",
+    "color": "Restrained.",
+    "visible_affordances": "Manage button shows an accent border while open/focused.",
+    "coherence": "Same in-flow pattern as desktop; less damaging here."
+   },
+   "weighted_exact": "6.95",
+   "total": "7.0",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 7
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Sub-40px trigger.",
+     "shell": "Unlabelled two-row phone nav.",
+     "accent_discipline": "Accent border on the focused trigger only.",
+     "suite_cohesion": "No Recovery equivalent."
+    },
+    "mean_exact": "38/5",
+    "mean": "7.6"
+   },
+   "confidence": "high",
+   "caveat": "Delete item and remaining records are below the fold."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-users-mobile-dark.png",
+   "sha256": "2fd7974bed967d0ea89d38242b5a1f4c7424d2ec8cef562e336a5b284331cb56",
+   "bytes": 52429,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "users",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "dark",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 7
+   },
+   "observations": {
+    "hierarchy": "Title and primary clear; each record has no heading, so 'admin' is not distinguished from its labels.",
+    "typography": "Label/value pairs legible; mono account names.",
+    "density_layout": "Each user takes ~237px of six label rows; ~2.5 users per screen; 'Actions' label sits above the Manage button's centre.",
+    "color": "Restrained.",
+    "visible_affordances": "Manage buttons readable.",
+    "coherence": "Consistent block pattern, but different from Groups, which keeps a table at 390px."
+   },
+   "weighted_exact": "6.95",
+   "total": "7.0",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Sub-40px buttons.",
+     "shell": "Unlabelled two-row phone nav.",
+     "accent_discipline": "Primary and tab only.",
+     "suite_cohesion": "Same palette/type as Recovery."
+    },
+    "mean_exact": "39/5",
+    "mean": "7.8"
+   },
+   "confidence": "high",
+   "caveat": "Shows two full records of five."
+  },
+  {
+   "file": "screenshots/kyidentity-00-before-users-mobile-light.png",
+   "sha256": "e28d0ea518e6b6abb2d4883947b988ad7758c17b9d9189a51f72d4020129a4af",
+   "bytes": 51853,
+   "width": 390,
+   "height": 844,
+   "cohort": "admin-console",
+   "duplicate_of": null,
+   "observed_product": "KyIdentity",
+   "observed_surface": "users",
+   "filename_matches_content": true,
+   "state": "populated",
+   "theme": "light",
+   "viewport": "mobile 390x844 DPR1",
+   "artifacts": "none visible",
+   "scores": {
+    "hierarchy": 7,
+    "typography": 7,
+    "density_layout": 6,
+    "color": 8,
+    "visible_affordances": 7,
+    "coherence": 7
+   },
+   "observations": {
+    "hierarchy": "Title and primary clear; each record has no heading, so 'admin' is not distinguished from its labels.",
+    "typography": "Label/value pairs legible; mono account names.",
+    "density_layout": "Each user takes ~237px of six label rows; ~2.5 users per screen; 'Actions' label sits above the Manage button's centre.",
+    "color": "Restrained.",
+    "visible_affordances": "Manage buttons readable.",
+    "coherence": "Consistent block pattern, but different from Groups, which keeps a table at 390px."
+   },
+   "weighted_exact": "6.95",
+   "total": "7.0",
+   "ky_fit": {
+    "scores": {
+     "palette_tokens": 8,
+     "type_geometry": 7,
+     "shell": 7,
+     "accent_discipline": 9,
+     "suite_cohesion": 8
+    },
+    "observations": {
+     "palette_tokens": "Token surfaces.",
+     "type_geometry": "Sub-40px buttons.",
+     "shell": "Unlabelled two-row phone nav.",
+     "accent_discipline": "Primary and tab only.",
+     "suite_cohesion": "Same palette/type as Recovery."
+    },
+    "mean_exact": "39/5",
+    "mean": "7.8"
+   },
+   "confidence": "high",
+   "caveat": "Shows two full records of five."
+  }
+ ],
+ "cohort_rankings": {
+  "note": "Ky-only capture set; ranks are within-cohort means of rounded per-file totals. No competitor files, so no Ky gap is computed.",
+  "cohorts": {
+   "admin-console": {
+    "n": 20,
+    "quality_sum": "137.2",
+    "quality_fraction": "343/50",
+    "quality_mean_exact": "6.86",
+    "quality_mean": "6.9",
+    "quality_min": "5.7",
+    "quality_max": "8.0",
+    "files_ge_8": 2,
+    "meets_8_exact": false,
+    "deficit_to_8": "1.14",
+    "ky_fit_sum": "156.0",
+    "ky_fit_fraction": "39/5",
+    "ky_fit_mean_exact": "7.8",
+    "matched": true,
+    "coverage": "Ky only; light+dark x desktop+mobile for every surface in the cohort; no competitor files"
+   },
+   "auth": {
+    "n": 4,
+    "quality_sum": "31.2",
+    "quality_fraction": "39/5",
+    "quality_mean_exact": "7.8",
+    "quality_mean": "7.8",
+    "quality_min": "7.8",
+    "quality_max": "7.8",
+    "files_ge_8": 0,
+    "meets_8_exact": false,
+    "deficit_to_8": "0.2",
+    "ky_fit_sum": "33.6",
+    "ky_fit_fraction": "42/5",
+    "ky_fit_mean_exact": "8.4",
+    "matched": true,
+    "coverage": "Ky only; light+dark x desktop+mobile for every surface in the cohort; no competitor files"
+   },
+   "member-home": {
+    "n": 4,
+    "quality_sum": "29.0",
+    "quality_fraction": "29/4",
+    "quality_mean_exact": "7.25",
+    "quality_mean": "7.3",
+    "quality_min": "7.0",
+    "quality_max": "7.5",
+    "files_ge_8": 0,
+    "meets_8_exact": false,
+    "deficit_to_8": "0.75",
+    "ky_fit_sum": "32.4",
+    "ky_fit_fraction": "81/10",
+    "ky_fit_mean_exact": "8.1",
+    "matched": true,
+    "coverage": "Ky only; light+dark x desktop+mobile for every surface in the cohort; no competitor files"
+   },
+   "settings": {
+    "n": 8,
+    "quality_sum": "59.8",
+    "quality_fraction": "299/40",
+    "quality_mean_exact": "7.475",
+    "quality_mean": "7.5",
+    "quality_min": "6.7",
+    "quality_max": "8.2",
+    "files_ge_8": 2,
+    "meets_8_exact": false,
+    "deficit_to_8": "0.525",
+    "ky_fit_sum": "64.8",
+    "ky_fit_fraction": "81/10",
+    "ky_fit_mean_exact": "8.1",
+    "matched": true,
+    "coverage": "Ky only; light+dark x desktop+mobile for every surface in the cohort; no competitor files"
+   }
+  },
+  "capture_set_summary": {
+   "label": "capture-set coverage summary, not a ranking",
+   "n": 36,
+   "quality_sum": "257.2",
+   "quality_fraction": "643/90",
+   "quality_mean_exact": "7.144444444444444444444444444",
+   "quality_mean_half_up_1dp": "7.1",
+   "ky_fit_sum": "286.8",
+   "ky_fit_fraction": "239/30",
+   "ky_fit_mean_exact": "7.966666666666666666666666667",
+   "ky_fit_mean_half_up_1dp": "8.0"
+  }
+ },
+ "drift": {
+  "basis": "No prior numeric Identity rating exists for this round; nothing to compare. Blind first scoring."
+ },
+ "priorities": {
+  "batches": [
+   {
+    "rank": 1,
+    "surfaces": "users-manage (4), users (desktop row actions)",
+    "effect": "Opening Manage inflates the row from 62px to 460px, re-flows every column (live: Email x 550->506), moves that row's trigger ~147px left, leaves the menu static with no overlay shadow; live it ignores Escape and two menus stay open together (page grows to 1308px).",
+    "fix": "Make the row-actions menu an anchored overlay (out of flow, --ky-shadow-overlay, one open at a time, Escape/outside click close and return focus to the trigger) so row height and column widths never change; on phones let it span the full record width or open as a sheet. Keep UserRowActions' per-row authorization rendering, delete separation and operation-bound step-up unchanged."
+   },
+   {
+    "rank": 2,
+    "surfaces": "groups (4), app-connections (4), applications (4)",
+    "effect": "Empty lists are a header-only table card, a dashed rule, a floating 'No matching\u2026' message and a disabled pager; App connections has no primary and its button touches the title (0px gap live); on phones its table scrolls inside the card (576px in 348px) hiding Actions; Applications' empty message names App connections without a link.",
+    "fix": "Use one page-header pattern (h1 left, the view's single primary right, same height/icon as Users' Create User); when total is 0 render a real empty state (what belongs here + the existing create/manage action) and hide the table header and pager; say 'No groups yet' unless a search is active; stack App connections rows on phones like Users; compress the policy paragraphs to one quiet line. No new features: link only to existing views/actions."
+   },
+   {
+    "rank": 3,
+    "surfaces": "security (4), phone shell on all 28 signed-in phone captures, users mobile (2)",
+    "effect": "Native checkbox renders Chromium blue (live accent-color: auto); secondary buttons are 31-34px; every Security section is its own card with dashed inner rules and inconsistent header wrapping at 390px; phone nav is two unlabelled scrolling rows and Applications repeats the signed-in identity; Users phone records have no heading.",
+    "fix": "Set accent-color to the accent token on checkboxes/radios, bring buttons to --ky-control-size, flatten Security sections to divided rows like KyRecovery with one header layout; give the two phone nav groups their visible group labels (or one row with a divider) and drop the duplicate 'Signed in as' line; make the account name the heading of each Users phone record."
+   }
+  ],
+  "minor_not_blocking": [
+   "Login 'Forgot your password?' sits ~4px right of the field edge and tight under the button.",
+   "Dark-theme stamp tile nearly matches the sidebar/brand panel.",
+   "Create User password helper sentence lives in the label; placeholder clips at 390px; required/optional not marked in text.",
+   "Status pill and pager text use mono where it is not fixed-width data."
+  ]
+ },
+ "gates": {
+  "keyboard": {
+   "result": "untested",
+   "evidence": "Screenshots cannot pass a gate. Live supplement (Chrome154/DPR2) observed Escape does not close an open Manage disclosure; no full keyboard path tested."
+  },
+  "focus": {
+   "result": "untested",
+   "evidence": "Focused Username/search fields show an orange border in stills; programmatic focus on the Manage summary showed outline-style none (not :focus-visible, so unproven either way)."
+  },
+  "contrast": {
+   "result": "untested",
+   "evidence": "No computed-style measurement made."
+  },
+  "states": {
+   "result": "untested",
+   "evidence": "Only empty/unconfigured and one populated list captured; loading/error/validation not captured."
+  },
+  "responsive": {
+   "result": "untested",
+   "evidence": "Manifest records page overflow 0 at 390px; live check shows App connections table scrolling inside its card (576/348) with Actions hidden. Not measured for every view."
+  },
+  "required_labels_contract": {
+   "result": "untested",
+   "evidence": "Create User marks no required/optional text except via the password helper; not tested against assistive tech."
+  }
+ },
+ "supplement": {
+  "when": "after score freeze (frozen scores sha256 recorded below)",
+  "tool": "T3 preview, own new incognito tab, closed afterwards",
+  "conditions": "Chrome154, DPR2, fixture http://127.0.0.1:51489, ordinary admin login; differs from scored Chromium153/DPR1",
+  "actions": "sign in; open/close Manage disclosures on Users; resize 1280x900 and 390x844; view App connections and Security; read computed styles. No create/edit/delete, no form submit, no theme change.",
+  "findings": [
+   "Manage open: row 62->460px, menu position static, box-shadow none, Email column x 550->506, trigger x 1144->997.",
+   "Escape leaves the disclosure open with focus on its summary; opening a second row leaves the first open (two 460px rows, document 1308px).",
+   "Phone App connections: title bottom = button top (235px); table 576px wide inside a 348px overflow-x:auto card.",
+   "Phone nav groups carry aria-labels 'Your account'/'Administration' but no visible group heading.",
+   "Security checkbox accent-color auto; content buttons 34px and 31px tall.",
+   "Supplement never revises the frozen vectors."
+  ]
+ },
+ "unscored": [],
+ "verdict": {
+  "satisfied": false,
+  "genuinely_satisfied": false,
+  "cohorts_meeting_8": [],
+  "quality_capture_set_mean_exact": "7.144444444444444444444444444",
+  "ky_fit_capture_set_mean_exact": "7.966666666666666666666666667",
+  "reason": "Quality mean over the 36 captures is 643/90 = 7.144 (half-up 7.1); no cohort reaches 8.0 (admin-console 6.86, member-home 7.25, settings 7.475, auth 7.8). The gap is driven by visible workflow composition (Manage disclosure, empty list views, phone nav/Security), not nits.",
+  "not_claimed": [
+   "competitive gap or ranking",
+   "full-product acceptance",
+   "behaviour gates",
+   "other roles (delegate/ordinary user) or configured states",
+   "the parent's combined Claude/Sol progression score"
+  ]
+ },
+ "limitations": [
+  "Stage 00 only: nine initial-view surfaces, administrator role, mostly empty data.",
+  "Stills cannot show keyboard, focus-visible, screen readers, real contrast, motion or performance.",
+  "Recovery brand references cover desktop only; phone/sign-in suite_cohesion judged on palette/type alone.",
+  "Live supplement ran on Chrome154/DPR2 and is descriptive only."
+ ],
+ "freeze": {
+  "scores_file": "/tmp/opus-identity-r1/frozen-scores.json (owned scratch)",
+  "scores_sha256": "8aabb7e60c63ce2a9d3983f9139b63983c6e9b224127706e949301a64e497253",
+  "frozen_at": "before Computer Use supplement",
+  "state": "frozen; vectors copied verbatim into files[]"
+ }
+}

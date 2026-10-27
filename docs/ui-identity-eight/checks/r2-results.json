@@ -1,0 +1,91 @@
+[
+  {
+    "name": "toolchain",
+    "command": "test -z \"$(gofmt -l $(git ls-files \"*.go\"))\"\ngo mod verify\ngo build -p 2 ./...\ngo vet -p 2 ./...\npython3 docs/check-strong-crypto-compose.py",
+    "exit_code": 0,
+    "seconds": 7.18,
+    "source_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+    "environment": {
+      "GOMAXPROCS": "2"
+    },
+    "evidence": "docs/ui-identity-eight/checks/r2-toolchain.txt"
+  },
+  {
+    "name": "race",
+    "command": "go test -p 2 -race -count=1 -timeout 20m ./...",
+    "exit_code": 0,
+    "seconds": 887.0,
+    "source_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+    "environment": {
+      "GOMAXPROCS": "2"
+    },
+    "evidence": "docs/ui-identity-eight/checks/r2-race.txt"
+  },
+  {
+    "name": "fips-race",
+    "command": "go test -p 2 -race -count=1 -timeout 20m ./...",
+    "exit_code": 0,
+    "seconds": 858.29,
+    "source_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+    "environment": {
+      "GOMAXPROCS": "2",
+      "GODEBUG": "fips140=on"
+    },
+    "evidence": "docs/ui-identity-eight/checks/r2-fips-race.txt"
+  },
+  {
+    "name": "web",
+    "command": "npm audit --prefix web --omit=dev --audit-level=low\nnpm run build --prefix web\ngit diff --exit-code -- web/dist\nnpm test --prefix web",
+    "exit_code": 0,
+    "seconds": 3.02,
+    "source_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+    "environment": {
+      "GOMAXPROCS": "2"
+    },
+    "evidence": "docs/ui-identity-eight/checks/r2-web.txt"
+  },
+  {
+    "name": "workers",
+    "command": "npm ci --prefix workers/apns\nnpm audit --prefix workers/apns --omit=dev --audit-level=low\nnpm run typecheck --prefix workers/apns\nnpm ci --prefix workers/fcn\nnpm audit --prefix workers/fcn --omit=dev --audit-level=low\nnpm run typecheck --prefix workers/fcn\nnode --test push-relay-shared/*.test.mts workers/apns/src/*.test.mts workers/fcn/src/*.test.mts",
+    "exit_code": 0,
+    "seconds": 4.02,
+    "source_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+    "environment": {
+      "GOMAXPROCS": "2"
+    },
+    "evidence": "docs/ui-identity-eight/checks/r2-workers.txt"
+  },
+  {
+    "name": "vulnerabilities",
+    "command": "go run golang.org/x/vuln/cmd/govulncheck@latest ./...",
+    "exit_code": 0,
+    "seconds": 7.53,
+    "source_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+    "environment": {
+      "GOMAXPROCS": "2"
+    },
+    "evidence": "docs/ui-identity-eight/checks/r2-vulnerabilities.txt"
+  },
+  {
+    "name": "repeatable",
+    "command": "mkdir -p \"/tmp/kyidentity-repeatable-d667jgjc/a/src\"\ngit archive HEAD | tar -x -C \"/tmp/kyidentity-repeatable-d667jgjc/a/src\"\n(cd \"/tmp/kyidentity-repeatable-d667jgjc/a/src\" && CGO_ENABLED=0 GOOS=linux go build -p 2 -trimpath -ldflags=\"-s -w -X github.com/Busnes-app/kyidentity-server/internal/appversion.release=0.0.0\" -o \"/tmp/kyidentity-repeatable-d667jgjc/a/kyidentity\" ./cmd/kyidentity)\nmkdir -p \"/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/src\"\ngit archive HEAD | tar -x -C \"/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/src\"\n(cd \"/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/src\" && CGO_ENABLED=0 GOOS=linux go build -p 2 -trimpath -ldflags=\"-s -w -X github.com/Busnes-app/kyidentity-server/internal/appversion.release=0.0.0\" -o \"/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/kyidentity\" ./cmd/kyidentity)\nsha256sum \"/tmp/kyidentity-repeatable-d667jgjc/a/kyidentity\" \"/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/kyidentity\"\ncmp \"/tmp/kyidentity-repeatable-d667jgjc/a/kyidentity\" \"/tmp/kyidentity-repeatable-d667jgjc/elsewhere/b/kyidentity\"",
+    "exit_code": 0,
+    "seconds": 4.87,
+    "source_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+    "environment": {
+      "GOMAXPROCS": "2"
+    },
+    "evidence": "docs/ui-identity-eight/checks/r2-repeatable.txt"
+  },
+  {
+    "name": "docker",
+    "command": "docker build -t kyidentity-ui-r2:2063542 .\n container_id=$(docker run -d -e PUSH_RELAY_URL= -e APNS_RELAY_URL= kyidentity-ui-r2:2063542)\n trap 'docker rm -f \"$container_id\" >/dev/null' EXIT\n ready=0\n for attempt in $(seq 1 30); do\n  if docker exec \"$container_id\" wget -q --spider http://localhost:5867/readyz; then ready=1; break; fi\n  sleep 1\n done\n test \"$ready\" = 1\n if docker run --rm -e KYIDENTITY_ISSUER_URL=http://auth.example.test kyidentity-ui-r2:2063542; then exit 1; fi",
+    "exit_code": 0,
+    "seconds": 33.41,
+    "source_commit": "0e5cee3128072ccd7d71a9674e5a944cd157127a",
+    "environment": {
+      "GOMAXPROCS": "2"
+    },
+    "evidence": "docs/ui-identity-eight/checks/r2-docker.txt"
+  }
+]

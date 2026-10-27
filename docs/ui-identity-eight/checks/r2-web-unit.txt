@@ -1,0 +1,13 @@
+npm notice run pretest
+npm notice run node src/ky-ui/check-vendor.mjs
+ky-ui 0.4.1: vendor files verified
+npm notice run test
+npm notice run vitest run
+
+ RUN  v5.0.5 /home/yoshi/git/busnes.app/KyIdentity-server/.claude/worktrees/ui-identity-eight/web
+
+
+ Test Files  14 passed (14)
+      Tests  198 passed (198)
+   Start at  11:09:13
+   Duration  360ms (import 53%, tests 22%, transform 18%, worker 6%)

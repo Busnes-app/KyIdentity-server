@@ -1,0 +1,5 @@
+{
+  "pairs_checked": 306,
+  "threshold": "changed<0.001 and max_channel_delta<=8",
+  "near_duplicates": []
+}

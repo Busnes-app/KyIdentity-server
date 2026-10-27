@@ -1,0 +1,169 @@
+{
+  "browser": "153.0.8010.12",
+  "results": [
+    {
+      "device": "desktop",
+      "theme": "light",
+      "menu": {
+        "x": 967,
+        "y": 205.65625,
+        "width": 256,
+        "height": 398
+      },
+      "stable_rows": true,
+      "escape_return": true,
+      "dialog_return": true,
+      "empty_states": true,
+      "retained_policy": true,
+      "controls": [
+        {
+          "text": "Pair a phone",
+          "height": 40
+        },
+        {
+          "text": "Add passkey",
+          "height": 40
+        },
+        {
+          "text": "Set up",
+          "height": 40
+        },
+        {
+          "text": "Generate new codes",
+          "height": 40
+        },
+        {
+          "text": "Change password",
+          "height": 40
+        },
+        {
+          "text": "Sign out other sessions",
+          "height": 40
+        }
+      ]
+    },
+    {
+      "device": "phone",
+      "theme": "light",
+      "menu": {
+        "x": 16,
+        "y": 430,
+        "width": 358,
+        "height": 398
+      },
+      "stable_rows": true,
+      "escape_return": true,
+      "dialog_return": true,
+      "empty_states": true,
+      "retained_policy": true,
+      "controls": [
+        {
+          "text": "Pair a phone",
+          "height": 40
+        },
+        {
+          "text": "Add passkey",
+          "height": 40
+        },
+        {
+          "text": "Set up",
+          "height": 40
+        },
+        {
+          "text": "Generate new codes",
+          "height": 40
+        },
+        {
+          "text": "Change password",
+          "height": 40
+        },
+        {
+          "text": "Sign out other sessions",
+          "height": 40
+        }
+      ]
+    },
+    {
+      "device": "desktop",
+      "theme": "dark",
+      "menu": {
+        "x": 967,
+        "y": 205.65625,
+        "width": 256,
+        "height": 398
+      },
+      "stable_rows": true,
+      "escape_return": true,
+      "dialog_return": true,
+      "empty_states": true,
+      "retained_policy": true,
+      "controls": [
+        {
+          "text": "Pair a phone",
+          "height": 40
+        },
+        {
+          "text": "Add passkey",
+          "height": 40
+        },
+        {
+          "text": "Set up",
+          "height": 40
+        },
+        {
+          "text": "Generate new codes",
+          "height": 40
+        },
+        {
+          "text": "Change password",
+          "height": 40
+        },
+        {
+          "text": "Sign out other sessions",
+          "height": 40
+        }
+      ]
+    },
+    {
+      "device": "phone",
+      "theme": "dark",
+      "menu": {
+        "x": 16,
+        "y": 430,
+        "width": 358,
+        "height": 398
+      },
+      "stable_rows": true,
+      "escape_return": true,
+      "dialog_return": true,
+      "empty_states": true,
+      "retained_policy": true,
+      "controls": [
+        {
+          "text": "Pair a phone",
+          "height": 40
+        },
+        {
+          "text": "Add passkey",
+          "height": 40
+        },
+        {
+          "text": "Set up",
+          "height": 40
+        },
+        {
+          "text": "Generate new codes",
+          "height": 40
+        },
+        {
+          "text": "Change password",
+          "height": 40
+        },
+        {
+          "text": "Sign out other sessions",
+          "height": 40
+        }
+      ]
+    }
+  ]
+}
