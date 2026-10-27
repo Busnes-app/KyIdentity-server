@@ -417,7 +417,7 @@ The only output is one line:
 |---|---|---|
 | `queued` | 0 | no `--wait`; `pending` is the connector's queued work |
 | `delivered` | 0 | every queued event for the connector was acknowledged |
-| `failed` | 1 | a create or update was given up after five attempts (KyIdentity re-queues it every 30 minutes while it is current), or a write is blocked with an uncertain outcome that an operator must resolve under the connector's Deliveries. Removals are never given up, so they never count here |
+| `failed` | 1 | a create or update was given up after five attempts (KyIdentity re-queues it every 30 minutes while it is current), or work is blocked behind a write an operator must resolve under the connector's Deliveries: one with an uncertain outcome, or one past its recovery time with no outcome (KyIdentity stopped mid-delivery). Recover it with **Resume delivery** (or `POST /api/admin/systems/{id}/deliveries/resume`) as in `docs/PROVISIONING.md`. Removals are never given up; one counts here only while held behind such a write |
 | `blocked` | 1 | the worker will not deliver: `blocked` is `disabled`, `held` (restore hold) or `unsupported` (connector type needs review) |
 | `timeout` | 1 | `pending` work remained at the deadline; it stays queued. A removal to a receiver that is down ends here and is delivered, with no further step, once the receiver is back |
 

@@ -303,8 +303,10 @@ func (s *Store) SystemForClient(clientID string) (string, error) {
 }
 
 // SyncBacklog is one connector's undelivered outbox. Failed is work that cannot finish
-// without an operator: exhausted retries or an uncertain remote write. Blocked names why
-// the worker sends nothing at all: disabled, held or unsupported.
+// without an operator: exhausted retries, an uncertain remote write, or work behind an
+// attempt past its recovery time that releaseFencesForRemovalsTx keeps (one a stopped
+// process left without an outcome). Blocked names why the worker sends nothing at all:
+// disabled, held or unsupported.
 type SyncBacklog struct {
 	Pending, Failed int
 	Blocked         string
@@ -315,10 +317,13 @@ func (s *Store) SyncBacklog(systemID string) (SyncBacklog, error) {
 	err := s.db.QueryRow(`SELECT
  (SELECT COUNT(*) FROM account_sync_events e WHERE e.system_id=p.id AND e.status='pending'),
  (SELECT COUNT(*) FROM account_sync_events e WHERE e.system_id=p.id AND (e.status='failed'
-   OR (e.last_error<>'' AND EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=e.id)))),
+   OR (e.last_error<>'' AND EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=e.id))
+   OR (e.status='pending' AND EXISTS(SELECT 1 FROM sync_delivery_attempts a
+     WHERE a.system_id=e.system_id AND a.user_id=e.user_id AND a.recover_after<=?
+     AND a.event_id NOT IN (SELECT id FROM account_sync_events WHERE `+removalSQL+`))))),
  CASE WHEN p.status='disabled' THEN 'disabled' WHEN p.provisioning_hold THEN 'held'
   WHEN p.system_type NOT IN `+deliverableTypes+` THEN 'unsupported' ELSE '' END
- FROM paired_systems p WHERE p.id=?`, systemID).Scan(&b.Pending, &b.Failed, &b.Blocked)
+ FROM paired_systems p WHERE p.id=?`, time.Now().UTC(), systemID).Scan(&b.Pending, &b.Failed, &b.Blocked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, ErrNotFound
 	}

@@ -170,3 +170,42 @@ func TestResyncSystem(t *testing.T) {
 		t.Fatal("held", r, err)
 	}
 }
+
+// A KyIdentity that stopped mid-delivery leaves a fence with no outcome. Once its
+// recovery time passes, resync reports the held work as failed (operator recovery under
+// the connector's Deliveries) instead of timing out on plain pending.
+func TestResyncSystemReportsAbandonedAttempt(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KYIDENTITY_DATA_DIR", dir)
+	t.Setenv("KYIDENTITY_DB_PATH", "")
+	resyncPoll = 5 * time.Millisecond
+	dbPath := filepath.Join(dir, "kyidentity.db")
+	s, _, systemID, appID := syncTarget(t, dbPath, "https://d.test/scim")
+	assignUser(t, s, appID, "fenced")
+	// The stopped process: delivery begun, no outcome recorded.
+	events, err := s.ClaimDueSyncEvents(50, time.Minute)
+	if err != nil || len(events) != 1 {
+		t.Fatal(events, err)
+	}
+	if ok, err := s.BeginSyncDelivery(events[0], time.Minute); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	var out bytes.Buffer
+	if err := runResyncSystem([]string{"--client", "kydrive"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`UPDATE sync_delivery_attempts SET recover_after=? WHERE system_id=?`, time.Now().UTC().Add(-time.Second), systemID); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	err = runResyncSystem([]string{"--client", "kydrive", "--wait", "300ms"}, &out)
+	var r resyncResult
+	if jerr := json.Unmarshal(out.Bytes(), &r); jerr != nil || err == nil || r.Status != "failed" || r.Failed == 0 {
+		t.Fatalf("resync = %+v, %v; want failed", r, err)
+	}
+}

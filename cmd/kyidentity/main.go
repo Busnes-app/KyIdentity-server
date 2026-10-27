@@ -197,8 +197,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start background account sync dispatcher worker
-	go syncEngine.StartWorker(ctx)
+	waitSync := startSyncWorker(ctx, syncEngine)
 	go oauthEngine.StartLogoutWorker(ctx)
 
 	// Background housekeeping.
@@ -278,7 +277,29 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
+	if !waitSync(shutdownCtx) {
+		log.Println("Sync worker still running at the shutdown deadline; an attempt it began stays fenced for operator recovery.")
+	}
 	log.Println("KyIdentity Server stopped.")
+}
+
+// startSyncWorker runs the sync dispatcher. The returned wait blocks until it has
+// returned or done ends, so shutdown does not exit between a delivery's fence and
+// its recorded outcome.
+func startSyncWorker(ctx context.Context, e *sync.Engine) (wait func(context.Context) bool) {
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		e.StartWorker(ctx)
+	}()
+	return func(done context.Context) bool {
+		select {
+		case <-stopped:
+			return true
+		case <-done.Done():
+			return false
+		}
+	}
 }
 
 // bootstrapOnStart creates the first administrator when none exists, from
