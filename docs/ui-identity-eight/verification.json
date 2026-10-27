@@ -39,7 +39,7 @@
     "parent_viewed": 36,
     "bounded_confirmation": "Stage01 preserved as superseded; desktop popover had an offscreen anchor. Stage02 is the single bounded cleanup capture."
   },
-  "gate": "Combined round1 progression7.5; round2 primary reviews pending; no single reviewer/cohort veto",
+  "gate": "Round2 accepted:Claude116/15,Sol376/45,combined362/45=8.044444\u2026 rounds8.0. Preserve individual satisfaction:Claude false,Sol true. Gemini unused.",
   "limitations": [
     "Full keyboard/focus/state/contrast matrix untested",
     "Other roles and populated connection/group workflows not independently captured",

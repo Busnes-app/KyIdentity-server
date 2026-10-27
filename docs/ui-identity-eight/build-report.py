@@ -46,7 +46,9 @@ for path in sorted(ROOT.glob('*-round*.json')):
   else:
    assert all(type(f['scores'][k]) is int and 0<=f['scores'][k]<=10 for k in WEIGHTS)
    total=rounded(sum(Decimal(w)*f['scores'][k] for k,w in WEIGHTS.items()));assert total==Decimal(str(f['total']))
-   fit=rounded(sum(Decimal(str(f['ky_fit']['scores'][k])) for k in BRAND)/5)
+   brand_values=[f['ky_fit']['scores'][k] for k in BRAND if f['ky_fit']['scores'][k]!='N/A']
+   assert brand_values and all(type(v) is int and 0<=v<=10 for v in brand_values)
+   fit=rounded(sum(Decimal(v) for v in brand_values)/len(brand_values))
   if not f.get('duplicate_of'): groups.setdefault(f['cohort'],[]).append(total)
   score_rows.append([number,who,file,f['cohort'],*[f['scores'][k] for k in WEIGHTS],str(total) if total is not None else None,f.get('confidence'),f.get('caveat')])
   brand_rows.append([number,who,file,*[f['ky_fit']['scores'][k] for k in BRAND],str(fit) if fit is not None else None])

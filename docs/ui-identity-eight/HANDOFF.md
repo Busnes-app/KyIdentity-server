@@ -19,13 +19,13 @@ KyRecovery is owner-accepted and PR#81 is green at48389ec3a2a319ecbf24e6a267fe0e
 - Frozen confirmation41982e901a817ad602fc50f73a3e4a50ac74bb04:manifest-02-after.json,inventory-v2.json,duplicate-audit-v2.json.36 originals,306 same-size comparisons,no duplicates/overflow. Parent individually inspected all36.
 -198web tests and final build passed. Browser regression check-ui.mjs passes4size/theme cases:stable row geometry,menu within viewport,one open,keyboard/outside dismissal,Escape/Edit-dialog focus return,empty/search states,full membership policy retained,40pxSecurity targets. Impeccable final source scan0findings. Vite has a >500kB uncompressed-bundle advisory (~151kB gzip),not a compiler/typecheck failure.
 - Full local verifier /tmp/kyidentity-r2-verify.py is running,log /tmp/kyidentity-r2-full.log;ordinary race passed. It started at0e5cee3 before CSS cleanup,so results are not a fresh all-final-source run. Do not mislabel freshness; final-head hosted CI must qualify current source. Do not stage partial check logs/results while runner writes them.
-- Offline gallery /home/yoshi/Pictures/KyPost-UI-Councel/exports/2026-10-27-changes-gallery/KyIdentity-Round2-Changes.html has36 matched comparisons,R1scores/R2pending. Checker:self-contained,contrast passes.
+- Offline gallery /home/yoshi/Pictures/KyPost-UI-Councel/exports/2026-10-27-changes-gallery/KyIdentity-Round2-Changes.html has36 matched comparisons,R1/R2scores and accepted progression. Checker:self-contained,contrast passes.
 
 ## Pending
 
-- R2 Opus: node:delegated-task:command%3Amcp%3A27617469-e7a2-4680-8e45-a055c47cd9fd%3Adelegate-task%3Akyidentity-refined-opus-r2-20261027
-- R2 Sol: node:delegated-task:command%3Amcp%3A27617469-e7a2-4680-8e45-a055c47cd9fd%3Adelegate-task%3Akyidentity-refined-sol-r2-20261027
-- Each writes only its own round2 report pair. Wait for both terminal tasks before raw/report validation,spread audit and shared export regeneration. No partial report commits. Apply combined rule,not individual vetoes; no fresh full review through child-thread sends.
+- COMPLETED R2 Opus: node:delegated-task:command%3Amcp%3A27617469-e7a2-4680-8e45-a055c47cd9fd%3Adelegate-task%3Akyidentity-refined-opus-r2-20261027
+- COMPLETED R2 Sol: node:delegated-task:command%3Amcp%3A27617469-e7a2-4680-8e45-a055c47cd9fd%3Adelegate-task%3Akyidentity-refined-sol-r2-20261027
+- Both R2 reports are terminal, raw files validated and preserved. Parent audited four phone login/Security coherence spreads. Claude116/15,Sol376/45,combined362/45 rounds8.0: ACCEPTED. No further cosmetic round; Gemini unused because Claude not genuinely satisfied. Phone action-menu account context is recorded as valid deferred polish. Workbook/CSV/COUNCIL refreshed.
 - Handle current PR#174 CI/security at current head. Link/watch event-driven; unwatch at final hand-back. No merge/deploy authorization. Keep old source checks explicit if later fields differ.
 
 ## Fixtures and limits
@@ -36,3 +36,7 @@ KyRecovery is owner-accepted and PR#81 is green at48389ec3a2a319ecbf24e6a267fe0e
 - Other roles,remaining admin workflows,populated groups/connections,full keyboard/focus/state/all-theme contrast and competitive coverage remain unproven. No whole-product acceptance claim. Existing authorization/CSP/custody/saved themes unchanged.
 - Old design.md cyan/MVP prose was reported,not repaired as an unrequested side task. No code changes are requested solely for that stale context.
 - MySlop credential already returns401;no shared-board post succeeded,no retry with unchanged credential. This checkpoint is committed and pushed with the PR so other machines can fetch it.
+
+## Latest checkpoint
+
+R2 covered visual progression is accepted under the owner rule. PR#174 is linked/watched; current-head CI and autonomous security remain pending. Local full verifier remains active; do not stage its partial logs. Next product selection follows the worst remaining app from the suite handoff. No merge/deploy authorized. MySlop remains known401; do not retry unchanged credentials.

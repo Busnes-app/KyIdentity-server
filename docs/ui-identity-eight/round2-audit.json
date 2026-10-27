@@ -1,0 +1,40 @@
+{
+  "round": 2,
+  "raw_reports": {
+    "opus-round2.json": "f926707f52feb196e9bfc010b8136ea5382a584af6f5d32aa66f2ac6ae4d324f",
+    "opus-round2.md": "c856c746ab37d375c245d01367656d7f36f9a154e4cbd20f6098fe97bd07ae7a",
+    "sol-round2.json": "157fe8c5afd48eb3b9438b2b6c8443ffa33baa3e3015603ccf924cfaa44c97cf",
+    "sol-round2.md": "b54f2b541bf85118b0b031892f8eeac50b4f84ea52921c6f48f9f8e94e6ef919"
+  },
+  "arithmetic": "Validated both reports against the same36 original memberships, image hashes/bytes/dimensions, weighted quality totals and exact progression arithmetic. Brand excludes explicitly N/A shell scores on sign-in, without changing publisher bytes.",
+  "spread_audit": "Four coherence dimensions spread2 across phone login/Security, light/dark. Parent reopened all four originals individually. Login retains excess vertical space and Security uses differing section header alignment; both are usable and fit the suite palette. This is differing reviewer judgment, not evidence to alter either raw score.",
+  "combined_progression": {
+    "claude": "116/15",
+    "sol": "376/45",
+    "combined_exact": "362/45",
+    "rounded": "8.0",
+    "accepted": true,
+    "policy": "Owner combined mean, rounded half-up to one decimal;8.0 passes. Individual/cohort shortfalls are not vetoes."
+  },
+  "satisfaction": {
+    "claude": false,
+    "sol": true
+  },
+  "gemini": "unused; Claude is not genuinely satisfied. Accepted progression is not delayed for advisory Gemini.",
+  "remaining_findings": [
+    {
+      "finding": "Phone Manage menu has no account label or dimmed backdrop and overlaps the trigger.",
+      "audit": "Valid in stage02 phone original; native action menu is viewport-contained and all actions remain reachable.",
+      "decision": "Record for later refinement; do not reopen an accepted progression gate for another cosmetic round."
+    },
+    {
+      "finding": "Phone login height, factor-link wrapping, directory density and section-header consistency.",
+      "decision": "Optional polish; preserve raw findings, no further round."
+    }
+  ],
+  "limitations": [
+    "Covered visual progression only; full role/theme/state/behavior and competitor coverage remain unproven.",
+    "Full local verifier began before final CSS cleanup; final-head hosted CI remains required."
+  ],
+  "dox": "Owning instructions intentionally unchanged: report compatibility with explicit N/A brand dimensions implements the existing rubric contract; no new product/workflow boundary."
+}
