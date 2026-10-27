@@ -407,7 +407,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
   };
 
   return (
-    <div className="settings-page">
+    <div className="settings-page security-page">
       <div className="page-header">
         <div>
           <h1 className="page-title">Security and devices</h1>
@@ -427,7 +427,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
 
         <label className="pair-signon text-sm">
           <input type="checkbox" checked={pairSignOn} disabled={!permitted('push')} onChange={(e) => setPairSignOn(e.target.checked)} />{' '}
-          Allow this phone to sign in to suite apps (KyPost, KyVault, ...)
+          Allow the phone you pair next to sign in to suite apps
         </label>
 
         <div className="device-list">

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Access, SessionInventory, User } from '../types';
 import { DelegationEditor } from './DelegationEditor';
 import { apiJson, apiRequest, errorMessage } from '../api';
@@ -547,11 +547,14 @@ export const UserRowActions: React.FC<{
   u: User; full: boolean; busy: boolean;
   act: Record<'groups' | 'edit' | 'delegate' | 'resetMFA' | 'sessions' | 'revoke' | 'link' | 'offboarding' | 'remove', RowAction>;
 }> = ({ u, full, busy, act }) => {
+  const menuId = useId();
   if (!full && u.role === 'admin') return null;
   return (
-    <details className="row-actions">
-      <summary className="secondary-btn sm">Manage<span className="sr-only"> {u.username}</span></summary>
-      <div className="row-actions-menu">
+    <div className="row-actions">
+      <button type="button" className="secondary-btn sm" popoverTarget={menuId}>Manage<span className="sr-only"> {u.username}</span></button>
+      <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`Actions for ${u.username}`} onClickCapture={event => {
+        if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
+      }}>
         {full && <button className="row-action" onClick={() => act.groups(u)} aria-label={`Manage groups for ${u.username}`}>
           <Users size={15} />Groups
         </button>}
@@ -580,6 +583,6 @@ export const UserRowActions: React.FC<{
           <Trash2 size={15} />Delete user
         </button>}
       </div>
-    </details>
+    </div>
   );
 };

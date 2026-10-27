@@ -105,6 +105,7 @@ export const App: React.FC = () => {
           <UserDashboard
             user={currentUser}
             onNavigateToDevices={() => setActiveTab('devices')}
+            onNavigateToConnections={currentUser.access?.admin || currentUser.access?.appOwner.length ? () => setActiveTab('admin-app-registry') : undefined}
           />
         )}
 

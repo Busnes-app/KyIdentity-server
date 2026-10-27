@@ -77,8 +77,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
   return (
     <aside className="side">
       <Brand />
-      {group('Your account', ACCOUNT)}
-      {admin.length > 0 && group('Administration', admin)}
+      <div className="side-navigation">
+        {group('Your account', ACCOUNT)}
+        {admin.length > 0 && group('Administration', admin)}
+      </div>
       <div className="side-me">
         <div className="side-who">
           <b>{user.username}</b>
