@@ -1,0 +1,50 @@
+{
+  "source_ui": "df8daef",
+  "checks": {
+    "web_unit": {
+      "status": "pass",
+      "count": 198,
+      "evidence": "checks/r2-web-unit.txt"
+    },
+    "web_build": {
+      "status": "pass",
+      "evidence": "checks/r2-web-build.txt",
+      "advisory": "Vite reports a >500kB uncompressed bundle; emitted gzip is150.91kB. No compiler/typecheck failure; no claim of a new performance optimization."
+    },
+    "browser": {
+      "status": "pass",
+      "cases": 4,
+      "evidence": "checks/r2-browser.json",
+      "scope": "Desktop/phone\u00d7light/dark: stable row geometry, viewport-contained native popover, one open, keyboard/outside dismissal, focus return including Edit dialog, truthful empty state/search, full policy retained and40px Security controls."
+    },
+    "impeccable": {
+      "status": "pass",
+      "findings": 0,
+      "evidence": "checks/r2-impeccable.json",
+      "note": "Rerun after the explicit native-anchor cleanup; no findings."
+    },
+    "full_required": {
+      "status": "running",
+      "results": "checks/r2-results.json",
+      "source_commit": "0e5cee3",
+      "scope": "Initial full suite started before desktop-only CSS anchor cleanup. Final-source hosted CI must validate current head; never represent old embedding as freshly tested final source."
+    }
+  },
+  "visual_evidence": {
+    "manifest": "manifest-02-after.json",
+    "source_commit": "df8daef",
+    "originals": 36,
+    "overflows": 0,
+    "duplicates": 0,
+    "parent_viewed": 36,
+    "bounded_confirmation": "Stage01 preserved as superseded; desktop popover had an offscreen anchor. Stage02 is the single bounded cleanup capture."
+  },
+  "gate": "Combined round1 progression7.5; round2 primary reviews pending; no single reviewer/cohort veto",
+  "limitations": [
+    "Full keyboard/focus/state/contrast matrix untested",
+    "Other roles and populated connection/group workflows not independently captured",
+    "No competitive or whole-product acceptance"
+  ],
+  "mySlop": "Known401; no board post succeeded; no retry with unchanged credential",
+  "merge_deploy": "Not authorized"
+}

@@ -27,6 +27,7 @@ Record staged UI changes and independent covered visual progression toward8/10.
 ## Verification
 
 - Check capture hashes, dimensions and inventory membership; recompute duplicate comparisons and every score before publishing.
+- `KY_PLAYWRIGHT=/installed/@playwright/test/index.mjs node docs/ui-identity-eight/check-ui.mjs /private/fixture.json` checks native action geometry/dismissal/focus, empty list states, retained policy and shared target sizes on the owned fixture in both sizes/themes.
 - Product checks remain owned by root AGENTS.md. Evidence-only baseline capture does not require rerunning unchanged product tests.
 
 ## Child DOX Index
