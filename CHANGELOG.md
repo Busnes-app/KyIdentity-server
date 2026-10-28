@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- Push relays keep key records in their `RelayCoordinator` Durable Object instead of the `API_KEYS` KV namespace. Registering no longer writes KV, whose free-plan quota of 1,000 writes a day ran out on 2026-10-26 and stopped Android push. Each relay keeps its own keys, so the KyPost and KyIdentity Android relays no longer share one key per public IP. Existing keys keep working: a relay copies a key out of KV the first time it is used. Operators list and revoke keys with SQL in the dashboard's Durable Objects Data Studio (object `relay-keys`); see the relay READMEs. (#173)
+- A self-registered server whose relay key the relay no longer knows now re-registers by itself: the relay answers `key_unknown` for a key it has no record of, and KyIdentity treats it like `key_superseded`. A key an operator revoked still gets a plain 401 and stays refused. (#165)
+
 ## 0.5.0 — 2026-10-28
 
 ### Upgrading

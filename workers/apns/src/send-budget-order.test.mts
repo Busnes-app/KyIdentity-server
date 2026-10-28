@@ -38,6 +38,7 @@ registerHooks({
 
 const worker = await import("./index.ts");
 const { RelayCoordinator } = await import("../../../push-relay-shared/relay-coordinator.ts");
+const { durableStorage } = await import("../../../push-relay-shared/durable-storage.mts");
 const { KEY_PREFIX, KEY_INDEX_PREFIX, BOUND_TOKEN_PREFIX, sha256Hex } = await import(
   "../../../push-relay-shared/push-relay-common.ts"
 );
@@ -47,25 +48,8 @@ const API_KEY = "relay-key-under-test";
 /** A 32-byte hex device token, distinct per seed. */
 const device = (seed: string) => seed.repeat(64 / seed.length);
 
-function storage() {
-  const cells = new Map();
-  return {
-    cells,
-    async get(key) {
-      return cells.get(key);
-    },
-    async put(keyOrEntries, value) {
-      if (typeof keyOrEntries === "string") {
-        cells.set(keyOrEntries, value);
-        return;
-      }
-      for (const [k, v] of Object.entries(keyOrEntries)) cells.set(k, v);
-    },
-    async delete(keys) {
-      for (const key of Array.isArray(keys) ? keys : [keys]) cells.delete(key);
-    },
-  };
-}
+// Durable Object storage with a real SQLite behind `sql`, as the key registry needs.
+const storage = durableStorage;
 
 /** A fully configured APNs env with a budget of exactly one send. */
 async function env(kvEntries: [string, unknown][] = []) {
@@ -216,7 +200,8 @@ test("an aliased or malformed token is refused before the claim, the budget or A
       assert.equal(refused.status, 400, `${JSON.stringify(alias)} answered ${refused.status}`);
       assert.equal((await refused.json()).error, "invalid token");
     }
-    assert.equal(e.instances.size, 0, "a refused token touched a coordinator or the budget");
+    // The key registry is consulted to authenticate; nothing past it may be.
+    assert.deepEqual([...e.instances.keys()].filter((n) => n !== "relay-keys"), [], "a refused token touched a coordinator or the budget");
 
     // Case folds onto the victim's own pin rather than a fresh one.
     assert.equal((await send(e, victim.toUpperCase())).status, 403);

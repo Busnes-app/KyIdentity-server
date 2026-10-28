@@ -162,4 +162,3 @@ test("a missing coordinator binding fails closed", async () => {
   const rc = requestContext({ RELAY_DAILY_BUDGET: "10" });
   assert.equal((await checkDailyBudget(rc, DAY_ONE)).allowed, false);
 });
-

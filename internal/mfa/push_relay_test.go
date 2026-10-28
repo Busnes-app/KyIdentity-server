@@ -146,9 +146,10 @@ func TestRelaySenderRequiresOKBodyOnSuccess(t *testing.T) {
 	}
 }
 
-// supersedingRelay accepts only its newest key; older keys get the relay's key_superseded 401,
-// or a plain 401 when superseded is false.
-func supersedingRelay(t *testing.T, superseded bool) (*httptest.Server, *atomic.Int32) {
+// supersedingRelay accepts only its newest key and refuses every other one with a 401 carrying
+// code: "key_superseded" for a key it replaced, "key_unknown" for one it forgot, "" for a
+// revoked key.
+func supersedingRelay(t *testing.T, code string) (*httptest.Server, *atomic.Int32) {
 	var registrations atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -164,8 +165,8 @@ func supersedingRelay(t *testing.T, superseded bool) (*httptest.Server, *atomic.
 			}
 			w.WriteHeader(http.StatusUnauthorized)
 			body := map[string]string{"error": "invalid api key"}
-			if superseded {
-				body = map[string]string{"error": "api key superseded", "code": "key_superseded"}
+			if code != "" {
+				body["code"] = code
 			}
 			_ = json.NewEncoder(w).Encode(body)
 		}
@@ -176,8 +177,14 @@ func supersedingRelay(t *testing.T, superseded bool) (*httptest.Server, *atomic.
 
 var relayTestDevice = store.NativeDevice{ID: "dev1", UserID: "u1", Platform: "android", PushToken: "token"}
 
-func TestRelaySenderReRegistersOnceWhenKeySuperseded(t *testing.T) {
-	srv, registrations := supersedingRelay(t, true)
+func TestRelaySenderReRegistersOnceWhenKeySupersededOrUnknown(t *testing.T) {
+	for _, code := range []string{"key_superseded", "key_unknown"} {
+		t.Run(code, func(t *testing.T) { testReRegistersOnce(t, code) })
+	}
+}
+
+func testReRegistersOnce(t *testing.T, code string) {
+	srv, registrations := supersedingRelay(t, code)
 	keyFile := filepath.Join(t.TempDir(), "relay.key")
 	if err := os.WriteFile(keyFile, []byte("key-0\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -213,15 +220,17 @@ func TestRelaySenderReRegistersOnceWhenKeySuperseded(t *testing.T) {
 
 func TestRelaySenderKeepsRefusedKeysRefused(t *testing.T) {
 	// A plain 401 is an operator revocation, and an operator key is not ours to replace.
-	plain, plainRegs := supersedingRelay(t, false)
+	plain, plainRegs := supersedingRelay(t, "")
 	keyFile := filepath.Join(t.TempDir(), "relay.key")
 	if err := os.WriteFile(keyFile, []byte("key-0\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	superseded, operatorRegs := supersedingRelay(t, true)
+	superseded, supersededRegs := supersedingRelay(t, "key_superseded")
+	forgetting, forgettingRegs := supersedingRelay(t, "key_unknown")
 	for name, cfg := range map[string]RelayConfig{
-		"plain 401":    {URL: plain.URL, KeyFile: keyFile},
-		"operator key": {URL: superseded.URL, Key: "key-0"},
+		"plain 401":                  {URL: plain.URL, KeyFile: keyFile},
+		"operator key, superseded":   {URL: superseded.URL, Key: "key-0"},
+		"operator key, relay forgot": {URL: forgetting.URL, Key: "key-0"},
 	} {
 		sender, err := NewRelaySender(cfg, RelayConfig{})
 		if err != nil {
@@ -231,8 +240,8 @@ func TestRelaySenderKeepsRefusedKeysRefused(t *testing.T) {
 			t.Fatalf("%s: send with a refused key succeeded", name)
 		}
 	}
-	if plainRegs.Load()+operatorRegs.Load() != 0 {
-		t.Fatalf("re-registered on a refusal that was not key_superseded")
+	if plainRegs.Load()+supersededRegs.Load()+forgettingRegs.Load() != 0 {
+		t.Fatalf("re-registered on a revocation or over an operator-supplied key")
 	}
 }
 

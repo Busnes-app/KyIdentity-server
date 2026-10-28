@@ -36,7 +36,7 @@ BOOTSTRAP_ADMIN_USER=admin
 # the Busnes.app relays below; an empty value turns one off, and then push MFA on that
 # platform does not work (TOTP, passkeys and UnifiedPush still do). Without a
 # *_RELAY_KEY the server self-registers, keeps the key under the data directory, and
-# re-registers once if the relay reports it superseded.
+# re-registers once if the relay reports it superseded or unknown.
 # PUSH_RELAY_URL=https://fcm.relay.kyauth.busnes.app
 # APNS_RELAY_URL=https://apn.relay.kyauth.busnes.app
 

@@ -22,8 +22,10 @@ import (
 
 var ErrStalePushToken = errors.New("push token is stale")
 
-// errKeySuperseded is the relay's 401 for a key a later /register from our address replaced.
-var errKeySuperseded = errors.New("push relay key superseded")
+// errKeyRenewable is the relay's 401 for a key it no longer honours but that we may replace by
+// registering again: one a later /register from our address superseded (key_superseded), or
+// one the relay has no record of (key_unknown). A revoked key gets a plain 401 and stays refused.
+var errKeyRenewable = errors.New("push relay key superseded or unknown")
 
 const relayResponseLimit = 2048
 
@@ -166,7 +168,7 @@ func (e *relayEndpoint) currentKey() string {
 	return e.key
 }
 
-// renew replaces a superseded key once. Senders that saw the same stale key wait here and
+// renew replaces a superseded or unknown key once. Senders that saw the same stale key wait here and
 // reuse the winner's key; each registering would supersede the last.
 func (e *relayEndpoint) renew(stale string) (string, error) {
 	e.mu.Lock()
@@ -293,11 +295,11 @@ func (s *RelaySender) SendPush(dev store.NativeDevice, ch MFAChallengePush) erro
 	})
 	key := endpoint.currentKey()
 	err = s.send(endpoint.url, key, body, dev)
-	if !errors.Is(err, errKeySuperseded) || !endpoint.renewable {
+	if !errors.Is(err, errKeyRenewable) || !endpoint.renewable {
 		return err
 	}
 	if key, err = endpoint.renew(key); err != nil {
-		return fmt.Errorf("push relay key superseded, re-registration failed: %w", err)
+		return fmt.Errorf("push relay key superseded or unknown, re-registration failed: %w", err)
 	}
 	return s.send(endpoint.url, key, body, dev)
 }
@@ -333,8 +335,8 @@ func (s *RelaySender) send(url, key string, body []byte, dev store.NativeDevice)
 	if resp.StatusCode == http.StatusGone {
 		return ErrStalePushToken
 	}
-	if resp.StatusCode == http.StatusUnauthorized && parsed.Code == "key_superseded" {
-		return fmt.Errorf("%w requestId=%s", errKeySuperseded, requestID)
+	if resp.StatusCode == http.StatusUnauthorized && (parsed.Code == "key_superseded" || parsed.Code == "key_unknown") {
+		return fmt.Errorf("%w (%s) requestId=%s", errKeyRenewable, parsed.Code, requestID)
 	}
 	if resp.StatusCode == http.StatusOK {
 		return fmt.Errorf("push relay send returned %s without ok=true body=%q requestId=%s", resp.Status, responseText, requestID)

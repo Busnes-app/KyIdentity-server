@@ -10,7 +10,7 @@
  * No test framework and no fixtures: `node --test` with the runtime's own type
  * stripping (Node >= 22.18). The one piece of machinery is the module hook
  * below, which stands in for `cloudflare:workers` so the Durable Object class
- * can be constructed outside workerd against a Map.
+ * can be constructed outside workerd (see durable-storage.mts).
  *
  *   node --test push-relay-shared/
  */
@@ -45,11 +45,9 @@ const {
   KEY_INDEX_PREFIX,
   KEY_PREFIX,
   BOUND_TOKEN_PREFIX,
-  handleRegister,
-  denyUnknownKey,
-  sha256Hex,
   apnsToken,
   fcmToken,
+  keyRegistry,
 } = await import("./push-relay-common.ts");
 
 // Real-shaped device tokens: 32 bytes of hex, and FCM's `<id>:APA91b…`.
@@ -58,30 +56,7 @@ const FCM = "dTxbVurMB3E:APA91b" + "x_-Y".repeat(35);
 
 // ---- doubles ---------------------------------------------------------------
 
-/** Durable Object storage: the get/put/delete shapes relay-coordinator uses. */
-function storage() {
-  const cells = new Map();
-  return {
-    cells,
-    async get(key) {
-      return cells.get(key);
-    },
-    async put(keyOrEntries, value) {
-      if (typeof keyOrEntries === "string") {
-        cells.set(keyOrEntries, value);
-        return;
-      }
-      for (const [k, v] of Object.entries(keyOrEntries)) {
-        cells.set(k, v);
-      }
-    },
-    async delete(keys) {
-      for (const key of Array.isArray(keys) ? keys : [keys]) {
-        cells.delete(key);
-      }
-    },
-  };
-}
+const { durableStorage: storage } = await import("./durable-storage.mts");
 
 function coordinator() {
   return new RelayCoordinator({ storage: storage() }, {});
@@ -256,7 +231,11 @@ test("an aged claim whose key is gone is taken over, one whose key is active is 
   assert.equal(whileActive.allowed, false);
   assert.equal(whileActive.logReason, "token_bound_to_other_key");
 
-  env.API_KEYS.get = async () => null; // key-a revoked
+  // key-a was copied into the registry by the check above, so KV no longer has
+  // a say: revoking it means revoking it there.
+  env.API_KEYS.get = async () => null;
+  assert.equal((await claimTokenForSend(rc, "device-token", "key-b")).allowed, false, "KV deletion overrode the registry");
+  keyRegistry(env).ctx.storage.sql.exec("UPDATE keys SET status = 'revoked' WHERE id = ?", "key-a");
   assert.deepEqual(await claimTokenForSend(rc, "device-token", "key-b"), { allowed: true });
   assert.equal(owner(instance), "key-b");
 });
@@ -483,199 +462,4 @@ test("the admin routes are gone, for every method and with any credential", asyn
     const response = await handler(request, env, ctx);
     assert.equal(response.status, 404, `${method} ${path} answered ${response.status}`);
   }
-});
-
-// ---- registration: claim, mint, commit --------------------------------------
-//
-// The one-active-key-per-IP rule is enforced across THREE steps that are not
-// one atomic operation: the coordinator swaps the IP's owner, KV mints the key,
-// and the coordinator is asked again whether the minted key is still the owner.
-// Only the first and third are serialized. Everything below is written as an
-// explicit interleaving of the second, because that is where the bug was.
-
-/** KV double with a hook that can stall a specific put mid-flight. */
-function registerKv() {
-  const cells = new Map();
-  const kv = {
-    cells,
-    /** Called before every put; return a promise to stall the caller there. */
-    beforePut: async (_key) => {},
-    async get(key, type) {
-      const value = cells.get(key);
-      if (value === undefined) return null;
-      return type === "json" && typeof value === "string" ? JSON.parse(value) : value;
-    },
-    async put(key, value) {
-      await kv.beforePut(key);
-      cells.set(key, value);
-    },
-    async delete(key) {
-      cells.delete(key);
-    },
-  };
-  return kv;
-}
-
-function registerEnv(kv) {
-  const instances = new Map();
-  return {
-    instances,
-    REGISTRATION_ENABLED: "true",
-    REGISTER_RATE_LIMITER: { async limit() { return { success: true }; } },
-    API_KEYS: kv,
-    RELAY_COORDINATOR: {
-      idFromName: (name) => name,
-      get(name) {
-        if (!instances.has(name)) {
-          instances.set(name, coordinator());
-        }
-        return instances.get(name);
-      },
-    },
-  };
-}
-
-function registerRequest(ip = "203.0.113.7") {
-  return new Request("https://relay.example/register", {
-    method: "POST",
-    body: JSON.stringify({ label: "server" }),
-    headers: { "CF-Connecting-IP": ip, "Content-Type": "application/json" },
-  });
-}
-
-/** Every key record currently in KV, by id. */
-function activeKeyIds(kv) {
-  const ids = [];
-  for (const [cell, value] of kv.cells) {
-    if (!cell.startsWith(KEY_PREFIX)) continue;
-    const record = typeof value === "string" ? JSON.parse(value) : value;
-    if (record.enabled) ids.push(record.id);
-  }
-  return ids.sort();
-}
-
-test("a registration displaced while minting leaves no second active key", async () => {
-  const kv = registerKv();
-  const env = registerEnv(kv);
-
-  // Stall the FIRST key-record write — request A, inside mintKey — after it has
-  // already claimed the IP from the coordinator. This is the exact window: A
-  // owns the IP, and A's key does not exist in KV for anyone to revoke.
-  let releaseA;
-  const aIsMinting = new Promise((resolveReached) => {
-    const held = new Promise((r) => { releaseA = r; });
-    let stalled = false;
-    kv.beforePut = async (cell) => {
-      if (stalled || !cell.startsWith(KEY_PREFIX)) return;
-      stalled = true;
-      resolveReached();
-      await held;
-    };
-  });
-
-  const a = handleRegister(registerRequest(), requestContext(env));
-  await aIsMinting;
-
-  // B registers start to finish while A is parked. B is handed A as its
-  // predecessor and revokes it — a no-op, because A has written nothing yet.
-  const bResponse = await handleRegister(registerRequest(), requestContext(env));
-  assert.equal(bResponse.status, 201);
-  const b = await bResponse.json();
-
-  releaseA();
-  const aResponse = await a;
-
-  // A must find out it lost and clean up after itself. Before the commit step
-  // it answered 201 and left its key enabled in KV forever.
-  assert.equal(aResponse.status, 503, "a superseded registration was handed a usable key");
-  assert.deepEqual(
-    activeKeyIds(kv),
-    [b.id],
-    "more than one active key survived a concurrent registration from one address",
-  );
-});
-
-test("the surviving key is the last to claim, whichever order the mints finish in", async () => {
-  // Same race with the stall moved: A mints fully, THEN B claims and mints. A's
-  // record exists by the time B revokes it, so the cleanup happens on B's side.
-  const kv = registerKv();
-  const env = registerEnv(kv);
-
-  const first = await handleRegister(registerRequest(), requestContext(env));
-  const second = await handleRegister(registerRequest(), requestContext(env));
-  assert.equal(first.status, 201);
-  assert.equal(second.status, 201);
-
-  const b = await second.json();
-  assert.deepEqual(activeKeyIds(kv), [b.id], "the superseded key was left active");
-});
-
-test("three racing registrations from one address leave exactly one key", async () => {
-  const kv = registerKv();
-  const env = registerEnv(kv);
-
-  // Stall every mint until all three have claimed, so all three are inside the
-  // window at once and each one's predecessor is un-minted.
-  let releaseAll;
-  const held = new Promise((r) => { releaseAll = r; });
-  let reached = 0;
-  let resolveAllReached;
-  const allReached = new Promise((r) => { resolveAllReached = r; });
-  const seen = new Set();
-  kv.beforePut = async (cell) => {
-    if (!cell.startsWith(KEY_PREFIX) || seen.has(cell)) return;
-    seen.add(cell);
-    if (++reached === 3) resolveAllReached();
-    await held;
-  };
-
-  const responses = [
-    handleRegister(registerRequest(), requestContext(env)),
-    handleRegister(registerRequest(), requestContext(env)),
-    handleRegister(registerRequest(), requestContext(env)),
-  ];
-  await allReached;
-  releaseAll();
-
-  const settled = await Promise.all(responses);
-  const issued = settled.filter((r) => r.status === 201);
-  assert.equal(issued.length, 1, `${issued.length} of three racing registrations were issued a key`);
-  const winner = await issued[0].json();
-  assert.deepEqual(activeKeyIds(kv), [winner.id]);
-});
-
-// An IPv6 caller rotating addresses inside one /64 must land on ONE coordinator,
-// or the whole chain above is per-address and the rule is unenforced. ipBucket
-// is what guarantees it; this pins that handleRegister actually applies it.
-test("registrations from one IPv6 /64 share a coordinator and so share the one key", async () => {
-  const kv = registerKv();
-  const env = registerEnv(kv);
-
-  const firstResponse = await handleRegister(registerRequest("2001:db8:1:2:3:4:5:6"), requestContext(env));
-  const secondResponse = await handleRegister(registerRequest("2001:db8:1:2:aaaa:bbbb:cccc:dddd"), requestContext(env));
-  assert.equal(firstResponse.status, 201);
-  assert.equal(secondResponse.status, 201);
-
-  assert.equal(env.instances.size, 1, "one /64 was given more than one registration coordinator");
-  const second = await secondResponse.json();
-  assert.deepEqual(activeKeyIds(kv), [second.id]);
-});
-
-
-// The relay keeps one key per address, so the displaced holder must be told why
-// its key stopped working; a plain "invalid" left it failing forever.
-test("a key displaced by re-registration answers key_superseded; an unknown key does not", async () => {
-  const kv = registerKv();
-  const env = registerEnv(kv);
-
-  const first = await (await handleRegister(registerRequest(), requestContext(env))).json();
-  assert.equal((await handleRegister(registerRequest(), requestContext(env))).status, 201);
-
-  const superseded = await denyUnknownKey(requestContext(env), await sha256Hex(first.key));
-  assert.equal(superseded.status, 401);
-  assert.equal((await superseded.json()).code, "key_superseded");
-
-  const unknown = await denyUnknownKey(requestContext(env), await sha256Hex("never-issued"));
-  assert.equal(unknown.status, 401);
-  assert.equal((await unknown.json()).code, undefined, "an operator-deleted key must not invite re-registration");
 });
