@@ -28,4 +28,3 @@ export function pemToDer(pem: string): Uint8Array {
     .replace(/\s+/g, "");
   return Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
 }
-
