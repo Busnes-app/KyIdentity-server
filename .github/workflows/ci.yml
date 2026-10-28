@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# Supersede a pull request's older run; every other run gets its own group so none is cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   go:
     runs-on: ubuntu-latest
@@ -71,10 +76,6 @@ jobs:
       # Go's default is 10 minutes per package, which the api suite under -race now
       # exceeds on a runner. This is a hang detector, not a performance budget.
       - run: go test -race -count=1 -timeout 20m ./...
-      - name: test supported strong-key profile
-        env:
-          GODEBUG: fips140=on
-        run: go test -race -count=1 -timeout 20m ./...
       - name: profile preserves Compose configuration
         run: python3 docs/check-strong-crypto-compose.py
       # The release binary must not depend on where it is built: build it the way the
@@ -91,6 +92,20 @@ jobs:
           done
           sha256sum "$RUNNER_TEMP/a/kyidentity" "$RUNNER_TEMP/elsewhere/b/kyidentity"
           cmp "$RUNNER_TEMP/a/kyidentity" "$RUNNER_TEMP/elsewhere/b/kyidentity"
+
+  # The same suite under the supported strong-key profile, in parallel with go.
+  go-strong-key:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: test supported strong-key profile
+        env:
+          GODEBUG: fips140=on
+        run: go test -race -count=1 -timeout 20m ./...
 
   web:
     runs-on: ubuntu-latest
@@ -178,7 +193,7 @@ jobs:
   # the pushed bytes are the tested bytes. A pull request from a fork must
   # never reach this job or write a package.
   publish:
-    needs: [go, web, relay, docker]
+    needs: [go, go-strong-key, web, relay, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     # No concurrency group here on purpose: GitHub cancels a *pending* job when a
