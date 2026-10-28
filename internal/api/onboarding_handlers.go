@@ -236,30 +236,44 @@ func (h *OnboardingHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// ChangePassword is the signed-in path: current password plus a step-up grant, then every
-// other session and grant ends. POST /api/user/password.
+// ChangePassword is the signed-in path: a step-up grant, then every other session and grant
+// ends. POST /api/user/password. Issuing the grant checked the password, so the spent grant is
+// the proof; a current password, when sent, is still checked.
 func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	user, sess := GetUserFromContext(r.Context()), GetSessionFromContext(r.Context())
 	var req struct {
 		CurrentPassword string `json:"currentPassword"`
 		NewPassword     string `json:"newPassword"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CurrentPassword == "" || req.NewPassword == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.NewPassword == "" || (req.CurrentPassword == "" && !stepUpSpent(r)) {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
-	ok, err := auth.VerifyPassword(req.CurrentPassword, user.PasswordHash)
-	if argonBusy(w, err) {
-		return
+	if req.CurrentPassword != "" {
+		ok, err := auth.VerifyPassword(req.CurrentPassword, user.PasswordHash)
+		if argonBusy(w, err) {
+			return
+		}
+		if err != nil || !ok {
+			h.audit.Observe("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "invalid_password"})
+			http.Error(w, `{"error":"invalid_credentials","error_description":"Current password is incorrect"}`, http.StatusUnauthorized)
+			return
+		}
 	}
-	if err != nil || !ok {
-		h.audit.Observe("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"reason": "invalid_password"})
-		http.Error(w, `{"error":"invalid_credentials","error_description":"Current password is incorrect"}`, http.StatusUnauthorized)
-		return
-	}
-	if user.PasswordChangeRequired && req.NewPassword == req.CurrentPassword {
-		writeAPIError(w, http.StatusBadRequest, "password_reused", "Choose a password different from the one you were given")
-		return
+	if user.PasswordChangeRequired {
+		reused, err := auth.VerifyPassword(req.NewPassword, user.PasswordHash)
+		if argonBusy(w, err) {
+			return
+		}
+		if err != nil {
+			log.Printf("password change for %s: %v", user.ID, err)
+			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+			return
+		}
+		if reused {
+			writeAPIError(w, http.StatusBadRequest, "password_reused", "Choose a password different from the one you were given")
+			return
+		}
 	}
 	hash, err := auth.HashPassword(req.NewPassword)
 	if argonBusy(w, err) {

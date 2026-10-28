@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- **Choose a new password** no longer asks for the given password: the step-up dialog takes it, so a new account types it twice (sign-in and step-up), not three times. `POST /api/user/password` accepts a body without `currentPassword` when its step-up grant, bound to the caller's user, session and this route, is spent on that request; a `currentPassword` that is sent is still checked, and a missing one without a grant is refused. Step-up is unchanged. (#136)
+
 ## 0.5.0 — 2026-10-28
 
 ### Upgrading

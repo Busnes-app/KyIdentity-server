@@ -56,6 +56,15 @@ func consumeStepUp(s *store.Store, r *http.Request) error {
 	return nil
 }
 
+// stepUpSpentKey marks a request whose own grant requireStepUp spent, for this request's
+// user and session.
+type stepUpSpentKey struct{}
+
+func stepUpSpent(r *http.Request) bool {
+	spent, _ := r.Context().Value(stepUpSpentKey{}).(bool)
+	return spent
+}
+
 // writeStepUpError distinguishes "you need to re-authenticate" from a server fault so the UI
 // can prompt instead of showing a dead end.
 func writeStepUpError(w http.ResponseWriter, err error) {

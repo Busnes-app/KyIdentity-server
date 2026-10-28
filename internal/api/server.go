@@ -479,7 +479,7 @@ func (s *Server) requireStepUp(next http.Handler) http.Handler {
 			writeStepUpError(w, err)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), stepUpSpentKey{}, true)))
 	})
 }
 
