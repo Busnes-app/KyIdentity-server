@@ -193,7 +193,7 @@ style failure is a red build, not a review comment.
 
 | Language | Style guide | Enforced by |
 |---|---|---|
-| Go | [Effective Go](https://go.dev/doc/effective_go) and the [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) | `gofmt -l` (must print nothing) and `go vet ./...` in the `go` job |
+| Go | [Effective Go](https://go.dev/doc/effective_go) and the [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) | `gofmt -l` (must print nothing) and `go vet ./...` in the `go-default` job |
 | TypeScript (`web/`, `workers/`) | The TypeScript compiler in `strict` mode; `web/` also refuses unused locals and parameters | `tsc -b` in `npm run build` (`web` job) and `npm run typecheck` (`relay` job) |
 
 Beyond what the tools check: keep to the comment density and naming of the file you are

@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  go:
+  go-default:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -93,7 +93,7 @@ jobs:
           sha256sum "$RUNNER_TEMP/a/kyidentity" "$RUNNER_TEMP/elsewhere/b/kyidentity"
           cmp "$RUNNER_TEMP/a/kyidentity" "$RUNNER_TEMP/elsewhere/b/kyidentity"
 
-  # The same suite under the supported strong-key profile, in parallel with go.
+  # The same suite under the supported strong-key profile, in parallel with go-default.
   go-strong-key:
     runs-on: ubuntu-latest
     steps:
@@ -106,6 +106,14 @@ jobs:
         env:
           GODEBUG: fips140=on
         run: go test -race -count=1 -timeout 20m ./...
+
+  # The required check: green only when both Go legs are.
+  go:
+    needs: [go-default, go-strong-key]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}" = true
 
   web:
     runs-on: ubuntu-latest
@@ -193,7 +201,7 @@ jobs:
   # the pushed bytes are the tested bytes. A pull request from a fork must
   # never reach this job or write a package.
   publish:
-    needs: [go, go-strong-key, web, relay, docker]
+    needs: [go, web, relay, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     # No concurrency group here on purpose: GitHub cancels a *pending* job when a
