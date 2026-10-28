@@ -2,7 +2,6 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15843/badge)](https://www.bestpractices.dev/projects/15843)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Busnes-app/KyIdentity-server/badge)](https://scorecard.dev/viewer/?uri=github.com/Busnes-app/KyIdentity-server)
-[![OctoCounts](https://api.octocounts.com/badge/Busnes-app/KyIdentity-server/branch/master)](https://octocounts.com/github/Busnes-app/KyIdentity-server/tree/master)
 
 **Start here:** [Standalone installation](INSTALL.md). Local accounts, groups, MFA and the identity provider run without other Ky servers. Configure an SMTP sender separately for activation and password-reset email; KyAuth is optional for push MFA and app sign-on.
 
@@ -32,6 +31,8 @@ Refer to [SECURITY.md](SECURITY.md) for vulnerability disclosure procedures and 
 
 RSA token-signing keys must be at least 2048 bits. Existing smaller keys stop
 startup without being overwritten; read the [signing-key upgrade guidance](docs/UPGRADES-AND-RECOVERY.md#rsa-signing-key-minimum) before upgrading such an installation.
+
+[![OctoCounts](https://api.octocounts.com/badge/Busnes-app/KyIdentity-server/branch/master)](https://octocounts.com/github/Busnes-app/KyIdentity-server/tree/master)
 
 ## Documentation
 
