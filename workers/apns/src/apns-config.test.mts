@@ -41,6 +41,7 @@ registerHooks({
 
 const worker = await import("./index.ts");
 const { parseApnsEnvironment } = worker;
+const { durableStorage } = await import("../../../push-relay-shared/durable-storage.mts");
 const { KEY_PREFIX, sha256Hex } = await import("../../../push-relay-shared/push-relay-common.ts");
 
 // A .p8 shaped well enough to be present; nothing here reaches Apple.
@@ -64,6 +65,10 @@ async function env(overrides: Record<string, unknown> = {}) {
         }
         return null;
       },
+    },
+    RELAY_COORDINATOR: {
+      idFromName: (name: string) => name,
+      get: () => new worker.RelayCoordinator({ storage: durableStorage() }, {}),
     },
     ...overrides,
   };

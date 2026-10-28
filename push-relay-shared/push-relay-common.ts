@@ -9,7 +9,7 @@
  * which createRelayFetchHandler below assembles into each worker's `fetch`.
  */
 
-import type { RelayCoordinator } from "./relay-coordinator";
+import type { KeyRow, RelayCoordinator } from "./relay-coordinator";
 
 /** Cloudflare native rate-limiting binding (configured in wrangler.toml). */
 export interface RateLimitBinding {
@@ -27,6 +27,11 @@ export interface AnalyticsEngineDatasetLike {
  * own KV cache binding (OAUTH_CACHE / APNS_TOKEN_CACHE).
  */
 export interface CommonEnv {
+  /**
+   * Key records from before the registry (see the key-records section). Read
+   * only, as the fallback for a key not yet copied into the registry; nothing
+   * writes here any more.
+   */
   API_KEYS: KVNamespace;
   /**
    * Minute limit is ENFORCED by the PUSH_RATE_LIMITER binding (simple.limit in
@@ -65,10 +70,10 @@ export interface CommonEnv {
   /** Per-key usage counters, offloaded off the KV write path. */
   USAGE_ANALYTICS?: AnalyticsEngineDatasetLike;
   /**
-   * Strongly-consistent owner of the two check-then-write invariants KV cannot
-   * hold: device-token pinning and one-active-key-per-IP. See RelayCoordinator.
-   * Optional in the type only so the binding can be reported missing rather than
-   * crashing; both call sites fail CLOSED without it.
+   * Strongly-consistent store for what KV cannot hold: device-token pinning, the
+   * key records (with one active key per IP), and the daily budget. See
+   * RelayCoordinator. Optional in the type only so the binding can be reported
+   * missing rather than crashing; every call site fails CLOSED without it.
    */
   RELAY_COORDINATOR?: DurableObjectNamespace<RelayCoordinator>;
 }
@@ -89,16 +94,11 @@ export interface ApiKeyRecord {
   registeredIp?: string | null;
 }
 
-export const KEY_PREFIX = "key:"; // key:<sha256(key)>      -> ApiKeyRecord (durable)
-export const KEY_INDEX_PREFIX = "keyid:"; // keyid:<id>     -> <sha256(key)> for revoke-by-id
+// Legacy KV layout, read only. Keys live in the registry now; these are its
+// fallback, and the seed for a token instance that has never been touched.
+export const KEY_PREFIX = "key:"; // key:<sha256(key)>      -> ApiKeyRecord
+export const KEY_INDEX_PREFIX = "keyid:"; // keyid:<id>     -> <sha256(key)>
 export const SUPERSEDED_PREFIX = "superseded:"; // superseded:<sha256(key)> -> "1", a key /register replaced
-// Long enough to outlast an idle server; each tombstone costs one rate-limited /register.
-const SUPERSEDED_TTL_SECONDS = 365 * 24 * 60 * 60;
-// The two ownership indexes below are no longer authoritative — RelayCoordinator
-// is (KV cannot make check-then-write atomic). They are kept as the one-time
-// seed for a coordinator instance that has never been touched, so claims made
-// before that change survive it, plus a little operator-facing bookkeeping.
-export const IP_INDEX_PREFIX = "ipkey:"; // ipkey:<ip>      -> keyId (one active key per IP)
 export const BOUND_TOKEN_PREFIX = "boundtoken:"; // boundtoken:<sha256(deviceToken)> -> keyId (first sender owns it)
 
 export const DEFAULT_LIMIT_PER_MINUTE = 10;
@@ -158,6 +158,23 @@ export const apnsToken: TokenFormat = (token) => {
 
 /** FCM: opaque and case-sensitive, so only the alphabet is checked; length is MAX_TOKEN_LENGTH. */
 export const fcmToken: TokenFormat = (token) => (/^[A-Za-z0-9_:-]+$/.test(token) ? token : null);
+
+/**
+ * The one way a caught value becomes log text.
+ *
+ * A `catch` binding is `unknown` and JavaScript lets anything be thrown, so
+ * `(err as Error).message` is a lie the compiler accepts: on `throw null` it
+ * throws a TypeError of its own, out of the handler that exists to keep the
+ * failure contained. Every one of these sits on a fail-closed path — the 502
+ * for a dead provider, the 429 for a throwing rate limiter — so the replacement
+ * failure is the generic 500 from the outer router, and the log line records
+ * the logging bug instead of the outage.
+ *
+ * Total by construction: `String()` accepts every value, including symbols.
+ */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 // ---- small helpers ---------------------------------------------------------
 
@@ -299,9 +316,9 @@ export function isExpired(record: ApiKeyRecord, now: number): boolean {
 // were let through, which is the spoofing this section exists to prevent.
 
 /**
- * Resolves the coordinator instance that owns one claim. Naming the instance
- * after the thing being claimed is what serializes the racers: every request for
- * one token, or one registering IP, lands on the same object.
+ * Resolves one coordinator instance by name. Naming the instance after the
+ * thing being claimed is what serializes the racers: every request for one
+ * token lands on the same object.
  */
 function coordinatorFor(env: CommonEnv, name: string): DurableObjectStub<RelayCoordinator> | null {
   const ns = env.RELAY_COORDINATOR;
@@ -315,30 +332,25 @@ export function tokenCoordinator(env: CommonEnv, tokenHash: string): DurableObje
   return coordinatorFor(env, "token:" + tokenHash);
 }
 
-export function registrationCoordinator(env: CommonEnv, ipBucketKey: string): DurableObjectStub<RelayCoordinator> | null {
-  return coordinatorFor(env, "ip:" + ipBucketKey);
-}
-
 /** Whether keyId still names a key that may hold a claim. */
 async function keyIsActive(env: CommonEnv, keyId: string): Promise<boolean> {
-  const hash = await env.API_KEYS.get(KEY_INDEX_PREFIX + keyId);
-  if (!hash) {
-    return false; // fully deleted
+  const registry = keyRegistry(env);
+  if (!registry) {
+    return true; // cannot tell, so no takeover
   }
-  const record = await env.API_KEYS.get<ApiKeyRecord>(KEY_PREFIX + hash, "json");
-  return Boolean(record && record.enabled && !isExpired(record, Date.now()));
+  const row =
+    (await registry.findKey({ id: keyId })) ??
+    (await importFromKv(env, registry, await env.API_KEYS.get(KEY_INDEX_PREFIX + keyId)));
+  return row !== null && row.status === "active" && !isExpired(recordOf(row), Date.now());
 }
 
 /**
- * How long a claim is protected from takeover. keyIsActive answers "is the
- * current owner's key still active?" out of KV, and KV converges globally in
- * about a minute: a key minted seconds ago reads as ABSENT at a PoP that has not
- * seen the write yet, which is indistinguishable from "deleted" and would hand
- * that key's freshly claimed token to whoever asked next. The owner had to
- * authenticate against KV to make the claim at all, so waiting out one
- * convergence window is enough for the record that proves it to be visible
- * everywhere. Only delays a legitimate takeover of a token whose owning key was
- * revoked within the last minute.
+ * How long a claim is protected from takeover. For a key not yet copied into
+ * the registry, keyIsActive still answers out of KV, which converges globally in
+ * about a minute: a key written seconds ago can read as ABSENT at a PoP that has
+ * not seen the write. Registry answers are consistent, so this matters only
+ * while the KV fallback exists; it delays a legitimate takeover of a token whose
+ * owning key went away within the last minute, nothing more.
  */
 const CLAIM_TAKEOVER_GRACE_MS = 60_000;
 
@@ -380,9 +392,10 @@ export type ClaimResult =
  *
  * The claim is a single serialized turn inside the token's RelayCoordinator, so
  * two keys racing the first send to one token can no longer both be told the
- * token is free. The one KV question left — is the current owner's key still
- * active, which decides whether a rotated key's tokens can be re-claimed — is
- * answered out here and applied back as a compare-and-swap, so a re-claim by the
+ * token is free. The one question it cannot answer itself — is the current
+ * owner's key still active, which decides whether a rotated key's tokens can be
+ * re-claimed — is the registry's, asked out here and applied back as a
+ * compare-and-swap, so a re-claim by the
  * legitimate owner in the meantime beats the takeover rather than being
  * overwritten by it.
  *
@@ -472,8 +485,9 @@ export function resolveLimit(raw: string | undefined, fallback: number): number 
 //
 // The cost: a caller who stays under the per-minute cap can sustain it
 // indefinitely, so the minute limit bounds burst rate but not daily volume
-// against someone else's FCM quota. That residual is why the fail-closed
-// behaviour below is not negotiable.
+// against someone else's infrastructure — the relay operator's Cloudflare
+// account first, and their provider's send-rate quota after it. That residual
+// is why the fail-closed behaviour below is not negotiable.
 //
 // The daily half of that residual is now covered — by checkDailyBudget, built
 // the way this note prescribed (a Durable Object counter, no KV write
@@ -518,12 +532,12 @@ export async function checkMinuteLimit(
     // binding as an outage that should not take delivery down with it, but the
     // minute tier is the only tier enforced (see the note above), so this branch is
     // the difference between a rate-limited relay and an unbounded send primitive
-    // against someone else's FCM quota, traced only by this log line.
+    // pointed at someone else's infrastructure, traced only by this log line.
     //
     // Callers surface it as 429 with a Retry-After: the request is refused not
     // because the caller misbehaved but because the relay cannot currently tell
     // whether they did.
-    rc.log({ level: "error", event: "ratelimit.binding_error", error: String((err as Error).message ?? err) });
+    rc.log({ level: "error", event: "ratelimit.binding_error", error: errorMessage(err) });
     return false;
   }
 }
@@ -560,8 +574,22 @@ export function secondsUntilUTCMidnight(now: number = Date.now()): number {
  * It is AGGREGATE, not per-key. The per-minute limiters bucket per key and per
  * registering IP, and with public registration open neither is a scarce
  * resource: an actor who wants a second bucket registers a second key from a
- * second address. What is scarce is the operator's FCM/APNs quota, which every
- * key spends from together — so the ceiling on it is counted together.
+ * second address. So the ceiling has to be counted together, or extra keys buy
+ * extra headroom and the limit means nothing.
+ *
+ * What that ceiling protects is worth naming precisely, because it is easy to
+ * assume it is a bill and it is not. FCM and APNs are free: there is no
+ * provider invoice, and the send quotas they do impose are per-project RATE
+ * limits rather than a daily cap. The resources actually being spent are the
+ * operator's — the Cloudflare account underneath, where free-plan daily limits
+ * on KV and Durable Object operations refuse further operations outright until
+ * 00:00 UTC, and on a paid plan become the invoice — plus the provider's
+ * goodwill, since an open relay driven hard is indistinguishable from an abuse
+ * source.
+ *
+ * This counter is blind to every one of those Cloudflare limits. It bounds what
+ * the relay chooses to send; it cannot see what Cloudflare is willing to serve.
+ * Sizing it below the plan's own ceilings is the operator's job.
  *
  * Unset RELAY_DAILY_BUDGET means unmetered, which is what every existing
  * deployment gets. An operator opts into the ceiling; nobody wakes up to find
@@ -597,8 +625,42 @@ export async function checkDailyBudget(
     }
     return { allowed: result.allowed, used: result.used, limit };
   } catch (err) {
-    rc.log({ level: "error", event: "budget.error", error: String((err as Error).message ?? err) });
+    rc.log({ level: "error", event: "budget.error", error: errorMessage(err) });
     return { allowed: false, used: 0, limit };
+  }
+}
+
+/**
+ * Give back a draw taken by a send that never reached the provider.
+ *
+ * checkDailyBudget draws before dispatch, because the counter has to be taken in
+ * the coordinator's serialized turn and the outcome is not known until after.
+ * That is right for the common case and wrong for the case where no provider
+ * request is ever made: a bad APNS_KEY_ID or FCM service account fails every
+ * send before it leaves Cloudflare, and un-refunded those failures spend the
+ * whole day's budget on zero delivery — so the relay stays refused until UTC
+ * midnight even after the credential is fixed.
+ *
+ * Callers refund ONLY on a result that proves no provider request was made
+ * (`reachedProvider: false`) or on a thrown send. A provider that answered — a
+ * dead token, a rejected token, a 5xx — spent the quota this budget bounds, and
+ * refunding those would make invented device tokens free.
+ *
+ * Best-effort and never throws: a failed refund overcounts the day by one, which
+ * is the safe direction, and the request it belongs to has already failed.
+ */
+export async function refundDailyBudget(rc: RequestContext, now: number = Date.now()): Promise<void> {
+  if ((rc.env.RELAY_DAILY_BUDGET ?? "").trim() === "") {
+    return;
+  }
+  const binding = rc.env.RELAY_COORDINATOR;
+  if (!binding || typeof binding.idFromName !== "function") {
+    return;
+  }
+  try {
+    await binding.get(binding.idFromName(BUDGET_INSTANCE)).refundDailyBudget(now);
+  } catch (err) {
+    rc.log({ level: "error", event: "budget.refund_failed", error: errorMessage(err) });
   }
 }
 
@@ -622,48 +684,147 @@ export function recordUsageAnalytics(env: CommonEnv, record: ApiKeyRecord): void
   }
 }
 
-// ---- key minting ------------------------------------------------------------
+// ---- key records --------------------------------------------------------------
+//
+// Every key lives in one RelayCoordinator instance, KEY_REGISTRY, in a SQLite
+// table (see RelayCoordinator.registerKey). Records used to live in API_KEYS
+// (KV): a registration cost four KV writes, the free plan allows 1,000 a day,
+// and on 2026-10-26 test servers registering against the production relays spent
+// them and took Android push down. A registry write is one row in a Durable
+// Object, whose free-plan allowance is 100,000 rows a day.
+//
+// Each relay Worker has its own Durable Object namespace, so each keeps its own
+// keys. In KV the FCM relays of two products shared one namespace, and with it
+// one active key per IP across both.
+//
+// Migration is copy-on-use. The registry is asked first; a key it has never seen
+// is looked up in KV and copied in (RelayCoordinator.importKey), so the
+// registry's answer is final from the key's first use on. Nothing writes KV.
+// Once no key has been copied for a while, the KV reads can go.
+
+/** The registry instance's name, which is also how Data Studio finds it. */
+export const KEY_REGISTRY = "relay-keys";
+
+export function keyRegistry(env: CommonEnv): DurableObjectStub<RelayCoordinator> | null {
+  return coordinatorFor(env, KEY_REGISTRY);
+}
 
 /**
- * Mint an API key, persist only its hash, and return the record plus the raw
- * key (which the caller returns to the client exactly once).
- *
- * `/register` is the only caller: there is no admin API. Keys are therefore
- * always self-issued and never expire, so neither is a parameter. `expiresAt`
- * stays on the record (and `isExpired` stays on the read path) because keys
- * minted by the admin endpoint that used to exist may still carry one.
+ * What /send knows about a presented key. `unknown` means neither the registry
+ * nor KV has ever heard of it: the relay lost it, and the server should
+ * re-register. `revoked` is an operator's decision and stays refused.
  */
-export async function mintKey(
-  env: CommonEnv,
-  rc: RequestContext,
-  opts: {
-    label: string;
-    registeredIp?: string | null;
-    /**
-     * Pre-generated key id. handleRegister needs the id BEFORE the record
-     * exists, so it can reserve the IP first and persist nothing until that
-     * reservation succeeds.
-     */
-    id: string;
-  },
-): Promise<{ record: ApiKeyRecord; key: string }> {
-  const key = randomToken();
-  const record: ApiKeyRecord = {
-    id: opts.id,
-    // Clamped here rather than at the call site so no minting path can store an
-    // unbounded label (see MAX_LABEL_LENGTH).
-    label: opts.label.slice(0, MAX_LABEL_LENGTH),
-    enabled: true,
-    createdAt: new Date().toISOString(),
-    expiresAt: null,
-    source: "self",
-    registeredIp: opts.registeredIp ?? null,
+export type KeyLookup =
+  | { status: "active"; record: ApiKeyRecord }
+  | { status: "expired"; record: ApiKeyRecord }
+  | { status: "superseded" | "revoked"; keyId?: string }
+  | { status: "unknown" | "unavailable" };
+
+// Active keys, briefly, so most sends skip the registry round trip. Per isolate
+// and keyed by hash, never by the key itself. A key superseded or revoked
+// elsewhere keeps working here for at most KEY_CACHE_TTL_MS, about the window
+// KV's own propagation used to leave.
+const KEY_CACHE_TTL_MS = 30_000;
+const KEY_CACHE_MAX = 1024;
+const keyCache = new Map<string, { record: ApiKeyRecord; until: number }>();
+
+/** Drops every cached key answer. For tests; a deploy does the same. */
+export function clearKeyCache(): void {
+  keyCache.clear();
+}
+
+function recordOf(row: KeyRow): ApiKeyRecord {
+  return {
+    id: row.id,
+    label: row.label,
+    enabled: row.status === "active",
+    createdAt: new Date(row.createdAt).toISOString(),
+    expiresAt: row.expiresAt === null ? null : new Date(row.expiresAt).toISOString(),
+    source: row.source === "admin" ? "admin" : "self",
+    registeredIp: row.ip,
   };
-  const hash = await sha256Hex(key);
-  await env.API_KEYS.put(KEY_PREFIX + hash, JSON.stringify(record));
-  await env.API_KEYS.put(KEY_INDEX_PREFIX + opts.id, hash);
-  rc.log({ level: "info", event: "key.created", keyId: opts.id, label: record.label, source: "self" });
-  return { record, key };
+}
+
+/** Copies the KV record for `hash` into the registry; null when KV has none. */
+async function importFromKv(
+  env: CommonEnv,
+  registry: DurableObjectStub<RelayCoordinator>,
+  hash: string | null,
+): Promise<KeyRow | null> {
+  if (!hash) {
+    return null;
+  }
+  const record = await env.API_KEYS.get<ApiKeyRecord>(KEY_PREFIX + hash, "json");
+  if (!record || typeof record.id !== "string") {
+    return null;
+  }
+  const expiresAt = record.expiresAt ? Date.parse(record.expiresAt) : NaN;
+  return registry.importKey({
+    hash,
+    id: record.id,
+    label: String(record.label ?? "").slice(0, MAX_LABEL_LENGTH),
+    ip: record.registeredIp ?? null,
+    createdAt: Date.parse(record.createdAt) || 0,
+    expiresAt: Number.isFinite(expiresAt) ? expiresAt : null,
+    source: record.source ?? "self",
+    enabled: record.enabled === true,
+  });
+}
+
+/** Resolves a presented key's hash: cache, then registry, then KV (copied in). */
+export async function lookupKey(rc: RequestContext, hash: string, now: number = Date.now()): Promise<KeyLookup> {
+  const cached = keyCache.get(hash);
+  if (cached && cached.until > now && !isExpired(cached.record, now)) {
+    return { status: "active", record: cached.record };
+  }
+  keyCache.delete(hash);
+
+  const registry = keyRegistry(rc.env);
+  if (!registry) {
+    rc.log({ level: "error", event: "keys.binding_missing" });
+    return { status: "unavailable" };
+  }
+  const row = (await registry.findKey({ hash })) ?? (await importFromKv(rc.env, registry, hash));
+  if (!row) {
+    // Keys /register replaced under KV left this tombstone; nothing writes it now.
+    return (await rc.env.API_KEYS.get(SUPERSEDED_PREFIX + hash))
+      ? { status: "superseded" }
+      : { status: "unknown" };
+  }
+  if (row.status !== "active") {
+    return { status: row.status, keyId: row.id };
+  }
+  const record = recordOf(row);
+  if (isExpired(record, now)) {
+    return { status: "expired", record };
+  }
+  if (keyCache.size >= KEY_CACHE_MAX) {
+    keyCache.delete(keyCache.keys().next().value!);
+  }
+  keyCache.set(hash, { record, until: now + KEY_CACHE_TTL_MS });
+  return { status: "active", record };
+}
+
+/**
+ * The refusal for a key that is not active. The `code` tells a self-registered
+ * server what to do: `key_superseded` and `key_unknown` mean register again;
+ * no code (a revoked key) means stop, because an operator decided.
+ */
+export function denyKey(rc: RequestContext, key: Exclude<KeyLookup, { status: "active" }>): Response {
+  const keyId = "record" in key ? key.record.id : "keyId" in key ? key.keyId : undefined;
+  rc.log({ level: "warn", event: "send.denied", reason: key.status, keyId });
+  switch (key.status) {
+    case "unavailable":
+      return fail(rc, 503, "key registry unavailable");
+    case "superseded":
+      return fail(rc, 401, "api key superseded", { code: "key_superseded" });
+    case "unknown":
+      return fail(rc, 401, "unknown api key", { code: "key_unknown" });
+    case "expired":
+      return fail(rc, 401, "api key expired", { expiresAt: key.record.expiresAt });
+    case "revoked":
+      return fail(rc, 401, "invalid api key");
+  }
 }
 
 /** A refusal that a handler returns as-is; `ok: true` carries the parsed value. */
@@ -863,12 +1024,12 @@ export function registrationEnabled(env: CommonEnv): boolean {
  * own per-server key with no maintainer involvement.
  *
  * One active key per IP: registering from an IP that already holds a key
- * invalidates the previous one, so a server that loses its key file can simply
- * re-register. The displaced key leaves a tombstone, so its holder's next /send
- * is told `key_superseded` (see denyUnknownKey) and can re-register in turn,
- * rather than failing with a key it would otherwise keep forever. That bounds only *concurrent* keys per IP, so it is paired with a
- * per-IP minute-tier rate limit (REGISTER_RATE_LIMITER) on top of the per-key
- * rolling limits and the REGISTRATION_ENABLED kill-switch.
+ * supersedes the previous one, so a server that loses its key file can simply
+ * re-register. Its old key then answers `key_superseded` (see denyKey), so a
+ * holder still presenting it can re-register in turn rather than failing
+ * forever. That bounds only *concurrent* keys per IP, so it is paired with a
+ * per-IP minute-tier rate limit (REGISTER_RATE_LIMITER) and the
+ * REGISTRATION_ENABLED kill-switch.
  *
  * KNOWN LIMIT, stated rather than implied: an IP is not an identity. Two
  * self-hosters behind one CGNAT address take each other's key away by
@@ -879,37 +1040,21 @@ export function registrationEnabled(env: CommonEnv): boolean {
  * inside the registration path would be worse than the gap.
  *
  * What IS bounded, as of RELAY_DAILY_BUDGET (see checkDailyBudget), is the thing
- * the accumulation was worth doing: the relay's total spend against the
- * operator's provider quota is now one shared daily counter, so extra keys no
- * longer buy extra budget. The remaining exposure from key accumulation is
- * denial-of-service against that shared pool, not unbounded provider cost.
+ * the accumulation was worth doing: the relay's total daily sends are now one
+ * shared counter, so extra keys no longer buy extra budget. The remaining
+ * exposure from key accumulation is denial-of-service against that shared pool,
+ * rather than unbounded sending. Each registration also writes a few registry
+ * rows, which the per-IP limiter bounds and no counter here can see.
  *
  * The CGNAT collision has no mitigation here at all. An operator running a relay
  * for users who may share an address should keep REGISTRATION_ENABLED off and
  * issue keys out of band.
  *
- * "One" is enforced by the IP's RelayCoordinator, not by a KV read followed by a
- * KV write. As four separate KV operations — look up the prior key, revoke it,
- * mint, index — concurrent registrations from one address interleaved into
- * several permanent active keys, which is the quota abuse the invariant exists
- * to prevent. The coordinator swaps the IP's current key and returns the one it
- * displaced in a single serialized turn, so racing registrations form a chain
- * where each revokes its predecessor.
- *
- * That chain is claim-then-COMMIT, not claim alone. Minting happens outside the
- * coordinator's turn, and the swap by itself left this hole:
- *
- *   1. A claims the IP and stalls before minting.
- *   2. B claims it, is handed A as its predecessor, mints, and revokes A —
- *      which does nothing, because A's key record does not exist yet.
- *   3. A resumes and mints. Two permanently active keys for one IP, and the
- *      revoke that was supposed to prevent it has already run.
- *
- * So after minting, every registration asks the coordinator whether it is still
- * the IP's current registration (confirmRegistrationIp). A registration that was
- * displaced while minting deletes the key it just made and hands out nothing —
- * it is the only party that still can, since its successor already looked and
- * found nothing there. Exactly one key survives any interleaving.
+ * "One" is a single registry transaction: supersede every active key for the
+ * IP, insert the new one. The key is minted before it and handed out only after
+ * it commits, so no interleaving of registrations leaves two active keys, and a
+ * failed transaction leaves nothing behind. (Under KV this took a claim, a mint
+ * and a commit across three systems, and still had to be patched twice.)
  */
 export async function handleRegister(request: Request, rc: RequestContext): Promise<Response> {
   const { env } = rc;
@@ -921,11 +1066,8 @@ export async function handleRegister(request: Request, rc: RequestContext): Prom
   const registeredIp = ipBucket(request.headers.get("CF-Connecting-IP") ?? "");
   // No usable client address means no rate limit and no one-key-per-IP
   // invariant, and both of those are the entire containment around an
-  // unauthenticated endpoint that mints permanent credentials. Minting anyway —
-  // which is what the previous `registeredIp && ...` guards did — turned a
-  // missing or unparseable header (a service binding, a preview environment, a
-  // platform change) into uncapped key minting. Same fail-closed reasoning as
-  // checkMinuteLimit and claimTokenForSend.
+  // unauthenticated endpoint that mints permanent credentials. Same fail-closed
+  // reasoning as checkMinuteLimit and claimTokenForSend.
   if (!registeredIp) {
     rc.log({ level: "error", event: "register.denied", reason: "no_client_ip" });
     return fail(rc, 503, "registration is temporarily unavailable");
@@ -943,110 +1085,33 @@ export async function handleRegister(request: Request, rc: RequestContext): Prom
   if (!parsed.ok) {
     return fail(rc, parsed.status, parsed.error);
   }
-  const label = (typeof parsed.value.label === "string" ? parsed.value.label : "").trim() || "self-registered";
+  // Clamped so no caller can store an unbounded label (see MAX_LABEL_LENGTH).
+  const label =
+    ((typeof parsed.value.label === "string" ? parsed.value.label : "").trim() || "self-registered").slice(
+      0,
+      MAX_LABEL_LENGTH,
+    );
 
-  // Refuse rather than mint an unconstrained key: without the coordinator the
-  // one-active-key-per-IP invariant is unenforceable, and an unconstrained
-  // permanent key on a public endpoint is the thing that invariant guards. Same
-  // fail-closed reasoning as checkMinuteLimit and claimTokenForSend.
-  const ipStub = registrationCoordinator(env, registeredIp);
-  if (!ipStub) {
+  // Without the registry the one-key-per-IP rule is unenforceable, and an
+  // unconstrained permanent key on a public endpoint is what it guards.
+  const registry = keyRegistry(env);
+  if (!registry) {
     rc.log({ level: "error", event: "register.denied", reason: "coordinator_binding_missing", ip: registeredIp });
     return fail(rc, 503, "registration is temporarily unavailable");
   }
 
-  // Reserve the id and the IP BEFORE persisting anything. Minting first meant a
-  // throwing coordinator (or a KV error) left an enabled key record behind that
-  // the 500 response never handed to anyone — unusable, since the raw key only
-  // ever travels in the response body, but still an orphan in KV and in every
-  // KV listing, mintable on repeat.
-  //
-  // Reordering beats minting-then-rolling-back: a compensating revoke is another
-  // write on the path that just failed, so it is exactly the write least likely
-  // to succeed. Here a failed mint instead leaves the coordinator pointing at an
-  // id that has no record, which costs nothing — revokeKeyById reports the
-  // unknown id as "already gone", the previous key is never revoked and keeps
-  // working, and the next registration displaces the dangling id.
-  const keyId = crypto.randomUUID();
-  // Swap first, then revoke what the swap displaced. The other order is the
-  // race: two registrations can both read the same prior key and both believe
-  // they superseded it, leaving both of their own keys active. Here each
-  // registration is handed its own immediate predecessor, so N racers form a
-  // chain of N-1 revocations and exactly one key is left standing.
-  const legacyKeyId = await env.API_KEYS.get(IP_INDEX_PREFIX + registeredIp);
-  const priorId = await ipStub.claimRegistrationIp(keyId, legacyKeyId);
+  // Only the hash is stored; the raw key travels once, in this response.
+  const key = randomToken();
+  const id = crypto.randomUUID();
+  const createdAt = Date.now();
+  const displaced = await registry.registerKey({ hash: await sha256Hex(key), id, label, ip: registeredIp, createdAt });
 
-  // Self-registered keys don't expire — they back long-lived servers.
-  const { record, key } = await mintKey(env, rc, { label, registeredIp, id: keyId });
-
-  // Commit. Until this returns true the minted key has been handed to nobody,
-  // so deleting it costs nothing; after it, the key is this IP's registration.
-  if (!(await ipStub.confirmRegistrationIp(keyId))) {
-    // Displaced while minting. The successor's revoke ran against an id that
-    // had no record yet and did nothing, so this is the only place this key can
-    // still be cleaned up. Deleting it is a compensating write, but unlike the
-    // mint-then-rollback ordering rejected above it is on a path where nothing
-    // has failed — and if it somehow does fail, what is left behind is an
-    // orphan record that was never returned to anyone rather than a second
-    // usable key.
-    await revokeKeyById(env, keyId);
-    rc.log({ level: "warn", event: "register.superseded_while_minting", keyId, ip: registeredIp });
-    const response = fail(rc, 503, "registration is temporarily unavailable");
-    response.headers.set("Retry-After", "5");
-    return response;
+  rc.log({ level: "info", event: "key.created", keyId: id, label, source: "self" });
+  for (const old of displaced) {
+    keyCache.delete(old.hash);
+    rc.log({ level: "info", event: "key.superseded", keyId: old.id, ip: registeredIp });
   }
-
-  // The KV index is no longer the authority — it only seeds a coordinator
-  // instance that has never been touched, and gives revokeKeyById something to
-  // tidy up. It is written after the swap and may lose a race with
-  // revokeKeyById's cleanup below; that costs nothing, because the coordinator
-  // holds the real answer and ignores the seed once set.
-  await env.API_KEYS.put(IP_INDEX_PREFIX + registeredIp, record.id);
-  if (priorId && (await revokeKeyById(env, priorId, true))) {
-    rc.log({ level: "info", event: "key.superseded", keyId: priorId, ip: registeredIp });
-  }
-  return json({ id: record.id, label: record.label, key, expiresAt: record.expiresAt }, 201);
-}
-
-/**
- * Delete a key and all its indexes by id. Also clears the per-IP index, but only
- * if it still points at this key (so superseding a key doesn't drop a newer
- * registration's mapping). Returns false if the id was unknown. `superseded`
- * leaves a tombstone first, so /send never sees the key as merely unknown.
- */
-export async function revokeKeyById(env: CommonEnv, id: string, superseded = false): Promise<boolean> {
-  const hash = await env.API_KEYS.get(KEY_INDEX_PREFIX + id);
-  if (!hash) {
-    return false;
-  }
-  if (superseded) {
-    await env.API_KEYS.put(SUPERSEDED_PREFIX + hash, "1", { expirationTtl: SUPERSEDED_TTL_SECONDS });
-  }
-  const record = await env.API_KEYS.get<ApiKeyRecord>(KEY_PREFIX + hash, "json");
-  await env.API_KEYS.delete(KEY_PREFIX + hash);
-  await env.API_KEYS.delete(KEY_INDEX_PREFIX + id);
-  const ip = record?.registeredIp;
-  if (ip) {
-    const current = await env.API_KEYS.get(IP_INDEX_PREFIX + ip);
-    if (current === id) {
-      await env.API_KEYS.delete(IP_INDEX_PREFIX + ip);
-    }
-  }
-  return true;
-}
-
-/**
- * The 401 for a presented key with no enabled record. Only a key /register
- * replaced answers `key_superseded`; one an operator deleted stays a plain
- * refusal, so the server does not undo that revocation by re-registering.
- */
-export async function denyUnknownKey(rc: RequestContext, hash: string): Promise<Response> {
-  if (await rc.env.API_KEYS.get(SUPERSEDED_PREFIX + hash)) {
-    rc.log({ level: "warn", event: "send.denied", reason: "superseded" });
-    return fail(rc, 401, "api key superseded", { code: "key_superseded" });
-  }
-  rc.log({ level: "warn", event: "send.denied", reason: "invalid_key" });
-  return fail(rc, 401, "invalid api key");
+  return json({ id, label, key, expiresAt: null }, 201);
 }
 
 // ---- router / fetch wrapper -------------------------------------------------
@@ -1117,7 +1182,7 @@ export function createRelayFetchHandler<TEnv extends CommonEnv>(opts: RelayRoute
     try {
       response = await routeRelay(request, path, rc, opts);
     } catch (err) {
-      log({ level: "error", event: "unhandled", method: request.method, path, error: String((err as Error)?.message ?? err) });
+      log({ level: "error", event: "unhandled", method: request.method, path, error: errorMessage(err) });
       response = json({ error: "internal error", requestId }, 500);
     }
 
@@ -1133,4 +1198,3 @@ export function createRelayFetchHandler<TEnv extends CommonEnv>(opts: RelayRoute
     return response;
   };
 }
-
