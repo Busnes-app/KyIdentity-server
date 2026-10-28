@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
@@ -187,5 +189,86 @@ func TestAdminSetPasswordsAreFlagged(t *testing.T) {
 	same := `{"currentPassword":"correct-horse-battery","newPassword":"correct-horse-battery"}`
 	if r := adminRequest(t, srv, "POST", "/api/user/password", cookie, same); r.Code != http.StatusOK {
 		t.Fatalf("unflagged change: %d %s", r.Code, r.Body.String())
+	}
+}
+
+// Issue #136: the spent step-up grant proves the password, so the forced change needs no
+// second copy of it. Only this request's own grant counts: none, one for another route, user
+// or session, and a bare handler call without one are all refused.
+func TestPasswordChangeTakesItsOwnGrantAsProof(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	adminCookie := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	if r := adminRequest(t, srv, "POST", "/api/admin/users", adminCookie, `{"username":"alex","email":"alex@x.test","password":"temporary-password-1","role":"user"}`); r.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", r.Code, r.Body.String())
+	}
+	other := sessionCookie(login(t, srv, "alex", "temporary-password-1")).Value
+	cookie := sessionCookie(login(t, srv, "alex", "temporary-password-1")).Value
+	bystander := newSession(t, db, newUser(t, db, "user"), time.Now().UTC().Add(time.Hour))
+	const op = "POST /api/user/password"
+	change := func(body, grant string) *httptest.ResponseRecorder {
+		return adminRequestWithStepUp(t, srv, "POST", "/api/user/password", cookie, body, grant)
+	}
+	flagged := func() bool {
+		t.Helper()
+		u, err := db.GetUserByUsername("alex")
+		if err != nil || u == nil {
+			t.Fatal(err)
+		}
+		return u.PasswordChangeRequired
+	}
+	fresh := `{"newPassword":"my-own-password-42"}`
+
+	for name, grant := range map[string]string{
+		"no grant":      "",
+		"other route":   mintStepUp(t, srv, cookie, "POST /api/user/mfa/totp/enable"),
+		"other user":    mintStepUp(t, srv, bystander, op),
+		"other session": mintStepUp(t, srv, other, op),
+	} {
+		if r := change(fresh, grant); r.Code != http.StatusForbidden || !strings.Contains(r.Body.String(), "step_up_required") {
+			t.Fatalf("%s: %d %s", name, r.Code, r.Body.String())
+		}
+	}
+
+	// Defence in depth: the handler refuses a missing current password unless requireStepUp
+	// spent a grant on this very request.
+	u, err := db.GetUserByUsername("alex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := db.GetSessionByTokenHash(crypto.HashSHA256(cookie), time.Hour)
+	if err != nil || sess == nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/api/user/password", strings.NewReader(fresh))
+	req = req.WithContext(context.WithValue(context.WithValue(req.Context(), userContextKey, u), sessionContextKey, sess))
+	rr := httptest.NewRecorder()
+	NewOnboardingHandler(srv.store, srv.audit, srv.middleware, srv.cfg.IssuerURL, srv.cfg.EncryptionKey).ChangePassword(rr, req)
+	if rr.Code != http.StatusBadRequest || !flagged() {
+		t.Fatalf("ungranted bare handler: %d %s", rr.Code, rr.Body.String())
+	}
+
+	if r := change(`{"newPassword":"temporary-password-1"}`, mintStepUp(t, srv, cookie, op)); r.Code != http.StatusBadRequest || !strings.Contains(r.Body.String(), "password_reused") {
+		t.Fatalf("kept the given password: %d %s", r.Code, r.Body.String())
+	}
+	if r := change(`{"currentPassword":"wrong-password-123","newPassword":"my-own-password-42"}`, mintStepUp(t, srv, cookie, op)); r.Code != http.StatusUnauthorized || !flagged() {
+		t.Fatalf("a sent current password is no longer checked: %d %s", r.Code, r.Body.String())
+	}
+
+	// The grant the dialog obtains, through the real step-up endpoint.
+	body, _ := json.Marshal(map[string]string{"password": "temporary-password-1", "operation": op})
+	r := adminRequestNoStepUp(t, srv, "POST", "/api/auth/step-up", cookie, string(body))
+	var reply struct{ StepUpToken string }
+	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &reply) != nil || reply.StepUpToken == "" {
+		t.Fatalf("grant: %d %s", r.Code, r.Body.String())
+	}
+	if r := change(fresh, reply.StepUpToken); r.Code != http.StatusOK || flagged() {
+		t.Fatalf("grant-only change: %d %s", r.Code, r.Body.String())
+	}
+	if r := login(t, srv, "alex", "my-own-password-42"); r.Code != http.StatusOK {
+		t.Fatalf("new password does not sign in: %d %s", r.Code, r.Body.String())
+	}
+	if r := call(t, srv, other, "GET", "/api/auth/me"); r.Code != http.StatusUnauthorized {
+		t.Fatalf("other session survived the change: %d", r.Code)
 	}
 }

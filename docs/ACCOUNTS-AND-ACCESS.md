@@ -31,8 +31,9 @@ password**. Until the change, the session can read `GET /api/auth/me` (which rep
 enroll a replacement factor (for a sign-in with a recovery code, whose step-up cannot
 authorize the change), and sign out. Every other API answers `403
 password_change_required`, `/oauth/authorize` returns `interaction_required` to the app, no
-code or token is issued, and the account's earlier tokens stop validating. The new password
-must differ from the given one. The change clears the flag, ends every other session, token
+code or token is issued, and the account's earlier tokens stop validating. The given
+password is entered once more, in the step-up dialog; the form itself asks only for the new
+one, which must differ from the given one. The change clears the flag, ends every other session, token
 and app grant, and is audited as `user.password_changed` with `required: true`; a reset link
 also clears it. Invitations, setup-created accounts (`apply-setup`) and an administrator
 setting their own password are not flagged.

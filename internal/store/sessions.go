@@ -137,6 +137,7 @@ func revokeSessionGrantsTx(tx *sql.Tx, where string, now time.Time, args ...any)
 		{`UPDATE issued_tokens SET revoked_at=? WHERE revoked_at IS NULL AND ` + where, append([]any{now}, args...)},
 		{`DELETE FROM authorization_codes WHERE ` + where, args},
 		{`UPDATE step_up_tokens SET used_at=? WHERE used_at IS NULL AND ` + where, append([]any{now}, args...)},
+		{`UPDATE step_up_challenges SET used_at=? WHERE used_at IS NULL AND ` + where, append([]any{now}, args...)},
 		{`DELETE FROM authorization_interactions WHERE ` + where, args},
 	}
 	for _, st := range statements {
