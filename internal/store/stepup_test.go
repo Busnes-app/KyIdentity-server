@@ -151,3 +151,29 @@ func TestStepUpMigrationInvalidatesUnscopedGrants(t *testing.T) {
 		t.Fatalf("repeat migration removed scoped grant: %v", err)
 	}
 }
+
+// A challenge started before a password change carries the old password's proof; it must not
+// finish into a grant afterwards, even in the session that made the change (issue #136 review).
+func TestPasswordChangeBurnsPendingStepUpChallenges(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	user := createTestUser(t, s)
+	now := time.Now().UTC()
+	if err := s.CreateSession(&Session{ID: "session", UserID: user.ID, SessionTokenHash: "session", ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	c := &StepUpChallenge{TokenHash: "pending", UserID: user.ID, SessionID: "session", Operation: "POST /api/user/password", Method: "push", Proof: "proof", PrimaryAuthenticatedAt: now, ExpiresAt: now.Add(time.Minute)}
+	if err := s.CreateStepUpChallenge(c, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ChangePassword(user.ID, "session", "changed", nil); err != nil {
+		t.Fatal(err)
+	}
+	if saved, err := s.GetStepUpChallenge(c.TokenHash, c.UserID, c.SessionID); err != nil || saved != nil {
+		t.Fatalf("challenge survived the password change: %v", err)
+	}
+	grant := &StepUpToken{ID: "grant", TokenHash: c.TokenHash, UserID: c.UserID, SessionID: c.SessionID, Operation: c.Operation, FactorMethod: c.Method, ExpiresAt: c.ExpiresAt}
+	if ok, err := s.CompleteStepUpChallenge(c, grant, nil); err != nil || ok {
+		t.Fatalf("pre-change challenge completed: %v %v", ok, err)
+	}
+}
