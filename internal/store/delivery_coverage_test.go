@@ -226,3 +226,40 @@ func TestResumeSyncDeliveryRefusesLiveAttempt(t *testing.T) {
 		t.Fatal("refused resume audited")
 	}
 }
+
+// A process that stopped between BeginSyncDelivery and the outcome leaves a fence with
+// nothing recorded. Past its recovery time, it and the work held behind it count as
+// failed, so resync-system reports operator work instead of timing out on "pending".
+// A removal's own expired fence is released by the next claim, so it never counts.
+func TestSyncBacklogFailsWorkBehindAbandonedAttempt(t *testing.T) {
+	s, u := newStoreWithUser(t, "user")
+	ev := deliverySystem(t, s, u.ID)
+	if err := s.CreateAccountSyncEvent(&AccountSyncEvent{ID: "held", SystemID: "target", UserID: u.ID, EventType: "user.updated", PayloadJSON: `{"active":true}`, Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateAccountSyncEvent(&AccountSyncEvent{ID: "removal", SystemID: "target", UserID: "other", EventType: "user.deleted", PayloadJSON: `{}`, Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	removals, err := s.ClaimDueSyncEvents(10, time.Minute)
+	if err != nil || len(removals) != 1 || removals[0].ID != "removal" {
+		t.Fatal(removals, err)
+	}
+	if ok, err := s.BeginSyncDelivery(removals[0], time.Minute); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if b, _ := s.SyncBacklog("target"); b != (SyncBacklog{Pending: 3}) {
+		t.Fatalf("attempts inside their window = %+v, want plain pending", b)
+	}
+	mustExec(t, s, `UPDATE sync_delivery_attempts SET recover_after=?`, time.Now().UTC().Add(-time.Second))
+	if b, _ := s.SyncBacklog("target"); b != (SyncBacklog{Pending: 3, Failed: 2}) {
+		t.Fatalf("abandoned attempt backlog = %+v, want the write and the event behind it failed", b)
+	}
+	// The operator recovery path clears it.
+	audit := &AuditEvent{ID: "resume", Action: "admin.sync_delivery_resumed", Outcome: "success"}
+	if err := s.ResumeSyncDelivery("target", ev.ClaimToken, false, audit); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := s.SyncBacklog("target"); b.Failed != 0 {
+		t.Fatalf("resumed backlog = %+v", b)
+	}
+}
