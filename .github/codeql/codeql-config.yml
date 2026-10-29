@@ -1,0 +1,3 @@
+# Screenshot tooling, not shipped. Has no effect on traced Go builds.
+paths-ignore:
+  - docs/**
