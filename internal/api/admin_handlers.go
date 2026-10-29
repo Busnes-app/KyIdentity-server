@@ -607,7 +607,7 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 		"clientType": client.ClientType,
 	})
 	if err := h.store.CreateOAuthClient(client, created.Row); err != nil {
-		log.Printf("client %s creation failed: %v", client.ID, err)
+		log.Printf("client %s creation failed: %v", strings.NewReplacer("\n", "", "\r", "").Replace(client.ID), err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
