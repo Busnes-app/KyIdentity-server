@@ -12,7 +12,7 @@
 export function sameOriginPath(raw: string | null): string | null {
   if (!raw) return null;
 
-  let value = raw;
+  let value: string;
   try {
     // The server percent-encodes the path once. A value that is still encoded after one
     // pass is a caller trying to smuggle something past this check, so decode at most once
