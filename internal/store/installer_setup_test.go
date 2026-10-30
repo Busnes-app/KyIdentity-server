@@ -196,3 +196,31 @@ func TestInstallerCheckRejectsAdministratorOrdinaryAccess(t *testing.T) {
 		t.Fatal("accepted administrator ordinary workflow grant")
 	}
 }
+
+func TestSetInstallerLaunchURL(t *testing.T) {
+	s, close := setupTestStore(t)
+	defer close()
+	p := installerFixture()
+	if _, err := s.ApplyInstallerSetup(p, false); err != nil {
+		t.Fatal(err)
+	}
+	event := func() *AuditEvent {
+		return &AuditEvent{ID: uuid.NewString(), Action: "admin.client_launcher_updated", TargetType: "client", Outcome: "success", CreatedAt: time.Now().UTC()}
+	}
+	if _, err := s.SetInstallerLaunchURL(uuid.NewString(), "kydrive", "https://drive.example.test/", event()); err != ErrNotFound {
+		t.Fatal("another setup set the client's launch URL", err)
+	}
+	audits := auditCount(t, s)
+	for _, want := range []bool{true, false} {
+		if changed, err := s.SetInstallerLaunchURL(p.ID, "kydrive", "https://drive.example.test/", event()); err != nil || changed != want {
+			t.Fatalf("changed %v: %v", changed, err)
+		}
+	}
+	if c, _ := s.GetOAuthClientByID("kydrive"); c.LaunchURL != "https://drive.example.test/" || auditCount(t, s) != audits+1 {
+		t.Fatalf("launch URL %q, audits %d", c.LaunchURL, auditCount(t, s)-audits)
+	}
+	// The installer's own setup still checks with a launch URL on its client.
+	if _, err := s.ApplyInstallerSetup(p, true); err != nil {
+		t.Fatal(err)
+	}
+}

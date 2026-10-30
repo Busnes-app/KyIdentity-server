@@ -210,6 +210,9 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
   `internal/store/installer_amendment_test.go` cover amendment preparation, scoped export,
   no-op reruns, unchanged parent check, and refusal of missing/drifted parents, existing
   clients, account/group blocks, foreign groups and changed intent, with no partial writes.
+- `TestSetupLaunchURL` and `TestSetInstallerLaunchURL` cover `--launch-url`: refusal before
+  the setup is applied, of a client it does not own and of a non-HTTPS URL; writing only an
+  empty link, once, with one audit; setup `--check` still passing afterwards.
 - `TestSetupClientExportScopeAndReadOnly` verifies scoped native export, applied ownership,
   credential/issuer/flag refusal, repeatable bytes and unchanged audits. It does not prove
   installer cross-target delivery or downstream setup.
