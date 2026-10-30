@@ -408,15 +408,22 @@ func runSetupInput(args []string, input io.Reader, out io.Writer) error {
 	check := flags.Bool("check", false, "verify without applying the bundle")
 	stage := flags.Bool("stage", false, "prepare secret-free metadata and target credentials from stdin")
 	exportClient := flags.String("export-client", "", "private machine-only export of one owned client")
+	launchURL := flags.String("launch-url", "", "give one owned client its launcher link: CLIENT=URL")
 	caps := flags.Bool("capabilities", false, "report supported setup features without opening the database")
 	if flags.Parse(args) != nil || flags.NArg() != 0 {
 		return errors.New("invalid apply-setup arguments")
 	}
 	if *caps {
-		if *file != "" || *db != "" || *check || *stage || *exportClient != "" {
+		if *file != "" || *db != "" || *check || *stage || *exportClient != "" || *launchURL != "" {
 			return errors.New("capabilities cannot be combined with setup arguments")
 		}
-		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system", "installer-verified-email", "mail-relay"}})
+		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system", "installer-verified-email", "mail-relay", "client-launch-urls"}})
+	}
+	if *launchURL != "" {
+		if *stage || *check || *exportClient != "" {
+			return errors.New("launch URL cannot be combined with preparation, inspection or export flags")
+		}
+		return setSetupLaunchURL(*file, *db, *launchURL, out)
 	}
 	if *exportClient != "" {
 		if *stage || *check {

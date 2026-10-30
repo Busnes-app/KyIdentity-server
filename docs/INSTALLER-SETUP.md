@@ -289,6 +289,21 @@ administrator, request a step-up grant for `POST /api/admin/users/{id}/reset-lin
 `{"send":true}`, and redeem the link from the mail sink at `POST /api/auth/password/reset`.
 That marks the address verified. A verified account can also use `POST /api/auth/password/forgot`.
 
+## Launcher links
+
+A client's launcher card opens the origin of its first redirect URI. When that is not the
+app (a chat client signing in through a separate auth service), give the card its link with
+capability `client-launch-urls`:
+
+`apply-setup --file /data/installer/<setup UUID>/setup.json --launch-url <client ID>=<https URL>`
+
+It needs the applied setup (or amendment) that owns the client, and refuses an HTTPS URL with
+credentials or a fragment. It writes the link only while the client has none, so a link an
+admin set stays, and audits it as `admin.client_launcher_updated`. It prints
+`{"schema":"kyidentity.launch-url/1","client":"<id>","status":"set"|"unchanged"}`. The link is
+not part of the bundle, whose intent never changes, so it also reaches a setup applied before
+the installer knew it.
+
 ## Adding clients later
 
 Setup intent is immutable, so a product installed after the first setup comes in an
