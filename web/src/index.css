@@ -2050,3 +2050,18 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   .users-table td[data-label="Account"] { display: block; font-family: var(--font-display); font-size: var(--ky-type-section); font-weight: 600; padding-bottom: 8px; }
   .users-table td[data-label="Account"]::before { content: none; }
 }
+
+/* Suite licence line and About dialog, shared names with KyPost. */
+.sidebar-footer { font-size: 0.75rem; color: var(--ink); padding: 0.6rem 0.5rem 0; white-space: nowrap; }
+.sidebar-footer p { margin: 0; }
+.license-link { margin: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; }
+.license-modal { max-width: min(720px, 96vw); }
+.license-window { padding: 1rem 1.5rem 1.5rem; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.license-title-main { display: flex; align-items: baseline; gap: 10px; }
+.license-app-name { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; }
+.license-version-badge { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.license-title-sub { margin: 0; font-size: 0.82rem; color: var(--ink); }
+.license-text { margin-top: 8px; width: 100%; min-height: 320px; resize: vertical; font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.4; white-space: pre; background: var(--panel); color: var(--ink-strong); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+@media (max-width: 52rem) {
+  .sidebar-footer { grid-column: 1 / -1; padding: 0; }
+}
