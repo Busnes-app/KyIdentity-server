@@ -147,7 +147,7 @@ export function parseUsers(value: unknown): User[] {
 /** /api/auth/me returns the user either bare or wrapped. */
 export function parseMe(value: unknown): User {
   const o = obj(value, 'an auth response');
-  return parseUser(isRecord(o.user) ? o.user : o);
+  return { ...parseUser(isRecord(o.user) ? o.user : o), version: optStr(o, 'version') };
 }
 
 export function parseDevice(value: unknown): NativeDevice {

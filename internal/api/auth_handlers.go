@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/appversion"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
@@ -753,5 +754,6 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"status":                        user.Status,
 		"mfaMethods":                    methodTypes,
 		"createdAt":                     user.CreatedAt,
+		"version":                       appversion.String(),
 	})
 }

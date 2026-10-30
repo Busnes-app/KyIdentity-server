@@ -34,6 +34,8 @@ export interface User {
   recoveryCodesNeedRegeneration?: boolean;
   /** The password was given, not chosen: every session is limited to replacing it. */
   passwordChangeRequired?: boolean;
+  /** Server release, sent only by /api/auth/me. */
+  version?: string;
 }
 
 export interface PairedSystem {

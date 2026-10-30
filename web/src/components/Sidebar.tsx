@@ -1,5 +1,6 @@
 import React from 'react';
 import { Access, User } from '../types';
+import { LicenseFooter } from './LicenseFooter';
 import { Shield, LayoutGrid, Smartphone, Palette, Users, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox, Bell } from 'lucide-react';
 
 interface SidebarProps {
@@ -90,6 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
           <LogOut size={16} />
         </button>
       </div>
+      <LicenseFooter version={user.version} />
     </aside>
   );
 };

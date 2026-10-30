@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/appversion"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
@@ -205,10 +206,18 @@ func TestLoginAndCSRFAuthenticationFlow(t *testing.T) {
 	var meResp struct {
 		Username string `json:"username"`
 		Role     string `json:"role"`
+		Version  string `json:"version"`
 	}
 	_ = json.NewDecoder(meRec.Body).Decode(&meResp)
-	if meResp.Username != "alice" || meResp.Role != "user" {
+	if meResp.Username != "alice" || meResp.Role != "user" || meResp.Version != appversion.String() {
 		t.Fatalf("unexpected /api/auth/me response: %+v", meResp)
+	}
+
+	// The version is only for signed-in users.
+	anonRec := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(anonRec, httptest.NewRequest("GET", "/api/auth/me", nil))
+	if anonRec.Code != http.StatusUnauthorized || strings.Contains(anonRec.Body.String(), "version") {
+		t.Fatalf("unauthenticated /api/auth/me = %d %q, want 401 without a version", anonRec.Code, anonRec.Body.String())
 	}
 }
 
