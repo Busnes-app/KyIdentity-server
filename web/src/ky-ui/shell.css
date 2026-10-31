@@ -1,5 +1,5 @@
 /* Suite shell: app frame (sidebar, brand, content, phone header), sign-in, user block, licence
-   line, About dialog and page head. Geometry follows KyCalendar. Product aliases come first so
+   line, About dialog, page head and status pills. Geometry follows KyCalendar. Product aliases come first so
    named palettes apply. */
 
 /* ---------- Sign-in ---------- */
@@ -413,6 +413,37 @@
 }
 @media (max-width: 720px) {
   .ky-page-head { margin-bottom: var(--ky-space-4); }
+}
+
+/* ---------- Status pills ---------- */
+/* Status never borrows the accent: the accent means "act here". A pill is a word on its
+   status tint with a leading dot, or an icon in place of the dot, so colour is never the
+   only signal. Without data-ky-status it is neutral (paused, unknown). */
+.ky-status {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.5rem;
+  padding: 0 0.625rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--panel-hover, var(--ky-panel-hover));
+  color: var(--ink-strong, var(--ky-ink-strong));
+  font-size: var(--ky-type-meta);
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.ky-status::before { content: ""; flex: none; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; }
+.ky-status:has(> svg)::before { display: none; }
+.ky-status > svg { flex: none; width: 14px; height: 14px; }
+.ky-status[data-ky-status="danger"] { background: var(--ky-danger-soft); color: var(--danger, var(--ky-danger)); }
+.ky-status[data-ky-status="warning"] { background: var(--ky-warning-soft); color: var(--warning, var(--ky-warning)); }
+.ky-status[data-ky-status="success"] { background: var(--ky-success-soft); color: var(--success, var(--ky-success)); }
+@media (forced-colors: active) {
+  .ky-status { border-color: CanvasText; }
+  .ky-status::before { background: CanvasText; }
 }
 
 /* ---------- Shared states ---------- */
