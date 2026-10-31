@@ -508,6 +508,7 @@ func launcherApps(st *store.Store, allow func(key string) bool, admin map[string
 		if app.Enabled && allow("custom:"+app.ID) {
 			app.Source = "custom"
 			app.Key = "custom:" + app.ID
+			app.IconName = launcherIconName(app.IconName, app.Name)
 			result = append(result, app)
 		}
 	}
@@ -524,17 +525,13 @@ func launcherApps(st *store.Store, allow func(key string) bool, admin map[string
 		if launchURL == "" {
 			continue
 		}
-		iconName := client.IconName
-		if iconName == "" {
-			iconName = "favicon"
-		}
 		result = append(result, store.Application{
 			Source:      "client",
 			Key:         "client:" + client.ID,
 			ID:          client.ID,
 			Name:        cmp.Or(client.LauncherName, client.ClientName),
 			URL:         launchURL,
-			IconName:    iconName,
+			IconName:    launcherIconName(client.IconName, client.ID, client.ClientName),
 			Description: client.Description,
 			Enabled:     true,
 		})

@@ -3,7 +3,7 @@ import { ExternalLink } from 'lucide-react';
 import type { Application } from '../types';
 import type { Arranged } from '../launcherLayout';
 import { faviconUrl } from '../favicon';
-import { launcherIcon } from '../launcherIcons';
+import { launcherIcon, suiteIconUrl } from '../launcherIcons';
 
 /** Uploaded icons are named "icon:<id>" and served by the API; built-ins are drawn inline. */
 export function uploadedIconUrl(iconName: string): string | undefined {
@@ -15,7 +15,7 @@ export function uploadedIconUrl(iconName: string): string | undefined {
 export const AppIcon: React.FC<{ app: Application; size?: number }> = ({ app, size = 20 }) => {
   const [failed, setFailed] = useState(false);
   const Icon = launcherIcon(app.iconName) ?? ExternalLink;
-  const image = app.iconName === 'favicon' ? faviconUrl(app.url) : uploadedIconUrl(app.iconName);
+  const image = app.iconName === 'favicon' ? faviconUrl(app.url) : suiteIconUrl(app.iconName) ?? uploadedIconUrl(app.iconName);
   return (
     <span className="app-icon">
       {image && !failed ? (

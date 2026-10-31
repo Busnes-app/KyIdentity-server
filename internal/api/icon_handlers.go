@@ -18,10 +18,43 @@ import (
 // this is a photo, and every signed-in user downloads every icon on the launcher.
 const maxIconBytes = 128 << 10
 
-// iconAllowed accepts a built-in icon name or "icon:<id>" for an upload that exists.
+// suiteIcons are the suite app icons bundled at web/public/suite-icons/<name>.png and named
+// "suite:<name>". web/src/launcherIcons.ts holds the same list and a test keeps the two in step.
+var suiteIcons = map[string]bool{
+	"kycalendar": true, "kydns": true, "kydrive": true, "kymessages": true, "kynotes": true,
+	"kypost": true, "kypulse": true, "kyrecovery": true, "kyyard": true,
+}
+
+// suiteIconAliases are KyQuickStart client IDs that differ from their app's icon name.
+var suiteIconAliases = map[string]string{"kymessage": "kymessages", "kymessage-chat": "kymessages"}
+
+// launcherIconName is the icon a card shows. A card left on the default favicon shows its
+// suite app's bundled icon when its client ID or name, compared exactly and case-insensitively,
+// is a suite app's: those apps serve a generic favicon. Any other choice is the admin's and stands.
+func launcherIconName(stored string, keys ...string) string {
+	if stored != "" && stored != "favicon" {
+		return stored
+	}
+	for _, key := range keys {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if alias, ok := suiteIconAliases[key]; ok {
+			key = alias
+		}
+		if suiteIcons[key] {
+			return "suite:" + key
+		}
+	}
+	return "favicon"
+}
+
+// iconAllowed accepts a built-in icon name, "suite:<app>" for a bundled suite icon, or
+// "icon:<id>" for an upload that exists.
 func (h *AdminHandler) iconAllowed(name string) bool {
 	if launcherIcons[name] {
 		return true
+	}
+	if app, ok := strings.CutPrefix(name, "suite:"); ok {
+		return suiteIcons[app]
 	}
 	id, ok := strings.CutPrefix(name, "icon:")
 	if !ok {

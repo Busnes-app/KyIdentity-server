@@ -4,7 +4,7 @@ import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
 import { parseApplications, parseLauncher } from '../parsers';
 import { AccessRequests } from './AccessRequests';
 import { Image, Upload, ArrowUpRight, Plus, Pencil } from 'lucide-react';
-import { LAUNCHER_ICONS } from '../launcherIcons';
+import { LAUNCHER_ICONS, SUITE_ICONS, suiteIconUrl } from '../launcherIcons';
 import { AppIcon, LauncherView, uploadedIconUrl } from './Launcher';
 import { LauncherCustomize } from './LauncherCustomize';
 import { arrange, normalize, searchLauncher, unhide } from '../launcherLayout';
@@ -342,6 +342,19 @@ const ManageCards: React.FC<{ user: User }> = ({ user }) => {
                 <Image size={20} />
                 <span>Favicon</span>
               </button>
+              {SUITE_ICONS.map(([app, label]) => (
+                <button
+                  key={app}
+                  type="button"
+                  className="icon-pick"
+                  aria-pressed={draft.iconName === `suite:${app}`}
+                  title={label}
+                  onClick={() => setDraft({ ...draft, iconName: `suite:${app}` })}
+                >
+                  <img className="app-favicon" src={suiteIconUrl(`suite:${app}`)} alt="" />
+                  <span>{label}</span>
+                </button>
+              ))}
               {LAUNCHER_ICONS.map(([name, label, Icon]) => (
                 <button
                   key={name}

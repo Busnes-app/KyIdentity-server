@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Busnes-app/kyidentity-server/internal/store"
+	"github.com/google/uuid"
 )
 
 func uploadIcon(t *testing.T, srv *Server, cookie, contentType string, data []byte) *httptest.ResponseRecorder {
@@ -218,5 +221,87 @@ func TestUploadedIconRejectsUnsafeContent(t *testing.T) {
 		`{"name":"X","url":"https://x.example.test","iconName":"icon:00000000-0000-0000-0000-000000000000"}`)
 	if unknown.Code != http.StatusBadRequest {
 		t.Errorf("card naming a missing upload returned %d, want 400", unknown.Code)
+	}
+}
+
+// Bundled suite icons are a closed set: the name after "suite:" is looked up, never used as
+// a path, so nothing outside the list gets through.
+func TestIconAllowedSuiteNames(t *testing.T) {
+	h := &AdminHandler{}
+	for _, name := range []string{"suite:kycalendar", "suite:kydns", "suite:kydrive", "suite:kymessages", "suite:kynotes", "suite:kypost", "suite:kypulse", "suite:kyrecovery", "suite:kyyard", "favicon", "globe"} {
+		if !h.iconAllowed(name) {
+			t.Errorf("%q rejected", name)
+		}
+	}
+	for _, name := range []string{"suite:", "suite:../x", "suite:kydrive/../kydns", "suite:KyDrive", "suite:kydrive.png", "suite:/kydrive", "suite:kymessage", "suite: kydrive", "kydrive", "suite:kyidentity", "suite:kydash"} {
+		if h.iconAllowed(name) {
+			t.Errorf("%q accepted", name)
+		}
+	}
+}
+
+func TestLauncherIconNameDefaultsSuiteApps(t *testing.T) {
+	for _, tc := range []struct {
+		stored string
+		keys   []string
+		want   string
+	}{
+		{"favicon", []string{"kydrive", "KyDrive"}, "suite:kydrive"},
+		{"", []string{"kycalendar"}, "suite:kycalendar"},
+		{"favicon", []string{"kymessage", "KyMessages"}, "suite:kymessages"},
+		{"favicon", []string{"kymessage-chat", "KyMessages chat"}, "suite:kymessages"},
+		{"favicon", []string{"calendar-prod", "KyCalendar"}, "suite:kycalendar"},
+		{"favicon", []string{" KYPULSE "}, "suite:kypulse"},
+		{"favicon", []string{"portainer", "Portainer"}, "favicon"},
+		{"", []string{"KyDrive backup"}, "favicon"},
+		{"favicon", []string{"kydash", "KyDash"}, "favicon"},
+		{"globe", []string{"kydrive"}, "globe"},
+		{"icon:6f1c2a7e-0000-4000-8000-000000000000", []string{"kydrive"}, "icon:6f1c2a7e-0000-4000-8000-000000000000"},
+		{"suite:kydns", []string{"kydrive"}, "suite:kydns"},
+	} {
+		if got := launcherIconName(tc.stored, tc.keys...); got != tc.want {
+			t.Errorf("launcherIconName(%q, %q) = %q, want %q", tc.stored, tc.keys, got, tc.want)
+		}
+	}
+}
+
+// The launcher a user sees gives suite apps on the default favicon their bundled icon, keeps
+// an admin's explicit choice, and leaves other apps on their favicon. Stored rows stay as set.
+func TestLauncherShowsSuiteIcons(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newUser(t, db, "admin")
+	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
+	newClient(t, db, "kydrive", []string{"https://drive.example.test/cb"}, []string{"openid"})
+	newClient(t, db, "kymessage", []string{"https://messages.example.test/cb"}, []string{"openid"})
+	newClient(t, db, "kydns", []string{"https://dns.example.test/cb"}, []string{"openid"})
+	newClient(t, db, "other", []string{"https://other.example.test/cb"}, []string{"openid"})
+	if rr := adminRequestNoStepUp(t, srv, "PUT", "/api/admin/clients/kydns/launcher", cookie, `{"iconName":"globe"}`); rr.Code != http.StatusOK {
+		t.Fatalf("launcher edit returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr := adminRequestNoStepUp(t, srv, "PUT", "/api/admin/clients/other/launcher", cookie, `{"iconName":"suite:kyyard"}`); rr.Code != http.StatusOK {
+		t.Fatalf("suite icon choice returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr := adminRequestNoStepUp(t, srv, "PUT", "/api/admin/clients/other/launcher", cookie, `{"iconName":"suite:../x"}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("path-like suite icon returned %d, want 400", rr.Code)
+	}
+	calendar := &store.Application{ID: uuid.New().String(), Name: "KyCalendar", URL: "https://calendar.example.test", IconName: "favicon", Enabled: true}
+	if err := db.CreateApplication(calendar, nil); err != nil {
+		t.Fatal(err)
+	}
+	allowTestAppAccess(t, db, calendar.ID)
+
+	cards := launcherCards(t, srv, cookie)
+	for id, want := range map[string]string{"kydrive": "suite:kydrive", "kymessage": "suite:kymessages", "kydns": "globe", "other": "suite:kyyard", calendar.ID: "suite:kycalendar"} {
+		card := cardByID(cards, id)
+		if card == nil {
+			t.Fatalf("%s is not on the launcher", id)
+		}
+		if card.IconName != want {
+			t.Errorf("%s iconName = %q, want %q", id, card.IconName, want)
+		}
+	}
+	if stored, _ := db.GetOAuthClientByID("kydrive"); stored == nil || (stored.IconName != "" && stored.IconName != "favicon") {
+		t.Errorf("stored kydrive icon rewritten: %+v", stored)
 	}
 }
