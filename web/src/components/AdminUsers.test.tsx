@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { UserRowActions, filterUsers } from './AdminUsers';
+import { AccountName, UserRowActions, filterUsers } from './AdminUsers';
 import type { User } from '../types';
 
 const admin: User = { id: 'a1', username: 'admin', displayName: 'Administrator', email: 'admin@x.test', role: 'admin' };
@@ -28,6 +28,12 @@ describe('user row actions', () => {
     expect(actions(html)).toEqual(['Reset MFA', 'Sessions and apps', 'Revoke sessions', 'Password reset link', 'Offboarding status']);
   });
 
+  it('open from a quiet ⋯ button named for the account, never a Manage button', () => {
+    const html = render(member, false);
+    expect(html).toMatch(/<button type="button" class="icon-btn sm" popover[Tt]arget="[^"]+" aria-label="More actions for member"><svg[^>]*aria-hidden="true"/);
+    expect(html).not.toContain('Manage<');
+  });
+
   it('name the activation link for a pending account', () => {
     expect(actions(render({ ...member, pending: true }, false))).toContain('Activation link');
   });
@@ -50,5 +56,15 @@ describe('user list filter', () => {
     expect(ids({ ...all, status: 'pending' })).toEqual(['p1']);
     expect(ids({ ...all, status: 'active' })).toEqual(['a1', 'u1']);
     expect(ids({ ...all, status: 'disabled' })).toEqual(['d1']);
+  });
+});
+
+describe('account name', () => {
+  it('is a button that edits the account for a full administrator', () => {
+    const html = renderToStaticMarkup(<AccountName u={member} busy={false} onEdit={none} />);
+    expect(html).toBe('<button type="button" class="cell-link"><span class="sr-only">Edit </span>Member</button>');
+  });
+  it('falls back to the username and stays text for a delegate', () => {
+    expect(renderToStaticMarkup(<AccountName u={{ ...member, displayName: '' }} busy={false} />)).toBe('member');
   });
 });

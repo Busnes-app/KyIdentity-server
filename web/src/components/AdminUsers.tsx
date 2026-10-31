@@ -10,7 +10,7 @@ import type { AccountLink } from '../types';
 import { SessionList } from './SessionList';
 import { OffboardingView } from './OffboardingView';
 import { PageHead } from './PageHead';
-import { Users, Search, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX, Link, Clock, UserCog } from 'lucide-react';
+import { Users, Search, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX, Link, Clock, UserCog, MoreHorizontal } from 'lucide-react';
 
 export interface UserFilter { query: string; role: 'all' | 'admin' | 'user'; status: 'all' | 'active' | 'pending' | 'disabled' }
 const NO_FILTER: UserFilter = { query: '', role: 'all', status: 'all' };
@@ -311,7 +311,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
               return (
                 <tr key={u.id}>
                   <td data-label="Account">
-                    <span className="cell-title">{u.displayName || u.username}{u.sourceConnectorId && <span className="status-badge warn" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</span>
+                    <span className="cell-title"><AccountName u={u} busy={busy} onEdit={full ? openEditModal : undefined} />{u.sourceConnectorId && <span className="status-badge warn" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</span>
                     {u.displayName && u.displayName !== u.username && <span className="cell-meta font-mono">{u.username}</span>}
                   </td>
                   <td data-label="Email" className="text-muted">{u.email}</td>
@@ -584,7 +584,15 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
 
 type RowAction = (user: User) => void;
 
-/** Every action stays one disclosure away, labelled; delete is set apart. Nothing renders when
+/** The account name is the row's way in: for a full administrator it opens Edit user (named
+ *  "Edit <name>"); a delegate, who may not edit, sees plain text and uses the ⋯ menu. */
+export const AccountName: React.FC<{ u: User; busy: boolean; onEdit?: RowAction }> = ({ u, busy, onEdit }) => {
+  const name = u.displayName || u.username;
+  if (!onEdit) return <>{name}</>;
+  return <button type="button" className="cell-link" disabled={busy} onClick={() => onEdit(u)}><span className="sr-only">Edit </span>{name}</button>;
+};
+
+/** Every action stays one quiet ⋯ disclosure away, labelled; delete is set apart. Nothing renders when
  *  the viewer may act on none of them (a delegate looking at an administrator). */
 export const UserRowActions: React.FC<{
   u: User; full: boolean; busy: boolean;
@@ -594,8 +602,10 @@ export const UserRowActions: React.FC<{
   if (!full && u.role === 'admin') return null;
   return (
     <div className="row-actions">
-      <button type="button" className="secondary-btn sm" popoverTarget={menuId}>Manage<span className="sr-only"> {u.username}</span></button>
-      <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`Actions for ${u.username}`} onClickCapture={event => {
+      <button type="button" className="icon-btn sm" popoverTarget={menuId} aria-label={`More actions for ${u.username}`}>
+        <MoreHorizontal size={16} aria-hidden="true" />
+      </button>
+      <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`More actions for ${u.username}`} onClickCapture={event => {
         if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
       }}>
         {full && <button className="row-action" onClick={() => act.groups(u)} aria-label={`Manage groups for ${u.username}`}>
