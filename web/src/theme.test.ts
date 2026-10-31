@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { findPair, findTheme } from './ky-ui/themes';
 import { THEME_CHOICES, storedTheme } from './theme';
 import { Appearance } from './components/Appearance';
+import { Settings } from './components/Settings';
+import type { User } from './types';
 
 // Names earlier versions saved under kyidentity-theme whose palette survives, and the half they keep.
 const KEPT: Record<string, string> = {
@@ -38,7 +40,17 @@ describe('theme', () => {
     expect(html.match(/data-ky-preview="[a-z]+-pair"/g)).toHaveLength(6);
     expect(html).toContain('checked="" value="system"');
     expect(html.match(/lucide-check/g)).toHaveLength(1);
-    expect(html).toContain('Pick a palette and how it handles light and dark. Match system switches with your device’s setting; Light or Dark keeps one. Your choice applies straight away and is saved in this browser only.');
     expect(html).not.toContain('style=');
+  });
+
+  it('opens Settings on the Appearance tab with its description', () => {
+    const user = { id: 'u', username: 'walter', role: 'user' } as User;
+    const html = renderToStaticMarkup(createElement(Settings, { section: 'appearance', user, onUserUpdate: () => {} }));
+    expect(html).toContain('<h1 class="ky-page-title">Settings</h1>');
+    expect([...html.matchAll(/<a class="ky-nav-item" href="([^"]+)"( aria-current="page")?>([^<]+)</g)].map(m => [m[1], m[3], Boolean(m[2])])).toEqual([
+      ['#/settings/account', 'Account', false], ['#/settings/devices', 'Phones &amp; apps', false], ['#/settings/appearance', 'Appearance', true],
+    ]);
+    expect(html).toContain('Pick a palette and how it handles light and dark. Match system switches with your device’s setting; Light or Dark keeps one. Your choice applies straight away and is saved in this browser only.');
+    expect(html.match(/type="radio"/g)).toHaveLength(18);
   });
 });
