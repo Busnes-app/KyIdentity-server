@@ -7,7 +7,9 @@ const none: Access = { admin: false, helpdesk: false, auditor: false, appOwner: 
 const render = (user: User, activeTab: string) =>
   renderToStaticMarkup(<Sidebar user={user} activeTab={activeTab} setActiveTab={() => {}} onLogout={() => {}} />);
 const admin: User = { id: 'a1', username: 'admin', displayName: 'Administrator', email: 'a@x.test', role: 'admin', access: { ...none, admin: true } };
-const sections = (html: string) => [...html.matchAll(/<summary[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)/g)].map(m => m[1]);
+// Section labels, plain or the fold buttons inside them.
+const sections = (html: string) => [...html.matchAll(/<p class="ky-nav-section">(?:<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?)?([^<]+)/g)].map(m => m[1]);
+const item = (label: string) => new RegExp(`aria-current="page"[^>]*>(?:<svg[\\s\\S]*?<\\/svg>)<span>${label}</span>`);
 
 describe('sidebar', () => {
   it('groups administration into Directory, Integrations, Security and System, under Your account', () => {
@@ -17,13 +19,17 @@ describe('sidebar', () => {
   it('marks exactly one current item and opens only its section', () => {
     const html = render(admin, 'admin-clients');
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
-    expect(html).toMatch(/aria-current="page"[^>]*>(?:<svg[\s\S]*?<\/svg>)OAuth clients/);
-    expect(html.match(/<details[^>]* open=""/g)).toHaveLength(2); // Your account and the current section
-    expect(html).toMatch(/<details[^>]* open=""><summary[^>]*data-current="true"[^>]*>(?:<svg[\s\S]*?<\/svg>)Integrations/);
+    expect(html).toMatch(item('OAuth clients'));
+    // Your account is a plain label; only the current administration section is expanded.
+    expect(html.match(/aria-expanded="true"/g)).toHaveLength(1);
+    expect(html).toMatch(/aria-expanded="true" data-current="true">(?:<svg[\s\S]*?<\/svg>)Integrations/);
+    // Folded rows stay in the markup (phones show them all); CSS hides them on desktop.
+    expect(html.match(/data-folded="true"/g)).toHaveLength(9);
+    expect(html).not.toContain('<details');
   });
 
   it('keeps App connections current while managing launcher cards', () => {
-    expect(render(admin, 'admin-launchers')).toMatch(/aria-current="page"[^>]*>(?:<svg[\s\S]*?<\/svg>)App connections/);
+    expect(render(admin, 'admin-launchers')).toMatch(item('App connections'));
   });
 
   it('shows a delegate only the sections it may use', () => {
@@ -38,5 +44,9 @@ describe('sidebar', () => {
     expect(sections(html)).toEqual(['Your account']);
     expect(html).toContain('<p class="ky-user-name">admin</p><p class="ky-user-role">Everyday account</p>');
     expect(html).toMatch(/class="ky-user-signout"><svg[^>]*lucide-log-out[\s\S]*?<span>Sign out<\/span>/);
+    // Phones: the header's icon-only Sign out, and a brand with no sub-label.
+    expect(html).toMatch(/class="ky-mobile-signout" aria-label="Sign out"><svg[^>]*lucide-log-out/);
+    expect(html).toMatch(/<div class="ky-brand"><img[^>]*width="28"[^>]*\/><span>KyIdentity<\/span><\/div>/);
+    expect(html).not.toContain('ID Authority');
   });
 });

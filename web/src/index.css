@@ -69,115 +69,25 @@ button {
   }
 }
 
-/* Shell: suite sidebar plus content column */
-.shell {
-  display: grid;
-  grid-template-columns: var(--ky-sidebar-size) 1fr;
-  min-height: 100vh;
+/* Shell: the ky-ui app frame. Administration sections fold on desktop (see Sidebar.tsx). */
+@media (min-width: 721px) {
+  .ky-sidebar { overflow-y: auto; }
+  .ky-nav > .ky-nav-item[data-folded] { display: none; }
 }
-
-.side {
-  background: linear-gradient(180deg, var(--sidebar-start), var(--sidebar-end));
-  border-right: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  padding: 1.25rem 1rem;
-  position: sticky;
-  top: 0;
-  height: 100vh;
+.ky-nav-fold {
+  display: flex; align-items: center; gap: 0.35rem;
+  width: 100%; min-height: 1.75rem; margin: 0; padding: 0;
+  border: 0; border-radius: var(--ky-control-radius); background: none;
+  color: inherit; font: inherit; text-align: start; cursor: pointer;
 }
-
-.main-content {
-  padding: 2.25rem 2rem 4rem;
-  max-width: 72rem;
-  width: 100%;
-  min-width: 0;
-}
-
-/* Brand */
-.brand {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.25rem 0.5rem 1.25rem;
-  /* The pre-bundle /css/styles.css sets a mono .brand; the app wordmark uses the display face. */
-  font-family: var(--font-display);
-}
-
-.brand b {
-  display: block;
-  font-size: 1.3rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-/* The product descriptor reads as quiet secondary text, not an accent eyebrow. */
-.brand small {
-  display: block;
-  font-size: var(--ky-type-meta);
-  color: var(--ink);
-  margin-top: 0.15rem;
-}
-
-/* Sidebar navigation */
-.side-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* Section labels; administration sections fold so the nav fits a laptop screen. */
-.side-heading {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin: 0.75rem 0 0.125rem;
-  padding: 0 0.6rem;
-  min-height: 1.75rem;
-  font-size: var(--ky-type-meta);
-  font-weight: 500;
-  color: var(--ink);
-}
-
-summary.side-heading {
-  list-style: none;
-  border-radius: var(--ky-control-radius);
-  cursor: pointer;
-  user-select: none;
-}
-
-summary.side-heading::-webkit-details-marker { display: none; }
-summary.side-heading:hover { color: var(--ink-strong); }
-summary.side-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-summary.side-heading[data-current] { color: var(--ink-strong); font-weight: 600; }
-summary.side-heading svg { flex: none; margin-left: -0.15rem; transition: transform 0.15s ease; }
-.side-section[open] > summary.side-heading svg { transform: rotate(90deg); }
-.side-section { display: flex; flex-direction: column; gap: 2px; }
-.side-section:not([open]) > summary.side-heading { margin-top: 0.25rem; }
-
-/* Geometry only: hover and the current item come from ky-ui navigation.css. */
-.side-nav :where(button) {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: none;
-  border-radius: var(--ky-control-radius);
-  min-height: var(--ky-control-size);
-  padding: 0 0.6rem;
-  color: var(--ink-strong);
-  font-size: var(--ky-type-nav);
-}
-
-.side-nav :where(button) svg { color: var(--ink); flex: none; }
-.side-nav :where(button[aria-current="page"]) { font-weight: 600; }
-.side-nav :where(button[aria-current="page"]) svg { color: var(--ink-strong); }
-
-.side .ky-user { margin-top: auto; padding-top: 0.75rem; }
-.ky-license { padding: 0.5rem 0 0; }
+.ky-nav-fold:hover, .ky-nav-fold[data-current] { color: var(--ink-strong); }
+.ky-nav-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ky-nav-fold svg { flex: none; width: 14px; height: 14px; margin-left: -0.15rem; transition: transform 0.15s ease; }
+.ky-nav-fold[aria-expanded="true"] svg { transform: rotate(90deg); }
+/* /css/styles.css pads every footer for the pre-bundle page; the sidebar licence line takes none. */
+.ky-license { padding: 0; }
+/* The tab row clips overflow: draw the focus ring inside the tab so none of it is cut off. */
+@media (max-width: 720px) { .ky-nav > .ky-nav-item:focus-visible { outline-offset: -2px; } }
 
 /* The mark is a dark tile; dark schemes get the light tile with a dark mark. */
 .ky-mark-stamp { border-radius: var(--ky-control-radius); }
@@ -1127,7 +1037,6 @@ dialog.modal-backdrop::backdrop {
 .ky-auth-card > .alert-box { margin: 0; }
 .ky-auth-field > input.ky-code-input { font-family: var(--font-mono); font-size: 1.25rem; letter-spacing: 0.12em; text-align: center; }
 .ky-auth-submit .spin { width: 16px; height: 16px; }
-.theme-selector { width: auto; max-width: 100%; min-height: 36px; padding: 6px 10px; border: 1px solid var(--ky-field-border); border-radius: var(--ky-control-radius); background: var(--panel); color: var(--ink-strong); font: inherit; font-size: var(--ky-type-meta); }
 
 .match {
   margin: 0;
@@ -1666,35 +1575,6 @@ dialog.modal-backdrop::backdrop {
 }
 
 @media (max-width: 52rem) {
-  .shell {
-    grid-template-columns: 1fr;
-    /* Short pages must not stretch the header rows. */
-    grid-template-rows: auto 1fr;
-  }
-
-  .side {
-    position: static;
-    height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.75rem;
-  }
-
-  .side-nav {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .side-nav button {
-    width: auto;
-  }
-
-  .main-content {
-    padding: 1.5rem 1.25rem;
-  }
-
   .identity,
   .app-list {
     grid-template-columns: 1fr;
@@ -1875,20 +1755,6 @@ dialog.modal-backdrop::backdrop {
 .launcher-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 600px) { .launcher-who { width: 100%; justify-content: space-between; } .launcher-search-controls { flex-wrap: wrap; } }
 .launcher-group { padding: 0; }
-.side { overflow-y: auto; }
-@media (max-width: 52rem) {
-  .side { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; border-right: 0; border-bottom: 1px solid var(--line); }
-  .side .brand { grid-column: 1; padding: 0; gap: 0.5rem; }
-  .side .ky-user { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 0.25rem; margin: 0; padding: 0; border: 0; }
-  .side .ky-user-copy { max-width: 7rem; padding: 0; }
-  .side .ky-user-signout { width: auto; padding-inline: 0.6rem; }
-  .ky-license { grid-column: 1 / -1; padding: 0; }
-  .side-nav { grid-column: 1 / -1; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; min-width: 0; padding-block: 0.25rem; }
-  .side-nav button { flex: none; white-space: nowrap; min-height: 40px; }
-  /* Appearance sits 16px from the screen edge, as in the other suite products:
-     room for two shared 172px cards at 390px. */
-  .appearance-page { margin-inline: -0.25rem; }
-}
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -1935,7 +1801,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .list-empty { border-block: 1px solid var(--line); padding: 32px 0; margin: 16px 0; }
 .list-empty h2 { font-size: var(--ky-type-section); font-weight: 600; margin: 0 0 8px; }
 .list-empty p { margin: 0; color: var(--ink); }
-.side-navigation { min-height: 0; overflow-y: auto; }
 .security-page > .settings-section { background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 24px 0 0; margin-bottom: 24px; }
 .security-page .section-header { padding: 0 0 16px; align-items: center; }
 .security-page .section-header h2 { font-size: var(--ky-type-section); }
@@ -1947,16 +1812,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .security-page .settings-section > .form-group, .security-page .settings-section > .alert-box { margin-inline: 0; }
 .security-page .password-change-form { padding-inline: 0; }
 @media (max-width: 52rem) {
-  .side-navigation { grid-column: 1 / -1; display: flex; gap: 16px; overflow-x: auto; overflow-y: hidden; }
-  .side-navigation .side-nav { flex: none; overflow: visible; max-width: none; padding: 0; }
-  .side-navigation .side-nav + .side-nav { border-left: 1px solid var(--line); padding-left: 16px; }
-  .side-navigation .side-nav { flex-direction: row; align-items: center; gap: 2px; }
-  .side-navigation .side-heading { margin: 0; padding: 0 8px; white-space: nowrap; }
-  .side-navigation .side-section + .side-section { margin-left: 12px; }
-  /* Phones scroll the strip instead of folding: every section shows, the toggle is only a label. */
-  .side-section { flex-direction: row; align-items: center; }
-  .side-section::details-content { display: flex; gap: 2px; content-visibility: visible; }
-  summary.side-heading svg { display: none; }
   .app-records-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .app-records-table, .app-records-table tbody, .app-records-table tr { display: block; width: 100%; }
   .app-records-table tr { padding: 16px; border-bottom: 1px solid var(--line); }
@@ -2023,7 +1878,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .page-header > .primary-btn, .page-header > .secondary-btn { padding: var(--ky-space-2) 1.05rem; font-size: var(--ky-type-nav); }
 
 /* Native selects: shared field look with a padded chevron (both schemes). */
-.form-select, .theme-selector {
+.form-select {
   appearance: none;
   padding-right: 2.25rem;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23566461' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -2031,10 +1886,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   background-position: right 0.75rem center;
   background-size: 16px;
 }
-:root[data-scheme="dark"] :is(.form-select, .theme-selector) {
+:root[data-scheme="dark"] .form-select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23b3bcb8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
-.theme-selector { min-height: var(--ky-control-size); padding-left: 0.75rem; }
 
 /* Fixed columns on desktop, so filtering never moves Role and Status. */
 @media (min-width: 52.001rem) {
@@ -2050,15 +1904,3 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   .groups-table th:nth-child(4) { width: 15rem; }
 }
 
-/* Phones: the nav strip fades at both edges instead of cutting a label mid-word. */
-@media (max-width: 52rem) {
-  .side .side-navigation {
-    margin-inline: -0.75rem;
-    padding-inline: 1rem;
-    scroll-padding-inline: 1rem;
-    scroll-snap-type: x mandatory;
-    mask-image: linear-gradient(to right, transparent, #000 1rem, #000 calc(100% - 1rem), transparent);
-  }
-  /* The strip rests on whole items, never mid-label. */
-  .side .side-navigation :is(.ky-nav-item, .side-heading) { scroll-snap-align: start; }
-}

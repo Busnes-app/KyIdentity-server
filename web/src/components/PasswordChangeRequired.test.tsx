@@ -21,7 +21,7 @@ describe('forced password change screen', () => {
 
   it('offers nothing but the change, a factor replacement and sign-out', () => {
     expect(html).toContain('Sign out');
-    expect(html).not.toContain('side-nav');
+    expect(html).not.toContain('ky-nav');
   });
 });
 

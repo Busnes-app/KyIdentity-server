@@ -326,6 +326,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               required
             />
           </div>
+          {/* No browser check runs here: the empty line keeps the card's rhythm. */}
+          <p className="ky-auth-check" />
           <button type="submit" className="ky-auth-submit" disabled={loading || Boolean(interaction && !interactionDetails)}>
             {loading ? spinner : <LogIn aria-hidden="true" />}
             <span>Sign in</span>

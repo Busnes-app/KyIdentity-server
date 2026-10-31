@@ -38,7 +38,7 @@ describe('theme', () => {
     expect(html.match(/data-ky-preview="[a-z]+-pair"/g)).toHaveLength(6);
     expect(html).toContain('checked="" value="system"');
     expect(html.match(/lucide-check/g)).toHaveLength(1);
-    expect(html).toContain('Match system follows your device');
+    expect(html).toContain('Pick a palette and how it handles light and dark. Match system switches with your device’s setting; Light or Dark keeps one. Your choice applies straight away and is saved in this browser only.');
     expect(html).not.toContain('style=');
   });
 });

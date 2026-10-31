@@ -45,10 +45,10 @@ export const PasswordChangeRequired: React.FC<{ user: User; onChanged: () => voi
 
   // A sign-in with a recovery code cannot step up for a password change; replacing the
   // lost factor first is the way through.
-  if (factors) return <div className="shell"><main className="main-content" style={{ gridColumn: '1 / -1' }}>
+  if (factors) return <main className="ky-content">
     <button className="secondary-btn" onClick={() => setFactors(false)}>Back to choosing a password</button>
     <DeviceSettings user={user} onUserUpdate={() => {}} />
-  </main></div>;
+  </main>;
 
   return (
     <AuthFrame after={stepUpPrompt}>
