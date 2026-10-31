@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 
 // Mirrors the server's registration policy. The server is the authority; this only keeps
 // the form from offering a choice the API will reject.
@@ -10,7 +10,8 @@ import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { Modal } from './Modal';
 import { parseCreatedClientSecret, parseOAuthClients, parseOIDCIssuer } from '../parsers';
-import { Plus, Trash2, CheckCircle, AlertTriangle, Info, KeyRound } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, XCircle, AlertTriangle, KeyRound, MoreHorizontal } from 'lucide-react';
+import { PageHead } from './PageHead';
 
 export const AdminClients: React.FC = () => {
   const [clients, setClients] = useState<OAuthClient[] | null>(null);
@@ -185,127 +186,104 @@ export const AdminClients: React.FC = () => {
   return (
     <div className="admin-page">
       {stepUpPrompt}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">OAuth clients</h1>
-        </div>
-        <button className="primary-btn sm" onClick={() => setShowModal(true)}>
-          <Plus size={14} />
-          <span>Register Client</span>
-        </button>
-      </div>
+      <PageHead
+        title="OAuth clients"
+        lede="Apps that send people here to sign in, with the addresses they may return to."
+        action={<button type="button" className="ky-page-action" onClick={() => setShowModal(true)}>
+          <Plus aria-hidden="true" />
+          <span>Register client</span>
+        </button>}
+      />
       {listError && <div className="alert-box error" role="alert">{listError}<button className="secondary-btn sm" onClick={fetchClients}>Retry</button></div>}
 
-      <div className="table-card">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>Client Name</th>
-              <th>Client ID</th>
-              <th>Type</th>
-              <th>Redirect URIs</th>
-              <th>Status</th>
-              <th className="text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {clients?.length === 0 ? (
+      {clients?.length === 0 ? (
+        <div className="list-empty">
+          <h2>No OAuth clients yet</h2>
+          <p>Register a client for each app that should sign people in through KyIdentity.</p>
+        </div>
+      ) : (
+        <div className="table-card">
+          <table className="admin-table clients-table">
+            <thead>
               <tr>
-                <td colSpan={6} className="text-center py-5 text-muted">
-                  No OAuth clients registered yet.
-                </td>
+                <th>Client</th>
+                <th>Client ID</th>
+                <th>Redirect URIs</th>
+                <th>Status</th>
+                <th className="text-right"><span className="sr-only">Actions</span></th>
               </tr>
-            ) : (
-              clients?.map((c) => {
-                return (
-                  <tr key={c.id}>
-                    <td className="font-bold text-white">{c.clientName}</td>
-                    <td className="font-mono text-cyan text-sm">{c.id}</td>
-                    <td>
-                      <span className="font-mono badge-type">{c.clientType.toUpperCase()}</span>
-                    </td>
-                    <td className="font-mono text-sm text-muted">
-                      {c.redirectUris.map((uri) => (
-                        <div key={uri}>{uri}</div>
-                      ))}
-                    </td>
-                    <td>
+            </thead>
+            <tbody>
+              {clients?.map((c) => (
+                <tr key={c.id}>
+                  <td data-label="Client">
+                    <span className="cell-title">{c.clientName}</span>
+                    <span className="cell-meta">{c.clientType === 'confidential' ? 'Confidential' : 'Public'}</span>
+                  </td>
+                  <td data-label="Client ID" className="font-mono">{c.id}</td>
+                  <td data-label="Redirect URIs" className="tabular">{c.redirectUris.length === 1 ? '1 URI' : `${c.redirectUris.length} URIs`}</td>
+                  <td data-label="Status">
+                    {c.enabled ? (
                       <span className="status-badge active">
-                        <CheckCircle size={12} /> Enabled
+                        <CheckCircle size={12} aria-hidden="true" /> Enabled
                       </span>
-                    </td>
-                    <td className="text-right">
-                      <div className="action-buttons-wrap">
-                        <button
-                          className="icon-btn"
-                          onClick={() => setDetailsClient(c)}
-                          title="Show connection details"
-                          aria-label={`Show connection details for ${c.clientName}`}
-                        >
-                          <Info size={15} />
-                        </button>
-                        {c.clientType === 'confidential' && (
-                          <button
-                            className="icon-btn"
-                            onClick={() => handleRotateSecret(c)}
-                            title="Issue a new client secret"
-                          >
-                            <KeyRound size={15} />
-                          </button>
-                        )}
-                        <button
-                          className="icon-btn danger"
-                          onClick={() => handleDeleteClient(c.id)}
-                          title="Delete Client"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                    ) : (
+                      <span className="status-badge disabled">
+                        <XCircle size={12} aria-hidden="true" /> Disabled
+                      </span>
+                    )}
+                  </td>
+                  <td data-label="Actions" className="text-right">
+                    <ClientRowActions
+                      client={c}
+                      onManage={() => setDetailsClient(c)}
+                      onRotate={() => handleRotateSecret(c)}
+                      onDelete={() => handleDeleteClient(c.id)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {detailsClient && (
         <Modal title={`${detailsClient.clientName} connection details`} onClose={() => setDetailsClient(null)} className="client-details-modal" closeOnBackdrop>
-          <div className="modal-body connection-details">
-            {[
-              ['Client ID', detailsClient.id],
-              ['Authorization URL', `${issuer}/oauth/authorize`],
-              ['Access token URL', `${issuer}/oauth/token`],
-              ['Resource URL', `${issuer}/oauth/userinfo`],
-              ['Logout URL', `${issuer}/oauth/logout`],
-              ['Post-logout redirect URIs', detailsClient.postLogoutRedirectUris.join(' ') || 'None registered; sign-out ends on the KySignOn page'],
-              ['Back-channel logout URI', detailsClient.backchannelLogoutUri || 'None; this app is not told when a login ends'],
-              ['User identifier', 'username'],
-              ['Scope', detailsClient.allowedScopes.join(' ')],
-              ['Auth Style', 'In Params'],
-            ].map(([label, value]) => (
-              <div className="form-group" key={label}>
-                <label className="form-label">{label}</label>
-                <input className="form-input font-mono" value={value} readOnly />
-              </div>
-            ))}
-            <div className="form-group">
-              <label className="form-label">Redirect URL</label>
-              {detailsClient.redirectUris.map((uri) => (
-                <input className="form-input font-mono" value={uri} readOnly key={uri} />
-              ))}
-            </div>
+          <div className="modal-body">
+            <dl className="connection-details">
+              {([
+                ['Client ID', detailsClient.id],
+                ['Authorization URL', `${issuer}/oauth/authorize`],
+                ['Access token URL', `${issuer}/oauth/token`],
+                ['Resource URL', `${issuer}/oauth/userinfo`],
+                ['Logout URL', `${issuer}/oauth/logout`],
+                ['Redirect URIs', detailsClient.redirectUris],
+                ['Post-logout redirect URIs', detailsClient.postLogoutRedirectUris, 'None registered; sign-out ends on the KySignOn page'],
+                ['Back-channel logout URI', detailsClient.backchannelLogoutUri, 'None; this app is not told when a login ends'],
+                ['User identifier', 'username'],
+                ['Scope', detailsClient.allowedScopes.join(' ')],
+                ['Auth style', 'In params'],
+              ] as [string, string | string[] | undefined, string?][]).map(([label, value, empty]) => {
+                const values = (Array.isArray(value) ? value : [value]).filter((v): v is string => Boolean(v));
+                return <React.Fragment key={label}>
+                  <dt>{label}</dt>
+                  <dd>{values.length === 0 ? <span className="muted-value">{empty ?? 'None'}</span>
+                    : values.length === 1 ? <code>{values[0]}</code>
+                    : <ul>{values.map(v => <li key={v}><code>{v}</code></li>)}</ul>}</dd>
+                </React.Fragment>;
+              })}
+            </dl>
           </div>
         </Modal>
       )}
 
       {showModal && (
-        <Modal title={secretWasRotated ? 'New Client Secret' : 'Register OAuth / OIDC Client'} onClose={resetForm}>
+        <Modal title={secretWasRotated ? 'New client secret' : 'Register an OAuth client'} onClose={resetForm}>
           {!createdClientId ? (
             <form onSubmit={handleCreateClient} className="modal-body">
               <div className="form-group">
-                <label className="form-label">Quick App Preset</label>
+                <label className="form-label">Quick app preset</label>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <button
                     type="button"
@@ -346,7 +324,7 @@ export const AdminClients: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Client ID (optional identifier)</label>
+                <label className="form-label">Client ID (optional)</label>
                 <input
                   type="text"
                   className="form-input font-mono"
@@ -357,7 +335,7 @@ export const AdminClients: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Client Name</label>
+                <label className="form-label">Client name</label>
                 <input
                   type="text"
                   className="form-input"
@@ -370,7 +348,7 @@ export const AdminClients: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Client Type</label>
+                <label className="form-label">Client type</label>
                 <select
                   className="form-select"
                   value={suiteLocked ? 'confidential' : clientType}
@@ -405,7 +383,7 @@ export const AdminClients: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Allowed Redirect URIs (one per line)</label>
+                <label className="form-label">Allowed redirect URIs (one per line)</label>
                 <textarea
                   className="form-textarea font-mono"
                   rows={3}
@@ -445,7 +423,7 @@ export const AdminClients: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Auto-Login / Launch URL (optional deep link for launcher)</label>
+                <label className="form-label">Launch URL (optional deep link for the launcher)</label>
                 <input
                   type="url"
                   className="form-input font-mono"
@@ -463,7 +441,7 @@ export const AdminClients: React.FC = () => {
                   Cancel
                 </button>
                 <button type="submit" className="primary-btn">
-                  Register Client
+                  Register client
                 </button>
               </div>
             </form>
@@ -485,7 +463,7 @@ export const AdminClients: React.FC = () => {
 
               {createdSecret && (
                 <div className="form-group text-left">
-                  <label className="form-label">Client Secret (Shown once)</label>
+                  <label className="form-label">Client secret (shown once)</label>
                   <input type="text" className="form-input font-mono" value={createdSecret} readOnly />
                 </div>
               )}
@@ -499,6 +477,29 @@ export const AdminClients: React.FC = () => {
           )}
         </Modal>
       )}
+    </div>
+  );
+};
+
+/** "Manage" opens the connection details; the rarer, riskier actions sit behind the ⋯ menu. */
+const ClientRowActions: React.FC<{ client: OAuthClient; onManage: () => void; onRotate: () => void; onDelete: () => void }> = ({ client, onManage, onRotate, onDelete }) => {
+  const menuId = useId();
+  return (
+    <div className="row-actions">
+      <button type="button" className="secondary-btn sm" onClick={onManage}>Manage<span className="sr-only"> {client.clientName}</span></button>
+      <button type="button" className="icon-btn sm" popoverTarget={menuId} aria-label={`More actions for ${client.clientName}`}>
+        <MoreHorizontal size={16} aria-hidden="true" />
+      </button>
+      <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`More actions for ${client.clientName}`} onClickCapture={event => {
+        if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
+      }}>
+        {client.clientType === 'confidential' && <button type="button" className="row-action" onClick={onRotate}>
+          <KeyRound size={15} aria-hidden="true" />Rotate secret
+        </button>}
+        <button type="button" className="row-action danger" onClick={onDelete}>
+          <Trash2 size={15} aria-hidden="true" />Delete client
+        </button>
+      </div>
     </div>
   );
 };

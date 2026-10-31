@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { apiRequest, errorMessage } from '../api';
 import { User } from '../types';
-import { Brand } from './Sidebar';
+import { AuthFrame } from './AuthFrame';
 import { DeviceSettings } from './DeviceSettings';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { AlertCircle } from 'lucide-react';
@@ -51,30 +51,24 @@ export const PasswordChangeRequired: React.FC<{ user: User; onChanged: () => voi
   </main></div>;
 
   return (
-    <div className="login-page">
-      <aside className="login-intro"><Brand /><h1>Sign in once, then open everything.</h1></aside>
-      <div className="login-col">
-        <div className="login-card">
-          {error && <div className="alert-box error" role="alert"><AlertCircle size={16} /><span>{error}</span></div>}
-          <form onSubmit={submit} className="login-form">
-            <h2>Choose a new password</h2>
-            <p className="text-muted">You signed in as {user.username} with a password someone gave you. Replace it before you continue; your apps open once you have.</p>
-            <p className="text-muted">Use 12 to 1024 characters. Every other session is signed out.</p>
-            <div className="form-group">
-              <label className="form-label" htmlFor="forced-new">New password</label>
-              <input id="forced-new" type="password" className="form-input" autoComplete="new-password" minLength={12} maxLength={1024} value={next} onChange={(e) => setNext(e.target.value)} disabled={busy} autoFocus required />
-            </div>
-            <div className="form-group">
-              <label className="form-label" htmlFor="forced-confirm">Repeat new password</label>
-              <input id="forced-confirm" type="password" className="form-input" autoComplete="new-password" minLength={12} maxLength={1024} value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={busy} required />
-            </div>
-            <button type="submit" className="primary-btn full-width" disabled={busy}>Set new password</button>
-            <button type="button" className="secondary-btn full-width" onClick={() => setFactors(true)}>Signed in with a recovery code? Replace your factor first</button>
-            <button type="button" className="secondary-btn full-width" onClick={onLogout}>Sign out</button>
-          </form>
+    <AuthFrame after={stepUpPrompt}>
+      {error && <div className="alert-box error" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div>}
+      <form onSubmit={submit}>
+        <h2>Choose a new password</h2>
+        <p className="ky-auth-note">You signed in as {user.username} with a password someone gave you. Replace it before you continue; your apps open once you have.</p>
+        <p className="ky-auth-note">Use 12 to 1024 characters. Every other session is signed out.</p>
+        <div className="ky-auth-field">
+          <label htmlFor="forced-new">New password</label>
+          <input id="forced-new" type="password" autoComplete="new-password" minLength={12} maxLength={1024} value={next} onChange={(e) => setNext(e.target.value)} disabled={busy} autoFocus required />
         </div>
-      </div>
-      {stepUpPrompt}
-    </div>
+        <div className="ky-auth-field">
+          <label htmlFor="forced-confirm">Repeat new password</label>
+          <input id="forced-confirm" type="password" autoComplete="new-password" minLength={12} maxLength={1024} value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={busy} required />
+        </div>
+        <button type="submit" className="ky-auth-submit" disabled={busy}>Set new password</button>
+        <button type="button" className="ky-auth-link" onClick={() => setFactors(true)}>Signed in with a recovery code? Replace your factor first</button>
+        <button type="button" className="ky-auth-link" onClick={onLogout}>Sign out</button>
+      </form>
+    </AuthFrame>
   );
 };

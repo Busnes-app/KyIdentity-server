@@ -81,3 +81,14 @@ From the independent refinement review. Evidence, stages and limits are in [docs
   - vitest passes 198/198, and `npm audit --omit=dev` finds 0 vulnerabilities.
   - `go build`, `go vet`, gofmt and `go test -p 2 -race -count=1 ./...` pass; Go code is unchanged.
 - **Limits:** N2 (Escape does not close the menu) and N3 (phone cell names repeat their label) are left as recorded.
+
+## Suite design pass — 2026-10-31
+
+ky-ui 0.6.0 shell and palette pairs: every pre-dashboard screen (sign-in, MFA, reset and
+activation links, forced password change) in the shared `ky-auth` frame with the theme
+switcher; administration grouped into folding Directory, Applications, Security and System
+sections; the shared user block and About dialog; Users gains a search, role and status
+toolbar with compact rows; OAuth clients show name, ID, redirect count and real status with
+"Manage" plus a ⋯ menu. No authentication, session, OAuth/OIDC or CSRF code changed.
+Before/after captures (1440×900 light/dark, 390×844 light, synthetic fixture created in the
+UI) are in `docs/ui-suite-2026-10-31/screenshots/`.

@@ -49,6 +49,14 @@ function bytes(n: number): string {
   return `${n} B`;
 }
 
+// A schedule only runs with a pinned key and a destination; otherwise say what it waits for.
+export function scheduleFact(s: BackupStatus | null): { badge: string; text: string } {
+  if (!s?.intervalSec) return { badge: 'warn', text: 'Manual only' };
+  if (!s.keyPinned) return { badge: 'disabled', text: 'Waiting for recovery key' };
+  if (!s.paired && !s.localDir) return { badge: 'disabled', text: 'Waiting for a destination' };
+  return { badge: 'active', text: s.nextRunAt ? `Next ${when(s.nextRunAt)}` : 'Next run not scheduled' };
+}
+
 export const AdminBackup: React.FC = () => {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState<boolean>(true);
@@ -263,6 +271,7 @@ export const AdminBackup: React.FC = () => {
   const hasLocal = Boolean(status?.localDir);
   const canBackUp = keyPinned && (paired || hasLocal);
   const scheduleOn = (status?.intervalSec ?? 0) > 0;
+  const schedule = scheduleFact(status);
   const newestLocal = status?.localCopies[0];
 
   return (
@@ -336,9 +345,9 @@ export const AdminBackup: React.FC = () => {
         <div className="dr-fact">
           <div className="dr-fact-label">
             <span>Schedule</span>
-            <span className={`status-badge ${scheduleOn ? 'active' : 'warn'}`}>{every(status?.intervalSec)}</span>
+            <span className={`status-badge ${schedule.badge}`}>{every(status?.intervalSec)}</span>
           </div>
-          <div className="dr-fact-value">{scheduleOn && status?.nextRunAt ? `Next ${when(status.nextRunAt)}` : 'Manual only'}</div>
+          <div className="dr-fact-value">{schedule.text}</div>
           <div className="dr-fact-note">Counts from the last attempt, successful or not</div>
         </div>
       </div>

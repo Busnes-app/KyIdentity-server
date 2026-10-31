@@ -1,43 +1,47 @@
 import { readChoice, saveChoice, watchChoice } from './ky-ui/theme';
-import { SYSTEM_THEME, THEME_CATALOG, applyThemeVariables, findTheme } from './ky-ui/themes';
-import type { CatalogTheme, SystemTheme } from './ky-ui/themes';
+import { SYSTEM_THEME, THEME_PAIRS, applyThemeVariables, findPair, findTheme } from './ky-ui/themes';
 
-// The suite catalog: Match system, Busnes Light/Dark and every named palette.
-export type Theme = CatalogTheme | SystemTheme;
-export const THEMES: readonly Theme[] = [SYSTEM_THEME, ...THEME_CATALOG];
+// Busnes.app defaults; explicit choices are local to this browser. The saved value is `system`
+// (Busnes following the OS), a pair ID (that pair following the OS) or a half ID (a fixed mode).
+// Names saved by earlier versions resolve through the catalog; removed palettes fall back to `system`.
 export const THEME_KEY = 'kyidentity-theme';
-const prefersDark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+export const THEME_CHOICES = THEME_PAIRS.map(pair => ({
+  pair,
+  choices: [
+    { mode: 'system', label: 'Match system', value: pair.id === 'busnes-pair' ? SYSTEM_THEME.id : pair.id },
+    { mode: 'light', label: 'Light', value: pair.light },
+    { mode: 'dark', label: 'Dark', value: pair.dark },
+  ],
+}));
 
-export function applyTheme(theme: Theme): void {
+export function storedTheme(): string {
+  try {
+    const saved = readChoice(THEME_KEY);
+    return findPair(saved)?.id ?? findTheme(saved)?.id ?? SYSTEM_THEME.id;
+  } catch {
+    return SYSTEM_THEME.id;
+  }
+}
+
+const media = typeof window !== 'undefined' ? window.matchMedia?.('(prefers-color-scheme: dark)') : undefined;
+
+export function applyTheme(theme: string, persist = false): void {
+  const option = findTheme(theme);
+  if (!option) return;
   const root = document.documentElement;
-  const scheme = applyThemeVariables(theme.id, root);
-  if (scheme) {
-    delete root.dataset.theme;
-    root.dataset.scheme = scheme;
-    return;
+  const resolved = option.id === 'system' ? (media?.matches ? 'busnes-dark' : 'busnes-light') : option.id;
+  const scheme = applyThemeVariables(resolved) ?? (resolved === 'busnes-light' ? 'light' : 'dark');
+  root.dataset.theme = resolved;
+  root.dataset.scheme = scheme;
+  root.style.colorScheme = scheme;
+  if (persist) {
+    try {
+      saveChoice(THEME_KEY, findPair(theme)?.id ?? option.id);
+    } catch {
+      // Storage off: the theme still applies for this page.
+    }
   }
-  const busnes = theme.id === 'system' ? (prefersDark() ? 'busnes-dark' : 'busnes-light') : theme.id;
-  root.dataset.theme = busnes;
-  delete root.dataset.scheme;
-  root.style.colorScheme = busnes === 'busnes-dark' ? 'dark' : 'light';
+  window.dispatchEvent(new Event('ky:theme'));
 }
 
-/** The saved choice (names saved by earlier versions included), else Match system. */
-export function storedTheme(): Theme {
-  try {
-    return findTheme(readChoice(THEME_KEY)) ?? SYSTEM_THEME;
-  } catch {
-    return SYSTEM_THEME;
-  }
-}
-
-export function saveTheme(theme: Theme): void {
-  try {
-    // Names are what earlier versions saved; keep writing them.
-    saveChoice(THEME_KEY, theme.id === 'system' ? 'system' : theme.name);
-  } catch {
-    // Storage off: the theme still applies for this page.
-  }
-}
-
-if (typeof window !== 'undefined') watchChoice(THEME_KEY, () => applyTheme(storedTheme()), () => storedTheme().id !== 'system');
+if (typeof window !== 'undefined') watchChoice(THEME_KEY, () => applyTheme(storedTheme()));

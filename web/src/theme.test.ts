@@ -1,33 +1,44 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
 import { describe, expect, it } from 'vitest';
-import { THEME_CATALOG, findTheme } from './ky-ui/themes';
-import { THEMES, storedTheme } from './theme';
+import { findPair, findTheme } from './ky-ui/themes';
+import { THEME_CHOICES, storedTheme } from './theme';
 import { Appearance } from './components/Appearance';
 
-// Every name earlier versions saved under kyidentity-theme.
-const SAVED = ['Busnes Light', 'Busnes Dark', 'Dark Matter', 'Light Matter', 'Tropics', 'Tropic Night', 'Ocean', 'Coffee', 'White Cliffs', 'Cyber Punk', 'Neon Purple', 'Space', 'Sky', 'Forest', 'Sun', 'Patina Ky', 'Polished Ky'];
+// Names earlier versions saved under kyidentity-theme whose palette survives, and the half they keep.
+const KEPT: Record<string, string> = {
+  'Busnes Light': 'busnes-light', 'Busnes Dark': 'busnes-dark', 'Dark Matter': 'dark-matter', 'Light Matter': 'light-matter',
+  Ocean: 'ocean', 'White Cliffs': 'white-cliffs', Forest: 'forest', 'Patina Ky': 'patina-ky', 'Polished Ky': 'polished-ky',
+  'Paper Clean': 'paper', 'Nord Slate': 'nord',
+};
 
 describe('theme', () => {
-  it('offers Match system first, then the suite catalog', () => {
-    expect(THEMES).toHaveLength(THEME_CATALOG.length + 1);
-    expect(THEMES[0].id).toBe('system');
+  it('offers six pairs, each as Match system, Light and Dark', () => {
+    expect(THEME_CHOICES.map(c => c.pair.name)).toEqual(['Busnes', 'Matter', 'Ocean', 'Forest', 'Ky', 'Nord']);
+    for (const { choices } of THEME_CHOICES) expect(choices.map(c => c.label)).toEqual(['Match system', 'Light', 'Dark']);
+    expect(THEME_CHOICES[0].choices[0].value).toBe('system');
   });
 
-  it('still recognises every saved name and keeps it as the saved value', () => {
-    for (const name of SAVED) expect(findTheme(name)?.name).toBe(name);
+  it('maps every surviving saved name to its fixed half', () => {
+    for (const [name, id] of Object.entries(KEPT)) expect(findTheme(name)?.id).toBe(id);
+  });
+
+  it('resets removed palettes to Match system rather than guessing', () => {
+    for (const name of ['Tropics', 'Coffee', 'Cyber Punk', 'Sun']) expect(findPair(name) ?? findTheme(name)).toBeUndefined();
   });
 
   it('follows the system without browser storage', () => {
-    expect(storedTheme().id).toBe('system');
+    expect(storedTheme()).toBe('system');
   });
 
-  it('renders native radio cards with shared previews and no inline styles', () => {
+  it('renders one native radio group with a check on the selected segment and no inline styles', () => {
     const html = renderToStaticMarkup(createElement(Appearance));
-    expect(html.match(/type="radio"/g)).toHaveLength(THEMES.length);
-    expect(html.match(/data-ky-preview="/g)).toHaveLength(THEMES.length);
+    expect(html.match(/type="radio"/g)).toHaveLength(18);
+    expect(html.match(/name="kyidentity-theme"/g)).toHaveLength(18);
+    expect(html.match(/data-ky-preview="[a-z]+-pair"/g)).toHaveLength(6);
     expect(html).toContain('checked="" value="system"');
-    expect(html).toContain('class="ky-appearance-description"');
+    expect(html.match(/lucide-check/g)).toHaveLength(1);
+    expect(html).toContain('Match system follows your device');
     expect(html).not.toContain('style=');
   });
 });

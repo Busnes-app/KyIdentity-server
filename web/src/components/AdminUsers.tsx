@@ -9,7 +9,20 @@ import { parseAccountLink, parseMailSettings, parseSessionInventory, parseUsers 
 import type { AccountLink } from '../types';
 import { SessionList } from './SessionList';
 import { OffboardingView } from './OffboardingView';
-import { Users, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX, Link, Clock, UserCog } from 'lucide-react';
+import { PageHead } from './PageHead';
+import { Users, Search, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX, Link, Clock, UserCog } from 'lucide-react';
+
+export interface UserFilter { query: string; role: 'all' | 'admin' | 'user'; status: 'all' | 'active' | 'pending' | 'disabled' }
+const NO_FILTER: UserFilter = { query: '', role: 'all', status: 'all' };
+
+/** The toolbar's view of the list: a case-insensitive match on account, name or email, plus role and status. */
+export function filterUsers(users: readonly User[], { query, role, status }: UserFilter): User[] {
+  const q = query.trim().toLowerCase();
+  return users.filter(u =>
+    (!q || [u.username, u.displayName, u.email].some(v => v?.toLowerCase().includes(q))) &&
+    (role === 'all' || u.role === role) &&
+    (status === 'all' || (u.pending ? 'pending' : u.status === 'active' ? 'active' : 'disabled') === status));
+}
 
 export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User) => void }> = ({ access, onManageGroups }) => {
   // Buttons hide as a convenience only; the server refuses what the actor may not do.
@@ -32,6 +45,8 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
   const [issued, setIssued] = useState<{ user: User; link: AccountLink } | null>(null);
   const [mailConfigured, setMailConfigured] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [filter, setFilter] = useState<UserFilter>(NO_FILTER);
+  const shown = users ? filterUsers(users, filter) : [];
 
   // Form State
   const [username, setUsername] = useState('');
@@ -235,42 +250,70 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
   return (
     <div className="admin-page">
       {stepUpPrompt}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Users</h1>
-        </div>
-        {full && <button
-          className="primary-btn sm"
+      <PageHead
+        title="Users"
+        lede="Every account that can sign in here, with its role and current status."
+        action={full && <button
+          type="button"
+          className="ky-page-action"
           onClick={() => {
             resetForm();
             setShowCreateModal(true);
           }}
         >
-          <Plus size={14} />
-          <span>Create User</span>
+          <Plus aria-hidden="true" />
+          <span>Create user</span>
         </button>}
-      </div>
+      />
       {listError && <div className="alert-box error" role="alert">{listError}<button className="secondary-btn sm" onClick={fetchUsers}>Retry</button></div>}
+
+      <div className="list-toolbar" role="search" aria-label="Filter users">
+        <div className="list-toolbar-search">
+          <Search size={16} aria-hidden="true" />
+          <input type="search" className="form-input" aria-label="Search users" placeholder="Search account, name or email"
+            value={filter.query} onChange={(e) => setFilter({ ...filter, query: e.target.value })} />
+        </div>
+        <select className="form-select" aria-label="Role" value={filter.role} onChange={(e) => setFilter({ ...filter, role: e.target.value as UserFilter['role'] })}>
+          <option value="all">All roles</option>
+          <option value="admin">Administrator</option>
+          <option value="user">User</option>
+        </select>
+        <select className="form-select" aria-label="Status" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value as UserFilter['status'] })}>
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="pending">Pending</option>
+          <option value="disabled">Disabled</option>
+        </select>
+        {users && <p className="list-toolbar-count" aria-live="polite">{shown.length === users.length ? `${users.length} users` : `${shown.length} of ${users.length} users`}</p>}
+      </div>
 
       <div className="table-card">
         <table className="admin-table users-table">
           <thead>
             <tr>
               <th>Account</th>
-              <th>Display Name</th>
               <th>Email</th>
               <th>Role</th>
               <th>Status</th>
-              <th className="text-right">Actions</th>
+              <th className="text-right"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
-            {users?.map((u) => {
+            {users && shown.length === 0 && (
+              <tr>
+                <td colSpan={5} className="list-no-match">
+                  No users match these filters. <button type="button" className="text-btn" onClick={() => setFilter(NO_FILTER)}>Clear filters</button>
+                </td>
+              </tr>
+            )}
+            {shown.map((u) => {
               const busy = busyIds.has(u.id);
               return (
                 <tr key={u.id}>
-                  <td data-label="Account" className="font-mono font-bold text-cyan">{u.username}{u.sourceConnectorId && <span className="status-badge warn" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</td>
-                  <td data-label="Display Name">{u.displayName || u.username}</td>
+                  <td data-label="Account">
+                    <span className="cell-title">{u.displayName || u.username}{u.sourceConnectorId && <span className="status-badge warn" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</span>
+                    {u.displayName && u.displayName !== u.username && <span className="cell-meta font-mono">{u.username}</span>}
+                  </td>
                   <td data-label="Email" className="text-muted">{u.email}</td>
                   <td data-label="Role">
                     {u.role === 'admin' ? 'Administrator' : 'User'}
@@ -278,15 +321,15 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                   <td data-label="Status">
                     {u.pending ? (
                       <span className="status-badge warn">
-                        <Clock size={12} /> Pending
+                        <Clock size={12} aria-hidden="true" /> Pending
                       </span>
                     ) : u.status === 'active' ? (
                       <span className="status-badge active">
-                        <CheckCircle size={12} /> Active
+                        <CheckCircle size={12} aria-hidden="true" /> Active
                       </span>
                     ) : (
                       <span className="status-badge disabled">
-                        <XCircle size={12} /> Disabled
+                        <XCircle size={12} aria-hidden="true" /> Disabled
                       </span>
                     )}
                     {u.endsAt && <div className="text-muted text-sm">Ends {describeInstant(u.endsAt)}</div>}
@@ -361,7 +404,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
 
       {/* Create User Modal */}
       {showCreateModal && (
-        <Modal title="Create User Account" onClose={() => setShowCreateModal(false)}>
+        <Modal title="Create a user" onClose={() => setShowCreateModal(false)}>
           <form onSubmit={handleCreateUser} className="modal-body">
             {formError && <div className="alert-box error sm">{formError}</div>}
 
@@ -379,7 +422,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
             </div>
 
             <div className="form-group">
-              <label className="form-label">Display Name</label>
+              <label className="form-label">Display name</label>
               <input
                 type="text"
                 className="form-input"
@@ -444,7 +487,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                 Cancel
               </button>
               <button type="submit" className="primary-btn" disabled={submitting}>
-                {submitting ? <RefreshCw className="spin" size={14} /> : <span>Create & Replicate</span>}
+                {submitting ? <RefreshCw className="spin" size={14} /> : <span>Create and replicate</span>}
               </button>
             </div>
           </form>
@@ -453,13 +496,13 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
 
       {/* Edit User Modal */}
       {showEditModal && selectedUser && (
-        <Modal title={`Edit User: ${selectedUser.username}`} onClose={() => setShowEditModal(false)}>
+        <Modal title={`Edit ${selectedUser.username}`} onClose={() => setShowEditModal(false)}>
           <form onSubmit={handleUpdateUser} className="modal-body">
             {formError && <div className="alert-box error sm">{formError}</div>}
             {selectedUser.sourceConnectorId && <p className="text-muted">Name and email are managed by the upstream directory. Disabling here is an override the upstream cannot lift.</p>}
 
             <div className="form-group">
-              <label className="form-label">Display Name</label>
+              <label className="form-label">Display name</label>
               <input
                 type="text"
                 className="form-input"
@@ -483,7 +526,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
             </div>
 
             <div className="form-group">
-              <label className="form-label">Reset Password (leave blank to keep current)</label>
+              <label className="form-label">Reset password (leave blank to keep current)</label>
               <input
                 type="password"
                 className="form-input"
@@ -529,7 +572,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                 Cancel
               </button>
               <button type="submit" className="primary-btn" disabled={submitting}>
-                {submitting ? <RefreshCw className="spin" size={14} /> : <span>Save Changes</span>}
+                {submitting ? <RefreshCw className="spin" size={14} /> : <span>Save changes</span>}
               </button>
             </div>
           </form>

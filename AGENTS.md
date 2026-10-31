@@ -264,7 +264,7 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## Shared browser UI
 
-- Phone navigation uses one scrolling strip containing visibly labelled account/administration groups; desktop retains one240px left region. Security sections stay flat, and shared controls are at least40px. Groups retains complete MFA membership rules in native disclosure; empty directory views omit empty table headers/pagers.
+- One 240px left nav: Your account, then administration in labelled Directory, Integrations, Security and System sections. On desktop those fold as native `<details>`, one open at a time (the current item's), so the nav fits 1440x900; phones show every section in one scrolling strip. Exactly one item is current; launcher management keeps App connections current. Every screen before the dashboard (sign-in, MFA, reset and activation links, forced password change) renders in the ky-ui `ky-auth` frame through `web/src/components/AuthFrame.tsx`. Security sections stay flat, and shared controls are at least40px. Groups retains complete MFA membership rules in native disclosure; empty directory views omit empty table headers/pagers.
 
 - `web/src/ky-ui/` is generated from Busnes-app/ky-ui, pinned by `VERSION` file hashes. Change shared colors, navigation states and storage helpers upstream, then run its consumer sync with an explicit worktree map; do not hand-edit vendored files.
 - Products own layout, routes, saved choice keys and named palettes. Busnes aliases consume shared tokens; mark primary navigation with `ky-nav-item` while preserving current-page semantics.

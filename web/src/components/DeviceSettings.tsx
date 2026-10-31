@@ -479,7 +479,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                   className="icon-danger-btn"
                   onClick={() => handleDeleteDevice(dev.id)}
                   disabled={restricted}
-                  title="Remove Device"
+                  title="Remove device"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -568,7 +568,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                   className="icon-danger-btn"
                   onClick={() => handleRemovePasskey(pk.id)}
                   disabled={restricted}
-                  title="Remove Passkey"
+                  title="Remove passkey"
                   aria-label={`Remove passkey ${pk.name}`}
                 >
                   <Trash2 size={16} />
@@ -679,7 +679,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
       )}
 
       {showTotpModal && (
-        <Modal title="Configure TOTP Authenticator" onClose={closeTotpModal}>
+        <Modal title="Configure a TOTP authenticator" onClose={closeTotpModal}>
           <form onSubmit={handleEnableTOTP} className="modal-body">
             <p className="modal-desc">
               Scan this QR code in your authenticator app, then enter the generated 6-digit verification code below. This replaces the account's current TOTP credential, if any.
@@ -725,7 +725,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
       )}
 
       {showRecoveryModal && (
-        <Modal title="Backup Recovery Codes" onClose={() => setShowRecoveryModal(false)}>
+        <Modal title="Backup recovery codes" onClose={() => setShowRecoveryModal(false)}>
           <div className="modal-body">
             <div className="alert-box warn">
               <ShieldAlert size={16} />
@@ -743,10 +743,10 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
           <div className="modal-footer">
             <button type="button" className="secondary-btn" onClick={copyRecoveryCodes}>
               {copied ? <Check size={14} /> : <Copy size={14} />}
-              <span>{copied ? 'Copied' : 'Copy All'}</span>
+              <span>{copied ? 'Copied' : 'Copy all'}</span>
             </button>
             <button type="button" className="primary-btn" onClick={() => setShowRecoveryModal(false)}>
-              I Have Saved Them
+              I have saved them
             </button>
           </div>
         </Modal>

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { apiRequest, errorMessage } from '../api';
 import { parseGroupPage, parseGroupUserPage } from '../parsers';
 import type { DirectoryGroup, User } from '../types';
@@ -6,6 +6,8 @@ import { isCancelled, useStepUp } from './StepUpPrompt';
 import { describeInstant, instantFromLocal, localZone } from '../instant';
 import { AdminEnrollmentPolicies } from './AdminEnrollmentPolicies';
 import { pageSize, Pager, useDirectoryPage } from './DirectoryPage';
+import { Edit, MoreHorizontal, Plus, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { Modal } from './Modal';
 
 type Mutate = (reason: string, method: 'POST' | 'PUT' | 'DELETE', path: string, body?: object) => Promise<boolean>;
 
@@ -100,12 +102,11 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
 
       </div>
       {user ? <button className="secondary-btn" disabled={busy} onClick={onClearUser}>All groups</button>
-        : <button className="primary-btn" disabled={busy} onClick={() => edit()}>Create group</button>}
+        : <button className="primary-btn" disabled={busy} onClick={() => edit()}><Plus size={16} aria-hidden="true" />Create group</button>}
     </div>
     <details className="policy-note"><summary>Membership and MFA rules</summary><p className="text-muted text-sm">Administrator access is controlled by each user's role. Membership in a group with required MFA changes authentication requirements and cancels that user's OAuth grants. If your account requires MFA, sign in with a permitted factor within five minutes before changing such memberships.</p></details>
     {(mutationError || error) && <div className="alert-box error" role="alert">{mutationError || error}{error && <button className="secondary-btn sm" onClick={reload}>Retry</button>}</div>}
-    {editor && <section className="settings-section" aria-labelledby="group-editor-title">
-      <div className="section-header"><h2 id="group-editor-title">{editor.kind === 'new' ? 'Create group' : `Edit ${editor.group.name}`}</h2></div>
+    {editor && <Modal title={editor.kind === 'new' ? 'Create group' : `Edit ${editor.group.name}`} onClose={() => { if (!busy) setEditor(null); }}>
       <form className="modal-body" onSubmit={async (e: React.FormEvent) => {
         e.preventDefault();
         const path = editor.kind === 'new' ? '/api/admin/groups' : `/api/admin/groups/${editor.group.id}`;
@@ -122,27 +123,33 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
           <button className="primary-btn" disabled={busy || !name.trim()}>Save group</button>
         </div>
       </form>
-    </section>}
+    </Modal>}
     {!selected && <>
-    <div className="form-group"><label className="form-label" htmlFor="group-search">Search groups</label>
-      <input id="group-search" autoFocus className="form-input" value={query} maxLength={200} disabled={busy}
-        onChange={e => { setQuery(e.target.value); setOffset(0); }} /></div>
-    {Boolean(page?.items.length) && <div className="table-card"><table className="admin-table">
-      <thead><tr><th>Name</th><th>Description</th><th>Members</th><th>{user ? 'Membership' : 'Actions'}</th></tr></thead>
+    <div className="list-toolbar" role="search" aria-label="Filter groups">
+      <div className="list-toolbar-search">
+        <Search size={16} aria-hidden="true" />
+        <input id="group-search" type="search" autoFocus className="form-input" aria-label="Search groups" placeholder="Search groups" value={query} maxLength={200} disabled={busy}
+          onChange={e => { setQuery(e.target.value); setOffset(0); }} />
+      </div>
+      {page && <p className="list-toolbar-count" aria-live="polite">{page.total === 1 ? '1 group' : `${page.total} groups`}</p>}
+    </div>
+    {Boolean(page?.items.length) && <div className="table-card"><table className="admin-table groups-table">
+      <thead><tr><th>Name</th><th>Description</th><th>Members</th><th className="text-right">{user ? 'Membership' : <span className="sr-only">Actions</span>}</th></tr></thead>
       <tbody>{page?.items.map(group => <tr key={group.id}>
         <td style={{ overflowWrap: 'anywhere' }}>{group.name}{group.sourceConnectorId && <span className="status-badge warn" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}</td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
-        <td><div className="action-buttons-wrap">
+        <td className="text-right"><div className="action-buttons-wrap">
           {user ? <button className="secondary-btn sm" disabled={busy} onClick={() => mutate(
             `${group.member ? 'Remove' : 'Add'} '${user.username}' ${group.member ? 'from' : 'to'} '${group.name}'.`,
             group.member ? 'DELETE' : 'PUT', `/api/admin/groups/${group.id}/members/${user.id}`)}>{group.member ? 'Remove member' : 'Add member'}</button> : <>
-            <button className="secondary-btn sm" disabled={busy} onClick={() => { setEditor(null); setSelected(group); }}>Members</button>
-            <button className="secondary-btn sm" disabled={busy} onClick={() => edit(group)}>Edit</button>
-            <button className="secondary-btn sm" disabled={busy} onClick={() => setPolicyGroup(group)}>MFA policy</button>
-            <button className="secondary-btn sm" disabled={busy} onClick={async () => {
-              if (await mutate(`Delete '${group.name}' and all of its memberships.`, 'DELETE', `/api/admin/groups/${group.id}`)) {
-                if (editor?.kind === 'edit' && editor.group.id === group.id) setEditor(null);
-              }
-            }}>Delete</button>
+            <GroupRowActions group={group} busy={busy}
+              onMembers={() => { setEditor(null); setSelected(group); }}
+              onEdit={() => edit(group)}
+              onPolicy={() => setPolicyGroup(group)}
+              onDelete={async () => {
+                if (await mutate(`Delete '${group.name}' and all of its memberships.`, 'DELETE', `/api/admin/groups/${group.id}`)) {
+                  if (editor?.kind === 'edit' && editor.group.id === group.id) setEditor(null);
+                }
+              }} />
           </>}
         </div></td>
       </tr>)}</tbody>
@@ -153,5 +160,25 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
     </>}
     {selected && <GroupMembers key={selected.id} group={selected} busy={busy} mutate={mutate} onClose={() => setSelected(null)} />}
     {stepUpPrompt}
+  </div>;
+}
+
+/** "Manage" opens the members; editing, MFA policy and delete sit behind the ⋯ menu. */
+function GroupRowActions({ group, busy, onMembers, onEdit, onPolicy, onDelete }: {
+  group: DirectoryGroup; busy: boolean; onMembers: () => void; onEdit: () => void; onPolicy: () => void; onDelete: () => void;
+}) {
+  const menuId = useId();
+  return <div className="row-actions">
+    <button type="button" className="secondary-btn sm" disabled={busy} onClick={onMembers}>Manage<span className="sr-only"> {group.name} members</span></button>
+    <button type="button" className="icon-btn sm" disabled={busy} popoverTarget={menuId} aria-label={`More actions for ${group.name}`}>
+      <MoreHorizontal size={16} aria-hidden="true" />
+    </button>
+    <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`More actions for ${group.name}`} onClickCapture={event => {
+      if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
+    }}>
+      <button type="button" className="row-action" onClick={onEdit}><Edit size={15} aria-hidden="true" />Edit group</button>
+      <button type="button" className="row-action" onClick={onPolicy}><ShieldCheck size={15} aria-hidden="true" />MFA policy</button>
+      <button type="button" className="row-action danger" onClick={onDelete}><Trash2 size={15} aria-hidden="true" />Delete group</button>
+    </div>
   </div>;
 }

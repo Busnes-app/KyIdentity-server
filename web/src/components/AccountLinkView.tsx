@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { apiJson, errorMessage } from '../api';
 import { parseSuccess } from '../parsers';
-import { Brand } from './Sidebar';
+import { AuthFrame } from './AuthFrame';
 import { AlertCircle } from 'lucide-react';
 
 /**
@@ -35,36 +35,31 @@ export const AccountLinkView: React.FC<{ kind: 'activation' | 'reset' }> = ({ ki
   };
 
   return (
-    <div className="login-page">
-      <aside className="login-intro"><Brand /><h1>Sign in once, then open everything.</h1></aside>
-      <div className="login-col">
-        <div className="login-card">
-          {error && <div className="alert-box error" role="alert"><AlertCircle size={16} /><span>{error}</span></div>}
-          {done ? (
-            <div className="login-form">
-              <h2>{kind === 'activation' ? 'Your account is ready' : 'Password changed'}</h2>
-              <p className="text-muted">{kind === 'activation' ? 'Sign in with your username and the password you just chose.' : 'Every other session was signed out. Sign in with your new password.'}</p>
-              <a className="primary-btn full-width" href="/">Sign in</a>
-            </div>
-          ) : !token ? (
-            <div className="login-form"><h2>Missing link</h2><p className="text-muted">Open the full link you were given.</p></div>
-          ) : (
-            <form onSubmit={submit} className="login-form">
-              <h2>{title}</h2>
-              <p className="text-muted">At least 12 characters. {kind === 'reset' ? 'Your second factor stays as it is.' : ''}</p>
-              <div className="form-group">
-                <label className="form-label" htmlFor="new-password">New password</label>
-                <input id="new-password" type="password" className="form-input" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={12} autoFocus required />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="confirm-password">Repeat password</label>
-                <input id="confirm-password" type="password" className="form-input" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} minLength={12} required />
-              </div>
-              <button type="submit" className="primary-btn full-width" disabled={busy}>{kind === 'activation' ? 'Activate account' : 'Set new password'}</button>
-            </form>
-          )}
+    <AuthFrame>
+      {error && <div className="alert-box error" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div>}
+      {done ? (
+        <div className="ky-auth-step">
+          <h2>{kind === 'activation' ? 'Your account is ready' : 'Password changed'}</h2>
+          <p className="ky-auth-note">{kind === 'activation' ? 'Sign in with your username and the password you just chose.' : 'Every other session was signed out. Sign in with your new password.'}</p>
+          <a className="ky-auth-submit" href="/">Sign in</a>
         </div>
-      </div>
-    </div>
+      ) : !token ? (
+        <div className="ky-auth-step"><h2>Missing link</h2><p className="ky-auth-note">Open the full link you were given.</p></div>
+      ) : (
+        <form onSubmit={submit}>
+          <h2>{title}</h2>
+          <p className="ky-auth-note">At least 12 characters. {kind === 'reset' ? 'Your second factor stays as it is.' : ''}</p>
+          <div className="ky-auth-field">
+            <label htmlFor="new-password">New password</label>
+            <input id="new-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={12} autoFocus required />
+          </div>
+          <div className="ky-auth-field">
+            <label htmlFor="confirm-password">Repeat password</label>
+            <input id="confirm-password" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} minLength={12} required />
+          </div>
+          <button type="submit" className="ky-auth-submit" disabled={busy}>{kind === 'activation' ? 'Activate account' : 'Set new password'}</button>
+        </form>
+      )}
+    </AuthFrame>
   );
 };

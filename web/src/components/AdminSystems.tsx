@@ -219,7 +219,7 @@ export const AdminSystems: React.FC = () => {
         </div>
         <button className="primary-btn sm" onClick={handleOpenModal}>
           <Plus size={14} />
-          <span>Connect SCIM Target</span>
+          <span>Connect SCIM target</span>
         </button>
       </div>
       {listError && <div className="alert-box error" role="alert">{listError}<button className="secondary-btn sm" onClick={fetchSystems}>Retry</button></div>}
@@ -230,11 +230,11 @@ export const AdminSystems: React.FC = () => {
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Target Service</th>
+              <th>Target service</th>
               <th>Type</th>
               <th>Destination URL</th>
-              <th>Sync Status</th>
-              <th>Last Synced</th>
+              <th>Sync status</th>
+              <th>Last synced</th>
               <th className="text-right">Actions</th>
             </tr>
           </thead>
@@ -242,7 +242,7 @@ export const AdminSystems: React.FC = () => {
             {systems?.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-5 text-muted">
-                  No downstream SCIM products connected yet. Click <strong>"Connect SCIM Target"</strong> to connect a service.
+                  No downstream SCIM products connected yet. Click <strong>Connect SCIM target</strong> to connect a service.
                 </td>
               </tr>
             ) : (
@@ -294,7 +294,7 @@ export const AdminSystems: React.FC = () => {
                     </div>
                   </td>
                   <td>
-                    <span className="font-mono badge-type">{s.systemType.toUpperCase()}</span>
+                    <span className="font-mono badge-type">{s.systemType}</span>
                   </td>
                   <td className="font-mono text-muted text-sm">{s.callbackUrl}</td>
                   <td>
@@ -333,12 +333,12 @@ export const AdminSystems: React.FC = () => {
                         title="Re-replicate all accounts via SCIM"
                       >
                         <Send size={13} />
-                        <span>Resync Directory</span>
+                        <span>Resync directory</span>
                       </button>
                       <button
                         className="icon-btn danger"
                         onClick={() => handleDeleteSystem(s)}
-                        title="Disconnect System"
+                        title="Disconnect system"
                       >
                         <Trash2 size={15} />
                       </button>
@@ -367,7 +367,7 @@ export const AdminSystems: React.FC = () => {
                   <span className="pairing-token-text font-mono">{createdToken}</span>
                   <button className="secondary-btn sm mt-2" onClick={copyCreatedToken}>
                     {copied ? <Check size={13} /> : <Copy size={13} />}
-                    <span>{copied ? 'Copied Token' : 'Copy signing secret'}</span>
+                    <span>{copied ? 'Copied token' : 'Copy signing secret'}</span>
                   </button>
                 </div>
                 <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.35rem', display: 'block' }}>
@@ -406,7 +406,7 @@ export const AdminSystems: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Target Name</label>
+                <label className="form-label">Target name</label>
                 <input
                   type="text"
                   className="form-input"
@@ -433,7 +433,7 @@ export const AdminSystems: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Custom Icon / Image URL (Optional)</label>
+                    <label className="form-label">Custom icon or image URL (optional)</label>
                     <input
                       type="url"
                       className="form-input font-mono"
