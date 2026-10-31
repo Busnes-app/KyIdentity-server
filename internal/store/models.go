@@ -192,12 +192,17 @@ type OAuthClient struct {
 	// PostLogoutRedirectURIsJSON lists where RP-initiated logout may send the browser.
 	PostLogoutRedirectURIsJSON string `json:"postLogoutRedirectUrisJson"`
 	// BackchannelLogoutURI receives signed logout tokens when a login ends; empty means unsupported.
-	BackchannelLogoutURI string    `json:"backchannelLogoutUri"`
-	LaunchURL            string    `json:"launchUrl,omitempty"`
-	Description          string    `json:"description,omitempty"`
-	IconName             string    `json:"iconName,omitempty"`
-	Enabled              bool      `json:"enabled"`
-	CreatedAt            time.Time `json:"createdAt"`
+	BackchannelLogoutURI string `json:"backchannelLogoutUri"`
+	LaunchURL            string `json:"launchUrl,omitempty"`
+	Description          string `json:"description,omitempty"`
+	IconName             string `json:"iconName,omitempty"`
+	// LauncherName replaces ClientName on launcher cards; empty means unset.
+	LauncherName string `json:"launcherName"`
+	// LauncherAudience is who sees the card: "" (unset) or LauncherEveryone, or
+	// LauncherAdmins. Display only: it never changes access.
+	LauncherAudience string    `json:"launcherAudience"`
+	Enabled          bool      `json:"enabled"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 type AuthorizationCode struct {

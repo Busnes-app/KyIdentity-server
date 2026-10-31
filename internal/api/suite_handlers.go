@@ -64,10 +64,13 @@ type suiteApp struct {
 
 // Apps lists launchable suite apps, for one user when sub is given.
 func (h *SuiteHandler) Apps(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
-	var keys map[string]bool
+	var keys, admin map[string]bool
 	var err error
 	if q := r.URL.Query(); q.Has("sub") {
 		keys, err = h.store.LauncherAppAccess(q.Get("sub"))
+		if err == nil {
+			admin, err = h.store.LauncherAdminClients(q.Get("sub"))
+		}
 		if !keys["client:"+caller.ID] {
 			keys = nil
 		}
@@ -78,7 +81,7 @@ func (h *SuiteHandler) Apps(w http.ResponseWriter, r *http.Request, caller *stor
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
-	apps, err := launcherApps(h.store, func(key string) bool { return keys[key] })
+	apps, err := launcherApps(h.store, func(key string) bool { return keys[key] }, admin)
 	if err != nil {
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return

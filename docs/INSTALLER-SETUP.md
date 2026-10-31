@@ -304,6 +304,19 @@ admin set stays, and audits it as `admin.client_launcher_updated`. It prints
 not part of the bundle, whose intent never changes, so it also reaches a setup applied before
 the installer knew it.
 
+With capability `client-launcher-display`, the same rules set a card's name and audience:
+
+`apply-setup --file <setup.json> --launcher-name <client ID>=<name>` (1-128 characters, no
+control characters or surrounding spaces) and
+`apply-setup --file <setup.json> --launcher-audience <client ID>=everyone|admins`.
+
+Each is written only while unset, so an admin's choice stays, audited as
+`admin.client_launcher_updated`, and prints `{"schema":"kyidentity.launcher-name/1"}` or
+`kyidentity.launcher-audience/1` with `client` and `status`. Setting `admins` also marks the
+client's bundle `administratorRole` as the app's administrator role, so only its holders see
+the card; a client without one falls back to KyIdentity administrators. One launcher flag per
+call. Display only: access, tokens and provisioning do not change.
+
 ## Adding clients later
 
 Setup intent is immutable, so a product installed after the first setup comes in an
