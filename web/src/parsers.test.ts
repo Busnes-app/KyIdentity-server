@@ -128,6 +128,13 @@ describe('parseOAuthClients', () => {
     );
   });
 
+  it('reads launcher name and audience, defaulting to unset', () => {
+    expect(parseOAuthClients({ clients: [client] })[0]).toMatchObject({ launcherName: '', launcherAudience: '' });
+    const parsed = parseOAuthClients({ clients: [{ ...client, launcherName: 'Chat', launcherAudience: 'admins' }] })[0];
+    expect(parsed).toMatchObject({ launcherName: 'Chat', launcherAudience: 'admins' });
+    expect(() => parseOAuthClients({ clients: [{ ...client, launcherAudience: 'staff' }] })).toThrow(/launcherAudience/);
+  });
+
   // Defaulting an unknown type to `public` silently downgrades how the UI describes the
   // client's authentication.
   it.each(['native', '', undefined])('refuses the unknown client type %p', (clientType) => {

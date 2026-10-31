@@ -498,6 +498,8 @@ func (s *Store) migrateOAuthClientLauncherMetadata() error {
 		"description":                    `ALTER TABLE oauth_clients ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
 		"icon_name":                      `ALTER TABLE oauth_clients ADD COLUMN icon_name TEXT NOT NULL DEFAULT ''`,
 		"post_logout_redirect_uris_json": `ALTER TABLE oauth_clients ADD COLUMN post_logout_redirect_uris_json TEXT NOT NULL DEFAULT '[]'`,
+		"launcher_name":                  `ALTER TABLE oauth_clients ADD COLUMN launcher_name TEXT NOT NULL DEFAULT ''`,
+		"launcher_audience":              `ALTER TABLE oauth_clients ADD COLUMN launcher_audience TEXT NOT NULL DEFAULT ''`,
 	} {
 		var count int
 		if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('oauth_clients') WHERE name = ?`, column).Scan(&count); err != nil {
@@ -2242,23 +2244,23 @@ func (s *Store) HasLegacyRecoveryCodes(userID string) (bool, error) {
 
 // OAuth Clients
 func (s *Store) CreateOAuthClient(c *OAuthClient, audit *AuditEvent) error {
-	query := `INSERT INTO oauth_clients (id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO oauth_clients (id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri, launcher_name, launcher_audience) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	c.CreatedAt = time.Now().UTC()
 	if c.PostLogoutRedirectURIsJSON == "" {
 		c.PostLogoutRedirectURIsJSON = "[]"
 	}
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		_, err := tx.Exec(query, c.ID, c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.CreatedAt, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI)
+		_, err := tx.Exec(query, c.ID, c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.CreatedAt, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI, c.LauncherName, c.LauncherAudience)
 		return err
 	})
 }
 
 func (s *Store) GetOAuthClientByID(id string) (*OAuthClient, error) {
-	query := `SELECT id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri FROM oauth_clients WHERE id = ?`
+	query := `SELECT id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri, launcher_name, launcher_audience FROM oauth_clients WHERE id = ?`
 	c := &OAuthClient{}
 	var secretHash sql.NullString
 	var launchURL sql.NullString
-	err := s.db.QueryRow(query, id).Scan(&c.ID, &c.ClientName, &c.ClientType, &secretHash, &c.RedirectURIsJSON, &c.AllowedScopesJSON, &launchURL, &c.Description, &c.IconName, &c.Enabled, &c.CreatedAt, &c.PostLogoutRedirectURIsJSON, &c.BackchannelLogoutURI)
+	err := s.db.QueryRow(query, id).Scan(&c.ID, &c.ClientName, &c.ClientType, &secretHash, &c.RedirectURIsJSON, &c.AllowedScopesJSON, &launchURL, &c.Description, &c.IconName, &c.Enabled, &c.CreatedAt, &c.PostLogoutRedirectURIsJSON, &c.BackchannelLogoutURI, &c.LauncherName, &c.LauncherAudience)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -2272,7 +2274,7 @@ func (s *Store) GetOAuthClientByID(id string) (*OAuthClient, error) {
 }
 
 func (s *Store) ListOAuthClients() ([]OAuthClient, error) {
-	query := `SELECT id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri FROM oauth_clients ORDER BY client_name ASC`
+	query := `SELECT id, client_name, client_type, client_secret_hash, redirect_uris_json, allowed_scopes_json, launch_url, description, icon_name, enabled, created_at, post_logout_redirect_uris_json, backchannel_logout_uri, launcher_name, launcher_audience FROM oauth_clients ORDER BY client_name ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -2284,7 +2286,7 @@ func (s *Store) ListOAuthClients() ([]OAuthClient, error) {
 		var c OAuthClient
 		var secretHash sql.NullString
 		var launchURL sql.NullString
-		if err := rows.Scan(&c.ID, &c.ClientName, &c.ClientType, &secretHash, &c.RedirectURIsJSON, &c.AllowedScopesJSON, &launchURL, &c.Description, &c.IconName, &c.Enabled, &c.CreatedAt, &c.PostLogoutRedirectURIsJSON, &c.BackchannelLogoutURI); err != nil {
+		if err := rows.Scan(&c.ID, &c.ClientName, &c.ClientType, &secretHash, &c.RedirectURIsJSON, &c.AllowedScopesJSON, &launchURL, &c.Description, &c.IconName, &c.Enabled, &c.CreatedAt, &c.PostLogoutRedirectURIsJSON, &c.BackchannelLogoutURI, &c.LauncherName, &c.LauncherAudience); err != nil {
 			return nil, err
 		}
 		if secretHash.Valid {
@@ -2322,8 +2324,8 @@ func (s *Store) UpdateOAuthClientWithAudit(c *OAuthClient, revokeTokens bool, au
 	if c.PostLogoutRedirectURIsJSON == "" {
 		c.PostLogoutRedirectURIsJSON = "[]"
 	}
-	if _, err := tx.Exec(`UPDATE oauth_clients SET client_name = ?, client_type = ?, client_secret_hash = ?, redirect_uris_json = ?, allowed_scopes_json = ?, launch_url = ?, description = ?, icon_name = ?, enabled = ?, post_logout_redirect_uris_json = ?, backchannel_logout_uri = ? WHERE id = ?`,
-		c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI, c.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE oauth_clients SET client_name = ?, client_type = ?, client_secret_hash = ?, redirect_uris_json = ?, allowed_scopes_json = ?, launch_url = ?, description = ?, icon_name = ?, enabled = ?, post_logout_redirect_uris_json = ?, backchannel_logout_uri = ?, launcher_name = ?, launcher_audience = ? WHERE id = ?`,
+		c.ClientName, c.ClientType, c.ClientSecretHash, c.RedirectURIsJSON, c.AllowedScopesJSON, c.LaunchURL, c.Description, c.IconName, c.Enabled, c.PostLogoutRedirectURIsJSON, c.BackchannelLogoutURI, c.LauncherName, c.LauncherAudience, c.ID); err != nil {
 		return err
 	}
 	if revokeTokens || !c.Enabled {

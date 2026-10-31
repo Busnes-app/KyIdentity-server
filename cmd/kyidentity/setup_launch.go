@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -12,13 +13,23 @@ import (
 	"github.com/google/uuid"
 )
 
-// setSetupLaunchURL gives one client of an applied prepared setup its launcher link, from
-// --launch-url CLIENT=URL. It is outside the bundle, whose staged intent never changes, so
-// an installer can add the link to a setup applied before it knew one.
-func setSetupLaunchURL(file, db, arg string, out io.Writer) error {
-	clientID, launch, _ := strings.Cut(arg, "=")
-	if !preparationPath(file) || !setupName.MatchString(clientID) || len(launch) > 2048 || !setupURI(launch) {
-		return errors.New("launch URL requires an owned prepared bundle and CLIENT=URL, the URL HTTPS without credentials or fragments")
+// setSetupLauncher sets one launcher setting of a client an applied prepared setup owns,
+// from --launch-url, --launcher-name or --launcher-audience CLIENT=VALUE. Settings are
+// outside the bundle, whose staged intent never changes, so an installer can add them to a
+// setup applied before it knew them. Each is written only while unset.
+func setSetupLauncher(file, db, flag, arg string, out io.Writer) error {
+	clientID, value, _ := strings.Cut(arg, "=")
+	valid := preparationPath(file) && setupName.MatchString(clientID)
+	switch flag {
+	case "launch-url":
+		valid = valid && len(value) <= 2048 && setupURI(value)
+	case "launcher-name":
+		valid = valid && value != "" && store.ValidLauncherName(value)
+	case "launcher-audience":
+		valid = valid && (value == store.LauncherEveryone || value == store.LauncherAdmins)
+	}
+	if !valid {
+		return fmt.Errorf("--%s requires an owned prepared bundle and CLIENT=VALUE: an HTTPS URL without credentials or fragments, a card name of at most 128 characters, or everyone|admins", flag)
 	}
 	raw, err := readSetupFile(file, setupBundleLimit)
 	if err != nil {
@@ -31,8 +42,9 @@ func setSetupLaunchURL(file, db, arg string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(b.Clients, func(c setupClient) bool { return c.ID == clientID }) {
-		return errors.New("launch URL client is not owned by this prepared setup")
+	i := slices.IndexFunc(b.Clients, func(c setupClient) bool { return c.ID == clientID })
+	if i < 0 {
+		return fmt.Errorf("--%s client is not owned by this prepared setup", flag)
 	}
 	p, err := prepareSetup(raw)
 	if err != nil {
@@ -44,16 +56,28 @@ func setSetupLaunchURL(file, db, arg string, out io.Writer) error {
 	}
 	defer s.Close()
 	if _, err := s.ApplyInstallerSetup(p, true); err != nil {
-		return errors.New("launch URL requires verified applied native ownership")
+		return fmt.Errorf("--%s requires verified applied native ownership", flag)
 	}
 	event := &store.AuditEvent{ID: uuid.NewString(), ActorUsername: "kyidentity-cli", Action: "admin.client_launcher_updated", TargetType: "client", IPAddress: "container-local", UserAgent: "kyidentity-cli", Outcome: "success", CreatedAt: time.Now().UTC()}
-	changed, err := s.SetInstallerLaunchURL(b.ID, clientID, launch, event)
+	var changed bool
+	switch flag {
+	case "launch-url":
+		changed, err = s.SetInstallerLaunchURL(b.ID, clientID, value, event)
+	case "launcher-name":
+		changed, err = s.SetInstallerLauncherName(b.ID, clientID, value, event)
+	default:
+		adminRole := ""
+		if value == store.LauncherAdmins {
+			adminRole = b.Clients[i].AdministratorRole
+		}
+		changed, err = s.SetInstallerLauncherAudience(b.ID, clientID, value, adminRole, event)
+	}
 	if err != nil {
-		return errors.New("launch URL failed; nothing was changed")
+		return fmt.Errorf("--%s failed; nothing was changed", flag)
 	}
 	status := "unchanged"
 	if changed {
 		status = "set"
 	}
-	return json.NewEncoder(out).Encode(map[string]string{"schema": "kyidentity.launch-url/1", "client": clientID, "status": status})
+	return json.NewEncoder(out).Encode(map[string]string{"schema": "kyidentity." + flag + "/1", "client": clientID, "status": status})
 }

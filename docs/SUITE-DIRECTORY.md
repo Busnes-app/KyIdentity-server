@@ -22,6 +22,9 @@ The suite apps a person can open, for an app switcher.
   (Element's home page).
 - Lists OAuth clients only, enabled, with an HTTPS launch URL. Custom launcher cards are left
   out. Order is the launcher's (sort order, then name).
+- The launcher's card settings apply: `name` is the client's launcher name when set, and a
+  card shown to the app's administrators only is listed only for a `sub` who is one, never
+  without `sub`. Like the launcher, this hides; it grants and removes no access.
 
 ```json
 {"apps": [{"id": "kypost", "name": "KyPost", "url": "https://mail.example.com/api/auth/oidc/login"}]}

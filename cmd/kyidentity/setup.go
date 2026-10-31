@@ -409,21 +409,29 @@ func runSetupInput(args []string, input io.Reader, out io.Writer) error {
 	stage := flags.Bool("stage", false, "prepare secret-free metadata and target credentials from stdin")
 	exportClient := flags.String("export-client", "", "private machine-only export of one owned client")
 	launchURL := flags.String("launch-url", "", "give one owned client its launcher link: CLIENT=URL")
+	launcherName := flags.String("launcher-name", "", "give one owned client its launcher card name: CLIENT=NAME")
+	launcherAudience := flags.String("launcher-audience", "", "show one owned client's launcher card to everyone or admins: CLIENT=AUDIENCE")
 	caps := flags.Bool("capabilities", false, "report supported setup features without opening the database")
 	if flags.Parse(args) != nil || flags.NArg() != 0 {
 		return errors.New("invalid apply-setup arguments")
 	}
 	if *caps {
-		if *file != "" || *db != "" || *check || *stage || *exportClient != "" || *launchURL != "" {
+		if *file != "" || *db != "" || *check || *stage || *exportClient != "" || *launchURL != "" || *launcherName != "" || *launcherAudience != "" {
 			return errors.New("capabilities cannot be combined with setup arguments")
 		}
-		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system", "installer-verified-email", "mail-relay", "client-launch-urls"}})
+		return json.NewEncoder(out).Encode(map[string]any{"schema": "ky.setup-capabilities/1", "service": "kyidentity", "bundleSchema": "kyidentity.setup/1", "features": []string{"local-accounts", "confidential-oidc-clients", "assigned-only", "everyday-assignment", "app-role-assignments", "scim-connectors", "suite-webhook-connectors", "directory-groups", "app-group-assignments", "scim-groups", "check", "protected-setup-files", "bundle-preparation", "target-credentials", "client-credential-export", "disable-user", "setup-amendments", "resync-system", "installer-verified-email", "mail-relay", "client-launch-urls", "client-launcher-display"}})
 	}
-	if *launchURL != "" {
-		if *stage || *check || *exportClient != "" {
-			return errors.New("launch URL cannot be combined with preparation, inspection or export flags")
+	launcher := map[string]string{}
+	for flag, value := range map[string]string{"launch-url": *launchURL, "launcher-name": *launcherName, "launcher-audience": *launcherAudience} {
+		if value != "" {
+			launcher[flag] = value
 		}
-		return setSetupLaunchURL(*file, *db, *launchURL, out)
+	}
+	for flag, value := range launcher {
+		if *stage || *check || *exportClient != "" || len(launcher) > 1 {
+			return errors.New("a launcher setting cannot be combined with another launcher setting or with preparation, inspection or export flags")
+		}
+		return setSetupLauncher(*file, *db, flag, value, out)
 	}
 	if *exportClient != "" {
 		if *stage || *check {

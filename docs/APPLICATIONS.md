@@ -40,6 +40,14 @@ it as `preferences`. It only arranges apps the user can already reach. Hiding an
 not remove access, and a hidden app stays one click away at the bottom of the page. Apps
 granted after the last save appear in a **New** group.
 
+**OAuth clients → ⋯ → Launcher card** sets how a client's card reads for everyone: a card
+name in place of the client name, and who sees it, **Everyone with access** or **This app's
+administrators** (holders of the app's administrator role, or KyIdentity administrators when
+the app has none). It is display only: a hidden card's app still signs the user in, and
+tokens and provisioning are unchanged. `PUT /api/admin/clients/{id}/launcher` takes
+`launcherName` and `launcherAudience` (`everyone`|`admins`) alongside `description` and
+`iconName`; omitted fields keep their value. The suite directory applies both.
+
 OAuth authorization and token exchange both enforce current access. Losing effective
 access revokes online tokens and invalidates authorization codes in the same transaction.
 Token registration rechecks access and the originating code atomically, including during
