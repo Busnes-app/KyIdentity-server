@@ -99,6 +99,7 @@ KyIdentity Server is the single-organization SSO provider and central identity a
 - Audit fails closed: a security mutation builds its row with `audit.Prepare`, hands `Row` to the store method that commits it in the mutation's transaction, then calls `Committed`; backup and mail settings use `Store.EditSettings` for the same. Denials, failures and sign-ins that commit with nothing use `audit.Observe`, which logs a lost row. `TestAuditWritesAreNeverDiscarded` fails on any bare or blank-assigned `Record`/`record` in `internal/api` or `cmd/kyidentity`.
 - API error bodies are marshalled (`writeAPIError`). Only `store.InputError` and `auth.PolicyError` text reaches a client (`writeInputError`); any other error is logged and answered as a generic 500.
 - Sensitive API and OAuth responses are `no-store`; registered redirect and launcher URLs must be HTTPS, except loopback HTTP for development.
+- Suite directory (`internal/api/suite_handlers.go`, contract `docs/SUITE-DIRECTORY.md`): `GET /api/suite/apps` and `GET /api/suite/peer` authenticate HTTP Basic through `oauth.Engine.AuthenticateConfidentialClient` (enabled confidential clients only; every failure is the same `401 invalid_client`), are rate limited per IP (`suite`) and per client (`suite_client:<id>`), and are `no-store`. Apps reuse the launcher's `launcherApps`/`clientLaunchURL`, list OAuth clients with `validateExternalURL` launch URLs only, and with `sub` apply `LauncherAppAccess` and return nothing unless the user may open the caller. Peer pairs come only from `suitePeers`; the secret is derived on demand (`DeriveKey(EncryptionKey, "kyidentity:suite-peer:v1:a|b")`, a < b), never stored or logged; each issue is audited `suite.peer.issue`.
 - Legacy device-pairing tables containing plaintext PINs are rebuilt on startup; their 90-second tokens are intentionally invalidated.
 - MFA reset invalidates pending native-device pairing tokens; native registration consumes a live token in the same transaction that creates the approver and push method.
 - PIN pairing (`MatchDevicePairingPIN`) looks up and counts in one immediate transaction: each miss increments `pin_failures` on all the user's live tokens, and the miss reaching `PairingPINBudget` (5) expires them all, QR tokens included.
@@ -187,6 +188,7 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## Verification
 
+- `internal/api/suite_handlers_test.go` pins launcher launch URLs (`TestLauncherLaunchURLResolution`) and covers suite-directory auth failures, per-user filtering, peer allowlist/refusals, the shared derived secret and per-client rate limiting.
 - Launcher search filters the arranged view only; never persist filtered results. Saved layouts, group order, hidden apps, custom icons and access-request controls remain available. `web/src/launcherLayout.test.ts` checks search leaves preferences and ordering unchanged.
 
 - `internal/sync/notes_native_test.go` is the opt-in real KyNotes directory sender.

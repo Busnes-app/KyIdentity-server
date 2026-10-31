@@ -286,6 +286,21 @@ func (e *Engine) authenticateClient(client *store.OAuthClient, clientSecret stri
 	}
 }
 
+// ErrInvalidClient is any failed confidential-client authentication; the reason is not told.
+var ErrInvalidClient = errors.New("invalid_client")
+
+// AuthenticateConfidentialClient returns the enabled confidential client the credentials name.
+func (e *Engine) AuthenticateConfidentialClient(clientID, clientSecret string) (*store.OAuthClient, error) {
+	client, err := e.store.GetOAuthClientByID(clientID)
+	if err != nil {
+		return nil, err
+	}
+	if client == nil || !client.Enabled || client.ClientType != "confidential" || e.authenticateClient(client, clientSecret) != nil {
+		return nil, ErrInvalidClient
+	}
+	return client, nil
+}
+
 // ExchangeAuthorizationCode validates the code, the client, the redirect URI and the PKCE
 // verifier, then issues an access token and, for the openid scope, an ID token.
 func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redirectURI, codeVerifier string) (*TokenResponse, error) {

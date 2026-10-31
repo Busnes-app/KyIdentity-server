@@ -198,6 +198,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /oauth/userinfo", s.middleware.RateLimit("oauth_userinfo", 120, 2.0)(http.HandlerFunc(oauthH.Userinfo)))
 	mux.Handle("POST /oauth/revoke", s.middleware.RateLimit("oauth_revoke", 30, 1.0)(http.HandlerFunc(oauthH.Revoke)))
 
+	// Suite directory: server-to-server, HTTP Basic client credentials (docs/SUITE-DIRECTORY.md).
+	suiteH := &SuiteHandler{store: s.store, oauthEngine: s.oauthEngine, audit: s.audit, middleware: s.middleware, encryptionKey: s.cfg.EncryptionKey}
+	mux.Handle("GET /api/suite/apps", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Apps)))
+	mux.Handle("GET /api/suite/peer", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Peer)))
+
 	// Admin routes: every one names its permission and whether it spends a step-up grant.
 	//
 	// Destructive and secret-bearing routes additionally spend a step-up grant. "Is this

@@ -30,6 +30,11 @@ authenticated by existing.
 This exists so a misregistration is recoverable; delete-and-recreate would break the
 integration it is meant to secure, which guarantees nobody ever does it.
 
+**The suite directory** lets suite servers find each other with their own client
+credentials: `GET /api/suite/apps` lists the apps a user may open (for an app switcher)
+and `GET /api/suite/peer` gives a paired app (KyCalendar and KyPost) its peer's URL and a
+derived shared secret. Contract: [SUITE-DIRECTORY.md](SUITE-DIRECTORY.md).
+
 **Access tokens live 15 minutes** and carry a `jti` recorded server-side.
 `POST /oauth/revoke` (RFC 7009, client authentication required) invalidates one;
 disabling a user, resetting their MFA, changing their password, or revoking their sessions

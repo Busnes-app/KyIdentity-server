@@ -451,32 +451,61 @@ var ssoLoginPaths = map[string]string{
 	"kypasswords": "/api/auth/oidc/login",
 	"kybookmarks": "/api/auth/oidc/login",
 	"kynotes":     "/api/auth/oidc/login",
+	"kycalendar":  "/api/sso/kysignon/login",
+	"kydrive":     "/api/sso/kysignon/login",
+	"kymessage":   "/api/sso/kyidentity/login",
 }
 
-// ListApplications returns dashboard application links, aggregating custom applications and registered OAuth clients.
-func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request) {
-	allowed, err := h.store.LauncherAppAccess(GetUserFromContext(r.Context()).ID)
-	if err != nil {
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
+// clientRedirectOrigin is the origin of the client's first redirect URI, preferring one
+// off localhost, plus the parsed URIs.
+func clientRedirectOrigin(client store.OAuthClient) (string, []string) {
+	var uris []string
+	_ = json.Unmarshal([]byte(client.RedirectURIsJSON), &uris)
+	origin := ""
+	for _, uStr := range uris {
+		if parsed, err := url.Parse(uStr); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+			if origin == "" || (strings.Contains(origin, "localhost") && !strings.Contains(parsed.Host, "localhost")) {
+				origin = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
+			}
+		}
 	}
-	customApps, err := h.store.ListApplications()
-	if err != nil {
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
-	}
+	return origin, uris
+}
 
-	oauthClients, err := h.store.ListOAuthClients()
+// clientLaunchURL is where a client's card opens: its launch URL, else its redirect origin
+// plus its SSO start path, else its first redirect URI. Empty means not launchable.
+func clientLaunchURL(client store.OAuthClient) string {
+	if launchURL := strings.TrimSpace(client.LaunchURL); launchURL != "" {
+		return launchURL
+	}
+	origin, uris := clientRedirectOrigin(client)
+	switch {
+	case origin != "":
+		return origin + ssoLoginPaths[strings.ToLower(client.ID)]
+	case len(uris) > 0:
+		return uris[0]
+	}
+	return ""
+}
+
+// launcherApps lists the enabled custom cards and OAuth clients whose key allow admits, in
+// launcher order. The launcher and the suite directory both read it.
+func launcherApps(st *store.Store, allow func(key string) bool) ([]store.Application, error) {
+	customApps, err := st.ListApplications()
+	if err != nil {
+		return nil, err
+	}
+	oauthClients, err := st.ListOAuthClients()
 	if err != nil {
 		oauthClients = []store.OAuthClient{}
 	}
 
-	appMap := make(map[string]store.Application)
+	result := make([]store.Application, 0, len(customApps)+len(oauthClients))
 	for _, app := range customApps {
-		if app.Enabled && allowed["custom:"+app.ID] {
+		if app.Enabled && allow("custom:"+app.ID) {
 			app.Source = "custom"
 			app.Key = "custom:" + app.ID
-			appMap[app.Key] = app
+			result = append(result, app)
 		}
 	}
 
@@ -485,40 +514,18 @@ func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request)
 	// than a generated one, because "OAuth 2.0 / OIDC SSO App (confidential)" restates the
 	// page title and tells the user nothing about the app.
 	for _, client := range oauthClients {
-		if !client.Enabled || !allowed["client:"+client.ID] {
+		if !client.Enabled || !allow("client:"+client.ID) {
 			continue
 		}
-		launchURL := strings.TrimSpace(client.LaunchURL)
-		if launchURL == "" {
-			var uris []string
-			_ = json.Unmarshal([]byte(client.RedirectURIsJSON), &uris)
-			origin := ""
-			for _, uStr := range uris {
-				if parsed, err := url.Parse(uStr); err == nil && parsed.Scheme != "" && parsed.Host != "" {
-					if origin == "" || (strings.Contains(origin, "localhost") && !strings.Contains(parsed.Host, "localhost")) {
-						origin = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
-					}
-				}
-			}
-
-			switch {
-			case origin != "":
-				launchURL = origin + ssoLoginPaths[strings.ToLower(client.ID)]
-			case len(uris) > 0:
-				launchURL = uris[0]
-			}
-		}
-
+		launchURL := clientLaunchURL(client)
 		if launchURL == "" {
 			continue
 		}
-
 		iconName := client.IconName
 		if iconName == "" {
 			iconName = "favicon"
 		}
-
-		appMap["client:"+client.ID] = store.Application{
+		result = append(result, store.Application{
 			Source:      "client",
 			Key:         "client:" + client.ID,
 			ID:          client.ID,
@@ -527,23 +534,34 @@ func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request)
 			IconName:    iconName,
 			Description: client.Description,
 			Enabled:     true,
-		}
+		})
 	}
 
-	result := make([]store.Application, 0, len(appMap))
-	for _, app := range appMap {
-		result = append(result, app)
-	}
-	// Map iteration order is randomised, so without this the launcher reshuffles on every
-	// page load despite sort_order existing.
-	sort.Slice(result, func(i, j int) bool {
+	// Without this the launcher reshuffles on every page load despite sort_order existing.
+	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].SortOrder != result[j].SortOrder {
 			return result[i].SortOrder < result[j].SortOrder
 		}
 		return result[i].Name < result[j].Name
 	})
+	return result, nil
+}
 
-	prefs, err := h.store.GetLauncherPrefs(GetUserFromContext(r.Context()).ID)
+// ListApplications returns dashboard application links, aggregating custom applications and registered OAuth clients.
+func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserFromContext(r.Context()).ID
+	allowed, err := h.store.LauncherAppAccess(userID)
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	result, err := launcherApps(h.store, func(key string) bool { return allowed[key] })
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	prefs, err := h.store.GetLauncherPrefs(userID)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
