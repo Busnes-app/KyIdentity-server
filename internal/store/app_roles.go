@@ -86,6 +86,16 @@ func (s *Store) migrateAppRoles() error {
  CREATE INDEX IF NOT EXISTS app_role_assignments_group ON app_role_group_assignments(group_id)`); err != nil {
 		return err
 	}
+	// administrator marks the role that makes a user the app's administrator; only
+	// launcher audience reads it.
+	if err = tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('app_roles') WHERE name='administrator'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err = tx.Exec(`ALTER TABLE app_roles ADD COLUMN administrator BOOLEAN NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 

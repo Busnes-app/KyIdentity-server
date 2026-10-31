@@ -10,7 +10,7 @@ import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { Modal } from './Modal';
 import { parseCreatedClientSecret, parseOAuthClients, parseOIDCIssuer } from '../parsers';
-import { Plus, Trash2, CheckCircle, XCircle, AlertTriangle, KeyRound, MoreHorizontal } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, XCircle, AlertTriangle, KeyRound, MoreHorizontal, LayoutGrid } from 'lucide-react';
 import { PageHead } from './PageHead';
 
 export const AdminClients: React.FC = () => {
@@ -18,6 +18,7 @@ export const AdminClients: React.FC = () => {
   const [listError, setListError] = useState<string | null>(null);
   const [issuer, setIssuer] = useState('');
   const [detailsClient, setDetailsClient] = useState<OAuthClient | null>(null);
+  const [launcherClient, setLauncherClient] = useState<OAuthClient | null>(null);
   const [showModal, setShowModal] = useState(false);
 
   const [clientId, setClientId] = useState('');
@@ -237,6 +238,7 @@ export const AdminClients: React.FC = () => {
                     <ClientRowActions
                       client={c}
                       onManage={() => setDetailsClient(c)}
+                      onLauncher={() => setLauncherClient(c)}
                       onRotate={() => handleRotateSecret(c)}
                       onDelete={() => handleDeleteClient(c.id)}
                     />
@@ -246,6 +248,10 @@ export const AdminClients: React.FC = () => {
             </tbody>
           </table>
         </div>
+      )}
+
+      {launcherClient && (
+        <ClientLauncherDialog client={launcherClient} onClose={() => setLauncherClient(null)} onSaved={() => { setLauncherClient(null); fetchClients(); }} />
       )}
 
       {detailsClient && (
@@ -482,7 +488,7 @@ export const AdminClients: React.FC = () => {
 };
 
 /** "Manage" opens the connection details; the rarer, riskier actions sit behind the ⋯ menu. */
-const ClientRowActions: React.FC<{ client: OAuthClient; onManage: () => void; onRotate: () => void; onDelete: () => void }> = ({ client, onManage, onRotate, onDelete }) => {
+const ClientRowActions: React.FC<{ client: OAuthClient; onManage: () => void; onLauncher: () => void; onRotate: () => void; onDelete: () => void }> = ({ client, onManage, onLauncher, onRotate, onDelete }) => {
   const menuId = useId();
   return (
     <div className="row-actions">
@@ -493,6 +499,9 @@ const ClientRowActions: React.FC<{ client: OAuthClient; onManage: () => void; on
       <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`More actions for ${client.clientName}`} onClickCapture={event => {
         if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
       }}>
+        <button type="button" className="row-action" onClick={onLauncher}>
+          <LayoutGrid size={15} aria-hidden="true" />Launcher card
+        </button>
         {client.clientType === 'confidential' && <button type="button" className="row-action" onClick={onRotate}>
           <KeyRound size={15} aria-hidden="true" />Rotate secret
         </button>}
@@ -501,5 +510,64 @@ const ClientRowActions: React.FC<{ client: OAuthClient; onManage: () => void; on
         </button>
       </div>
     </div>
+  );
+};
+
+type Audience = 'everyone' | 'admins';
+
+const AUDIENCES: [Audience, string, string][] = [
+  ['everyone', 'Everyone with access', 'Anyone who may open the app.'],
+  ['admins', "This app's administrators", "Holders of the app's administrator role, or KyIdentity administrators when it has none."],
+];
+
+/** The launcher fields to send: only those the admin changed, so an untouched unset value stays unset. */
+export function launcherChanges(client: OAuthClient, name: string, audience: Audience): { launcherName?: string; launcherAudience?: Audience } {
+  const changes: { launcherName?: string; launcherAudience?: Audience } = {};
+  if (name.trim() !== client.launcherName) changes.launcherName = name.trim();
+  if (audience !== (client.launcherAudience || 'everyone')) changes.launcherAudience = audience;
+  return changes;
+}
+
+/** How the client's card reads on the launcher and who sees it. It never changes access. */
+const ClientLauncherDialog: React.FC<{ client: OAuthClient; onClose: () => void; onSaved: () => void }> = ({ client, onClose, onSaved }) => {
+  const [name, setName] = useState(client.launcherName);
+  const [audience, setAudience] = useState<Audience>(client.launcherAudience || 'everyone');
+  const [error, setError] = useState<string | null>(null);
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const changes = launcherChanges(client, name, audience);
+    if (Object.keys(changes).length === 0) return onClose();
+    try {
+      await apiRequest(`/api/admin/clients/${encodeURIComponent(client.id)}/launcher`, { method: 'PUT', body: JSON.stringify(changes) });
+      onSaved();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not save the launcher card'));
+    }
+  };
+  return (
+    <Modal title={`Launcher card for ${client.clientName}`} onClose={onClose} closeOnBackdrop>
+      <form className="modal-body" onSubmit={save}>
+        {error && <p className="alert-box error" role="alert">{error}</p>}
+        <div className="form-group">
+          <label className="form-label" htmlFor="launcher-name">Card name</label>
+          <input id="launcher-name" className="form-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={128} placeholder={client.clientName} autoFocus />
+          <p className="form-hint">Leave empty to use the client name.</p>
+        </div>
+        <fieldset className="launcher-layout">
+          <legend className="form-label">Shown to</legend>
+          {AUDIENCES.map(([value, label, hint]) => (
+            <label key={value}>
+              <input type="radio" name="launcher-audience" value={value} checked={audience === value} onChange={() => setAudience(value)} />
+              <span><b>{label}</b><small>{hint}</small></span>
+            </label>
+          ))}
+        </fieldset>
+        <p className="form-hint">Hiding the card does not remove access: people can still sign in to the app.</p>
+        <div className="modal-footer">
+          <button type="button" className="secondary-btn" onClick={onClose}>Cancel</button>
+          <button type="submit" className="primary-btn">Save</button>
+        </div>
+      </form>
+    </Modal>
   );
 };

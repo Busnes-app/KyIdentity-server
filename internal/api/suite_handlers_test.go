@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -349,5 +350,113 @@ func TestSuiteRateLimitedPerClient(t *testing.T) {
 	}
 	if rr := suiteGet(t, srv, "/api/suite/apps", "kypost", "post-secret"); rr.Code != http.StatusOK {
 		t.Fatalf("another client was limited too: %d", rr.Code)
+	}
+}
+
+// The KyMessages case: everyday users see one "KyMessages" card opening the chat client and
+// no console card, the console card stays for administrators, and hiding a card leaves
+// access alone. The launcher and the suite directory agree.
+func TestLauncherNameAndAudience(t *testing.T) {
+	srv, db, cleanup := suiteFixture(t)
+	defer cleanup()
+	newClient(t, db, "kymessage", []string{covRedirect}, []string{"openid"})
+	createClient(t, db, "kymessage-chat", "public", "", "https://chat.example.test/", "https://chat-auth.example.test/cb")
+	allowTestAppAccess(t, db, "kymessage-chat")
+	allowTestAppAccess(t, db, "kypost")
+	admin := newUser(t, db, "admin")
+	everyday := newUser(t, db, "user")
+	adminCookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
+	everydayCookie := newSession(t, db, everyday, time.Now().UTC().Add(time.Hour))
+
+	for _, c := range []struct{ id, body string }{
+		{"kymessage", `{"launcherAudience":"admins"}`},
+		{"kymessage-chat", `{"launcherName":"KyMessages"}`},
+	} {
+		if rr := adminRequestNoStepUp(t, srv, "PUT", "/api/admin/clients/"+c.id+"/launcher", adminCookie, c.body); rr.Code != http.StatusOK {
+			t.Fatalf("launcher edit %s: %d %s", c.id, rr.Code, rr.Body.String())
+		}
+	}
+
+	names := func(cards []store.Application) map[string]string {
+		out := map[string]string{}
+		for _, c := range cards {
+			out[c.ID] = c.Name
+		}
+		return out
+	}
+	if got := names(launcherCards(t, srv, everydayCookie)); got["kymessage-chat"] != "KyMessages" || got["kymessage"] != "" {
+		t.Fatalf("everyday launcher %v", got)
+	}
+	// No administrator roles on the console, so KyIdentity administrators count.
+	if got := names(launcherCards(t, srv, adminCookie)); got["kymessage"] != "kymessage" || got["kymessage-chat"] != "KyMessages" {
+		t.Fatalf("admin launcher %v", got)
+	}
+
+	suiteNames := func(query string) map[string]string {
+		rr := suiteGet(t, srv, "/api/suite/apps"+query, "kypost", "post-secret")
+		var resp struct {
+			Apps []suiteApp `json:"apps"`
+		}
+		if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &resp) != nil {
+			t.Fatalf("suite apps%s: %d %s", query, rr.Code, rr.Body.String())
+		}
+		out := map[string]string{}
+		for _, a := range resp.Apps {
+			out[a.ID] = a.Name
+		}
+		return out
+	}
+	if got := suiteNames("?sub=" + everyday.ID); got["kymessage-chat"] != "KyMessages" || got["kymessage"] != "" {
+		t.Fatalf("suite everyday %v", got)
+	}
+	if got := suiteNames("?sub=" + admin.ID); got["kymessage"] == "" {
+		t.Fatalf("suite admin %v", got)
+	}
+	if got := suiteNames(""); got["kymessage"] != "" || got["kymessage-chat"] != "KyMessages" {
+		t.Fatalf("suite without a user lists an admins-only card: %v", got)
+	}
+
+	// Hidden is not denied: the everyday user still signs in to the console.
+	rr := covAuthorize(t, srv, everydayCookie, covAuthorizeQuery("kymessage").Encode())
+	loc, _ := url.Parse(rr.Header().Get("Location"))
+	if rr.Code != http.StatusFound || loc == nil || loc.Query().Get("code") == "" {
+		t.Fatalf("hidden card blocked sign-in: %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+}
+
+func TestClientLauncherEditNameAndAudience(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	admin := newUser(t, db, "admin")
+	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
+	newClient(t, db, "kydns", []string{"https://dns.example.test/cb"}, []string{"openid"})
+	put := func(body string) int {
+		return adminRequestNoStepUp(t, srv, "PUT", "/api/admin/clients/kydns/launcher", cookie, body).Code
+	}
+	if code := put(`{"description":"DNS","iconName":"globe","launcherName":"Name server","launcherAudience":"admins"}`); code != http.StatusOK {
+		t.Fatalf("full edit %d", code)
+	}
+	// Omitted fields keep their values.
+	if code := put(`{"launcherAudience":"everyone"}`); code != http.StatusOK {
+		t.Fatalf("audience edit %d", code)
+	}
+	c, _ := db.GetOAuthClientByID("kydns")
+	if c.Description != "DNS" || c.IconName != "globe" || c.LauncherName != "Name server" || c.LauncherAudience != "everyone" {
+		t.Fatalf("client after partial edit %+v", c)
+	}
+	for _, bad := range []string{`{"launcherAudience":"staff"}`, `{"launcherName":"a\u0007b"}`, `{"launcherName":"` + strings.Repeat("x", 129) + `"}`} {
+		if code := put(bad); code != http.StatusBadRequest {
+			t.Errorf("%s returned %d, want 400", bad, code)
+		}
+	}
+	// An empty name clears it back to the client name.
+	if code := put(`{"launcherName":"  "}`); code != http.StatusOK {
+		t.Fatalf("clear %d", code)
+	}
+	if card := cardByID(launcherCards(t, srv, cookie), "kydns"); card == nil || card.Name != "kydns" {
+		t.Fatalf("cleared name card %+v", card)
+	}
+	if n := covAuditOutcomes(t, db, "admin.client_launcher_updated")["success"]; n != 3 {
+		t.Fatalf("launcher edits audited %d times, want 3", n)
 	}
 }

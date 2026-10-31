@@ -397,6 +397,8 @@ export function parseOAuthClients(value: unknown): OAuthClient[] {
       postLogoutRedirectUris: typeof c.postLogoutRedirectUrisJson === 'string' ? jsonStringArray(c, 'postLogoutRedirectUrisJson') : [],
       backchannelLogoutUri: optStr(c, 'backchannelLogoutUri') || undefined,
       launchUrl: optStr(c, 'launchUrl'),
+      launcherName: optStr(c, 'launcherName') ?? '',
+      launcherAudience: c.launcherAudience === undefined ? '' : oneOf(c, 'launcherAudience', ['', 'everyone', 'admins'] as const),
       enabled: c.enabled !== false,
       createdAt: optStr(c, 'createdAt') ?? '',
     };

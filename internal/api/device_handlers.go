@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -489,8 +490,10 @@ func clientLaunchURL(client store.OAuthClient) string {
 }
 
 // launcherApps lists the enabled custom cards and OAuth clients whose key allow admits, in
-// launcher order. The launcher and the suite directory both read it.
-func launcherApps(st *store.Store, allow func(key string) bool) ([]store.Application, error) {
+// launcher order, under each client's launcher name. A card for admins only shows when
+// admin holds its client ID (nil for no viewer). The launcher and the suite directory both
+// read it; neither audience nor name changes access.
+func launcherApps(st *store.Store, allow func(key string) bool, admin map[string]bool) ([]store.Application, error) {
 	customApps, err := st.ListApplications()
 	if err != nil {
 		return nil, err
@@ -514,7 +517,7 @@ func launcherApps(st *store.Store, allow func(key string) bool) ([]store.Applica
 	// than a generated one, because "OAuth 2.0 / OIDC SSO App (confidential)" restates the
 	// page title and tells the user nothing about the app.
 	for _, client := range oauthClients {
-		if !client.Enabled || !allow("client:"+client.ID) {
+		if !client.Enabled || !allow("client:"+client.ID) || client.LauncherAudience == store.LauncherAdmins && !admin[client.ID] {
 			continue
 		}
 		launchURL := clientLaunchURL(client)
@@ -529,7 +532,7 @@ func launcherApps(st *store.Store, allow func(key string) bool) ([]store.Applica
 			Source:      "client",
 			Key:         "client:" + client.ID,
 			ID:          client.ID,
-			Name:        client.ClientName,
+			Name:        cmp.Or(client.LauncherName, client.ClientName),
 			URL:         launchURL,
 			IconName:    iconName,
 			Description: client.Description,
@@ -555,7 +558,12 @@ func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	result, err := launcherApps(h.store, func(key string) bool { return allowed[key] })
+	admin, err := h.store.LauncherAdminClients(userID)
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	result, err := launcherApps(h.store, func(key string) bool { return allowed[key] }, admin)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

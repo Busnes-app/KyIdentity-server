@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -1025,36 +1026,26 @@ func (h *AdminHandler) UpdateApplication(w http.ResponseWriter, r *http.Request)
 }
 
 // UpdateClientLauncher edits only how a registered client is presented on the launcher: its
-// blurb and its icon.
+// blurb, icon, card name and audience. Omitted fields keep their value.
 //
 // It is deliberately a separate route from UpdateOAuthClient, which is step-up gated. Step-up
 // grants are single-use, so describing seven cards through that handler costs seven MFA
 // prompts, and an admin who is prompted seven times to fix cosmetic text learns to leave the
 // text wrong. This handler cannot reach redirect URIs, scopes, the secret, the client type,
-// or enablement, so nothing it can write is worth a grant.
+// enablement or access, so nothing it can write is worth a grant: an audience hides a card,
+// it never removes access.
 func (h *AdminHandler) UpdateClientLauncher(w http.ResponseWriter, r *http.Request) {
 	admin := GetUserFromContext(r.Context())
 	clientID := r.PathValue("id")
 
 	var req struct {
-		Description string `json:"description"`
-		IconName    string `json:"iconName"`
+		Description      *string `json:"description"`
+		IconName         *string `json:"iconName"`
+		LauncherName     *string `json:"launcherName"`
+		LauncherAudience *string `json:"launcherAudience"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
-		return
-	}
-	description := strings.TrimSpace(req.Description)
-	if len(description) > maxLauncherDescription {
-		http.Error(w, `{"error":"invalid_request","error_description":"Description is too long"}`, http.StatusBadRequest)
-		return
-	}
-	iconName := strings.TrimSpace(req.IconName)
-	if iconName == "" {
-		iconName = "favicon"
-	}
-	if !h.iconAllowed(iconName) {
-		http.Error(w, `{"error":"invalid_request","error_description":"Unknown application icon"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -1067,12 +1058,39 @@ func (h *AdminHandler) UpdateClientLauncher(w http.ResponseWriter, r *http.Reque
 		http.Error(w, `{"error":"client_not_found"}`, http.StatusNotFound)
 		return
 	}
-
 	previousIcon := client.IconName
-	client.Description = description
-	client.IconName = iconName
 
-	updated := h.audit.Prepare("admin.client_launcher_updated", admin.ID, admin.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if req.Description != nil {
+		client.Description = strings.TrimSpace(*req.Description)
+		if len(client.Description) > maxLauncherDescription {
+			http.Error(w, `{"error":"invalid_request","error_description":"Description is too long"}`, http.StatusBadRequest)
+			return
+		}
+	}
+	if req.IconName != nil {
+		client.IconName = cmp.Or(strings.TrimSpace(*req.IconName), "favicon")
+		if !h.iconAllowed(client.IconName) {
+			http.Error(w, `{"error":"invalid_request","error_description":"Unknown application icon"}`, http.StatusBadRequest)
+			return
+		}
+	}
+	if req.LauncherName != nil {
+		client.LauncherName = strings.TrimSpace(*req.LauncherName)
+		if !store.ValidLauncherName(client.LauncherName) {
+			http.Error(w, `{"error":"invalid_request","error_description":"Card name must be at most 128 characters without control characters"}`, http.StatusBadRequest)
+			return
+		}
+	}
+	if req.LauncherAudience != nil {
+		client.LauncherAudience = *req.LauncherAudience
+		if !store.ValidLauncherAudience(client.LauncherAudience) {
+			http.Error(w, `{"error":"invalid_request","error_description":"Audience must be everyone or admins"}`, http.StatusBadRequest)
+			return
+		}
+	}
+
+	updated := h.audit.Prepare("admin.client_launcher_updated", admin.ID, admin.Username, clientID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success",
+		map[string]any{"launcherName": client.LauncherName, "launcherAudience": client.LauncherAudience})
 	if err := h.store.UpdateOAuthClientWithAudit(client, false, updated.Row); err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

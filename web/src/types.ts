@@ -150,6 +150,10 @@ export interface OAuthClient {
   postLogoutRedirectUris: string[];
   backchannelLogoutUri?: string;
   launchUrl?: string;
+  /** Launcher card name; empty uses clientName. */
+  launcherName: string;
+  /** Who sees the launcher card; '' is unset (everyone). Display only, never access. */
+  launcherAudience: '' | 'everyone' | 'admins';
   enabled: boolean;
   createdAt: string;
 }
