@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { UserRowActions } from './AdminUsers';
+import { UserRowActions, filterUsers } from './AdminUsers';
 import type { User } from '../types';
 
 const admin: User = { id: 'a1', username: 'admin', displayName: 'Administrator', email: 'admin@x.test', role: 'admin' };
@@ -30,5 +30,25 @@ describe('user row actions', () => {
 
   it('name the activation link for a pending account', () => {
     expect(actions(render({ ...member, pending: true }, false))).toContain('Activation link');
+  });
+});
+
+describe('user list filter', () => {
+  const list: User[] = [{ ...admin, status: 'active' }, { ...member, status: 'active' }, { ...member, id: 'p1', username: 'priya', displayName: 'Priya Shah', email: 'p@x.test', pending: true },
+    { ...member, id: 'd1', username: 'gone', displayName: '', email: 'gone@x.test', status: 'disabled' }];
+  const ids = (f: Parameters<typeof filterUsers>[1]) => filterUsers(list, f).map(u => u.id);
+  const all = { query: '', role: 'all', status: 'all' } as const;
+
+  it('keeps every account with no filter', () => expect(ids(all)).toEqual(['a1', 'u1', 'p1', 'd1']));
+  it('matches account, display name or email, ignoring case and spaces', () => {
+    expect(ids({ ...all, query: ' SHAH ' })).toEqual(['p1']);
+    expect(ids({ ...all, query: 'gone@' })).toEqual(['d1']);
+    expect(ids({ ...all, query: 'admin' })).toEqual(['a1']);
+  });
+  it('filters by role and by status, pending before active', () => {
+    expect(ids({ ...all, role: 'admin' })).toEqual(['a1']);
+    expect(ids({ ...all, status: 'pending' })).toEqual(['p1']);
+    expect(ids({ ...all, status: 'active' })).toEqual(['a1', 'u1']);
+    expect(ids({ ...all, status: 'disabled' })).toEqual(['d1']);
   });
 });

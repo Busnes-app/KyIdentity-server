@@ -4,8 +4,8 @@ import { parseAuthStep, parseBeginLogin, parsePushStatus, parseSuccess } from '.
 import { sameOriginPath } from '../returnTo';
 import { getPasskeyAssertion, isPasskeySupported } from '../webauthn';
 import type { User } from '../types';
-import { ScanFace, RefreshCw, AlertCircle } from 'lucide-react';
-import { Brand } from './Sidebar';
+import { ScanFace, RefreshCw, AlertCircle, LogIn } from 'lucide-react';
+import { AuthFrame } from './AuthFrame';
 
 interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
@@ -258,188 +258,186 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   };
 
   const canUseWebauthn = mfaMethods.includes('webauthn') && isPasskeySupported();
-  const spinner = <RefreshCw className="spin" size={16} />;
+  const spinner = <RefreshCw className="spin" size={16} aria-hidden="true" />;
 
   if (authorizationRestarted) return (
-    <div className="login-page"><div className="login-col"><div className="login-card">
-      <h1>You’re signed in</h1>
-      <p role="status">The application’s sign-in request expired or was cancelled. Return to the application and start sign-in again.</p>
-      <a className="primary-btn" href="/">Go to your dashboard</a>
-    </div></div></div>
+    <AuthFrame>
+      <h2>You’re signed in</h2>
+      <p role="status" className="ky-auth-note">The application’s sign-in request expired or was cancelled. Return to the application and start sign-in again.</p>
+      <a className="ky-auth-submit" href="/">Go to your dashboard</a>
+    </AuthFrame>
   );
 
   return (
-    <div className="login-page">
-      <aside className="login-intro">
-        <Brand />
-        <h1>Sign in once, then open everything.</h1>
-      </aside>
-
-      <div className="login-col">
-        <div className="login-card">
-          {error && (
-            <div className="alert-box error" role="alert">
-              <AlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {interaction && <button type="button" className="text-btn" onClick={cancelInteraction}>Cancel sign-in</button>}
-
-          {!mfaRequired && forgot && (
-            <form onSubmit={handleForgotSubmit} className="login-form">
-              <h2>Reset your password</h2>
-              {forgotSent ? (
-                <p className="text-muted">If that account exists and mail delivery is set up, a reset link is on its way and stays valid for 30 minutes. Otherwise ask an administrator for a link.</p>
-              ) : (
-                <>
-                  <p className="text-muted">Enter your username or email address.</p>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="forgot-identifier">Username or email</label>
-                    <input id="forgot-identifier" type="text" className="form-input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required />
-                  </div>
-                  <button type="submit" className="primary-btn full-width" disabled={loading}>{loading ? spinner : 'Send reset link'}</button>
-                </>
-              )}
-              <button type="button" className="text-btn" onClick={() => { setForgot(false); setForgotSent(false); setError(null); }}>Back to sign in</button>
-            </form>
-          )}
-
-          {!mfaRequired && !forgot && (
-            <form onSubmit={handlePasswordSubmit} className="login-form">
-              <h2>{interaction ? 'Verify your sign-in' : 'Sign in'}</h2>
-              {interactionDetails && <p className="text-muted">Continue to {interactionDetails.appName}. {interactionDetails.requiresPasskey ? 'Use your password and an enrolled passkey. Other factors do not meet this request.' : interactionDetails.requiresMFA ? 'Use your password and an enrolled authenticator or passkey. Recovery codes do not meet this request.' : 'Enter your password and complete any enrolled second factor.'}</p>}
-              <div className="form-group">
-                <label className="form-label" htmlFor="username">Username</label>
-                <input
-                  id="username"
-                  type="text"
-                  className="form-input font-mono"
-                  autoComplete="username"
-                  readOnly={Boolean(interactionDetails?.username)}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="password">Password</label>
-                <input
-                  id="password"
-                  type="password"
-                  className="form-input"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <button type="submit" className="primary-btn full-width" disabled={loading || Boolean(interaction && !interactionDetails)}>
-                {loading ? spinner : 'Sign in'}
-              </button>
-              {!interaction && <button type="button" className="text-btn" onClick={() => { setForgot(true); setError(null); }}>Forgot your password?</button>}
-            </form>
-          )}
-
-          {mfaRequired && mfaMode === 'webauthn' && (
-            <div className="login-form">
-              <h2>Use a passkey</h2>
-              {!isPasskeySupported() && <p role="alert">This browser cannot use passkeys. Open the application in a browser with passkey support.</p>}
-              <p className="text-muted">Your browser will ask for a fingerprint, face, or security key.</p>
-              <div className="match"><ScanFace size={56} /></div>
-              <button type="button" className="primary-btn full-width" onClick={submitPasskey} disabled={loading || !isPasskeySupported()}>
-                {loading ? spinner : 'Continue with passkey'}
-              </button>
-              <div className="mfa-alt-links">
-                {matchDigits && (
-                  <button type="button" className="text-btn" onClick={() => setMfaMode('push')}>Approve on your phone instead</button>
-                )}
-                {!interactionDetails?.requiresPasskey && mfaMethods.includes('totp') && <button type="button" className="text-btn" onClick={() => setMfaMode('totp')}>Enter a six-digit code</button>}
-                {!interactionDetails?.requiresMFA && <button type="button" className="text-btn" onClick={() => setMfaMode('recovery')}>Use a recovery code</button>}
-              </div>
-            </div>
-          )}
-
-          {mfaRequired && mfaMode === 'push' && (
-            <div className="login-form">
-              <h2>Check your phone</h2>
-              <p className="text-muted">Open KyAuth on your phone and type in this number.</p>
-              <div className="match" aria-live="polite">
-                <b>{matchDigits}</b>
-                <span>Type it into KyAuth to approve this sign-in.</span>
-              </div>
-              <div className="wait"><i />Waiting for approval.</div>
-              <div className="mfa-alt-links">
-                {canUseWebauthn && (
-                  <button type="button" className="text-btn" onClick={() => setMfaMode('webauthn')}>Use a passkey instead</button>
-                )}
-                {!interactionDetails?.requiresPasskey && mfaMethods.includes('totp') && <button type="button" className="text-btn" onClick={() => setMfaMode('totp')}>Enter a six-digit code</button>}
-              </div>
-            </div>
-          )}
-
-          {mfaRequired && mfaMode === 'totp' && (
-            <form onSubmit={handleTOTPSubmit} className="login-form">
-              <h2>Enter your six-digit code</h2>
-              <div className="form-group">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  className="form-input text-center text-mono text-large"
-                  placeholder="000000"
-                  aria-label="Six-digit code"
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </div>
-              <button type="submit" className="primary-btn full-width" disabled={loading || totpCode.length < 6}>
-                {loading ? spinner : 'Continue'}
-              </button>
-              <div className="mfa-alt-links">
-                {canUseWebauthn && (
-                  <button type="button" className="text-btn" onClick={() => setMfaMode('webauthn')}>Use a passkey instead</button>
-                )}
-                {matchDigits && (
-                  <button type="button" className="text-btn" onClick={() => setMfaMode('push')}>Approve on your phone instead</button>
-                )}
-                {!interactionDetails?.requiresMFA && <button type="button" className="text-btn" onClick={() => setMfaMode('recovery')}>Use a recovery code</button>}
-              </div>
-            </form>
-          )}
-
-          {mfaRequired && mfaMode === 'recovery' && (
-            <form onSubmit={handleRecoverySubmit} className="login-form">
-              <h2>Use a recovery code</h2>
-              <p className="text-muted">Each code works once.</p>
-              <div className="form-group">
-                <input
-                  type="text"
-                  className="form-input text-center text-mono"
-                  placeholder="XXXX-XXXX"
-                  aria-label="Recovery code"
-                  value={recoveryCode}
-                  onChange={(e) => setRecoveryCode(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </div>
-              <button type="submit" className="primary-btn full-width" disabled={loading || !recoveryCode}>
-                {loading ? spinner : 'Continue'}
-              </button>
-              <div className="mfa-alt-links">
-                {canUseWebauthn && (
-                  <button type="button" className="text-btn" onClick={() => setMfaMode('webauthn')}>Use a passkey instead</button>
-                )}
-                {!interactionDetails?.requiresPasskey && mfaMethods.includes('totp') && <button type="button" className="text-btn" onClick={() => setMfaMode('totp')}>Enter a six-digit code</button>}
-              </div>
-            </form>
-          )}
+    <AuthFrame>
+      {error && (
+        <div className="alert-box error" role="alert">
+          <AlertCircle size={16} aria-hidden="true" />
+          <span>{error}</span>
         </div>
-      </div>
-    </div>
+      )}
+
+      {!mfaRequired && forgot && (
+        <form onSubmit={handleForgotSubmit}>
+          <h2>Reset your password</h2>
+          {forgotSent ? (
+            <p className="ky-auth-note">If that account exists and mail delivery is set up, a reset link is on its way and stays valid for 30 minutes. Otherwise ask an administrator for a link.</p>
+          ) : (
+            <>
+              <p className="ky-auth-note">Enter your username or email address.</p>
+              <div className="ky-auth-field">
+                <label htmlFor="forgot-identifier">Username or email</label>
+                <input id="forgot-identifier" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required />
+              </div>
+              <button type="submit" className="ky-auth-submit" disabled={loading}>{loading ? spinner : 'Send reset link'}</button>
+            </>
+          )}
+          <button type="button" className="ky-auth-link" onClick={() => { setForgot(false); setForgotSent(false); setError(null); }}>Back to sign in</button>
+        </form>
+      )}
+
+      {!mfaRequired && !forgot && (
+        <form onSubmit={handlePasswordSubmit}>
+          {interaction && <h2>Verify your sign-in</h2>}
+          {interactionDetails && <p className="ky-auth-note">Continue to {interactionDetails.appName}. {interactionDetails.requiresPasskey ? 'Use your password and an enrolled passkey. Other factors do not meet this request.' : interactionDetails.requiresMFA ? 'Use your password and an enrolled authenticator or passkey. Recovery codes do not meet this request.' : 'Enter your password and complete any enrolled second factor.'}</p>}
+          <div className="ky-auth-field">
+            <label htmlFor="username">Username</label>
+            <input
+              id="username"
+              type="text"
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              readOnly={Boolean(interactionDetails?.username)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoFocus
+              required
+            />
+          </div>
+          <div className="ky-auth-field">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
+          <button type="submit" className="ky-auth-submit" disabled={loading || Boolean(interaction && !interactionDetails)}>
+            {loading ? spinner : <LogIn aria-hidden="true" />}
+            <span>Sign in</span>
+          </button>
+          {!interaction && <button type="button" className="ky-auth-link" onClick={() => { setForgot(true); setError(null); }}>Forgot your password?</button>}
+        </form>
+      )}
+
+      {mfaRequired && mfaMode === 'webauthn' && (
+        <div className="ky-auth-step">
+          <h2>Use a passkey</h2>
+          {!isPasskeySupported() && <p role="alert">This browser cannot use passkeys. Open the application in a browser with passkey support.</p>}
+          <p className="ky-auth-note">Your browser will ask for a fingerprint, face, or security key.</p>
+          <div className="match"><ScanFace size={56} aria-hidden="true" /></div>
+          <button type="button" className="ky-auth-submit" onClick={submitPasskey} disabled={loading || !isPasskeySupported()}>
+            {loading ? spinner : 'Continue with passkey'}
+          </button>
+          <div className="mfa-alt-links">
+            {matchDigits && (
+              <button type="button" className="ky-auth-link" onClick={() => setMfaMode('push')}>Approve on your phone instead</button>
+            )}
+            {!interactionDetails?.requiresPasskey && mfaMethods.includes('totp') && <button type="button" className="ky-auth-link" onClick={() => setMfaMode('totp')}>Enter a six-digit code</button>}
+            {!interactionDetails?.requiresMFA && <button type="button" className="ky-auth-link" onClick={() => setMfaMode('recovery')}>Use a recovery code</button>}
+          </div>
+        </div>
+      )}
+
+      {mfaRequired && mfaMode === 'push' && (
+        <div className="ky-auth-step">
+          <h2>Check your phone</h2>
+          <p className="ky-auth-note">Open KyAuth on your phone and type in this number.</p>
+          <div className="match" aria-live="polite">
+            <b>{matchDigits}</b>
+            <span>Type it into KyAuth to approve this sign-in.</span>
+          </div>
+          <div className="wait"><i />Waiting for approval.</div>
+          <div className="mfa-alt-links">
+            {canUseWebauthn && (
+              <button type="button" className="ky-auth-link" onClick={() => setMfaMode('webauthn')}>Use a passkey instead</button>
+            )}
+            {!interactionDetails?.requiresPasskey && mfaMethods.includes('totp') && <button type="button" className="ky-auth-link" onClick={() => setMfaMode('totp')}>Enter a six-digit code</button>}
+          </div>
+        </div>
+      )}
+
+      {mfaRequired && mfaMode === 'totp' && (
+        <form onSubmit={handleTOTPSubmit}>
+          <h2>Enter your six-digit code</h2>
+          <div className="ky-auth-field">
+            <label htmlFor="totp-code">Six-digit code</label>
+            <input
+              id="totp-code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              className="ky-code-input"
+              placeholder="000000"
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value)}
+              autoFocus
+              required
+            />
+          </div>
+          <button type="submit" className="ky-auth-submit" disabled={loading || totpCode.length < 6}>
+            {loading ? spinner : 'Continue'}
+          </button>
+          <div className="mfa-alt-links">
+            {canUseWebauthn && (
+              <button type="button" className="ky-auth-link" onClick={() => setMfaMode('webauthn')}>Use a passkey instead</button>
+            )}
+            {matchDigits && (
+              <button type="button" className="ky-auth-link" onClick={() => setMfaMode('push')}>Approve on your phone instead</button>
+            )}
+            {!interactionDetails?.requiresMFA && <button type="button" className="ky-auth-link" onClick={() => setMfaMode('recovery')}>Use a recovery code</button>}
+          </div>
+        </form>
+      )}
+
+      {mfaRequired && mfaMode === 'recovery' && (
+        <form onSubmit={handleRecoverySubmit}>
+          <h2>Use a recovery code</h2>
+          <p className="ky-auth-note">Each code works once.</p>
+          <div className="ky-auth-field">
+            <label htmlFor="recovery-code">Recovery code</label>
+            <input
+              id="recovery-code"
+              type="text"
+              autoComplete="one-time-code"
+              autoCapitalize="none"
+              spellCheck={false}
+              className="ky-code-input"
+              placeholder="XXXX-XXXX"
+              value={recoveryCode}
+              onChange={(e) => setRecoveryCode(e.target.value)}
+              autoFocus
+              required
+            />
+          </div>
+          <button type="submit" className="ky-auth-submit" disabled={loading || !recoveryCode}>
+            {loading ? spinner : 'Continue'}
+          </button>
+          <div className="mfa-alt-links">
+            {canUseWebauthn && (
+              <button type="button" className="ky-auth-link" onClick={() => setMfaMode('webauthn')}>Use a passkey instead</button>
+            )}
+            {!interactionDetails?.requiresPasskey && mfaMethods.includes('totp') && <button type="button" className="ky-auth-link" onClick={() => setMfaMode('totp')}>Enter a six-digit code</button>}
+          </div>
+        </form>
+      )}
+
+      {interaction && <button type="button" className="ky-auth-link" onClick={cancelInteraction}>Cancel sign-in</button>}
+    </AuthFrame>
   );
 };

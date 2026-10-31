@@ -6,6 +6,7 @@ import { isCancelled, useStepUp } from './StepUpPrompt';
 import { describeInstant, instantFromLocal, localZone } from '../instant';
 import { AdminEnrollmentPolicies } from './AdminEnrollmentPolicies';
 import { pageSize, Pager, useDirectoryPage } from './DirectoryPage';
+import { Plus } from 'lucide-react';
 
 type Mutate = (reason: string, method: 'POST' | 'PUT' | 'DELETE', path: string, body?: object) => Promise<boolean>;
 
@@ -100,7 +101,7 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
 
       </div>
       {user ? <button className="secondary-btn" disabled={busy} onClick={onClearUser}>All groups</button>
-        : <button className="primary-btn" disabled={busy} onClick={() => edit()}>Create group</button>}
+        : <button className="primary-btn" disabled={busy} onClick={() => edit()}><Plus size={16} aria-hidden="true" />Create group</button>}
     </div>
     <details className="policy-note"><summary>Membership and MFA rules</summary><p className="text-muted text-sm">Administrator access is controlled by each user's role. Membership in a group with required MFA changes authentication requirements and cancels that user's OAuth grants. If your account requires MFA, sign in with a permitted factor within five minutes before changing such memberships.</p></details>
     {(mutationError || error) && <div className="alert-box error" role="alert">{mutationError || error}{error && <button className="secondary-btn sm" onClick={reload}>Retry</button>}</div>}

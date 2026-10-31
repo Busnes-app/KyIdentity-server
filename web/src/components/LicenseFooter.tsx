@@ -1,42 +1,29 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import mitLicenseText from '../mit.txt?raw';
-import { Modal } from './Modal';
 
-export const LicenseTitle: React.FC<{ version?: string }> = ({ version }) => (
-  <span className="license-title-main">
-    <span className="license-app-name">KyIdentity</span>
-    {version ? <span className="license-version-badge">v{version}</span> : null}
-  </span>
-);
-
-export const LicenseDetails: React.FC = () => (
-  <div className="license-window">
-    <p className="license-title-sub">Developed by Busnes.app</p>
-    <p className="license-title-sub">&copy; {new Date().getFullYear()} &middot; Licensed under the MIT License</p>
-    <textarea className="license-text" readOnly value={mitLicenseText} aria-label="MIT License" />
-  </div>
-);
-
-/** The suite's sidebar licence line; opens the version and MIT text. */
+/** The suite's licence line and About dialog (ky-ui shell markup). */
 export const LicenseFooter: React.FC<{ version?: string }> = ({ version }) => {
-  const [open, setOpen] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const year = new Date().getFullYear();
+  const close = () => dialog.current?.close();
+
   return (
-    <div className="sidebar-footer">
-      <p>
-        <button type="button" className="license-link" onClick={() => setOpen(true)}>
-          &copy; {new Date().getFullYear()} &middot; MIT License
-        </button>
-      </p>
-      {open && (
-        <Modal
-          className="license-modal"
-          closeOnBackdrop
-          onClose={() => setOpen(false)}
-          title={<LicenseTitle version={version} />}
-        >
-          <LicenseDetails />
-        </Modal>
-      )}
-    </div>
+    <footer className="ky-license">
+      <button type="button" className="ky-license-link" onClick={() => dialog.current?.showModal()}>
+        &copy; {year} &middot; MIT License
+      </button>
+      <dialog ref={dialog} className="ky-about" aria-label="About KyIdentity"
+        onClick={event => { if (event.target === dialog.current) close(); }}>
+        <div className="ky-about-head">
+          <div>
+            <h2 className="ky-about-name">KyIdentity{version ? <span className="ky-about-version">v{version}</span> : null}</h2>
+            <p className="ky-about-meta">Developed by Busnes.app</p>
+            <p className="ky-about-meta">&copy; {year} &middot; Licensed under the MIT License</p>
+          </div>
+          <button type="button" className="ky-about-close" onClick={close}>Close</button>
+        </div>
+        <textarea className="ky-about-license" readOnly value={mitLicenseText} aria-label="MIT License" />
+      </dialog>
+    </footer>
   );
 };

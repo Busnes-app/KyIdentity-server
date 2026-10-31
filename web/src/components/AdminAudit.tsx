@@ -399,7 +399,7 @@ export const AdminAudit: React.FC = () => {
                                   <span className="audit-detail-value">{e.targetId || '—'}</span>
                                 </div>
                                 <div className="audit-detail-item">
-                                  <span className="audit-detail-label">User Agent</span>
+                                  <span className="audit-detail-label">User agent</span>
                                   <span className="audit-detail-value text-muted" style={{ fontSize: '0.78rem' }}>
                                     {e.userAgent || '—'}
                                   </span>
@@ -408,7 +408,7 @@ export const AdminAudit: React.FC = () => {
 
                               {parsedDetails !== null && parsedDetails !== undefined && (
                                 <div className="audit-detail-item">
-                                  <span className="audit-detail-label">Event Payload / Details</span>
+                                  <span className="audit-detail-label">Event payload and details</span>
                                   <pre className="audit-json-box">
                                     {typeof parsedDetails === 'object'
                                       ? JSON.stringify(parsedDetails, null, 2)

@@ -101,7 +101,7 @@ export function useStepUp() {
   };
 
   const stepUpPrompt = prompt ? (
-    <Modal title="Confirm It's You" onClose={cancel} className="step-up-card" returnFocus={prompt.returnFocus}>
+    <Modal title="Confirm it's you" onClose={cancel} className="step-up-card" returnFocus={prompt.returnFocus}>
       <form onSubmit={submit}>
         <div className="modal-body">
           <p className="modal-desc">{prompt.reason}</p>
