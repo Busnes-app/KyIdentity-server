@@ -9,18 +9,18 @@ const ready: BackupStatus = {
 
 describe('backup schedule fact', () => {
   it('waits for a recovery key instead of promising a next run', () => {
-    expect(scheduleFact({ ...ready, keyPinned: false, paired: false })).toEqual({ badge: 'disabled', text: 'Waiting for recovery key' });
+    expect(scheduleFact({ ...ready, keyPinned: false, paired: false })).toEqual({ badge: 'danger', text: 'Waiting for recovery key' });
   });
   it('waits for a destination when a key is pinned but nothing is paired or local', () => {
-    expect(scheduleFact({ ...ready, paired: false })).toEqual({ badge: 'disabled', text: 'Waiting for a destination' });
+    expect(scheduleFact({ ...ready, paired: false })).toEqual({ badge: 'danger', text: 'Waiting for a destination' });
   });
   it('shows the next run only when a backup can actually run', () => {
-    expect(scheduleFact(ready).badge).toBe('active');
+    expect(scheduleFact(ready).badge).toBe('success');
     expect(scheduleFact(ready).text).toMatch(/^Next /);
-    expect(scheduleFact({ ...ready, paired: false, localDir: '/backups' }).badge).toBe('active');
+    expect(scheduleFact({ ...ready, paired: false, localDir: '/backups' }).badge).toBe('success');
   });
   it('says manual only with no schedule', () => {
-    expect(scheduleFact({ ...ready, intervalSec: 0 })).toEqual({ badge: 'warn', text: 'Manual only' });
+    expect(scheduleFact({ ...ready, intervalSec: 0 })).toEqual({ badge: 'warning', text: 'Manual only' });
     expect(scheduleFact(null).text).toBe('Manual only');
   });
 });

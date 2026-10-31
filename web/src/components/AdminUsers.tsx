@@ -10,7 +10,7 @@ import type { AccountLink } from '../types';
 import { SessionList } from './SessionList';
 import { OffboardingView } from './OffboardingView';
 import { PageHead } from './PageHead';
-import { Users, Search, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, XCircle, Monitor, UserX, Link, Clock, UserCog, MoreHorizontal } from 'lucide-react';
+import { Users, Search, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, Monitor, UserX, Link, Clock, UserCog, MoreHorizontal } from 'lucide-react';
 
 export interface UserFilter { query: string; role: 'all' | 'admin' | 'user'; status: 'all' | 'active' | 'pending' | 'disabled' }
 const NO_FILTER: UserFilter = { query: '', role: 'all', status: 'all' };
@@ -311,7 +311,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
               return (
                 <tr key={u.id}>
                   <td data-label="Account">
-                    <span className="cell-title"><AccountName u={u} busy={busy} onEdit={full ? openEditModal : undefined} />{u.sourceConnectorId && <span className="status-badge warn" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</span>
+                    <span className="cell-title"><AccountName u={u} busy={busy} onEdit={full ? openEditModal : undefined} />{u.sourceConnectorId && <span className="badge-type" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</span>
                     {u.displayName && u.displayName !== u.username && <span className="cell-meta font-mono">{u.username}</span>}
                   </td>
                   <td data-label="Email" className="text-muted">{u.email}</td>
@@ -320,16 +320,16 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                   </td>
                   <td data-label="Status">
                     {u.pending ? (
-                      <span className="status-badge warn">
+                      <span className="ky-status" data-ky-status="warning">
                         <Clock size={12} aria-hidden="true" /> Pending
                       </span>
                     ) : u.status === 'active' ? (
-                      <span className="status-badge active">
+                      <span className="ky-status" data-ky-status="success">
                         <CheckCircle size={12} aria-hidden="true" /> Active
                       </span>
                     ) : (
-                      <span className="status-badge disabled">
-                        <XCircle size={12} aria-hidden="true" /> Disabled
+                      <span className="ky-status">
+                        Disabled
                       </span>
                     )}
                     {u.endsAt && <div className="text-muted text-sm">Ends {describeInstant(u.endsAt)}</div>}

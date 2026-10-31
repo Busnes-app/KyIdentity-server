@@ -50,11 +50,11 @@ function bytes(n: number): string {
 }
 
 // A schedule only runs with a pinned key and a destination; otherwise say what it waits for.
-export function scheduleFact(s: BackupStatus | null): { badge: string; text: string } {
-  if (!s?.intervalSec) return { badge: 'warn', text: 'Manual only' };
-  if (!s.keyPinned) return { badge: 'disabled', text: 'Waiting for recovery key' };
-  if (!s.paired && !s.localDir) return { badge: 'disabled', text: 'Waiting for a destination' };
-  return { badge: 'active', text: s.nextRunAt ? `Next ${when(s.nextRunAt)}` : 'Next run not scheduled' };
+export function scheduleFact(s: BackupStatus | null): { badge: 'success' | 'warning' | 'danger'; text: string } {
+  if (!s?.intervalSec) return { badge: 'warning', text: 'Manual only' };
+  if (!s.keyPinned) return { badge: 'danger', text: 'Waiting for recovery key' };
+  if (!s.paired && !s.localDir) return { badge: 'danger', text: 'Waiting for a destination' };
+  return { badge: 'success', text: s.nextRunAt ? `Next ${when(s.nextRunAt)}` : 'Next run not scheduled' };
 }
 
 export const AdminBackup: React.FC = () => {
@@ -317,7 +317,7 @@ export const AdminBackup: React.FC = () => {
         <div className="dr-fact">
           <div className="dr-fact-label">
             <span>Recovery key</span>
-            <span className={`status-badge ${keyPinned ? 'active' : 'warn'}`}>{keyPinned ? 'Pinned' : 'None'}</span>
+            <span className="ky-status" data-ky-status={keyPinned ? 'success' : 'warning'}>{keyPinned ? 'Pinned' : 'None'}</span>
           </div>
           <div className="dr-fact-value font-mono">{status?.recovery_key_id ?? '—'}</div>
           <div className="dr-fact-note">
@@ -327,7 +327,7 @@ export const AdminBackup: React.FC = () => {
         <div className="dr-fact">
           <div className="dr-fact-label">
             <span>KyRecovery</span>
-            <span className={`status-badge ${paired ? 'active' : 'disabled'}`}>{paired ? 'Paired' : 'Not paired'}</span>
+            <span className="ky-status" data-ky-status={paired ? 'success' : 'danger'}>{paired ? 'Paired' : 'Not paired'}</span>
           </div>
           <div className="dr-fact-value">{paired ? status?.recovery_url : 'No off-site copy'}</div>
           <div className="dr-fact-note">
@@ -337,7 +337,7 @@ export const AdminBackup: React.FC = () => {
         <div className="dr-fact">
           <div className="dr-fact-label">
             <span>Local copies</span>
-            <span className={`status-badge ${hasLocal ? 'active' : 'disabled'}`}>{hasLocal ? `${status?.localCopies.length ?? 0} of ${status?.localKeep}` : 'Off'}</span>
+            <span className="ky-status" data-ky-status={hasLocal ? 'success' : 'danger'}>{hasLocal ? `${status?.localCopies.length ?? 0} of ${status?.localKeep}` : 'Off'}</span>
           </div>
           <div className="dr-fact-value font-mono">{status?.localDir ?? 'KYIDENTITY_BACKUP_DIR not set'}</div>
           <div className="dr-fact-note">{status?.localError ?? (newestLocal ? `Newest ${when(newestLocal.createdAt)}` : hasLocal ? 'Nothing written yet' : '')}</div>
@@ -345,7 +345,7 @@ export const AdminBackup: React.FC = () => {
         <div className="dr-fact">
           <div className="dr-fact-label">
             <span>Schedule</span>
-            <span className={`status-badge ${schedule.badge}`}>{every(status?.intervalSec)}</span>
+            <span className="ky-status" data-ky-status={schedule.badge}>{every(status?.intervalSec)}</span>
           </div>
           <div className="dr-fact-value">{schedule.text}</div>
           <div className="dr-fact-note">Counts from the last attempt, successful or not</div>
@@ -410,7 +410,7 @@ export const AdminBackup: React.FC = () => {
             <div className="mt-3">
               <div className="text-sm">
                 Restore drill{' '}
-                <span className={`status-badge ${drillResult.passed ? 'active' : 'disabled'}`}>{drillResult.passed ? 'passed' : 'failed'}</span>{' '}
+                <span className="ky-status" data-ky-status={drillResult.passed ? 'success' : 'danger'}>{drillResult.passed ? 'passed' : 'failed'}</span>{' '}
                 <span className="text-muted">{drillResult.duration_ms} ms</span>
               </div>
               {drillResult.error_message && <div className="text-sm text-danger mt-2">{drillResult.error_message}</div>}
@@ -478,7 +478,7 @@ export const AdminBackup: React.FC = () => {
                 <Server size={16} className="icon-cyan" /> KyRecovery
               </h2>
             </div>
-            <span className={`status-badge ${paired ? 'active' : 'disabled'}`}>{paired ? 'Paired' : 'Not paired'}</span>
+            <span className="ky-status" data-ky-status={paired ? 'success' : 'danger'}>{paired ? 'Paired' : 'Not paired'}</span>
           </div>
           <div className="dr-body">
             <p className="form-hint">
@@ -532,7 +532,7 @@ export const AdminBackup: React.FC = () => {
                 <KeyRound size={16} className="icon-cyan" /> Recovery key by hand
               </h2>
             </div>
-            <span className={`status-badge ${keyPinned ? 'active' : 'warn'}`}>{keyPinned ? 'Pinned' : 'None'}</span>
+            <span className="ky-status" data-ky-status={keyPinned ? 'success' : 'warning'}>{keyPinned ? 'Pinned' : 'None'}</span>
           </div>
           <div className="dr-body">
             {keyPinned ? (

@@ -12,7 +12,6 @@ import {
   Trash2,
   CheckCircle,
   AlertTriangle,
-  XCircle,
   Copy,
   Check,
   Send,
@@ -298,22 +297,22 @@ export const AdminSystems: React.FC = () => {
                   </td>
                   <td className="font-mono text-muted text-sm">{s.callbackUrl}</td>
                   <td>
-                    {s.groupsEnabled && <span className="status-badge active">Groups</span>}
-                    {needsReview(s) && <span className="status-badge warn">Protocol review required — delivery paused</span>}
-                    {s.provisioningHold && <span className="status-badge warn">Held after a restore — reconcile to resume delivery</span>}
+                    {s.groupsEnabled && <span className="badge-type">Groups</span>}
+                    {needsReview(s) && <span className="ky-status" data-ky-status="warning">Protocol review required — delivery paused</span>}
+                    {s.provisioningHold && <span className="ky-status" data-ky-status="warning">Held after a restore — reconcile to resume delivery</span>}
                     {!needsReview(s) && s.status === 'active' && (
-                      <span className="status-badge active">
+                      <span className="ky-status" data-ky-status="success">
                         <CheckCircle size={12} /> Active
                       </span>
                     )}
                     {s.status === 'failing' && (
-                      <span className="status-badge warn">
+                      <span className="ky-status" data-ky-status="danger">
                         <AlertTriangle size={12} /> Failing
                       </span>
                     )}
                     {s.status === 'disabled' && (
-                      <span className="status-badge disabled">
-                        <XCircle size={12} /> Disabled
+                      <span className="ky-status">
+                        Disabled
                       </span>
                     )}
                   </td>

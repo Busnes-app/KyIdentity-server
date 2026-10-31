@@ -136,7 +136,7 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
     {Boolean(page?.items.length) && <div className="table-card"><table className="admin-table groups-table">
       <thead><tr><th>Name</th><th>Description</th><th>Members</th><th className="text-right">{user ? 'Membership' : <span className="sr-only">Actions</span>}</th></tr></thead>
       <tbody>{page?.items.map(group => <tr key={group.id}>
-        <td style={{ overflowWrap: 'anywhere' }}>{group.name}{group.sourceConnectorId && <span className="status-badge warn" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}</td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
+        <td style={{ overflowWrap: 'anywhere' }}>{group.name}{group.sourceConnectorId && <span className="badge-type" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}</td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
         <td className="text-right"><div className="action-buttons-wrap">
           {user ? <button className="secondary-btn sm" disabled={busy} onClick={() => mutate(
             `${group.member ? 'Remove' : 'Add'} '${user.username}' ${group.member ? 'from' : 'to'} '${group.name}'.`,

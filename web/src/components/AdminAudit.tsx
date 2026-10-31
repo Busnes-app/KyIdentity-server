@@ -363,17 +363,17 @@ export const AdminAudit: React.FC = () => {
                         <td className="font-mono text-sm text-muted">{e.ipAddress}</td>
                         <td>
                           {e.outcome === 'success' && (
-                            <span className="status-badge active">
+                            <span className="ky-status" data-ky-status="success">
                               <CheckCircle size={12} /> Success
                             </span>
                           )}
                           {e.outcome === 'failure' && (
-                            <span className="status-badge warn">
+                            <span className="ky-status" data-ky-status="warning">
                               <AlertTriangle size={12} /> Failure
                             </span>
                           )}
                           {e.outcome === 'denied' && (
-                            <span className="status-badge disabled">
+                            <span className="ky-status" data-ky-status="danger">
                               <XCircle size={12} /> Denied
                             </span>
                           )}

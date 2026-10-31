@@ -40,7 +40,7 @@ export const SessionList: React.FC<SessionListProps> = ({ sessions, apps, logout
             <div className="device-info">
               <span className="device-name">
                 {s.userAgent || 'Unknown browser'}
-                {s.current && <span className="status-badge active"> This session</span>}
+                {s.current && <span className="badge-type"> This session</span>}
               </span>
               <span className="device-id-mono">
                 {s.ipAddress || 'unknown address'} · active {when(s.lastActiveAt)} · signed in {when(s.createdAt)}
@@ -98,7 +98,7 @@ export const LogoutDeliveries: React.FC<{ logouts: LogoutDelivery[]; onRetryLogo
             <div className="device-info">
               <span className="device-name">
                 {d.clientName}
-                <span className={`status-badge ${d.status === 'delivered' ? 'active' : d.status === 'failed' ? 'disabled' : 'warn'}`}> {logoutLabel[d.status]}</span>
+                <span className="ky-status" data-ky-status={d.status === 'delivered' ? 'success' : d.status === 'failed' ? 'danger' : 'warning'}> {logoutLabel[d.status]}</span>
               </span>
               <span className="device-id-mono">
                 {d.attempts} attempt{d.attempts === 1 ? '' : 's'} · {when(d.updatedAt)}
