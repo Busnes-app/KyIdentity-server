@@ -131,7 +131,7 @@ KyIdentity natively manages mobile push devices and pairing tokens.
 
 #### Device Enrollment (90-second Ephemeral PIN/QR)
 
-1. The user logs into the KyIdentity User Dashboard and navigates to **Security & Devices**.
+1. The user logs into the KyIdentity User Dashboard and opens **Settings → Phones & apps**.
 2. The user clicks **Add Authenticator Device**. KyIdentity generates a 90-second single-use pairing token, displayed as both a scannable QR code and a 6-digit numeric PIN.
 3. In the KySecurity Authenticator app (or KyPost mobile app), the user scans the QR code or enters the PIN.
 4. The mobile app posts to `POST /api/notifications/native/register` with the pairing token, device ID, public key, and push target: `pushToken`, plus `pushTransport` (`fcm`, the default, `unifiedpush` or `ubuntupush`) and `platform` (`android`, the default, `ios`, `macos` or `linux`). A `linux` device may use only `unifiedpush` or `ubuntupush`, and `ubuntupush` only `linux`. For `ubuntupush`, `pushToken` is the Lomiri PushClient token, 1-512 bytes of `[A-Za-z0-9+/=_.:-]`, with the same required keys as `unifiedpush`. For `unifiedpush`, `pushToken` is the HTTPS endpoint (passes the outbound URL policy, at most 4096 bytes) and `pushP256dh` (65-byte uncompressed P-256 point) and `pushAuth` (16 bytes) are required, base64url with optional padding. For `fcm` the keys are optional, both or neither, validated the same way; KyAuth iOS always sends them, and its pushes are then sealed (step 3 below).
