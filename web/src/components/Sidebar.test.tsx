@@ -10,16 +10,16 @@ const admin: User = { id: 'a1', username: 'admin', displayName: 'Administrator',
 const sections = (html: string) => [...html.matchAll(/<summary[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)/g)].map(m => m[1]);
 
 describe('sidebar', () => {
-  it('groups administration into Directory, Applications, Security and System', () => {
-    expect(sections(render(admin, 'admin-users'))).toEqual(['Directory', 'Applications', 'Security', 'System']);
+  it('groups administration into Directory, Integrations, Security and System, under Your account', () => {
+    expect(sections(render(admin, 'admin-users'))).toEqual(['Your account', 'Directory', 'Integrations', 'Security', 'System']);
   });
 
   it('marks exactly one current item and opens only its section', () => {
     const html = render(admin, 'admin-clients');
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
     expect(html).toMatch(/aria-current="page"[^>]*>(?:<svg[\s\S]*?<\/svg>)OAuth clients/);
-    expect(html.match(/<details[^>]* open=""/g)).toHaveLength(1);
-    expect(html).toMatch(/<details[^>]* open=""><summary[^>]*data-current="true"[^>]*>(?:<svg[\s\S]*?<\/svg>)Applications/);
+    expect(html.match(/<details[^>]* open=""/g)).toHaveLength(2); // Your account and the current section
+    expect(html).toMatch(/<details[^>]* open=""><summary[^>]*data-current="true"[^>]*>(?:<svg[\s\S]*?<\/svg>)Integrations/);
   });
 
   it('keeps App connections current while managing launcher cards', () => {
@@ -29,13 +29,13 @@ describe('sidebar', () => {
   it('shows a delegate only the sections it may use', () => {
     const helpdesk: User = { ...admin, role: 'user', access: { ...none, helpdesk: true } };
     const html = render(helpdesk, 'dashboard');
-    expect(sections(html)).toEqual(['Directory']);
+    expect(sections(html)).toEqual(['Your account', 'Directory']);
     expect(html).toContain('Delegated administrator');
   });
 
   it('names the user over their role with a labelled Sign out row', () => {
     const html = render({ ...admin, role: 'user', access: none }, 'dashboard');
-    expect(html).not.toContain('<summary');
+    expect(sections(html)).toEqual(['Your account']);
     expect(html).toContain('<p class="ky-user-name">admin</p><p class="ky-user-role">Everyday account</p>');
     expect(html).toMatch(/class="ky-user-signout"><svg[^>]*lucide-log-out[\s\S]*?<span>Sign out<\/span>/);
   });

@@ -36,7 +36,7 @@ export function Modal({ title, onClose, className, closeOnBackdrop, returnFocus,
     <div className={className ? `modal-card ${className}` : 'modal-card'}>
       <div className="modal-header">
         <h3 id={titleId}>{title}</h3>
-        <button type="button" className="close-btn" onClick={onClose} aria-label="Close">×</button>
+        <button type="button" className="ky-about-close" onClick={onClose}>Close</button>
       </div>
       {open && children}
     </div>

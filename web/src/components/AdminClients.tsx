@@ -250,30 +250,30 @@ export const AdminClients: React.FC = () => {
 
       {detailsClient && (
         <Modal title={`${detailsClient.clientName} connection details`} onClose={() => setDetailsClient(null)} className="client-details-modal" closeOnBackdrop>
-          <div className="modal-body connection-details">
-            {[
-              ['Client ID', detailsClient.id],
-              ['Authorization URL', `${issuer}/oauth/authorize`],
-              ['Access token URL', `${issuer}/oauth/token`],
-              ['Resource URL', `${issuer}/oauth/userinfo`],
-              ['Logout URL', `${issuer}/oauth/logout`],
-              ['Post-logout redirect URIs', detailsClient.postLogoutRedirectUris.join(' ') || 'None registered; sign-out ends on the KySignOn page'],
-              ['Back-channel logout URI', detailsClient.backchannelLogoutUri || 'None; this app is not told when a login ends'],
-              ['User identifier', 'username'],
-              ['Scope', detailsClient.allowedScopes.join(' ')],
-              ['Auth style', 'In params'],
-            ].map(([label, value]) => (
-              <div className="form-group" key={label}>
-                <label className="form-label">{label}</label>
-                <input className="form-input font-mono" value={value} readOnly />
-              </div>
-            ))}
-            <div className="form-group">
-              <label className="form-label">Redirect URL</label>
-              {detailsClient.redirectUris.map((uri) => (
-                <input className="form-input font-mono" value={uri} readOnly key={uri} />
-              ))}
-            </div>
+          <div className="modal-body">
+            <dl className="connection-details">
+              {([
+                ['Client ID', detailsClient.id],
+                ['Authorization URL', `${issuer}/oauth/authorize`],
+                ['Access token URL', `${issuer}/oauth/token`],
+                ['Resource URL', `${issuer}/oauth/userinfo`],
+                ['Logout URL', `${issuer}/oauth/logout`],
+                ['Redirect URIs', detailsClient.redirectUris],
+                ['Post-logout redirect URIs', detailsClient.postLogoutRedirectUris, 'None registered; sign-out ends on the KySignOn page'],
+                ['Back-channel logout URI', detailsClient.backchannelLogoutUri, 'None; this app is not told when a login ends'],
+                ['User identifier', 'username'],
+                ['Scope', detailsClient.allowedScopes.join(' ')],
+                ['Auth style', 'In params'],
+              ] as [string, string | string[] | undefined, string?][]).map(([label, value, empty]) => {
+                const values = (Array.isArray(value) ? value : [value]).filter((v): v is string => Boolean(v));
+                return <React.Fragment key={label}>
+                  <dt>{label}</dt>
+                  <dd>{values.length === 0 ? <span className="muted-value">{empty ?? 'None'}</span>
+                    : values.length === 1 ? <code>{values[0]}</code>
+                    : <ul>{values.map(v => <li key={v}><code>{v}</code></li>)}</ul>}</dd>
+                </React.Fragment>;
+              })}
+            </dl>
           </div>
         </Modal>
       )}

@@ -27,7 +27,7 @@ const ADMIN: Section[] = [
     ['admin-systems', 'Suite sync', RefreshCw],
     ['admin-scim', 'Inbound SCIM', Database],
   ]],
-  ['Applications', [
+  ['Integrations', [
     ['admin-app-registry', 'App connections', AppWindow],
     ['admin-clients', 'OAuth clients', Key],
     ['admin-requests', 'Access requests', Inbox],
@@ -76,6 +76,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
   const current = sectionOf(admin, activeTab);
   const [open, setOpen] = useState(() => current ?? admin[0]?.[0] ?? '');
   useEffect(() => { if (current) setOpen(current); }, [current]);
+  // Your account folds on its own and starts open.
+  const [accountOpen, setAccountOpen] = useState(true);
 
   const items = (list: Item[]) => list.map(([tab, label, Icon]) => (
     <button
@@ -95,8 +97,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
       <Brand />
       <div className="side-navigation">
         <nav className="side-nav" aria-label="Your account">
-          <h2 className="side-heading">Your account</h2>
-          {items(ACCOUNT)}
+          <details className="side-section" open={accountOpen} onToggle={e => setAccountOpen(e.currentTarget.open)}>
+            <summary className="side-heading" data-current={ACCOUNT.some(([tab]) => tab === activeTab) || undefined}>
+              <ChevronRight size={14} aria-hidden="true" />
+              Your account
+            </summary>
+            {items(ACCOUNT)}
+          </details>
         </nav>
         {admin.length > 0 && (
           <nav className="side-nav" aria-label="Administration">
