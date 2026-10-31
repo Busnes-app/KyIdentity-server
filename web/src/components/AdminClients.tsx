@@ -10,7 +10,7 @@ import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { Modal } from './Modal';
 import { parseCreatedClientSecret, parseOAuthClients, parseOIDCIssuer } from '../parsers';
-import { Plus, Trash2, CheckCircle, AlertTriangle, KeyRound, MoreHorizontal, LayoutGrid } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, AlertTriangle, KeyRound, MoreHorizontal, LayoutGrid, Settings } from 'lucide-react';
 import { PageHead } from './PageHead';
 
 export const AdminClients: React.FC = () => {
@@ -218,7 +218,7 @@ export const AdminClients: React.FC = () => {
               {clients?.map((c) => (
                 <tr key={c.id}>
                   <td data-label="Client">
-                    <span className="cell-title">{c.clientName}</span>
+                    <span className="cell-title"><ClientName client={c} onManage={setDetailsClient} /></span>
                     <span className="cell-meta">{c.clientType === 'confidential' ? 'Confidential' : 'Public'}</span>
                   </td>
                   <td data-label="Client ID" className="font-mono">{c.id}</td>
@@ -487,18 +487,26 @@ export const AdminClients: React.FC = () => {
   );
 };
 
-/** "Manage" opens the connection details; the rarer, riskier actions sit behind the ⋯ menu. */
-const ClientRowActions: React.FC<{ client: OAuthClient; onManage: () => void; onLauncher: () => void; onRotate: () => void; onDelete: () => void }> = ({ client, onManage, onLauncher, onRotate, onDelete }) => {
+/** The client name opens the connection details (Manage); without onManage it stays text. */
+export const ClientName: React.FC<{ client: OAuthClient; onManage?: (client: OAuthClient) => void }> = ({ client, onManage }) => {
+  if (!onManage) return <>{client.clientName}</>;
+  return <button type="button" className="cell-link" onClick={() => onManage(client)}><span className="sr-only">Manage </span>{client.clientName}</button>;
+};
+
+/** Manage, then the rarer, riskier actions, all behind one quiet ⋯ menu. */
+export const ClientRowActions: React.FC<{ client: OAuthClient; onManage: () => void; onLauncher: () => void; onRotate: () => void; onDelete: () => void }> = ({ client, onManage, onLauncher, onRotate, onDelete }) => {
   const menuId = useId();
   return (
     <div className="row-actions">
-      <button type="button" className="secondary-btn sm" onClick={onManage}>Manage<span className="sr-only"> {client.clientName}</span></button>
       <button type="button" className="icon-btn sm" popoverTarget={menuId} aria-label={`More actions for ${client.clientName}`}>
         <MoreHorizontal size={16} aria-hidden="true" />
       </button>
       <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`More actions for ${client.clientName}`} onClickCapture={event => {
         if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
       }}>
+        <button type="button" className="row-action" onClick={onManage}>
+          <Settings size={15} aria-hidden="true" />Manage
+        </button>
         <button type="button" className="row-action" onClick={onLauncher}>
           <LayoutGrid size={15} aria-hidden="true" />Launcher card
         </button>
