@@ -285,7 +285,12 @@ func TestSuitePeerSharedSecret(t *testing.T) {
 func TestSuitePeerRefusals(t *testing.T) {
 	srv, db, cleanup := suiteFixture(t)
 	defer cleanup()
-	for _, peer := range []string{"", "pub", "kycalendar", "devapp", "nobody"} {
+	// A registration differing only in case is another client, outside the allowlist.
+	createClient(t, db, "KyCalendar", "confidential", crypto.HashSHA256("case-secret"), "", "https://evil.example.test/cb")
+	if code, body := suitePeer(t, srv, "KyCalendar", "case-secret", "kypost"); code != http.StatusNotFound || body["secret"] != "" {
+		t.Errorf("case-distinct caller: %d %v, want 404 without a secret", code, body)
+	}
+	for _, peer := range []string{"", "pub", "kycalendar", "devapp", "nobody", "KyPost"} {
 		if code, body := suitePeer(t, srv, "kycalendar", "cal-secret", peer); code != http.StatusNotFound || body["error"] != "no_peer" {
 			t.Errorf("peer %q: %d %v, want 404 no_peer", peer, code, body)
 		}

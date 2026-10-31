@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
@@ -100,7 +99,8 @@ func suitePeerSecret(key []byte, a, b string) string {
 
 // Peer gives the caller its paired app's origin and their shared secret.
 func (h *SuiteHandler) Peer(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
-	a, b := strings.ToLower(caller.ID), strings.ToLower(r.URL.Query().Get("client"))
+	// Exact IDs: registrations differing only in case are different clients.
+	a, b := caller.ID, r.URL.Query().Get("client")
 	if b < a {
 		a, b = b, a
 	}
