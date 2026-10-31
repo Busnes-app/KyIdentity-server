@@ -116,7 +116,7 @@ export function ProvisioningState({ system, onClose }: { system: PairedSystem; o
             {u.lastEvent.error && <div className="text-muted">{u.lastEvent.error}</div>}
             {u.lastEvent.status === 'pending' && u.lastEvent.nextAttemptAt && <div className="text-muted">next attempt {when(u.lastEvent.nextAttemptAt)}</div>}
           </> : 'None'}
-          {u.blocked && <div><span className="status-badge warn">Blocked</span></div>}
+          {u.blocked && <div><span className="ky-status" data-ky-status="warning">Blocked</span></div>}
         </td>
         <td><button className="secondary-btn sm" disabled={busy} onClick={() => void retry(u.userId)}>Retry</button></td>
       </tr>)}</tbody>

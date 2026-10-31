@@ -97,7 +97,7 @@ export function AdminSCIM() {
           <div key={c.id} className="settings-section">
             <div className="section-header">
               <div className="section-title-wrap">
-                <h2>{c.name} <span className={`status-badge ${c.status === 'active' ? 'active' : 'disabled'}`}>{c.status === 'active' ? 'Active' : 'Paused'}</span></h2>
+                <h2>{c.name} <span className="ky-status" data-ky-status={c.status === 'active' ? 'success' : undefined}>{c.status === 'active' ? 'Active' : 'Paused'}</span></h2>
                 <p className="section-desc">{c.users} owned account{c.users === 1 ? '' : 's'} · {c.groups} owned group{c.groups === 1 ? '' : 's'} · created {when(c.createdAt)}</p>
               </div>
               <div className="action-buttons-wrap">

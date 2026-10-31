@@ -10,7 +10,7 @@ import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { Modal } from './Modal';
 import { parseCreatedClientSecret, parseOAuthClients, parseOIDCIssuer } from '../parsers';
-import { Plus, Trash2, CheckCircle, XCircle, AlertTriangle, KeyRound, MoreHorizontal, LayoutGrid } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, AlertTriangle, KeyRound, MoreHorizontal, LayoutGrid } from 'lucide-react';
 import { PageHead } from './PageHead';
 
 export const AdminClients: React.FC = () => {
@@ -225,12 +225,12 @@ export const AdminClients: React.FC = () => {
                   <td data-label="Redirect URIs" className="tabular">{c.redirectUris.length === 1 ? '1 URI' : `${c.redirectUris.length} URIs`}</td>
                   <td data-label="Status">
                     {c.enabled ? (
-                      <span className="status-badge active">
+                      <span className="ky-status" data-ky-status="success">
                         <CheckCircle size={12} aria-hidden="true" /> Enabled
                       </span>
                     ) : (
-                      <span className="status-badge disabled">
-                        <XCircle size={12} aria-hidden="true" /> Disabled
+                      <span className="ky-status">
+                        Disabled
                       </span>
                     )}
                   </td>

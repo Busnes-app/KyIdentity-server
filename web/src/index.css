@@ -642,33 +642,6 @@ button {
   background: var(--panel-hover);
 }
 
-/* Status Badges */
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  font-weight: 500;
-}
-
-.status-badge.active {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.status-badge.disabled {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.status-badge.warn {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-
 .badge-type {
   display: inline-flex;
   align-items: center;
@@ -1214,11 +1187,6 @@ dialog.modal-backdrop::backdrop {
 .device-list {
   display: flex;
   flex-direction: column;
-}
-
-.badge-type.warn {
-  border-color: var(--warning);
-  color: var(--warning);
 }
 
 .pair-signon {

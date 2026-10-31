@@ -11,13 +11,13 @@ const observedLabel: Record<OffboardingTarget['observed'], string> = {
 };
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : '');
 
-function targetBadge(t: OffboardingTarget): { cls: string; text: string } {
-  if (!t.recorded) return { cls: 'warn', text: 'Still provisioned' };
-  if (t.contradicted) return { cls: 'disabled', text: 'Still active at target' };
-  if (t.verified) return { cls: 'active', text: 'Verified' };
-  if (t.acknowledged) return { cls: 'active', text: 'Acknowledged' };
-  if (t.lastEvent?.status === 'failed') return { cls: 'disabled', text: 'Failed' };
-  return { cls: 'warn', text: t.blocked ? 'Blocked' : 'Pending' };
+function targetBadge(t: OffboardingTarget): { status: 'success' | 'warning' | 'danger'; text: string } {
+  if (!t.recorded) return { status: 'warning', text: 'Still provisioned' };
+  if (t.contradicted) return { status: 'danger', text: 'Still active at target' };
+  if (t.verified) return { status: 'success', text: 'Verified' };
+  if (t.acknowledged) return { status: 'success', text: 'Acknowledged' };
+  if (t.lastEvent?.status === 'failed') return { status: 'danger', text: 'Failed' };
+  return { status: 'warning', text: t.blocked ? 'Blocked' : 'Pending' };
 }
 
 /**
@@ -61,7 +61,7 @@ export const OffboardingView: React.FC<{ userId: string; username: string; onClo
         {off && (
           <>
             <p>
-              <span className={`status-badge ${off.active ? 'disabled' : off.acknowledged ? 'active' : 'warn'}`}>{badge}</span>{' '}
+              <span className="ky-status" data-ky-status={off.active ? 'danger' : off.acknowledged ? 'success' : 'warning'}>{badge}</span>{' '}
               {summary}{off.deleted ? ' The directory account is deleted; remote mappings are kept for retries.' : ''}
             </p>
             <div className="device-list">
@@ -76,8 +76,8 @@ export const OffboardingView: React.FC<{ userId: string; username: string; onClo
                       <div className="device-info">
                         <span className="device-name">
                           {t.systemName}
-                          <span className={`status-badge ${b.cls}`}> {b.text}</span>
-                          {t.systemStatus === 'disabled' && <span className="status-badge disabled"> Connector disabled</span>}
+                          <span className="ky-status" data-ky-status={b.status}> {b.text}</span>
+                          {t.systemStatus === 'disabled' && <span className="ky-status"> Connector disabled</span>}
                         </span>
                         <span className="device-id-mono">
                           {ev ? `${ev.type} ${ev.status} · ${ev.attempts} attempt${ev.attempts === 1 ? '' : 's'} · ${when(ev.updatedAt)}` : 'nothing sent yet'}

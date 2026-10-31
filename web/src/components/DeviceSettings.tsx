@@ -451,15 +451,15 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
                         <CheckCircle size={12} /> Push approver
                       </span>
                     )}
-                    {dev.attestedLevel === 'strongbox' && <span className="badge-type"><ShieldCheck size={12} /> Attested: StrongBox</span>}
-                    {dev.attestedLevel === 'tee' && <span className="badge-type"><ShieldCheck size={12} /> Attested: TEE</span>}
-                    {dev.attestedLevel === 'appattest' && <span className="badge-type"><ShieldCheck size={12} /> Verified by App Attest</span>}
+                    {dev.attestedLevel === 'strongbox' && <span className="ky-status" data-ky-status="success"><ShieldCheck size={12} /> Attested: StrongBox</span>}
+                    {dev.attestedLevel === 'tee' && <span className="ky-status" data-ky-status="success"><ShieldCheck size={12} /> Attested: TEE</span>}
+                    {dev.attestedLevel === 'appattest' && <span className="ky-status" data-ky-status="success"><ShieldCheck size={12} /> Verified by App Attest</span>}
                     {dev.attestedLevel === 'none' && (
-                      <span className="badge-type warn">
+                      <span className="ky-status" data-ky-status="warning">
                         <ShieldAlert size={12} /> Not attested
                       </span>
                     )}
-                    {dev.bootState === 'unlocked' && <span className="badge-type warn">Bootloader unlocked</span>}
+                    {dev.bootState === 'unlocked' && <span className="ky-status" data-ky-status="warning">Bootloader unlocked</span>}
                   </div>
                   {dev.attestedLevel === 'none' && <span className="device-hint">Pair KyAuth again to attest this phone.</span>}
                 </div>
