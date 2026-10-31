@@ -6,7 +6,7 @@ import { isCancelled, useStepUp } from './StepUpPrompt';
 import { describeInstant, instantFromLocal, localZone } from '../instant';
 import { AdminEnrollmentPolicies } from './AdminEnrollmentPolicies';
 import { pageSize, Pager, useDirectoryPage } from './DirectoryPage';
-import { Edit, MoreHorizontal, Plus, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { Edit, MoreHorizontal, Plus, Search, ShieldCheck, Trash2, UsersRound } from 'lucide-react';
 import { Modal } from './Modal';
 
 type Mutate = (reason: string, method: 'POST' | 'PUT' | 'DELETE', path: string, body?: object) => Promise<boolean>;
@@ -94,6 +94,7 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
     setDescription(group?.description ?? '');
     setEditor(group ? { kind: 'edit', group } : { kind: 'new' });
   };
+  const manage = (group: DirectoryGroup) => { setEditor(null); setSelected(group); };
   if (policyGroup) return <AdminEnrollmentPolicies key={policyGroup.id} group={policyGroup} onBack={() => setPolicyGroup(null)} />;
   return <div className="admin-page">
     <div className="page-header">
@@ -136,13 +137,13 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
     {Boolean(page?.items.length) && <div className="table-card"><table className="admin-table groups-table">
       <thead><tr><th>Name</th><th>Description</th><th>Members</th><th className="text-right">{user ? 'Membership' : <span className="sr-only">Actions</span>}</th></tr></thead>
       <tbody>{page?.items.map(group => <tr key={group.id}>
-        <td style={{ overflowWrap: 'anywhere' }}>{group.name}{group.sourceConnectorId && <span className="badge-type" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}</td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
+        <td style={{ overflowWrap: 'anywhere' }}><span className="cell-title"><GroupName group={group} busy={busy} onManage={user ? undefined : manage} />{group.sourceConnectorId && <span className="badge-type" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}</span></td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
         <td className="text-right"><div className="action-buttons-wrap">
           {user ? <button className="secondary-btn sm" disabled={busy} onClick={() => mutate(
             `${group.member ? 'Remove' : 'Add'} '${user.username}' ${group.member ? 'from' : 'to'} '${group.name}'.`,
             group.member ? 'DELETE' : 'PUT', `/api/admin/groups/${group.id}/members/${user.id}`)}>{group.member ? 'Remove member' : 'Add member'}</button> : <>
             <GroupRowActions group={group} busy={busy}
-              onMembers={() => { setEditor(null); setSelected(group); }}
+              onMembers={() => manage(group)}
               onEdit={() => edit(group)}
               onPolicy={() => setPolicyGroup(group)}
               onDelete={async () => {
@@ -163,19 +164,25 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
   </div>;
 }
 
-/** "Manage" opens the members; editing, MFA policy and delete sit behind the ⋯ menu. */
-function GroupRowActions({ group, busy, onMembers, onEdit, onPolicy, onDelete }: {
+/** The group name opens its members (Manage) where the list offers Manage; otherwise it stays text. */
+export function GroupName({ group, busy, onManage }: { group: DirectoryGroup; busy: boolean; onManage?: (group: DirectoryGroup) => void }) {
+  if (!onManage) return <>{group.name}</>;
+  return <button type="button" className="cell-link" disabled={busy} onClick={() => onManage(group)}><span className="sr-only">Manage </span>{group.name}<span className="sr-only"> members</span></button>;
+}
+
+/** Manage (the members), editing, MFA policy and delete, all behind one quiet ⋯ menu. */
+export function GroupRowActions({ group, busy, onMembers, onEdit, onPolicy, onDelete }: {
   group: DirectoryGroup; busy: boolean; onMembers: () => void; onEdit: () => void; onPolicy: () => void; onDelete: () => void;
 }) {
   const menuId = useId();
   return <div className="row-actions">
-    <button type="button" className="secondary-btn sm" disabled={busy} onClick={onMembers}>Manage<span className="sr-only"> {group.name} members</span></button>
     <button type="button" className="icon-btn sm" disabled={busy} popoverTarget={menuId} aria-label={`More actions for ${group.name}`}>
       <MoreHorizontal size={16} aria-hidden="true" />
     </button>
     <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`More actions for ${group.name}`} onClickCapture={event => {
       if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
     }}>
+      <button type="button" className="row-action" onClick={onMembers}><UsersRound size={15} aria-hidden="true" />Manage</button>
       <button type="button" className="row-action" onClick={onEdit}><Edit size={15} aria-hidden="true" />Edit group</button>
       <button type="button" className="row-action" onClick={onPolicy}><ShieldCheck size={15} aria-hidden="true" />MFA policy</button>
       <button type="button" className="row-action danger" onClick={onDelete}><Trash2 size={15} aria-hidden="true" />Delete group</button>

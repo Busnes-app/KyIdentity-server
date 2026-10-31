@@ -1726,8 +1726,8 @@ dialog.modal-backdrop::backdrop {
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* Users: the account name opens Edit user, and every other action sits behind one quiet ⋯
-   disclosure, as on OAuth clients and Groups, so names lead the row; delete is set apart. */
+/* Users, OAuth clients and Groups: the name opens the row (Edit user, Manage), and every action
+   sits behind one quiet ⋯ disclosure, so names lead the row; delete is set apart. */
 .row-actions { display: inline-block; text-align: left; }
 .row-actions-menu { display: none; position: fixed; width: 16rem; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; padding: 8px; border: 1px solid var(--ky-field-border); border-radius: var(--ky-control-radius); background: var(--panel); color: var(--ink-strong); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
 .row-actions-menu:popover-open { display: grid; gap: 2px; }
@@ -1801,7 +1801,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .list-no-match { padding: 1.5rem 1rem !important; color: var(--ink); text-align: center; }
 .cell-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; color: var(--ink-strong); }
 .cell-link { padding: 0; border: 0; background: none; color: inherit; font-weight: inherit; text-align: left; text-decoration: none; text-underline-offset: 3px; border-radius: 2px; }
-.cell-link:hover:not(:disabled), .users-table tr:hover .cell-link:not(:disabled) { text-decoration: underline; }
+.cell-link:hover:not(:disabled), .admin-table tr:hover .cell-link:not(:disabled) { text-decoration: underline; }
 .cell-link:disabled { cursor: progress; }
 .cell-meta { display: block; margin-top: 0.1rem; color: var(--ink); font-size: var(--ky-type-meta); font-weight: 400; }
 .tabular { font-variant-numeric: tabular-nums; }
