@@ -57,6 +57,25 @@ export const LAUNCHER_ICONS: ReadonlyArray<[name: string, label: string, Icon: L
   ['map', 'Maps', Map],
 ];
 
+/** Mirrors the server's suiteIcons: bundled suite app icons, named "suite:<app>". */
+export const SUITE_ICONS: ReadonlyArray<[app: string, label: string]> = [
+  ['kycalendar', 'KyCalendar'],
+  ['kydns', 'KyDNS'],
+  ['kydrive', 'KyDrive'],
+  ['kymessages', 'KyMessages'],
+  ['kynotes', 'KyNotes'],
+  ['kypost', 'KyPost'],
+  ['kypulse', 'KyPulse'],
+  ['kyrecovery', 'KyRecovery'],
+  ['kyyard', 'KyYard'],
+];
+
+/** Same-origin URL of a bundled suite icon; only names on the list resolve. */
+export function suiteIconUrl(iconName: string): string | undefined {
+  const app = iconName.startsWith('suite:') ? iconName.slice(6) : '';
+  return SUITE_ICONS.some(([a]) => a === app) ? `/suite-icons/${app}.png` : undefined;
+}
+
 export function launcherIcon(name: string): LauncherIcon | undefined {
   return LAUNCHER_ICONS.find(([n]) => n === name)?.[2];
 }

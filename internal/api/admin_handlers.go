@@ -857,6 +857,9 @@ func (h *AdminHandler) ListApplications(w http.ResponseWriter, r *http.Request) 
 	if apps == nil {
 		apps = []store.Application{}
 	}
+	for i := range apps {
+		apps[i].IconName = launcherIconName(apps[i].IconName, apps[i].Name)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"applications": apps})
