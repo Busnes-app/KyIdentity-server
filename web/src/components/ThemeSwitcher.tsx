@@ -9,7 +9,7 @@ export function ThemeSwitcher() {
     window.addEventListener('ky:theme', sync);
     return () => window.removeEventListener('ky:theme', sync);
   }, []);
-  return <select className="theme-selector" aria-label="Color theme" value={theme} onChange={event => {
+  return <select aria-label="Color theme" value={theme} onChange={event => {
     setTheme(event.target.value);
     applyTheme(event.target.value, true);
   }}>{THEME_CHOICES.map(({ pair, choices }) => (

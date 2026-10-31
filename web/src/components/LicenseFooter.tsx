@@ -2,13 +2,14 @@ import React, { useRef } from 'react';
 import mitLicenseText from '../mit.txt?raw';
 
 /** The suite's licence line and About dialog (ky-ui shell markup). */
-export const LicenseFooter: React.FC<{ version?: string }> = ({ version }) => {
+/** `className` places it: the sidebar foot by default, `ky-content-foot` at a phone page's end. */
+export const LicenseFooter: React.FC<{ version?: string; className?: string }> = ({ version, className = 'ky-license' }) => {
   const dialog = useRef<HTMLDialogElement>(null);
   const year = new Date().getFullYear();
   const close = () => dialog.current?.close();
 
   return (
-    <footer className="ky-license">
+    <footer className={className}>
       <button type="button" className="ky-license-link" onClick={() => dialog.current?.showModal()}>
         &copy; {year} &middot; MIT License
       </button>

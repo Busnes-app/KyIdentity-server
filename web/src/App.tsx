@@ -21,6 +21,7 @@ import { AdminAccessRequests } from './components/AdminAccessRequests';
 import { AdminAlerts } from './components/AdminAlerts';
 import { AccountLinkView } from './components/AccountLinkView';
 import { PasswordChangeRequired } from './components/PasswordChangeRequired';
+import { LicenseFooter } from './components/LicenseFooter';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -81,17 +82,17 @@ export const App: React.FC = () => {
     return <LoginView onLoginSuccess={(u) => { setCurrentUser(u); checkSession(); }} />;
   }
 
-  if (currentUser.enrollment?.restricted) return <div className="shell"><main className="main-content" style={{ gridColumn: '1 / -1' }}>
+  if (currentUser.enrollment?.restricted) return <main className="ky-content">
     <div role="status" className="alert-box"><div><h1>Complete MFA enrollment</h1><p>This session can only set up account security. Permitted methods: {currentUser.enrollment.allowedMethods.map(m=>m==='webauthn'?'passkey':m.toUpperCase()).join(', ')}.</p><p>After enrolling, sign out and sign in with a permitted factor to continue.</p><button className="secondary-btn" onClick={handleLogout}>Sign out and sign in again</button></div></div>
     <DeviceSettings user={currentUser} onUserUpdate={checkSession}/>
-  </main></div>;
+  </main>;
 
   if (currentUser.passwordChangeRequired) {
     return <PasswordChangeRequired user={currentUser} onLogout={handleLogout} onChanged={() => { setActiveTab('dashboard'); checkSession(); }} />;
   }
 
   return (
-    <div className="shell">
+    <div className="ky-app">
       <Sidebar
         user={currentUser}
         activeTab={activeTab}
@@ -99,7 +100,7 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
       />
 
-      <main className="main-content">
+      <main className="ky-content">
         {currentUser.enrollment?.required && !currentUser.enrollment.enrolled && <div role="status" className="alert-box"><p>Enroll a permitted MFA factor by {new Date(currentUser.enrollment.deadline*1000).toLocaleString()}. <button className="secondary-btn" onClick={()=>setActiveTab('devices')}>Set up MFA</button></p></div>}
         {activeTab === 'dashboard' && (
           <UserDashboard
@@ -132,6 +133,7 @@ export const App: React.FC = () => {
             {activeTab === 'admin-alerts' && <AdminAlerts access={currentUser.access} />}
           </>
         )}
+        <LicenseFooter version={currentUser.version} className="ky-content-foot" />
       </main>
     </div>
   );
