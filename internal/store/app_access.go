@@ -96,7 +96,16 @@ func (s *Store) ClientAccessAllowed(userID, clientID string) (bool, error) {
 	return allowed, err
 }
 func (s *Store) LauncherAppAccess(userID string) (map[string]bool, error) {
-	rows, err := s.db.Query(`SELECT COALESCE(a.client_id,''),COALESCE(a.launcher_id,'') FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE e.user_id=?`, userID)
+	return s.appKeys(`SELECT COALESCE(a.client_id,''),COALESCE(a.launcher_id,'') FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE e.user_id=?`, userID)
+}
+
+// EnabledAppKeys returns the launcher keys of every app whose access policy is enabled.
+func (s *Store) EnabledAppKeys() (map[string]bool, error) {
+	return s.appKeys(`SELECT COALESCE(client_id,''),COALESCE(launcher_id,'') FROM app_registry WHERE enabled`)
+}
+
+func (s *Store) appKeys(query string, args ...any) (map[string]bool, error) {
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
