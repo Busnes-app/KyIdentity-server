@@ -21,12 +21,16 @@ const maxIconBytes = 128 << 10
 // suiteIcons are the suite app icons bundled at web/public/suite-icons/<name>.png and named
 // "suite:<name>". web/src/launcherIcons.ts holds the same list and a test keeps the two in step.
 var suiteIcons = map[string]bool{
-	"kycalendar": true, "kydns": true, "kydrive": true, "kymessages": true, "kynotes": true,
-	"kypost": true, "kypulse": true, "kyrecovery": true, "kyyard": true,
+	"kycalendar": true, "kydash": true, "kydns": true, "kydrive": true, "kymessages": true,
+	"kynotes": true, "kypost": true, "kypulse": true, "kyrecovery": true, "kyyard": true,
 }
 
-// suiteIconAliases are KyQuickStart client IDs that differ from their app's icon name.
-var suiteIconAliases = map[string]string{"kymessage": "kymessages", "kymessage-chat": "kymessages"}
+// suiteIconAliases are client IDs and names that differ from their app's icon name: KyQuickStart's
+// KyMessages clients, and KyDash's repository name and Compose KY_APP_NAME.
+var suiteIconAliases = map[string]string{
+	"kymessage": "kymessages", "kymessage-chat": "kymessages",
+	"ky-dashboard": "kydash", "ky dashboard": "kydash",
+}
 
 // launcherIconName is the icon a card shows. A card left on the default favicon shows its
 // suite app's bundled icon when its client ID or name, compared exactly and case-insensitively,

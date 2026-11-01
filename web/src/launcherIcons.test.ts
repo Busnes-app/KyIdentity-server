@@ -39,7 +39,7 @@ describe('suite icons', () => {
       expect(suiteIconUrl(`suite:${app}`)).toBe(`/suite-icons/${app}.png`);
       expect(existsSync(new URL(`../public/suite-icons/${app}.png`, import.meta.url))).toBe(true);
     }
-    for (const name of ['suite:', 'suite:../x', 'suite:kydrive/../../api', 'suite:KyDrive', 'kydrive', 'favicon', 'globe', 'icon:kydrive']) {
+    for (const name of ['suite:', 'suite:../x', 'suite:kydrive/../../api', 'suite:KyDrive', 'suite:KyDash', 'suite:kydash/../../api', 'suite:ky-dashboard', 'kydrive', 'favicon', 'globe', 'icon:kydrive']) {
       expect(suiteIconUrl(name)).toBeUndefined();
     }
   });

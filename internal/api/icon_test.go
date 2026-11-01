@@ -228,12 +228,12 @@ func TestUploadedIconRejectsUnsafeContent(t *testing.T) {
 // a path, so nothing outside the list gets through.
 func TestIconAllowedSuiteNames(t *testing.T) {
 	h := &AdminHandler{}
-	for _, name := range []string{"suite:kycalendar", "suite:kydns", "suite:kydrive", "suite:kymessages", "suite:kynotes", "suite:kypost", "suite:kypulse", "suite:kyrecovery", "suite:kyyard", "favicon", "globe"} {
+	for _, name := range []string{"suite:kycalendar", "suite:kydash", "suite:kydns", "suite:kydrive", "suite:kymessages", "suite:kynotes", "suite:kypost", "suite:kypulse", "suite:kyrecovery", "suite:kyyard", "favicon", "globe"} {
 		if !h.iconAllowed(name) {
 			t.Errorf("%q rejected", name)
 		}
 	}
-	for _, name := range []string{"suite:", "suite:../x", "suite:kydrive/../kydns", "suite:KyDrive", "suite:kydrive.png", "suite:/kydrive", "suite:kymessage", "suite: kydrive", "kydrive", "suite:kyidentity", "suite:kydash"} {
+	for _, name := range []string{"suite:", "suite:../x", "suite:kydrive/../kydns", "suite:KyDrive", "suite:kydrive.png", "suite:/kydrive", "suite:kymessage", "suite: kydrive", "kydrive", "suite:kyidentity", "suite:KyDash", "suite:ky-dashboard", "suite:kydash.png", "suite:kydash/../kydns", "suite:../kydash"} {
 		if h.iconAllowed(name) {
 			t.Errorf("%q accepted", name)
 		}
@@ -254,7 +254,11 @@ func TestLauncherIconNameDefaultsSuiteApps(t *testing.T) {
 		{"favicon", []string{" KYPULSE "}, "suite:kypulse"},
 		{"favicon", []string{"portainer", "Portainer"}, "favicon"},
 		{"", []string{"KyDrive backup"}, "favicon"},
-		{"favicon", []string{"kydash", "KyDash"}, "favicon"},
+		{"favicon", []string{"kydash", "KyDash"}, "suite:kydash"},
+		{"favicon", []string{"ky-dashboard", "Ky Dashboard"}, "suite:kydash"},
+		{"", []string{"dash-prod", "KyDash"}, "suite:kydash"},
+		{"favicon", []string{"other", "Ky Dashboard"}, "suite:kydash"},
+		{"favicon", []string{"kydashboard", "KyDash staging"}, "favicon"},
 		{"globe", []string{"kydrive"}, "globe"},
 		{"icon:6f1c2a7e-0000-4000-8000-000000000000", []string{"kydrive"}, "icon:6f1c2a7e-0000-4000-8000-000000000000"},
 		{"suite:kydns", []string{"kydrive"}, "suite:kydns"},

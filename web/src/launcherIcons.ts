@@ -60,6 +60,7 @@ export const LAUNCHER_ICONS: ReadonlyArray<[name: string, label: string, Icon: L
 /** Mirrors the server's suiteIcons: bundled suite app icons, named "suite:<app>". */
 export const SUITE_ICONS: ReadonlyArray<[app: string, label: string]> = [
   ['kycalendar', 'KyCalendar'],
+  ['kydash', 'KyDash'],
   ['kydns', 'KyDNS'],
   ['kydrive', 'KyDrive'],
   ['kymessages', 'KyMessages'],
