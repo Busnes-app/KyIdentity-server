@@ -1779,6 +1779,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .security-page .pair-signon input { margin-top: 4px; flex: none; }
 .security-page .settings-section > .form-group, .security-page .settings-section > .alert-box { margin-inline: 0; }
 .security-page .password-change-form { padding-inline: 0; }
+/* Each Settings tab opens with one line saying what it holds. */
+.settings-intro { margin: 0 0 24px; color: var(--ink); max-width: 72ch; line-height: 1.5; }
+.settings-intro a { color: var(--ink-strong); text-decoration: underline; text-underline-offset: 2px; }
 @media (max-width: 52rem) {
   .app-records-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .app-records-table, .app-records-table tbody, .app-records-table tr { display: block; width: 100%; }

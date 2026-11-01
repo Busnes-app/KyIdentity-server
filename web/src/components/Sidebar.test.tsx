@@ -39,13 +39,23 @@ describe('sidebar', () => {
     expect(html).toContain('Delegated administrator');
   });
 
-  it('names the user over their role with a labelled Sign out row', () => {
+  it('holds Account, Phones & apps and Appearance in one Settings item', () => {
+    const html = render(admin, 'settings/devices');
+    expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+    expect(html).toMatch(item('Settings'));
+    expect(html).not.toMatch(/<span>(Appearance|Security and devices|Account|Phones &amp; apps)<\/span>/);
+  });
+
+  it('names the user over their role with an icon-only Sign out', () => {
     const html = render({ ...admin, role: 'user', access: none }, 'dashboard');
     expect(sections(html)).toEqual(['Your account']);
     expect(html).toContain('<p class="ky-user-name">admin</p><p class="ky-user-role">Everyday account</p>');
-    expect(html).toMatch(/class="ky-user-signout"><svg[^>]*lucide-log-out[\s\S]*?<span>Sign out<\/span>/);
-    // Phones: the header's icon-only Sign out, and a brand with no sub-label.
-    expect(html).toMatch(/class="ky-mobile-signout" aria-label="Sign out"><svg[^>]*lucide-log-out/);
+    const signOut = /<button type="button" class="ky-icon-button" aria-label="Sign out" title="Sign out"><svg[^>]*lucide-log-out[^>]*>[\s\S]*?<\/svg><\/button>/;
+    expect(html).toMatch(new RegExp(`class="ky-user-actions">${signOut.source}</div>`));
+    expect(html).not.toContain('<span>Sign out</span>');
+    // Phones: the same button in the header, and no Settings gear (KyIdentity keeps the nav item).
+    expect(html).toMatch(new RegExp(`class="ky-mobile-actions">${signOut.source}</div>`));
+    expect(html).not.toContain('aria-label="Settings"');
     expect(html).toMatch(/<div class="ky-brand"><img[^>]*width="28"[^>]*\/><span>KyIdentity<\/span><\/div>/);
     expect(html).not.toContain('ID Authority');
   });

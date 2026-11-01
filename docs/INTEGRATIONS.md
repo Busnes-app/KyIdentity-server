@@ -78,7 +78,7 @@ is always verified after the password in the same sign-in. With `prompt=none` an
 insufficient sign-in answers `login_required` instead of showing a page. Refresh never
 updates `auth_time` or `acr`, so a refreshed ID token cannot pass a step-up check its
 sign-in did not. An administrator can impose the same per app (Authentication: maximum
-password age, required factor and its age). Security and devices lists where an account is signed in: each live browser
+password age, required factor and its age). Settings → Account lists where an account is signed in: each live browser
 session with its address, browser, sign-in and last-activity times, expiry and the factor
 used, plus the apps currently holding access tokens. `GET /api/user/sessions`,
 `DELETE /api/user/sessions/{id}` and `POST /api/user/sessions/revoke-others` act on the

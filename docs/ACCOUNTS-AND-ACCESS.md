@@ -46,7 +46,7 @@ or, once retention has pruned its creation row, as an administrator whose row wa
 modified. Nothing is reset: the account still signs in with its current password, then
 chooses a new one. Setup-owned and SCIM-owned accounts are never flagged.
 
-**Passwords.** Security and devices → Password changes your own password after a
+**Passwords.** Settings → Account → Password changes your own password after a
 step-up; every other session, token and app grant ends, this browser stays signed in.
 Changing it clears a required password change.
 "Forgot your password?" on the sign-in page always answers the same way whether or not

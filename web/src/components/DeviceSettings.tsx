@@ -38,9 +38,11 @@ const drawQR = (canvas: HTMLCanvasElement, text: string) =>
 interface DeviceSettingsProps {
   user: User;
   onUserUpdate: () => void;
+  /** One Settings tab; left out, the enrollment-only screen shows every method. */
+  section?: 'account' | 'devices';
 }
 
-export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpdate }) => {
+export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpdate, section }) => {
   const restricted = Boolean(user.enrollment?.restricted);
   const permitted = (method: string) => !restricted || Boolean(user.enrollment?.allowedMethods.includes(method));
   const [devices, setDevices] = useState<NativeDevice[]>([]);
@@ -408,13 +410,15 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
 
   return (
     <div className="settings-page security-page">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Security and devices</h1>
+      {!section && (
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">Security and devices</h1>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="settings-section">
+      {section !== 'account' && <div className="settings-section">
         <div className="section-header">
           <div className="section-title-wrap">
             <h2>Phones that approve sign-ins</h2>
@@ -487,8 +491,9 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
             ))
           )}
         </div>
-      </div>
+      </div>}
 
+      {section !== 'devices' && <>
       <div className="settings-section">
         <div className="section-header">
           <div className="section-title-wrap">
@@ -637,6 +642,7 @@ export const DeviceSettings: React.FC<DeviceSettingsProps> = ({ user, onUserUpda
         </div>
         <SessionList sessions={inventory.sessions} apps={inventory.apps} logouts={inventory.logouts} onRevokeSession={(sess) => handleRevokeSession(sess.id, sess.current)} />
       </div>
+      </>}
 
       {showPairModal && (
         <Modal title="Pair KyAuth" onClose={closePairModal}>

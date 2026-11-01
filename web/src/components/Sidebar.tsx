@@ -1,7 +1,7 @@
 import React, { Fragment, useEffect, useState } from 'react';
 import { Access, User } from '../types';
 import { LicenseFooter } from './LicenseFooter';
-import { Shield, LayoutGrid, Smartphone, Palette, Users, UsersRound, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox, Bell, ChevronRight, AppWindow } from 'lucide-react';
+import { Shield, LayoutGrid, Settings, Users, UsersRound, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox, Bell, ChevronRight, AppWindow } from 'lucide-react';
 
 interface SidebarProps {
   user: User;
@@ -16,11 +16,10 @@ type Section = [title: string, items: Item[]];
 
 const ACCOUNT: Item[] = [
   ['dashboard', 'Applications', LayoutGrid],
-  ['devices', 'Security and devices', Smartphone],
-  ['appearance', 'Appearance', Palette],
+  ['settings/account', 'Settings', Settings],
 ];
 
-const ADMIN: Section[] = [
+export const ADMIN: Section[] = [
   ['Directory', [
     ['admin-users', 'Users', Users],
     ['admin-groups', 'Groups', UsersRound],
@@ -50,6 +49,12 @@ export const Brand: React.FC = () => (
   </div>
 );
 
+const SignOut: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
+  <button type="button" className="ky-icon-button" aria-label="Sign out" title="Sign out" onClick={onLogout}>
+    <LogOut aria-hidden="true" />
+  </button>
+);
+
 /** Navigation is a convenience; the server enforces every route. */
 function adminSections(a: Access | undefined): Section[] {
   if (!a) return [];
@@ -63,8 +68,8 @@ function roleLabel(user: User): string {
   return adminSections(user.access).length > 0 ? 'Delegated administrator' : 'Everyday account';
 }
 
-// Launcher management is reached from App connections, so that item stays current there.
-const navTab = (tab: string) => (tab === 'admin-launchers' ? 'admin-app-registry' : tab);
+// Launcher management is reached from App connections, and every Settings tab from Settings.
+const navTab = (tab: string) => (tab === 'admin-launchers' ? 'admin-app-registry' : tab.startsWith('settings/') ? 'settings/account' : tab);
 const sectionOf = (sections: Section[], tab: string) => sections.find(([, items]) => items.some(([t]) => t === navTab(tab)))?.[0];
 
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onLogout }) => {
@@ -93,9 +98,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
     <header className="ky-sidebar">
       <div className="ky-mobile-head">
         <Brand />
-        <button type="button" className="ky-mobile-signout" aria-label="Sign out" onClick={onLogout}>
-          <LogOut aria-hidden="true" />
-        </button>
+        <div className="ky-mobile-actions">
+          <SignOut onLogout={onLogout} />
+        </div>
       </div>
       <nav className="ky-nav" aria-label="Primary">
         <p className="ky-nav-section">Your account</p>
@@ -119,10 +124,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab,
             <p className="ky-user-name">{user.username}</p>
             <p className="ky-user-role">{roleLabel(user)}</p>
           </div>
-          <button type="button" className="ky-user-signout" onClick={onLogout}>
-            <LogOut size={16} aria-hidden="true" />
-            <span>Sign out</span>
-          </button>
+          <div className="ky-user-actions">
+            <SignOut onLogout={onLogout} />
+          </div>
         </div>
         <LicenseFooter version={user.version} />
       </div>

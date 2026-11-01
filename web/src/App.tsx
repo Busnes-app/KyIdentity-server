@@ -6,7 +6,8 @@ import { Sidebar } from './components/Sidebar';
 import { LoginView } from './components/LoginView';
 import { UserDashboard } from './components/UserDashboard';
 import { DeviceSettings } from './components/DeviceSettings';
-import { Appearance } from './components/Appearance';
+import { Settings } from './components/Settings';
+import { SettingsSection, hashFor, tabFromHash } from './route';
 import { AdminAppRegistry } from './components/AdminAppRegistry';
 import { AdminEnrollmentPolicies } from './components/AdminEnrollmentPolicies';
 import { AdminGroups } from './components/AdminGroups';
@@ -27,8 +28,26 @@ import { RefreshCw } from 'lucide-react';
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setTab] = useState(() => tabFromHash(window.location.hash));
   const [groupUser, setGroupUser] = useState<User | null>(null);
+
+  // The view lives in the URL hash, so links and the back button work.
+  const setActiveTab = (tab: string) => {
+    if (window.location.hash === hashFor(tab)) setTab(tab);
+    else window.location.hash = hashFor(tab);
+  };
+  useEffect(() => {
+    const sync = () => {
+      const tab = tabFromHash(window.location.hash);
+      // A moved or unknown hash is rewritten in place, not added to history.
+      if (window.location.hash && window.location.hash !== hashFor(tab)) history.replaceState(null, '', hashFor(tab));
+      if (tab !== 'admin-groups') setGroupUser(null);
+      setTab(tab);
+    };
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
 
   // Link pages need no session and must not wait for one.
   const linkKind = window.location.pathname === '/activate' ? 'activation' : window.location.pathname === '/reset' ? 'reset' : null;
@@ -101,20 +120,18 @@ export const App: React.FC = () => {
       />
 
       <main className="ky-content">
-        {currentUser.enrollment?.required && !currentUser.enrollment.enrolled && <div role="status" className="alert-box"><p>Enroll a permitted MFA factor by {new Date(currentUser.enrollment.deadline*1000).toLocaleString()}. <button className="secondary-btn" onClick={()=>setActiveTab('devices')}>Set up MFA</button></p></div>}
+        {currentUser.enrollment?.required && !currentUser.enrollment.enrolled && <div role="status" className="alert-box"><p>Enroll a permitted MFA factor by {new Date(currentUser.enrollment.deadline*1000).toLocaleString()}. <button className="secondary-btn" onClick={()=>setActiveTab('settings/account')}>Set up MFA</button></p></div>}
         {activeTab === 'dashboard' && (
           <UserDashboard
             user={currentUser}
-            onNavigateToDevices={() => setActiveTab('devices')}
+            onNavigateToDevices={() => setActiveTab('settings/account')}
             onNavigateToConnections={currentUser.access?.admin || currentUser.access?.appOwner.length ? () => setActiveTab('admin-app-registry') : undefined}
           />
         )}
 
-        {activeTab === 'devices' && (
-          <DeviceSettings user={currentUser} onUserUpdate={checkSession} />
+        {activeTab.startsWith('settings/') && (
+          <Settings section={activeTab.slice(9) as SettingsSection} user={currentUser} onUserUpdate={checkSession} />
         )}
-
-        {activeTab === 'appearance' && <Appearance />}
 
         {canAdminister(currentUser.access) && (
           <>
@@ -122,7 +139,7 @@ export const App: React.FC = () => {
             {activeTab === 'admin-users' && <AdminUsers access={currentUser.access} onManageGroups={user => { setGroupUser(user); setActiveTab('admin-groups'); }} />}
             {activeTab === 'admin-groups' && <AdminGroups key={groupUser?.id ?? 'all'} user={groupUser} onClearUser={() => setGroupUser(null)} />}
             {activeTab === 'admin-app-registry' && <AdminAppRegistry onManageLaunchers={() => setActiveTab('admin-launchers')} />}
-            {activeTab === 'admin-launchers' && <UserDashboard key="manage-launchers" manage user={currentUser} onNavigateToDevices={() => setActiveTab('devices')} />}
+            {activeTab === 'admin-launchers' && <UserDashboard key="manage-launchers" manage user={currentUser} onNavigateToDevices={() => setActiveTab('settings/account')} />}
             {activeTab === 'admin-systems' && <AdminSystems />}
             {activeTab === 'admin-clients' && <AdminClients />}
             {activeTab === 'admin-audit' && <AdminAudit />}
