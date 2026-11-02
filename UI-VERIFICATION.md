@@ -96,3 +96,7 @@ UI) are in `docs/ui-suite-2026-10-31/screenshots/`.
 ## Admin table layout — 2026-11-02
 
 OAuth clients and Suite sync now fit 1280–1920 px desktop widths without horizontal scroll: fixed columns, truncated URLs with a full-value tooltip, and Suite sync's actions in one ⋯ menu. The Inbound SCIM new-connector form is padded and aligned, and disabled primary buttons keep a button outline. Before and after shots (1440×900 and 1280×800, Busnes Light and Dark), the overflow measurements and the limits are in [docs/ui-suite-2026-11-02](docs/ui-suite-2026-11-02/README.md).
+
+## Stale tab after an upgrade — 2026-11-02
+
+`index.html` and the SPA fallback are sent with `Cache-Control: no-cache`; assets keep their headers (`internal/api/spa_cache_test.go`). `web/src/main.tsx` starts ky-ui's `watchForUpdate`, which offers a reload when the server serves a different build. Before and after shots of a real server upgrade under an open tab (1440×900, Busnes Light and Dark) and the limits are in [docs/ui-stale-tab-2026-11-02](docs/ui-stale-tab-2026-11-02/README.md). `check-vendor.mjs` passes, and the committed `web/dist` equals a fresh Node 26 build.

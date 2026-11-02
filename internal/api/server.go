@@ -389,14 +389,19 @@ func (s *Server) routes() *http.ServeMux {
 
 		// Check if requesting static asset file directly
 		if s.staticFS != nil {
-			f, err := s.staticFS.Open(strings.TrimPrefix(path, "/"))
+			name := strings.TrimPrefix(path, "/")
+			f, err := s.staticFS.Open(name)
 			if err == nil {
 				_ = f.Close()
+				if name == "" || strings.HasSuffix(name, ".html") {
+					revalidateEntryDocument(w)
+				}
 				http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r)
 				return
 			}
 
 			// SPA Fallback to index.html
+			revalidateEntryDocument(w)
 			indexData, err := fs.ReadFile(s.staticFS, "index.html")
 			if err == nil {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -406,6 +411,7 @@ func (s *Server) routes() *http.ServeMux {
 		}
 
 		// Fallback to local web/dist or minimal placeholder
+		revalidateEntryDocument(w)
 		if data, err := os.ReadFile(filepath.Join("web", "dist", "index.html")); err == nil {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write(data)
@@ -418,6 +424,15 @@ func (s *Server) routes() *http.ServeMux {
 	})
 
 	return mux
+}
+
+// The entry document names the current hashed bundles: browsers revalidate it, so a tab
+// opened after an upgrade loads the new build. A stricter header set earlier (no-store on
+// /api/ and /oauth/) stays; assets keep their caching.
+func revalidateEntryDocument(w http.ResponseWriter) {
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 }
 
 // Start serves until Shutdown; the limiter sweeper lives exactly as long.

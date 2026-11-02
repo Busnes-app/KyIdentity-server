@@ -4,6 +4,7 @@
 
 ### Changes
 
+- A tab left open across an upgrade now says so: "KyIdentity was updated. Reload to use the new version.", with Reload and Dismiss (ky-ui's update notice; it never reloads by itself, so unsaved work stays). It checks at most every five minutes, on focus or when the tab becomes visible, by re-reading `index.html`, and stays quiet offline. `index.html` and the SPA fallback are now sent with `Cache-Control: no-cache`, so a reload or a new tab always gets the current build; hashed assets keep their caching.
 - Admin tables fit the content area at desktop widths (1280–1920 px) with no horizontal scroll. **OAuth clients** shows each client's first redirect URI on one truncated line, with "+N more" and every URI in its tooltip (the full list stays under Manage), and a long monospace client ID such as a UUID breaks at its hyphens. **Suite sync** has fixed Name, Type, Destination URL (truncated, full value in the tooltip), Sync status and Last synced (date over time) columns. All its row actions, including Connection settings, sit in one ⋯ menu per row, as on OAuth clients, Groups and Users. On phones both tables become labelled blocks. No API change.
 - **Inbound SCIM**: the new-connector form has card padding, the label above, and the field and **Connect** aligned on one row. The setup disclosure is padded the same way. A disabled primary button keeps its outline and a neutral fill (ky-ui's disabled page action), so it still reads as a button.
 
