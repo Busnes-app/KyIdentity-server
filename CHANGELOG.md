@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- Admin tables fit the content area at desktop widths (1280–1920 px) with no horizontal scroll. **OAuth clients** shows each client's first redirect URI on one truncated line, with "+N more" and every URI in its tooltip (the full list stays under Manage), and a long monospace client ID such as a UUID breaks at its hyphens. **Suite sync** has fixed Name, Type, Destination URL (truncated, full value in the tooltip), Sync status and Last synced (date over time) columns. All its row actions, including Connection settings, sit in one ⋯ menu per row, as on OAuth clients, Groups and Users. On phones both tables become labelled blocks. No API change.
+- **Inbound SCIM**: the new-connector form has card padding, the label above, and the field and **Connect** aligned on one row. The setup disclosure is padded the same way. A disabled primary button keeps its outline and a neutral fill (ky-ui's disabled page action), so it still reads as a button.
+
 ## 0.6.0 — 2026-11-02
 
 ### Changes

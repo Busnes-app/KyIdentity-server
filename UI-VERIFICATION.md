@@ -92,3 +92,7 @@ toolbar with compact rows; OAuth clients show name, ID, redirect count and real 
 "Manage" plus a ⋯ menu. No authentication, session, OAuth/OIDC or CSRF code changed.
 Before/after captures (1440×900 light/dark, 390×844 light, synthetic fixture created in the
 UI) are in `docs/ui-suite-2026-10-31/screenshots/`.
+
+## Admin table layout — 2026-11-02
+
+OAuth clients and Suite sync now fit 1280–1920 px desktop widths without horizontal scroll: fixed columns, truncated URLs with a full-value tooltip, and Suite sync's actions in one ⋯ menu. The Inbound SCIM new-connector form is padded and aligned, and disabled primary buttons keep a button outline. Before and after shots (1440×900 and 1280×800, Busnes Light and Dark), the overflow measurements and the limits are in [docs/ui-suite-2026-11-02](docs/ui-suite-2026-11-02/README.md).

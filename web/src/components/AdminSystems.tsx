@@ -1,6 +1,7 @@
 import { SyncDeliveries } from './SyncDeliveries';
 import { ProvisioningState } from './ProvisioningState';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
+import { UrlCell } from './UrlCell';
 import { PairedSystem } from '../types';
 import { apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
@@ -17,6 +18,11 @@ import {
   Send,
   Key,
   Globe,
+  MoreHorizontal,
+  Settings,
+  History,
+  Users,
+  PlugZap,
 } from 'lucide-react';
 
 const PRESET_METADATA: Record<
@@ -52,6 +58,9 @@ const PRESET_METADATA: Record<
     defaultIcon: '',
   },
 };
+
+/** A legacy or unknown type: delivery pauses until an administrator picks a protocol. */
+const needsReview = (s: PairedSystem) => !['scim', 'suite_webhook', 'kypost', 'kypasswords', 'kybookmarks', 'kynotes'].includes(s.systemType);
 
 export const AdminSystems: React.FC = () => {
   const [deliverySystem, setDeliverySystem] = useState<PairedSystem | null>(null);
@@ -196,7 +205,6 @@ export const AdminSystems: React.FC = () => {
   };
 
   const isCustomOrGeneric = systemType === 'scim' || systemType === 'suite_webhook';
-  const needsReview = (s: PairedSystem) => !['scim', 'suite_webhook', 'kypost', 'kypasswords', 'kybookmarks', 'kynotes'].includes(s.systemType);
   const openConnection = (s: PairedSystem) => {
     setEditing(s); setSystemType(s.systemType === 'scim' ? 'scim' : '');
     setTargetName(s.name); setCallbackUrl(s.callbackUrl); setDescription(s.description ?? ''); setIconUrl(s.iconUrl ?? '');
@@ -226,15 +234,15 @@ export const AdminSystems: React.FC = () => {
       {deliverySystem && <SyncDeliveries key={deliverySystem.id} system={deliverySystem} onClose={() => setDeliverySystem(null)} />}
       {provisioningSystem && <ProvisioningState key={provisioningSystem.id} system={provisioningSystem} onClose={() => setProvisioningSystem(null)} />}
       <div className="table-card">
-        <table className="admin-table">
+        <table className="admin-table systems-table">
           <thead>
             <tr>
-              <th>Target service</th>
+              <th>Name</th>
               <th>Type</th>
               <th>Destination URL</th>
               <th>Sync status</th>
               <th>Last synced</th>
-              <th className="text-right">Actions</th>
+              <th className="text-right"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -247,67 +255,42 @@ export const AdminSystems: React.FC = () => {
             ) : (
               systems?.map((s) => (
                 <tr key={s.id}>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <td data-label="Name">
+                    <div className="cell-with-icon">
                       {s.iconUrl ? (
                         <img
                           src={s.iconUrl}
                           alt=""
-                          style={{
-                            width: 24,
-                            height: 24,
-                            borderRadius: '4px',
-                            objectFit: 'contain',
-                            background: 'var(--panel-hover)',
-                            padding: '2px',
-                            border: '1px solid var(--line)',
-                          }}
+                          className="system-icon"
                           onError={(e) => {
                             e.currentTarget.style.display = 'none';
                           }}
                         />
                       ) : (
-                        <div
-                          style={{
-                            width: 24,
-                            height: 24,
-                            borderRadius: '4px',
-                            background: 'rgba(77, 238, 234, 0.1)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'var(--cyan)',
-                          }}
-                        >
-                          <Globe size={13} />
-                        </div>
+                        <span className="system-icon" aria-hidden="true"><Globe size={13} /></span>
                       )}
-                      <div>
-                        <div className="font-bold text-white">{s.name}</div>
-                        {s.description && (
-                          <div className="text-muted text-xs" style={{ marginTop: '0.15rem' }}>
-                            {s.description}
-                          </div>
-                        )}
+                      <div className="cell-body">
+                        <span className="cell-title">{s.name}</span>
+                        {s.description && <span className="cell-meta">{s.description}</span>}
                       </div>
                     </div>
                   </td>
-                  <td>
+                  <td data-label="Type">
                     <span className="font-mono badge-type">{s.systemType}</span>
                   </td>
-                  <td className="font-mono text-muted text-sm">{s.callbackUrl}</td>
-                  <td>
+                  <td data-label="Destination URL"><UrlCell values={[s.callbackUrl]} /></td>
+                  <td data-label="Sync status" className="cell-badges">
                     {s.groupsEnabled && <span className="badge-type">Groups</span>}
                     {needsReview(s) && <span className="ky-status" data-ky-status="warning">Protocol review required — delivery paused</span>}
                     {s.provisioningHold && <span className="ky-status" data-ky-status="warning">Held after a restore — reconcile to resume delivery</span>}
                     {!needsReview(s) && s.status === 'active' && (
                       <span className="ky-status" data-ky-status="success">
-                        <CheckCircle size={12} /> Active
+                        <CheckCircle size={12} aria-hidden="true" /> Active
                       </span>
                     )}
                     {s.status === 'failing' && (
                       <span className="ky-status" data-ky-status="danger">
-                        <AlertTriangle size={12} /> Failing
+                        <AlertTriangle size={12} aria-hidden="true" /> Failing
                       </span>
                     )}
                     {s.status === 'disabled' && (
@@ -316,32 +299,22 @@ export const AdminSystems: React.FC = () => {
                       </span>
                     )}
                   </td>
-                  <td className="text-muted text-sm font-mono">
-                    {s.lastSyncedAt ? new Date(s.lastSyncedAt).toLocaleString() : 'Pending'}
+                  <td data-label="Last synced" className="tabular">
+                    {s.lastSyncedAt ? <span className="cell-stack">
+                      {new Date(s.lastSyncedAt).toLocaleDateString()}
+                      <span className="cell-meta">{new Date(s.lastSyncedAt).toLocaleTimeString()}</span>
+                    </span> : 'Pending'}
                   </td>
-                  <td className="text-right">
-                    <div className="action-buttons-wrap">
-                      {(needsReview(s) || s.systemType === 'scim') && <button className="secondary-btn sm" onClick={() => openConnection(s)}>{needsReview(s) ? 'Review connection' : 'Connection settings'}</button>}
-                      <button className="secondary-btn sm" onClick={() => setDeliverySystem(s)}>Deliveries</button>
-                      <button className="secondary-btn sm" onClick={() => setProvisioningSystem(s)}>Provisioning</button>
-                      {s.systemType === 'scim' && <button className="secondary-btn sm" onClick={() => testConnection(s)}>Test connection</button>}
-                      <button
-                        className="secondary-btn sm"
-                        disabled={needsReview(s)}
-                        onClick={() => handleTriggerResync(s)}
-                        title="Re-replicate all accounts via SCIM"
-                      >
-                        <Send size={13} />
-                        <span>Resync directory</span>
-                      </button>
-                      <button
-                        className="icon-btn danger"
-                        onClick={() => handleDeleteSystem(s)}
-                        title="Disconnect system"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
+                  <td data-label="Actions" className="text-right">
+                    <SystemRowActions
+                      system={s}
+                      onConnection={() => openConnection(s)}
+                      onDeliveries={() => setDeliverySystem(s)}
+                      onProvisioning={() => setProvisioningSystem(s)}
+                      onTest={() => testConnection(s)}
+                      onResync={() => handleTriggerResync(s)}
+                      onDelete={() => handleDeleteSystem(s)}
+                    />
                   </td>
                 </tr>
               ))
@@ -491,6 +464,49 @@ export const AdminSystems: React.FC = () => {
           )}
         </Modal>
       )}
+    </div>
+  );
+};
+
+/** Every row action behind one quiet ⋯ menu, so the table keeps one narrow actions column. */
+export const SystemRowActions: React.FC<{
+  system: PairedSystem;
+  onConnection: () => void;
+  onDeliveries: () => void;
+  onProvisioning: () => void;
+  onTest: () => void;
+  onResync: () => void;
+  onDelete: () => void;
+}> = ({ system: s, onConnection, onDeliveries, onProvisioning, onTest, onResync, onDelete }) => {
+  const menuId = useId();
+  const review = needsReview(s);
+  return (
+    <div className="row-actions">
+      <button type="button" className="icon-btn sm" popoverTarget={menuId} aria-label={`More actions for ${s.name}`}>
+        <MoreHorizontal size={16} aria-hidden="true" />
+      </button>
+      <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`More actions for ${s.name}`} onClickCapture={event => {
+        if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
+      }}>
+        {(review || s.systemType === 'scim') && <button type="button" className="row-action" onClick={onConnection}>
+          <Settings size={15} aria-hidden="true" />{review ? 'Review connection' : 'Connection settings'}
+        </button>}
+        <button type="button" className="row-action" onClick={onDeliveries}>
+          <History size={15} aria-hidden="true" />Deliveries
+        </button>
+        <button type="button" className="row-action" onClick={onProvisioning}>
+          <Users size={15} aria-hidden="true" />Provisioning
+        </button>
+        {s.systemType === 'scim' && <button type="button" className="row-action" onClick={onTest}>
+          <PlugZap size={15} aria-hidden="true" />Test connection
+        </button>}
+        <button type="button" className="row-action" disabled={review} onClick={onResync} title="Re-replicate all accounts via SCIM">
+          <Send size={15} aria-hidden="true" />Resync directory
+        </button>
+        <button type="button" className="row-action danger" onClick={onDelete}>
+          <Trash2 size={15} aria-hidden="true" />Disconnect
+        </button>
+      </div>
     </div>
   );
 };
