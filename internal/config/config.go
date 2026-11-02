@@ -165,6 +165,9 @@ func Load() (*Config, error) {
 	rsaKeyPath := getEnv("KYIDENTITY_RSA_KEY_PATH", filepath.Join(dataDir, "jwt_rs256.key"))
 
 	port := getEnv("KYIDENTITY_PORT", "5867")
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
+		return nil, fmt.Errorf("KYIDENTITY_PORT must be a port number from 1 to 65535, got %q", port)
+	}
 	listenHost := os.Getenv("KYIDENTITY_LISTEN_HOST")
 	if listenHost != "" && net.ParseIP(listenHost) == nil {
 		return nil, errors.New("KYIDENTITY_LISTEN_HOST must be a literal IP address")

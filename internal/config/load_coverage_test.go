@@ -33,6 +33,13 @@ func TestLoadFailsClosedOnMalformedValues(t *testing.T) {
 		{"proxy not an ip", map[string]string{"TRUSTED_PROXY_CIDRS": "proxy.local"}, "is not a valid IP or CIDR"},
 		{"proxy bad prefix", map[string]string{"TRUSTED_PROXY_CIDRS": "10.0.0.0/33"}, "is not a valid CIDR"},
 		{"short secret key", map[string]string{"KYIDENTITY_SECRET_KEY": "abcd"}, "KYIDENTITY_SECRET_KEY must be exactly 64 hex characters"},
+		{"port above range", map[string]string{"KYIDENTITY_PORT": "99999"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
+		{"port zero", map[string]string{"KYIDENTITY_PORT": "0"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
+		{"port negative", map[string]string{"KYIDENTITY_PORT": "-1"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
+		{"port name", map[string]string{"KYIDENTITY_PORT": "http"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
+		{"port with sign", map[string]string{"KYIDENTITY_PORT": "+5867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
+		{"port with leading zero", map[string]string{"KYIDENTITY_PORT": "05867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
+		{"port with space", map[string]string{"KYIDENTITY_PORT": " 5867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -133,5 +140,19 @@ func TestExplicitDatabasePathWins(t *testing.T) {
 	}
 	if cfg.DBPath != "/srv/identity/custom.db" {
 		t.Fatalf("DBPath = %q", cfg.DBPath)
+	}
+}
+
+// KYIDENTITY_PORT accepts both ends of the port range and keeps the value as given (issue #92).
+func TestLoadAcceptsPortRangeBounds(t *testing.T) {
+	for _, port := range []string{"1", "5867", "65535"} {
+		t.Run(port, func(t *testing.T) {
+			t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+			t.Setenv("KYIDENTITY_PORT", port)
+			cfg, err := Load()
+			if err != nil || cfg.Port != port {
+				t.Fatalf("cfg %+v err = %v, want port %q", cfg, err, port)
+			}
+		})
 	}
 }
