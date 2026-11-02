@@ -86,10 +86,10 @@ export function AdminSCIM() {
         </ol>
       </details>
       {error && <div className="alert-box error" role="alert">{error}</div>}
-      <form className="settings-section" onSubmit={create}>
+      <form className="settings-section inline-form" onSubmit={create}>
         <div className="form-row">
           <div className="form-group flex-1"><label className="form-label" htmlFor="scim-name">New connector name</label><input id="scim-name" className="form-input" value={name} onChange={e => setName(e.target.value)} disabled={busy} required /></div>
-          <div className="form-group"><label className="form-label">&nbsp;</label><button type="submit" className="primary-btn" disabled={busy || !name.trim()}>Connect</button></div>
+          <button type="submit" className="primary-btn" disabled={busy || !name.trim()}>Connect</button>
         </div>
       </form>
       <div className="device-list">

@@ -271,6 +271,7 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 - `web/src/ky-ui/` is generated from Busnes-app/ky-ui, pinned by `VERSION` file hashes. Change shared colors, navigation states and storage helpers upstream, then run its consumer sync with an explicit worktree map; do not hand-edit vendored files.
 - State badges use the ky-ui `.ky-status` pill: `data-ky-status` is `success`, `warning` or `danger`, and absent for a chosen off state (Disabled, Paused). Each has a word. Attribute tags that are not a state (SCIM, Groups, This session, system type) use the outlined `.badge-type`. No local pill colours.
+- Admin tables with long values (OAuth clients, Suite sync) use fixed desktop columns, so Status and actions never leave the card. URLs go in `UrlCell`, one truncated line with every value in its title. Long monospace IDs use `.cell-id`. All of a row's actions sit in one ⋯ `.row-actions` menu, as on Users and Groups. An inline create form in a card is `.settings-section.inline-form`: label above, field and button on one row. `docs/ui-suite-2026-11-02/` records the overflow measurements.
 - Products own layout, routes, saved choice keys and named palettes. Busnes aliases consume shared tokens; mark primary navigation with `ky-nav-item` while preserving current-page semantics.
 - Verify vendored files with `node web/src/ky-ui/check-vendor.mjs` from this document's directory. Builds/CI run that check. Rendered evidence and capture limitations are recorded in the repository-root `UI-VERIFICATION.md`.
 

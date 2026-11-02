@@ -12,6 +12,7 @@ import { Modal } from './Modal';
 import { parseCreatedClientSecret, parseOAuthClients, parseOIDCIssuer } from '../parsers';
 import { Plus, Trash2, CheckCircle, AlertTriangle, KeyRound, MoreHorizontal, LayoutGrid, Settings } from 'lucide-react';
 import { PageHead } from './PageHead';
+import { UrlCell } from './UrlCell';
 
 export const AdminClients: React.FC = () => {
   const [clients, setClients] = useState<OAuthClient[] | null>(null);
@@ -221,8 +222,8 @@ export const AdminClients: React.FC = () => {
                     <span className="cell-title"><ClientName client={c} onManage={setDetailsClient} /></span>
                     <span className="cell-meta">{c.clientType === 'confidential' ? 'Confidential' : 'Public'}</span>
                   </td>
-                  <td data-label="Client ID" className="font-mono">{c.id}</td>
-                  <td data-label="Redirect URIs" className="tabular">{c.redirectUris.length === 1 ? '1 URI' : `${c.redirectUris.length} URIs`}</td>
+                  <td data-label="Client ID" className="font-mono cell-id">{c.id}</td>
+                  <td data-label="Redirect URIs"><UrlCell values={c.redirectUris} /></td>
                   <td data-label="Status">
                     {c.enabled ? (
                       <span className="ky-status" data-ky-status="success">

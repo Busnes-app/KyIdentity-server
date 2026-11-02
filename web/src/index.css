@@ -687,8 +687,11 @@ button {
   box-shadow: 0 0 0 3px var(--glow);
 }
 
+/* Disabled keeps the button shape: ky-ui's disabled page action (neutral fill, outline, ink text). */
 .primary-btn:disabled {
-  opacity: 0.5;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-hover);
+  color: var(--ink);
   cursor: not-allowed;
 }
 
@@ -1814,13 +1817,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   .list-toolbar-search { flex-basis: 100%; max-width: none; }
   .list-toolbar-count { flex-basis: 100%; margin: 0; }
   .users-table td[data-label="Account"] .cell-title { font-size: var(--ky-type-section); }
-  .clients-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .clients-table, .clients-table tbody, .clients-table tr { display: block; width: 100%; }
-  .clients-table tr { padding: 0.75rem 1rem; border-bottom: 1px solid var(--line); }
-  .clients-table td { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: 0.5rem; padding: 0.35rem 0; border: 0; text-align: left; }
-  .clients-table td::before { content: attr(data-label); color: var(--ink); font-size: var(--ky-type-meta); }
-  .clients-table td[data-label="Client"] { display: block; }
-  .clients-table td[data-label="Client"]::before { content: none; }
+  .clients-table thead, .systems-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .clients-table, .clients-table tbody, .clients-table tr, .systems-table, .systems-table tbody, .systems-table tr { display: block; width: 100%; }
+  .clients-table tr, .systems-table tr { padding: 0.75rem 1rem; border-bottom: 1px solid var(--line); }
+  .clients-table td, .systems-table td { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: 0.5rem; padding: 0.35rem 0; border: 0; text-align: left; }
+  .clients-table td::before, .systems-table td::before { content: attr(data-label); color: var(--ink); font-size: var(--ky-type-meta); }
+  .clients-table td[data-label="Client"], .systems-table td[data-label="Name"] { display: block; }
+  .clients-table td[data-label="Client"]::before, .systems-table td[data-label="Name"]::before { content: none; }
 }
 
 /* Appearance: six pair cards, each a Match system / Light / Dark segment (KyCalendar reference). */
@@ -1876,5 +1879,38 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   .groups-table th:nth-child(1) { width: 24%; }
   .groups-table th:nth-child(3) { width: 12%; }
   .groups-table th:nth-child(4) { width: 15rem; }
+  /* OAuth clients and Suite sync: long IDs and URLs stay inside their column, so Status and ⋯ never leave the card. */
+  .clients-table, .systems-table { table-layout: fixed; }
+  .clients-table th:nth-child(1) { width: 22%; }
+  .clients-table th:nth-child(2) { width: 23%; }
+  .clients-table th:nth-child(4) { width: 8.5rem; }
+  .clients-table th:nth-child(5), .systems-table th:nth-child(6) { width: 4.5rem; }
+  .systems-table th:nth-child(1) { width: 19%; }
+  .systems-table th:nth-child(2) { width: 9.5rem; }
+  .systems-table th:nth-child(4) { width: 8.5rem; }
+  .systems-table th:nth-child(5) { width: 8rem; }
+  .clients-table td, .systems-table td { overflow-wrap: anywhere; }
 }
 
+/* Long values in fixed table columns: one truncated line (the full value is in the title), or a monospace ID that breaks anywhere. */
+.cell-truncate { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-id { overflow-wrap: anywhere; }
+.cell-stack { display: block; min-width: 0; }
+.cell-with-icon { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+.cell-body { min-width: 0; }
+.system-icon { flex: none; display: grid; place-items: center; box-sizing: border-box; width: 24px; height: 24px; padding: 2px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-hover); color: var(--ink); object-fit: contain; }
+.cell-badges .ky-status { white-space: normal; }
+.cell-badges > * + * { margin-top: 0.25rem; }
+
+/* Inline create form in a card: label over the field, field and button on one row, card padding. */
+.inline-form { padding: 1rem 1.25rem; }
+.inline-form .form-row { flex-wrap: wrap; align-items: flex-end; gap: 0.75rem; }
+.inline-form .form-row > .form-group { min-width: min(100%, 16rem); margin-bottom: 0; }
+
+/* A disclosure card (Inbound SCIM setup) takes the same inner padding. */
+details.settings-section > summary { min-height: var(--ky-control-size); display: flex; align-items: center; gap: 0.5rem; padding: 0 1.25rem; cursor: pointer; }
+details.settings-section > summary::before { content: "▸"; color: var(--ink); }
+details.settings-section[open] > summary::before { content: "▾"; }
+details.settings-section > summary::-webkit-details-marker { display: none; }
+details.settings-section > summary { list-style: none; }
+details.settings-section > :not(summary) { margin: 0 1.25rem 1rem; }
