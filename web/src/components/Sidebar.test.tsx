@@ -24,7 +24,7 @@ describe('sidebar', () => {
     expect(html.match(/aria-expanded="true"/g)).toHaveLength(1);
     expect(html).toMatch(/aria-expanded="true" data-current="true">(?:<svg[\s\S]*?<\/svg>)Integrations/);
     // Folded rows stay in the markup (phones show them all); CSS hides them on desktop.
-    expect(html.match(/data-folded="true"/g)).toHaveLength(9);
+    expect(html.match(/data-folded="true"/g)).toHaveLength(10);
     expect(html).not.toContain('<details');
   });
 
