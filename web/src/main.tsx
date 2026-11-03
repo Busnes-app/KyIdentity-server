@@ -8,8 +8,10 @@ import './ky-ui/appearance.css';
 import './ky-ui/appearance-themes.css';
 import './ky-ui/shell.css';
 import { applyTheme, storedTheme } from './theme';
+import { watchForUpdate } from './ky-ui/update.js';
 
 applyTheme(storedTheme());
+watchForUpdate({ name: 'KyIdentity' });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
