@@ -86,6 +86,18 @@ administrator and audits the outcome. Cleartext SMTP is not offered: a relay wit
 STARTTLS is refused before any credential is sent. Without mail delivery every link is
 handed over by an administrator and self-service reset is unavailable.
 
+**Branding.** Administration → Branding sets the organisation's name (up to 64 visible
+characters) and logo, shown on the sign-in page and in the brand at the top of the menu
+instead of the KyIdentity name and mark. Only global administrators may change them; no
+step-up is asked, since branding grants nothing, and every change is audited
+(`admin.branding_name_changed`, `admin.branding_logo_uploaded`,
+`admin.branding_logo_removed`). The logo must be a PNG or JPEG of at most 128 KiB and
+512 × 512 pixels. The server decodes and re-encodes it, so only the pixels are kept, and
+serves it under a sandboxing Content-Security-Policy. SVG, custom CSS and scripts are not
+accepted, and the page's Content-Security-Policy is unchanged. `GET /api/branding` returns
+`{"name","logoUrl"}` without sign-in, for the sign-in page; other suite products could
+read it there too, but none does yet.
+
 ## Directory groups
 
 Administrators can create, rename and delete groups under **Groups**, manage each group's

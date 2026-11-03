@@ -1,7 +1,8 @@
 import React, { Fragment, useEffect, useState } from 'react';
 import { Access, User } from '../types';
 import { LicenseFooter } from './LicenseFooter';
-import { Shield, LayoutGrid, Settings, Users, UsersRound, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox, Bell, ChevronRight, AppWindow } from 'lucide-react';
+import { useBranding } from '../branding';
+import { Shield, LayoutGrid, Settings, Users, UsersRound, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox, Bell, ChevronRight, AppWindow, Palette } from 'lucide-react';
 
 interface SidebarProps {
   user: User;
@@ -39,15 +40,22 @@ export const ADMIN: Section[] = [
   ['System', [
     ['admin-backup', 'Disaster recovery', Archive],
     ['admin-mail', 'Mail delivery', Mail],
+    ['admin-branding', 'Branding', Palette],
   ]],
 ];
 
-export const Brand: React.FC = () => (
-  <div className="ky-brand">
-    <img className="ky-mark-stamp" src="/app-icon.png" width={28} height={28} alt="" />
-    <span>KyIdentity</span>
-  </div>
-);
+/** The shell brand: the organisation's logo and name when set (issue #145), else KyIdentity's. */
+export const Brand: React.FC = () => {
+  const { name, logoUrl } = useBranding();
+  return (
+    <div className="ky-brand" title={name ? `${name} · KyIdentity` : undefined}>
+      {logoUrl
+        ? <img className="brand-logo" src={logoUrl} width={28} height={28} alt="" />
+        : <img className="ky-mark-stamp" src="/app-icon.png" width={28} height={28} alt="" />}
+      <span>{name || 'KyIdentity'}</span>
+    </div>
+  );
+};
 
 const SignOut: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
   <button type="button" className="ky-icon-button" aria-label="Sign out" title="Sign out" onClick={onLogout}>

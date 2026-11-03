@@ -203,6 +203,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/suite/apps", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Apps)))
 	mux.Handle("GET /api/suite/peer", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Peer)))
 
+	// Organisation branding: public, because the sign-in page shows it (issue #145).
+	brandingH := &BrandingHandler{store: s.store, audit: s.audit, middleware: s.middleware}
+	mux.Handle("GET /api/branding", s.middleware.RateLimit("branding", 120, 2)(http.HandlerFunc(brandingH.Get)))
+	mux.Handle("GET /api/branding/logo", s.middleware.RateLimit("branding", 120, 2)(http.HandlerFunc(brandingH.Logo)))
+
 	// Admin routes: every one names its permission and whether it spends a step-up grant.
 	//
 	// Destructive and secret-bearing routes additionally spend a step-up grant. "Is this
@@ -294,6 +299,9 @@ func (s *Server) routes() *http.ServeMux {
 		{"PUT", "/api/admin/alerts/settings", permAdmin, true, http.HandlerFunc(alertH.PutSettings)},
 		{"GET", "/api/admin/attestation/settings", permRead, false, http.HandlerFunc(attestationH.GetSettings)},
 		{"PUT", "/api/admin/attestation/settings", permAdmin, true, http.HandlerFunc(attestationH.PutSettings)},
+		{"PUT", "/api/admin/branding/name", permAdmin, false, http.HandlerFunc(brandingH.PutName)},
+		{"PUT", "/api/admin/branding/logo", permAdmin, false, s.middleware.RateLimit("icon_upload", 20, 0.1)(http.HandlerFunc(brandingH.PutLogo))},
+		{"DELETE", "/api/admin/branding/logo", permAdmin, false, http.HandlerFunc(brandingH.DeleteLogo)},
 		{"GET", "/api/admin/session-settings", permRead, false, http.HandlerFunc(sessionSettingsH.Get)},
 		{"PUT", "/api/admin/session-settings", permAdmin, true, http.HandlerFunc(sessionSettingsH.Put)},
 		{"POST", "/api/admin/backup/drill", permAdmin, false, http.HandlerFunc(backupH.RunDrill)},
