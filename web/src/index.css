@@ -92,6 +92,8 @@ button {
 /* The mark is a dark tile; dark schemes get the light tile with a dark mark. */
 .ky-mark-stamp { border-radius: var(--ky-control-radius); }
 :root[data-scheme="dark"] .ky-mark-stamp { filter: invert(1) hue-rotate(180deg); }
+/* An organisation logo (issue #145) keeps its own colours and proportions in its square. */
+.brand-logo { object-fit: contain; border-radius: var(--ky-control-radius); }
 
 /* Page Headers */
 .page-header {
