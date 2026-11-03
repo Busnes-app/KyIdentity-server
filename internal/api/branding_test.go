@@ -218,7 +218,7 @@ func TestBrandingLogo(t *testing.T) {
 	}
 }
 
-// Only global administrators change branding; a user without delegation cannot.
+// Only global administrators change branding, and only with the CSRF token.
 func TestBrandingNeedsAdministrator(t *testing.T) {
 	srv, db, _, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
@@ -228,6 +228,16 @@ func TestBrandingNeedsAdministrator(t *testing.T) {
 	}
 	if rr := putLogo(t, srv, user, "image/png", sizedPNG(t, 4, 4)); rr.Code != http.StatusForbidden {
 		t.Fatalf("user set the logo: %d", rr.Code)
+	}
+	// An administrator's cookie alone, without the CSRF token, changes nothing.
+	admin := newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
+	req := httptest.NewRequest("PUT", "/api/admin/branding/name", strings.NewReader(`{"name":"Forged"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: admin})
+	rr := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("cross-site name change: %d", rr.Code)
 	}
 	if b := readBranding(t, srv); b != (brandingBody{}) {
 		t.Fatalf("branding changed: %+v", b)

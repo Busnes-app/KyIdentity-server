@@ -94,8 +94,6 @@ button {
 :root[data-scheme="dark"] .ky-mark-stamp { filter: invert(1) hue-rotate(180deg); }
 /* An organisation logo (issue #145) keeps its own colours and proportions in its square. */
 .brand-logo { object-fit: contain; border-radius: var(--ky-control-radius); }
-.branding-preview { display: flex; align-items: center; gap: var(--ky-space-3); margin-block: var(--ky-space-3); }
-.branding-preview img { width: 56px; height: 56px; object-fit: contain; border: 1px solid var(--line, var(--ky-line)); border-radius: var(--ky-control-radius); background: var(--panel, var(--ky-panel)); }
 
 /* Page Headers */
 .page-header {

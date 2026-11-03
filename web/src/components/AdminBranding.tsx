@@ -50,10 +50,11 @@ export function AdminBranding() {
           <button type="submit" className="primary-btn" disabled={busy || name.trim() === branding.name}>Save</button>
         </div>
       </form>
-      <section className="settings-section">
-        <h2>Logo</h2>
-        <p>A square PNG or JPEG, up to 512 by 512 pixels and 128 KiB. It is shown at 28 and 56 pixels and is re-encoded when uploaded. Without one, the KyIdentity mark shows.</p>
+      <section className="settings-section inline-form" aria-labelledby="branding-logo">
+        <p className="form-label" id="branding-logo">Logo</p>
+        <p className="form-hint">A square PNG or JPEG, up to 512 by 512 pixels and 128 KiB, shown at 28 and 56 pixels. It is re-encoded on upload. Without one, the KyIdentity mark shows.</p>
         <div className="form-row">
+          {branding.logoUrl && <img className="brand-logo" src={branding.logoUrl} width={40} height={40} alt="Current logo" />}
           <input ref={picker} type="file" accept="image/png,image/jpeg" hidden onChange={upload} />
           <button type="button" className="secondary-btn" onClick={() => picker.current?.click()} disabled={busy}>{branding.logoUrl ? 'Replace logo' : 'Upload logo'}</button>
           {branding.logoUrl && <button type="button" className="secondary-btn" onClick={removeLogo} disabled={busy}>Remove logo</button>}
