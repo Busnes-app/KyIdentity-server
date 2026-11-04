@@ -158,8 +158,8 @@ func (e *Engine) deliverSCIMGroup(parent context.Context, sys *store.PairedSyste
 // ownedMembers reads back each member a group write would add and returns the remote IDs
 // that still carry their local ID as externalId. A stored user mapping may outlive a target
 // wipe that handed its ID to someone else, so a member is never granted the group in another
-// person's place. A member whose ID is gone or reassigned is left out of the write (it
-// rejoins once its own delivery or a repair fixes the mapping), so it never blocks the rest
+// person's place. A member whose ID is gone or reassigned is left out of the write (a
+// repair of the connector fixes the mapping and re-sends the group), so it never blocks the rest
 // of the group, removals included. Eight reads run at once, with time for each, so a large
 // first delivery still completes; any other error fails the write for a retry.
 func (e *Engine) ownedMembers(parent context.Context, c *scim.Client, added []store.SCIMMember) (map[string]bool, error) {

@@ -106,7 +106,7 @@ Only one header is consulted, on purpose. Trying several in turn (`CF-Connecting
 Two further rules apply to the value:
 
 - It must parse as an IP address. An unparseable entry is discarded and the request is attributed to the peer, so a caller cannot mint a fresh rate-limit bucket per request by sending a new nonsense value each time.
-- The chain is read right to left, skipping hops inside `TRUSTED_PROXY_CIDRS`, and the first address you did not write is the client. Reading the leftmost entry instead would attribute the request to whatever the client prepended to the list.
+- The chain is read right to left, skipping hops inside `TRUSTED_PROXY_CIDRS`, and the first address you did not write is the client. Reading the leftmost entry instead would attribute the request to whatever the client prepended to the list; that is done only when every entry is inside your ranges (a Tunnel's `0.0.0.0/0` with `CF-Connecting-IP`), and with a wide range and `X-Forwarded-For` it lets the client choose its address, which is why a wide range is unsafe.
 
 **Name the proxy's address specifically, not a wide range.** Any peer inside the range you name can forge their own client IP and bypass every rate limit and lockout, including the per-address password lockout, by rotating forged addresses. Example:
 
