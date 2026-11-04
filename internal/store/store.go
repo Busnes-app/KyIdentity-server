@@ -1379,6 +1379,11 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
 	if len(events) == 0 {
 		return nil, tx.Commit()
 	}
+	for i := range events {
+		if err := refreshSyncEventRolesTx(tx, &events[i]); err != nil {
+			return nil, err
+		}
+	}
 
 	until := now.Add(lease)
 	stmt, err := tx.Prepare(`UPDATE account_sync_events SET lease_until = ?, updated_at = ?, claim_token = ?

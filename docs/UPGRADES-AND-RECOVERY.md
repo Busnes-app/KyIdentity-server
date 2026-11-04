@@ -20,7 +20,14 @@ Before upgrading KyIdentity and the KyMessages, KyPulse or ky-server-base receiv
 3. Upgrade the source and receivers together as a coordinated rollout. On each
    connector use **Resync** (or `kyidentity resync-system --client <client-id> --wait 2m`)
    after the source upgrade to replace retained and queued old profiles; check delivery
-   success. Startup alone does not rewrite old deliveries or downstream accounts.
+   success. Before any new delivery attempt, the source refreshes only the role array
+   of unfenced app-backed user events (including old queued profiles and MFA resets)
+   from current explicit app assignments. Event ID, type, revision and other profile
+   fields stay intact. Held uncertain attempts are never rewritten or retried by this
+   refresh; establish remote quiescence and use the existing attempt-recovery action
+   before they can be claimed again. Resync and verify delivery after recovery.
+   Startup alone cannot undo an old write that already reached a receiver or stop
+   an in-flight request from an older process; stop the old source before upgrading.
 4. Sign in afresh to each product as its dedicated administrator and verify an
    administrator action. Verify an unassigned global administrator and an everyday
    account have no product administrator access. Confirm existing content is retained.

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"sort"
@@ -467,7 +468,15 @@ func scimUserPayloadTx(tx *sql.Tx, u *User, active bool, systemID string) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	claims, err := appClaimsTx(tx, u.ID, appID)
+	roles, err := appSCIMRolesTx(tx, u.ID, appID)
+	if err != nil {
+		return nil, err
+	}
+	return scimUserPayloadWithRoles(u, active, roles)
+}
+
+func appSCIMRolesTx(tx *sql.Tx, userID, appID string) ([]scim.MultiValue, error) {
+	claims, err := appClaimsTx(tx, userID, appID)
 	if err != nil {
 		return nil, err
 	}
@@ -475,5 +484,53 @@ func scimUserPayloadTx(tx *sql.Tx, u *User, active bool, systemID string) ([]byt
 	for i, r := range claims.Roles {
 		roles = append(roles, scim.MultiValue{Value: r, Primary: i == 0})
 	}
-	return scimUserPayloadWithRoles(u, active, roles)
+	return roles, nil
+}
+
+// refreshSyncEventRolesTx runs only for unfenced events selected by ClaimDueSyncEvents.
+// Old persisted profiles must not reintroduce a global role after an upgrade or a
+// manual recovery. Preserve event identity, revision and effects (especially MFA
+// resets); a held uncertain attempt is never selected or rewritten here.
+func refreshSyncEventRolesTx(tx *sql.Tx, ev *AccountSyncEvent) error {
+	switch ev.EventType {
+	case "user.created", "user.updated", "user.deleted", "user.mfa_reset":
+	default:
+		return nil
+	}
+	var appID string
+	err := tx.QueryRow(`SELECT id FROM app_registry WHERE system_id=?`, ev.SystemID).Scan(&appID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	roles, err := appSCIMRolesTx(tx, ev.UserID, appID)
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(roles)
+	if err != nil {
+		return err
+	}
+	var profile map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(ev.PayloadJSON), &profile); err != nil {
+		return err
+	}
+	if profile == nil {
+		return errors.New("sync user profile must be a JSON object")
+	}
+	if string(profile["roles"]) == string(encoded) {
+		return nil
+	}
+	profile["roles"] = encoded
+	payload, err := json.Marshal(profile)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE account_sync_events SET payload_json=? WHERE id=?`, string(payload), ev.ID); err != nil {
+		return err
+	}
+	ev.PayloadJSON = string(payload)
+	return nil
 }

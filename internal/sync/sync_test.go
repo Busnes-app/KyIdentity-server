@@ -404,6 +404,9 @@ func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
 			t.Fatal("no signed webhook delivered")
 		}
 	}
+	// Simulate a persisted pre-upgrade profile. The native dispatcher must send
+	// current app roles, not this old global administrator grant.
+	execRaw(t, s, `UPDATE account_sync_events SET payload_json=json_set(payload_json,'$.roles',json('[{"value":"admin","primary":true}]')) WHERE system_id=? AND user_id=? AND status='pending'`, sys.ID, admin.ID)
 	check(`"roles":[]`, true)
 	role, err := s.CreateAppRole(app.ID, "admin", "", nil)
 	if err != nil {
