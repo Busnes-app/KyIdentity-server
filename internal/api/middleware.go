@@ -117,7 +117,7 @@ func (m *MiddlewareManager) ClientIP(r *http.Request) string {
 	// and anything further left was written by someone we have no reason to believe.
 	// A single-value header (CF-Connecting-IP, X-Real-IP) is simply a chain of length one.
 	parts := strings.Split(r.Header.Get(m.forwardedHeader), ",")
-	var nearest net.IP
+	var nearest, nearestPublic net.IP
 	for i := len(parts) - 1; i >= 0; i-- {
 		ip := net.ParseIP(strings.TrimSpace(parts[i]))
 		if ip == nil {
@@ -127,13 +127,20 @@ func (m *MiddlewareManager) ClientIP(r *http.Request) string {
 		if nearest == nil {
 			nearest = ip
 		}
+		if nearestPublic == nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
+			nearestPublic = ip
+		}
 		if !m.isTrustedIP(ip) {
 			return ip.String()
 		}
 	}
 	// Every entry is inside the trusted ranges (a Cloudflare Tunnel trusts 0.0.0.0/0).
-	// The rightmost is the client our own peer reported, never the proxy itself, or every
-	// caller would share one lockout key. Anything left of it may be what the client sent.
+	// The rightmost public entry is the client the edge reported; private ones to its right
+	// are proxy hops (cloudflared, a proxy beside it), which would key every caller alike.
+	// Anything left of it may be what the client sent.
+	if nearestPublic != nil {
+		return nearestPublic.String()
+	}
 	return nearest.String()
 }
 

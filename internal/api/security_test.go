@@ -239,6 +239,11 @@ func TestTunnelWithForwardedForIgnoresForgedEntries(t *testing.T) {
 		if got := mm.ClientIP(req); got != "203.0.113.8" {
 			t.Errorf("ClientIP with forged %q = %q, want the visitor 203.0.113.8", forged, got)
 		}
+		// A proxy between cloudflared and KyIdentity appends cloudflared's private address.
+		req.Header.Set("X-Forwarded-For", forged+", 203.0.113.8, 172.18.0.7")
+		if got := mm.ClientIP(req); got != "203.0.113.8" {
+			t.Errorf("ClientIP behind a second hop with forged %q = %q, want the visitor 203.0.113.8", forged, got)
+		}
 	}
 }
 

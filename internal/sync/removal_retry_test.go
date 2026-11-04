@@ -405,7 +405,7 @@ func TestRemovalGoesAheadOfUndeliveredMFAReset(t *testing.T) {
 	dispatch(t, e)
 	dispatch(t, e)
 	got := recv.seen()
-	if len(got) < 2 || got[len(got)-2] != (hit{"user.updated", false}) || got[len(got)-1].event != "user.mfa_reset" {
+	if len(got) < 2 || got[len(got)-2] != (hit{"user.updated", false}) || got[len(got)-1] != (hit{"user.mfa_reset", false}) {
 		t.Fatalf("receiver saw %+v", got)
 	}
 	if left := outbox(t, s, sys.ID, u.ID); len(left) != 0 {

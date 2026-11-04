@@ -193,6 +193,11 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	if err := insertResourceEventTx(tx, d.systemID, d.resourceID, eventType, d.payload, revision, now); err != nil {
 		return err
 	}
+	// The moved reset says what the removal says: its old payload says active, and a
+	// receiver applies a reset's active flag.
+	for i := range resets {
+		resets[i].PayloadJSON = string(d.payload)
+	}
 	return requeueBehindTx(tx, d.systemID, d.resourceID, resets, now)
 }
 
