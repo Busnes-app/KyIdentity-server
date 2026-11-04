@@ -57,6 +57,16 @@ export function scheduleFact(s: BackupStatus | null): { badge: 'success' | 'warn
   return { badge: 'success', text: s.nextRunAt ? `Next ${when(s.nextRunAt)}` : 'Next run not scheduled' };
 }
 
+/** Copies text, resolving false where the clipboard is missing (plain http) or refuses. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const AdminBackup: React.FC = () => {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState<boolean>(true);
@@ -66,7 +76,7 @@ export const AdminBackup: React.FC = () => {
   const [runMessage, setRunMessage] = useState<string>('');
   const [runError, setRunError] = useState<string>('');
   const [download, setDownload] = useState<{ name: string; digest: string } | null>(null);
-  const [digestCopied, setDigestCopied] = useState<boolean>(false);
+  const [digestCopied, setDigestCopied] = useState<boolean | null>(null);
 
   const [runningDrill, setRunningDrill] = useState<boolean>(false);
   const [drillResult, setDrillResult] = useState<BackupDrillResult | null>(null);
@@ -142,7 +152,7 @@ export const AdminBackup: React.FC = () => {
     setRunError('');
     setRunMessage('');
     setDownload(null);
-    setDigestCopied(false);
+    setDigestCopied(null);
     try {
       const grant = await requestGrant('The capsule holds your entire directory and its keys, sealed to the suite recovery key.', 'GET /api/admin/backup/export-capsule');
       const res = await fetch('/api/admin/backup/export-capsule', {
@@ -406,8 +416,8 @@ export const AdminBackup: React.FC = () => {
                 <div>Saved {download.name}. Its digest:</div>
                 <div className="font-mono cell-id">{download.digest}</div>
                 <div>Keep this with the file: restore needs it (-expect-digest).</div>
-                <button type="button" className="secondary-btn sm mt-2" onClick={() => { void navigator.clipboard?.writeText(download.digest); setDigestCopied(true); }}>
-                  {digestCopied ? 'Copied' : 'Copy digest'}
+                <button type="button" className="secondary-btn sm mt-2" onClick={() => { void copyText(download.digest).then(setDigestCopied); }}>
+                  {digestCopied === null ? 'Copy digest' : digestCopied ? 'Copied' : 'Copy failed: select the digest and copy it'}
                 </button>
               </div>
             </div>

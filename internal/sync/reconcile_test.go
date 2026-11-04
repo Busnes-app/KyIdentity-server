@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -450,5 +451,71 @@ func TestGroupWriteChecksTheMappingOfAMemberItAdds(t *testing.T) {
 	drain(t, e)
 	if g, ok := remote.groupByExternal(group.ID); !ok || len(g.Members) != 0 {
 		t.Fatal("group granted through a mapping the target reassigned", g, ok)
+	}
+}
+
+// Adding many members reads each back, which must not run out of the write's time, and one
+// member whose remote ID was reassigned is left out rather than blocking the whole group.
+func TestLargeGroupAdditionCompletesAndSkipsAReassignedMember(t *testing.T) {
+	e, s, _, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ReviewSystem(sys, "scim", "", true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	group := &store.Group{ID: uuid.NewString(), Name: "Everyone"}
+	if err := s.CreateGroup(group, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	var users []*store.User
+	for i := range 60 {
+		u := &store.User{ID: uuid.NewString(), Username: fmt.Sprintf("m%02d", i), DisplayName: "M", Email: fmt.Sprintf("m%02d@example.com", i), PasswordHash: "x", Role: "user", Status: "active"}
+		if err := s.CreateUser(u); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+			t.Fatal(err)
+		}
+		users = append(users, u)
+	}
+	for range 3 {
+		drain(t, e)
+	}
+	moved, ok := remote.userByExternal(users[0].ID)
+	if !ok {
+		t.Fatal("fixture users not delivered")
+	}
+	remote.mu.Lock()
+	other := remote.users[moved.ID]
+	other.ExternalID = "someone-else"
+	remote.users[moved.ID] = other
+	// Read one by one, 60 members at 400 ms would need 24 s, past the 20 s a write has.
+	remote.userGetDelay = 400 * time.Millisecond
+	remote.mu.Unlock()
+	for _, u := range users {
+		if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	drain(t, e)
+	g, ok := remote.groupByExternal(group.ID)
+	if !ok || len(g.Members) != len(users)-1 {
+		t.Fatalf("group holds %d members, want %d", len(g.Members), len(users)-1)
+	}
+	for _, m := range g.Members {
+		if m.Value == moved.ID {
+			t.Fatal("the reassigned remote user got the group")
+		}
 	}
 }

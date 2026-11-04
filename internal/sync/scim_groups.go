@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
+	stdsync "sync"
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/scim"
@@ -25,8 +27,8 @@ type scimGroup struct {
 	Members     []scim.MultiValue `json:"members"`
 }
 
-func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, secret, eventType, groupID string) error {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+func (e *Engine) deliverSCIMGroup(parent context.Context, sys *store.PairedSystem, secret, eventType, groupID string) error {
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
 	if groupID == "" {
 		return errors.New("missing local group ID")
@@ -100,21 +102,24 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 	for _, m := range current.Members {
 		held[m.Value] = true
 	}
+	var added []store.SCIMMember
 	for _, m := range members {
-		// A stored user mapping may outlive a target wipe that handed its ID to someone
-		// else; a member this write adds is checked first, so no one is granted the group
-		// in another person's place. Members the group already holds are not re-read.
 		if !held[m.RemoteID] {
-			u, err := c.GetUser(ctx, m.RemoteID)
-			if err != nil {
-				return err
-			}
-			if u.ID != m.RemoteID || u.ExternalID != m.LocalID {
-				return scim.ErrMalformedResponse
-			}
+			added = append(added, m)
 		}
-		desired.Members = append(desired.Members, scim.MultiValue{Value: m.RemoteID})
 	}
+	owned, err := e.ownedMembers(parent, c, added)
+	if err != nil {
+		return err
+	}
+	for _, m := range members {
+		if held[m.RemoteID] || owned[m.RemoteID] {
+			desired.Members = append(desired.Members, scim.MultiValue{Value: m.RemoteID})
+		}
+	}
+	// The write gets its own budget, whatever the checks took.
+	ctx, cancelWrite := context.WithTimeout(parent, 20*time.Second)
+	defer cancelWrite()
 	body, err := json.Marshal(desired)
 	if err != nil {
 		return err
@@ -148,4 +153,43 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 		return scim.ErrMalformedResponse
 	}
 	return err
+}
+
+// ownedMembers reads back each member a group write would add and returns the remote IDs
+// that still carry their local ID as externalId. A stored user mapping may outlive a target
+// wipe that handed its ID to someone else, so a member is never granted the group in another
+// person's place. A member whose ID is gone or reassigned is left out of the write (it
+// rejoins once its own delivery or a repair fixes the mapping), so it never blocks the rest
+// of the group, removals included. Eight reads run at once, with time for each, so a large
+// first delivery still completes; any other error fails the write for a retry.
+func (e *Engine) ownedMembers(parent context.Context, c *scim.Client, added []store.SCIMMember) (map[string]bool, error) {
+	owned := map[string]bool{}
+	if len(added) == 0 {
+		return owned, nil
+	}
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second+time.Duration(len(added))*time.Second/2)
+	defer cancel()
+	var mu stdsync.Mutex
+	var firstErr error
+	slots := make(chan struct{}, 8)
+	var wg stdsync.WaitGroup
+	for _, m := range added {
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			u, err := c.GetUser(ctx, m.RemoteID)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil && u.ID == m.RemoteID && u.ExternalID == m.LocalID:
+				owned[m.RemoteID] = true
+			case err == nil || errors.Is(err, scim.ErrNotFound):
+				log.Printf("[SYNC] group member %s left out: remote user %s is gone or belongs to someone else; repair the connector", m.LocalID, m.RemoteID)
+			case firstErr == nil:
+				firstErr = err
+			}
+		})
+	}
+	wg.Wait()
+	return owned, firstErr
 }

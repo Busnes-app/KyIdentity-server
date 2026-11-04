@@ -60,6 +60,9 @@ server still picks up those legacy filenames through the fallback in `internal/c
   Backup page, the page shows the digest after the download (also sent as the
   `X-Capsule-Digest` response header and kept in that download's
   `admin.backup_capsule_export` audit event); copy it and keep it with the file.
+- **Use this release or newer for `restore`.** A database over 64 MiB is sealed as
+  ordered parts (`data/kyidentity.db.part000`, …) that `restore` joins back into
+  `data/kyidentity.db`; an older `kyidentity restore` leaves the parts unjoined.
 - **Gather k custodians.** Each card carries one share, a single line beginning `ky2-`. They
   type or paste it themselves; do not collect the shares in a file, a chat, or an email. Two
   shares in one place is the suite key in one place.
