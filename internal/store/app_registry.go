@@ -249,8 +249,9 @@ func (s *Store) UnlinkAppRecord(id, kind string, revision int, audit *AuditEvent
 	if _, err = tx.Exec(`UPDATE app_registry SET access_mode=?,enabled=?,auth_mode=?,auth_primary_max_age=?,auth_factor=?,auth_factor_max_age=?,auth_refresh_idle=?,auth_refresh_lifetime=?,auth_revision=?,legacy_role_claim=?,groups_claim=? WHERE id=?`, a.AccessMode, a.Enabled, a.Authentication.Mode, a.Authentication.PrimaryMaxAge, a.Authentication.Factor, a.Authentication.FactorMaxAge, a.Authentication.RefreshIdle, a.Authentication.RefreshLifetime, a.AuthenticationRevision, a.LegacyRoleClaim, a.GroupsClaim, newID); err != nil {
 		return "", err
 	}
-	for _, spec := range []struct{ table, column string }{{"app_user_assignments", "user_id"}, {"app_group_assignments", "group_id"}} {
-		if _, err = tx.Exec(`INSERT INTO `+spec.table+`(app_id,`+spec.column+`) SELECT ?,`+spec.column+` FROM `+spec.table+` WHERE app_id=?`, newID, id); err != nil {
+	// A time-limited grant keeps its end date on the copy.
+	for _, spec := range []struct{ table, columns string }{{"app_user_assignments", "user_id,expires_at"}, {"app_group_assignments", "group_id"}} {
+		if _, err = tx.Exec(`INSERT INTO `+spec.table+`(app_id,`+spec.columns+`) SELECT ?,`+spec.columns+` FROM `+spec.table+` WHERE app_id=?`, newID, id); err != nil {
 			return "", err
 		}
 	}

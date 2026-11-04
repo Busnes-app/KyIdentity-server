@@ -138,6 +138,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     if (!mfaRequired || mfaMode !== 'push' || !challengeId || !mfaToken) return;
 
     let isMounted = true;
+    let finishing = false;
     const timeout = setTimeout(() => {
       if (!isMounted) return;
       setError('Push challenge expired. Please try again or use TOTP.');
@@ -155,6 +156,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         if (status === 'approved') {
           clearInterval(interval);
           clearTimeout(timeout);
+          finishing = true;
           // Complete login
           const finish = await apiJson('/api/auth/mfa/push/finish', parseAuthStep, {
             method: 'POST',
@@ -179,6 +181,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           clearTimeout(timeout);
           setError('Push challenge expired. Please sign in again or use another MFA method.');
           setMfaMode('totp');
+        } else if (finishing) {
+          // Approved, but finishing failed: polling has stopped, so say so.
+          setError(errorMessage(err, 'Could not finish signing in. Please sign in again.'));
         }
       }
     }, 2000);
@@ -381,6 +386,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               <button type="button" className="ky-auth-link" onClick={() => setMfaMode('webauthn')}>Use a passkey instead</button>
             )}
             {!interactionDetails?.requiresPasskey && mfaMethods.includes('totp') && <button type="button" className="ky-auth-link" onClick={() => setMfaMode('totp')}>Enter a six-digit code</button>}
+            {!interactionDetails?.requiresMFA && <button type="button" className="ky-auth-link" onClick={() => setMfaMode('recovery')}>Use a recovery code</button>}
           </div>
         </div>
       )}

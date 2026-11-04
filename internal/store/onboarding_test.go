@@ -321,3 +321,32 @@ func TestLinksDieWithAccessRevocationAndStateChanges(t *testing.T) {
 		t.Fatal("a refused redemption consumed the token")
 	}
 }
+
+// A link issued while the account was ordinary (a helpdesk delegate may issue one) must
+// not survive the account becoming an administrator or a delegate.
+func TestPromotionAndDelegationEndOutstandingLinks(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	promoted := pendingUser(t, s)
+	raw, err := s.IssueAccountToken(promoted.ID, "activation", "manual", 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EditUser(promoted.ID, nil, func(next *User) (bool, error) { next.Role = "admin"; return true, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("activation link survived promotion: %v", err)
+	}
+
+	delegated := pendingUser(t, s)
+	if raw, err = s.IssueAccountToken(delegated.ID, "activation", "manual", 24*time.Hour, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDelegations(delegated.ID, Delegations{Helpdesk: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("activation link survived a delegation: %v", err)
+	}
+}

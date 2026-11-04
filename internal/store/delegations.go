@@ -101,6 +101,13 @@ func (s *Store) SetDelegations(userID string, d Delegations, audit *AuditEvent) 
 		if err := invalidateUserEnrollmentTx(tx, userID); err != nil {
 			return err
 		}
+		// Delegates are out of other delegates' reach; a link issued before must not
+		// hand one over.
+		if d.Helpdesk || d.Auditor || len(apps) > 0 {
+			if err := expireAccountTokensTx(tx, now, `user_id=?`, userID); err != nil {
+				return err
+			}
+		}
 		return appRegistryAudit(audit, map[string]any{"user": userID, "helpdesk": d.Helpdesk, "auditor": d.Auditor, "appOwner": apps})
 	})
 }

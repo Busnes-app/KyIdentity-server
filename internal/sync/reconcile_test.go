@@ -519,3 +519,45 @@ func TestLargeGroupAdditionCompletesAndSkipsAReassignedMember(t *testing.T) {
 		}
 	}
 }
+
+// A target refilled after a wipe can hand one account's old ID to another. That is a
+// dispute repair counts and leaves to the operator, never a failure of the whole run.
+func TestRepairCountsAReusedRemoteID(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	other := &store.User{ID: uuid.NewString(), Username: "sam", DisplayName: "Sam", Email: "sam@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := s.CreateUser(other); err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []*store.User{u, other} {
+		if err := s.SetAppAssignment(app.ID, "users", x.ID, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	drain(t, e)
+	first, ok := remote.userByExternal(u.ID)
+	if !ok {
+		t.Fatal("fixture user not delivered")
+	}
+	// After the wipe the target lists only the other account, under the first one's old ID.
+	remote.mu.Lock()
+	remote.users = map[string]scim.User{first.ID: {ID: first.ID, ExternalID: other.ID, UserName: other.Username, DisplayName: other.DisplayName, Emails: []scim.MultiValue{{Value: other.Email, Primary: true}}, Active: true}}
+	remote.mu.Unlock()
+
+	report := runJob(t, e, s, sys.ID, "repair")
+	if !report.Complete || !report.Repaired || report.MappingConflicts != 1 {
+		t.Fatalf("repair %+v", report)
+	}
+	if id, _, err := s.SCIMUserLink(sys.ID, u.ID); err != nil || id != first.ID {
+		t.Fatalf("disputed mapping rewritten to %q, %v", id, err)
+	}
+}

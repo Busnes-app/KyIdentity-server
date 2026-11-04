@@ -965,6 +965,13 @@ func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u
 	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, password_change_required = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
 		return nil, enrollmentMutationError(err)
 	}
+	if oldRole != "admin" && u.Role == "admin" {
+		// A link a delegate issued while the account was ordinary must not hand them an
+		// administrator: delegates never act on administrators.
+		if err := expireAccountTokensTx(tx, now, `user_id=?`, u.ID); err != nil {
+			return nil, err
+		}
+	}
 	if !strings.EqualFold(oldEmail, u.Email) {
 		// A new address is unproven, and a link mailed to the old one must not act on it.
 		if _, err := tx.Exec(`UPDATE users SET email_verified_at = NULL WHERE id = ?`, u.ID); err != nil {
@@ -1070,8 +1077,25 @@ func (s *Store) CreateSessionForInteraction(sess *Session, interactionHash, brow
 		return err
 	}
 	defer tx.Rollback()
+	now := time.Now().UTC()
+	id, renew := sess.ID, false
 	if interactionHash != "" {
-		result, err := tx.Exec(`UPDATE authorization_interactions SET session_id=?,user_id=? WHERE hash=? AND browser_hash=? AND session_id='' AND expires_at>? AND (user_id='' OR user_id=?) AND (SELECT COUNT(*) FROM authorization_interactions WHERE user_id=? AND hash<>?)<10 AND created_at<=? AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active') AND (original_session_id='' OR EXISTS(SELECT 1 FROM sessions WHERE id=authorization_interactions.original_session_id AND expires_at>?))`, sess.ID, sess.UserID, interactionHash, browserHash, time.Now().UTC(), sess.UserID, sess.UserID, interactionHash, sess.PrimaryAuthenticatedAt, sess.UserID, time.Now().UTC())
+		// A re-authentication (prompt=login, max_age) from a signed-in browser renews that
+		// session in place, so the apps signed in under it end when the user signs out
+		// instead of living on in a session no browser holds.
+		var original string
+		if err := tx.QueryRow(`SELECT original_session_id FROM authorization_interactions WHERE hash=? AND browser_hash=?`, interactionHash, browserHash).Scan(&original); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if original != "" {
+			if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sessions WHERE id=? AND user_id=? AND expires_at>?)`, original, sess.UserID, now).Scan(&renew); err != nil {
+				return err
+			}
+			if renew {
+				id = original
+			}
+		}
+		result, err := tx.Exec(`UPDATE authorization_interactions SET session_id=?,user_id=? WHERE hash=? AND browser_hash=? AND session_id='' AND expires_at>? AND (user_id='' OR user_id=?) AND (SELECT COUNT(*) FROM authorization_interactions WHERE user_id=? AND hash<>?)<10 AND created_at<=? AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active') AND (original_session_id='' OR EXISTS(SELECT 1 FROM sessions WHERE id=authorization_interactions.original_session_id AND expires_at>?))`, id, sess.UserID, interactionHash, browserHash, now, sess.UserID, sess.UserID, interactionHash, sess.PrimaryAuthenticatedAt, sess.UserID, now)
 		if err != nil {
 			return err
 		}
@@ -1082,12 +1106,23 @@ func (s *Store) CreateSessionForInteraction(sess *Session, interactionHash, brow
 		if n != 1 {
 			return ErrAuthorizationInteraction
 		}
+		if renew {
+			// Another tab's interaction this session already satisfied was proven by the
+			// session's earlier sign-in; it must be proven again, as it would be by a new session.
+			if _, err := tx.Exec(`UPDATE authorization_interactions SET expires_at=? WHERE session_id=? AND hash<>?`, now, id, interactionHash); err != nil {
+				return err
+			}
+		}
 	}
-	query := `INSERT INTO sessions (id, user_id, session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')`
-	now := time.Now().UTC()
-	sess.CreatedAt = now
-	sess.LastActiveAt = now
-	result, err := tx.Exec(query, sess.ID, sess.UserID, sess.SessionTokenHash, sess.IPAddress, sess.UserAgent, sess.ExpiresAt, sess.CreatedAt, sess.LastActiveAt, sess.PrimaryAuthenticatedAt, sess.FactorAuthenticatedAt, sess.FactorMethod, sess.UserID)
+	// A password change, reset or disable that committed after the sign-in read the
+	// account has already ended its sessions; this one must not start after it.
+	eligible := `EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND (?='' OR password_hash=?))`
+	query := `INSERT INTO sessions (session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method, id, user_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ` + eligible
+	if renew {
+		// enrollment_only starts clear, as on a new session: the fresh login decides it below.
+		query = `UPDATE sessions SET session_token_hash=?, ip_address=?, user_agent=?, expires_at=?, created_at=?, last_active_at=?, primary_authenticated_at=?, factor_authenticated_at=?, factor_method=?, enrollment_only=0 WHERE id=? AND user_id=? AND ` + eligible
+	}
+	result, err := tx.Exec(query, sess.SessionTokenHash, sess.IPAddress, sess.UserAgent, sess.ExpiresAt, now, now, sess.PrimaryAuthenticatedAt, sess.FactorAuthenticatedAt, sess.FactorMethod, id, sess.UserID, sess.UserID, sess.ProvenPasswordHash, sess.ProvenPasswordHash)
 	if err != nil {
 		return err
 	}
@@ -1098,10 +1133,14 @@ func (s *Store) CreateSessionForInteraction(sess *Session, interactionHash, brow
 	if n != 1 {
 		return ErrAppAccessDenied
 	}
-	if _, err = tx.Exec(`UPDATE sessions SET enrollment_only=NOT (SELECT allowed FROM mfa_session_access WHERE id=?) WHERE id=?`, sess.ID, sess.ID); err != nil {
+	if _, err = tx.Exec(`UPDATE sessions SET enrollment_only=NOT (SELECT allowed FROM mfa_session_access WHERE id=?) WHERE id=?`, id, id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	sess.ID, sess.CreatedAt, sess.LastActiveAt = id, now, now
+	return nil
 }
 
 // GetSessionByTokenHash returns a session within both its absolute and idle lifetime, or
