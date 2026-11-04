@@ -243,8 +243,8 @@ func (s *Store) CreateAppRole(appID, name, description string, audit *AuditEvent
 			}
 			return err
 		}
-		// The first role switches the connection from the global role to app roles:
-		// everyone provisioned there is re-sent with their (empty) app roles.
+		// Re-send every provisioned profile when the first role is defined;
+		// app roles remain explicit even while no assignment exists.
 		if err := appRoleShapeChangeTx(tx, app, 1, role.CreatedAt); err != nil {
 			return err
 		}
@@ -304,7 +304,7 @@ func (s *Store) DeleteAppRole(appID, roleID string, audit *AuditEvent) error {
 		if err := roleChangeTx(tx, app, holders, now); err != nil {
 			return err
 		}
-		// The last role going returns the connection to the global role for everyone.
+		// Re-send empty app roles when the final definition is removed.
 		if err := appRoleShapeChangeTx(tx, app, 0, now); err != nil {
 			return err
 		}

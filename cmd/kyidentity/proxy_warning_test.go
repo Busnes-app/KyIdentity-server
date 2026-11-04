@@ -12,6 +12,8 @@ func TestWideTrustedProxyWarnings(t *testing.T) {
 		warn bool
 	}{
 		{"0.0.0.0/0", true}, {"::/0", true},
+		{"::ffff:0.0.0.0/96", true}, {"::ffff:192.168.0.0/111", true},
+		{"::ffff:10.0.0.0/104", false}, {"::ffff:203.0.113.7/128", false},
 		{"10.0.0.0/7", true}, {"172.16.0.0/11", true},
 		{"192.168.0.0/15", true}, {"fc00::/6", true},
 		{"10.0.0.0/8", false}, {"172.16.0.0/12", false},

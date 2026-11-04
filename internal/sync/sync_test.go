@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -380,13 +381,22 @@ func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	secret = token
-	grantAllUsers(t, s, sys.ID)
 	app := appRecordFor(t, s, sys.ID)
-	check := func(want string) {
+	if err := s.SetAppAssignment(app.ID, "users", admin.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want string, active bool) {
 		t.Helper()
 		drain(t, engine)
 		select {
 		case body := <-received:
+			var profile struct{ Active bool }
+			if err := json.Unmarshal(body, &profile); err != nil {
+				t.Fatal(err)
+			}
+			if profile.Active != active {
+				t.Fatalf("active = %v, want %v: %s", profile.Active, active, body)
+			}
 			if !strings.Contains(string(body), `"id":"`+admin.ID+`"`) || !strings.Contains(string(body), want) {
 				t.Fatalf("unexpected webhook: %s, want %s", body, want)
 			}
@@ -394,18 +404,44 @@ func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
 			t.Fatal("no signed webhook delivered")
 		}
 	}
-	check(`"roles":[]`)
+	check(`"roles":[]`, true)
 	role, err := s.CreateAppRole(app.ID, "admin", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	check(`"roles":[]`)
+	check(`"roles":[]`, true)
 	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", admin.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	check(`"roles":[{"value":"admin","primary":true}]`)
+	check(`"roles":[{"value":"admin","primary":true}]`, true)
 	if err := s.DeleteAppRole(app.ID, role.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	check(`"roles":[]`)
+	check(`"roles":[]`, true)
+	// All newly generated inactive paths must also stay app-scoped.
+	if err := s.SetAppAssignment(app.ID, "users", admin.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	check(`"roles":[]`, false)
+	if err := s.ResyncSystem(sys.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	check(`"roles":[]`, false)
+	if _, err := s.ReconcileDrift(sys.ID, store.RemoteListing{Supported: true, Complete: true,
+		Users: []store.RemoteAccount{{ID: admin.ID, ExternalID: admin.ID, UserName: admin.Username, Active: true}}}, true); err != nil {
+		t.Fatal(err)
+	}
+	check(`"roles":[]`, false)
+	if err := s.SetAppAssignment(app.ID, "users", admin.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	check(`"roles":[]`, true)
+	other := &store.User{ID: uuid.NewString(), Username: "remaining-admin", DisplayName: "Remaining", Role: "admin", Status: "active", PasswordHash: "fixture"}
+	if err := s.CreateUser(other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EditUser(admin.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
+		t.Fatal(err)
+	}
+	check(`"roles":[]`, false)
 }

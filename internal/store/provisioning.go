@@ -343,7 +343,7 @@ func reconcileProvisioningTx(tx *sql.Tx, now time.Time) error {
 		}
 		payload := scimInactivePayload(p.resourceID)
 		if u != nil {
-			if payload, err = scimUserPayload(u, false); err != nil {
+			if payload, err = scimUserPayloadTx(tx, u, false, p.systemID); err != nil {
 				return err
 			}
 		}
@@ -524,7 +524,7 @@ func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
 		}
 		payload := scimInactivePayload(id)
 		if u != nil {
-			if payload, err = scimUserPayload(u, false); err != nil {
+			if payload, err = scimUserPayloadTx(tx, u, false, systemID); err != nil {
 				return err
 			}
 		}

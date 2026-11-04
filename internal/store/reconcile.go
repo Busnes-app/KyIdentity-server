@@ -534,7 +534,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 				}
 				payload := scimInactivePayload(remote.ExternalID)
 				if local != nil {
-					if payload, err = scimUserPayload(local, false); err != nil {
+					if payload, err = scimUserPayloadTx(tx, local, false, systemID); err != nil {
 						return nil, err
 					}
 				}
