@@ -1119,7 +1119,8 @@ func (s *Store) CreateSessionForInteraction(sess *Session, interactionHash, brow
 	eligible := `EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND (?='' OR password_hash=?))`
 	query := `INSERT INTO sessions (session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method, id, user_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ` + eligible
 	if renew {
-		query = `UPDATE sessions SET session_token_hash=?, ip_address=?, user_agent=?, expires_at=?, created_at=?, last_active_at=?, primary_authenticated_at=?, factor_authenticated_at=?, factor_method=? WHERE id=? AND user_id=? AND ` + eligible
+		// enrollment_only starts clear, as on a new session: the fresh login decides it below.
+		query = `UPDATE sessions SET session_token_hash=?, ip_address=?, user_agent=?, expires_at=?, created_at=?, last_active_at=?, primary_authenticated_at=?, factor_authenticated_at=?, factor_method=?, enrollment_only=0 WHERE id=? AND user_id=? AND ` + eligible
 	}
 	result, err := tx.Exec(query, sess.SessionTokenHash, sess.IPAddress, sess.UserAgent, sess.ExpiresAt, now, now, sess.PrimaryAuthenticatedAt, sess.FactorAuthenticatedAt, sess.FactorMethod, id, sess.UserID, sess.UserID, sess.ProvenPasswordHash, sess.ProvenPasswordHash)
 	if err != nil {

@@ -274,6 +274,10 @@ func TestReauthenticationRenewsTheOriginalSession(t *testing.T) {
 	if err := s.CreateAuthorizationInteraction(&AuthorizationInteraction{Hash: "again", BrowserHash: "browser", UserID: u.ID, OriginalSessionID: "session", CreatedAt: now, ExpiresAt: now.Add(time.Minute), Request: "client_id=client"}); err != nil {
 		t.Fatal(err)
 	}
+	// A restriction the old sign-in earned is decided afresh, as for a new session.
+	if _, err := s.db.Exec(`UPDATE sessions SET enrollment_only=1 WHERE id='session'`); err != nil {
+		t.Fatal(err)
+	}
 	at := time.Now().UTC()
 	sess := &Session{ID: "new", UserID: u.ID, SessionTokenHash: "new-hash", ExpiresAt: now.Add(time.Hour), AuthenticationEvidence: AuthenticationEvidence{PrimaryAuthenticatedAt: &at}}
 	if err := s.CreateSessionForInteraction(sess, "again", "browser"); err != nil {
@@ -291,5 +295,9 @@ func TestReauthenticationRenewsTheOriginalSession(t *testing.T) {
 	got, err := s.GetSessionByTokenHash("new-hash", time.Hour)
 	if err != nil || got == nil || got.ID != "session" || got.PrimaryAuthenticatedAt == nil || !got.PrimaryAuthenticatedAt.Equal(at) {
 		t.Fatalf("renewed session = %+v, %v", got, err)
+	}
+	var restricted bool
+	if err := s.db.QueryRow(`SELECT enrollment_only FROM sessions WHERE id='session'`).Scan(&restricted); err != nil || restricted {
+		t.Fatalf("renewed session kept the old restriction: %v %v", restricted, err)
 	}
 }

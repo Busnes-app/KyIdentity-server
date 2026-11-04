@@ -615,10 +615,10 @@ func (s *Store) SCIMGroupMembers(systemID, groupID string) (name string, exists 
 // A confirmed first delivery establishes the remote link, so groups holding this user
 // are re-queued to pick the member up.
 func provisionedTx(tx *sql.Tx, ev AccountSyncEvent, now time.Time) error {
-	if ev.EventType == "user.deleted" || ev.EventType == "user.updated" {
-		// A delivered inactive state for the current revision is the acknowledgement the
-		// offboarding view reads; a newer desired state clears it.
-		// An MFA reset queued behind the removal may have taken the next revision.
+	if ev.Removal() {
+		// A delivered removal for the current revision is the acknowledgement the
+		// offboarding view reads; a newer desired state clears it. An MFA reset queued
+		// behind the removal may have taken the next revision.
 		if _, err := tx.Exec(`UPDATE sync_resource_state SET offboarded_at=? WHERE system_id=? AND resource_id=? AND kind='user' AND NOT active AND revision>=?`, now, ev.SystemID, ev.UserID, ev.Revision); err != nil {
 			return err
 		}

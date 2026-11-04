@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -655,5 +656,40 @@ func TestExhaustedRemovalBeforeCreateRetries(t *testing.T) {
 	pending, err := s.GetPendingSyncEvents(10)
 	if err != nil || len(pending) != 1 || pending[0].EventType != "user.updated" || pending[0].Attempts != 0 {
 		t.Fatalf("exhausted removal not revived: %+v %v", pending, err)
+	}
+}
+
+// Only a delivered removal acknowledges offboarding. An older active update landing after
+// the disable was queued does not, even though the reset behind a removal means the
+// state's revision can be ahead of the removal's.
+func TestOnlyARemovalAcknowledgesOffboarding(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	provisioningFixture(t, s, "sys")
+	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES('sys','u','user',0,1,3)
+ ON CONFLICT(system_id,resource_id) DO UPDATE SET active=0,provisioned=1,revision=3,offboarded_at=NULL`); err != nil {
+		t.Fatal(err)
+	}
+	offboarded := func(ev AccountSyncEvent) bool {
+		t.Helper()
+		tx, err := s.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if err := provisionedTx(tx, ev, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		var at sql.NullTime
+		if err := tx.QueryRow(`SELECT offboarded_at FROM sync_resource_state WHERE system_id='sys' AND resource_id='u'`).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at.Valid
+	}
+	if offboarded(AccountSyncEvent{SystemID: "sys", UserID: "u", EventType: "user.updated", PayloadJSON: `{"active":true}`, Revision: 2}) {
+		t.Fatal("an active update acknowledged offboarding")
+	}
+	if !offboarded(AccountSyncEvent{SystemID: "sys", UserID: "u", EventType: "user.updated", PayloadJSON: `{"active":false}`, Revision: 2}) {
+		t.Fatal("a removal followed by a reset was not acknowledged")
 	}
 }
