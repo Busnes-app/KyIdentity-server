@@ -74,8 +74,10 @@ export async function apiRequest(path: string, options: ApiOptions = {}): Promis
     data = parseBody(await res.text());
   }
 
+  // invalid_credentials is a wrong password (sign-in, step-up, current password), never an
+  // ended session: the form that sent it shows the error.
   if (res.status === 401 && !path.startsWith('/api/auth/login') &&
-      !(path.startsWith('/api/auth/step-up') && isRecord(data) && data.error === 'invalid_credentials')) {
+      !(isRecord(data) && data.error === 'invalid_credentials')) {
     window.dispatchEvent(new CustomEvent('kyidentity:unauthorized'));
   }
 

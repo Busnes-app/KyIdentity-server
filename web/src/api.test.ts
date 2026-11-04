@@ -112,7 +112,7 @@ describe('unauthorized session handling', () => {
     expect((dispatch.mock.calls[0][0] as CustomEvent).type).toBe('kyidentity:unauthorized');
   });
 
-  it.each(['/api/auth/step-up', '/api/auth/step-up/finish'])('keeps the session on failed credentials at %s', async path => {
+  it.each(['/api/auth/step-up', '/api/auth/step-up/finish', '/api/user/password'])('keeps the session on failed credentials at %s', async path => {
     stubFetch([{ status: 401, body: { error: 'invalid_credentials' } }]);
     await expect(apiRequest(path, { method: 'POST', body: '{}' })).rejects.toThrow();
     expect(window.dispatchEvent).not.toHaveBeenCalled();
