@@ -693,3 +693,97 @@ func TestOnlyARemovalAcknowledgesOffboarding(t *testing.T) {
 		t.Fatal("a removal followed by a reset was not acknowledged")
 	}
 }
+
+// queuedFor lists a resource's unsent events in queue order.
+func queuedFor(t *testing.T, s *Store, systemID, userID string) []AccountSyncEvent {
+	t.Helper()
+	rows, err := s.db.Query(`SELECT `+syncEventColumns+` FROM account_sync_events WHERE system_id=? AND user_id=? AND status IN ('pending','failed') ORDER BY rowid`, systemID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := scanSyncEvents(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return events
+}
+
+// Two queued updates a reset overtakes (a resumed fenced one and the current one) follow
+// it in their old order, each at its own revision, so the current one lands last.
+func TestOvertakenUpdatesKeepTheirOrderAtDistinctRevisions(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	app := provisioningFixture(t, s, "target")
+	u := createTestUserNamed(t, s, "held")
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	var rev int
+	if err := s.db.QueryRow(`UPDATE sync_resource_state SET revision=revision+2 WHERE system_id='target' AND resource_id=? RETURNING revision`, u.ID).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	for i, payload := range []string{`{"active":true,"displayName":"old"}`, `{"active":true,"displayName":"current"}`} {
+		if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,attempts,status,created_at,updated_at,revision) VALUES(?,?,'target','user.updated',?,0,'pending',?,?,?)`,
+			uuid.NewString(), u.ID, payload, time.Now().UTC(), time.Now().UTC(), rev-1+i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.ResetUserMFA(u.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := queuedFor(t, s, "target", u.ID)
+	if len(got) != 3 || got[0].EventType != "user.mfa_reset" || got[1].PayloadJSON != `{"active":true,"displayName":"old"}` || got[2].PayloadJSON != `{"active":true,"displayName":"current"}` {
+		t.Fatalf("queue %+v", got)
+	}
+	if !(got[0].Revision > rev && got[1].Revision > got[0].Revision && got[2].Revision > got[1].Revision) {
+		t.Fatalf("revisions %d %d %d after %d", got[0].Revision, got[1].Revision, got[2].Revision, rev)
+	}
+}
+
+// A reset queued by an earlier version at a revision the receiver already held is given
+// its own once, and says inactive when the account is no longer desired there.
+func TestQueuedResetsFromBeforeTheUpgradeAreResequenced(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	app := provisioningFixture(t, s, "target")
+	u := createTestUserNamed(t, s, "gone")
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	var rev int
+	if err := s.db.QueryRow(`SELECT revision FROM sync_resource_state WHERE system_id='target' AND resource_id=?`, u.ID).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	// As the old code left it: the reset behind the removal, at the removal's revision,
+	// with the active payload it was first queued with.
+	if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,attempts,status,created_at,updated_at,revision) VALUES('old-reset',?,'target','user.mfa_reset','{"active":true}',3,'failed',?,?,?)`,
+		u.ID, time.Now().UTC(), time.Now().UTC(), rev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM system_settings WHERE key=?`, resetRevisionMigrationSetting); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrateResetRevisions(); err != nil {
+		t.Fatal(err)
+	}
+	// The reset takes the next revision and the queued removal follows it, still last.
+	got := queuedFor(t, s, "target", u.ID)
+	if len(got) != 2 || got[0].ID != "old-reset" || got[0].Revision != rev+1 || got[1].EventType != "user.updated" || got[1].Revision != rev+2 || !got[1].Removal() {
+		t.Fatalf("queue after migration %+v (removal was at %d)", got, rev)
+	}
+	if !strings.Contains(got[0].PayloadJSON, `"active":false`) {
+		t.Fatalf("migrated reset payload %s", got[0].PayloadJSON)
+	}
+	// Once per database.
+	if err := s.migrateResetRevisions(); err != nil {
+		t.Fatal(err)
+	}
+	if again := queuedFor(t, s, "target", u.ID); again[0].Revision != rev+1 {
+		t.Fatalf("migration ran twice: %+v", again)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -208,23 +209,90 @@ func nextRevisionTx(tx *sql.Tx, systemID, resourceID string) (int, error) {
 	return revision, err
 }
 
-// requeueBehindTx re-inserts taken-out events at the back of the queue under a new
-// revision, so they follow what was just queued and are still the resource's latest.
+// requeueBehindTx re-inserts taken-out events at the back of the queue in their old
+// order, each under its own new revision: receivers refuse a second event at a revision
+// they hold, and the last one stays the resource's latest.
 func requeueBehindTx(tx *sql.Tx, systemID, resourceID string, events []AccountSyncEvent, now time.Time) error {
-	if len(events) == 0 {
-		return nil
-	}
-	revision, err := nextRevisionTx(tx, systemID, resourceID)
-	if err != nil {
-		return err
-	}
+	sort.SliceStable(events, func(i, j int) bool {
+		if events[i].Revision != events[j].Revision {
+			return events[i].Revision < events[j].Revision
+		}
+		return events[i].CreatedAt.Before(events[j].CreatedAt)
+	})
 	for _, r := range events {
+		revision, err := nextRevisionTx(tx, systemID, resourceID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`INSERT INTO account_sync_events (`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			r.ID, r.UserID, r.SystemID, r.EventType, r.PayloadJSON, r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// resetRevisionMigrationSetting marks that MFA resets queued before resets took their own
+// revision were re-sequenced, once per database.
+const resetRevisionMigrationSetting = "mfa_reset_revisions_migrated"
+
+// migrateResetRevisions gives each unsent MFA reset its own revision, followed by the
+// queued state of the same resource. Earlier versions reused a revision receivers already
+// held, so those resets were refused forever. A reset for an account no longer desired
+// says inactive, never the active payload it was queued with.
+func (s *Store) migrateResetRevisions() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var done bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM system_settings WHERE key=?)`, resetRevisionMigrationSetting).Scan(&done); err != nil || done {
+		return err
+	}
+	unsent := `status IN ('pending','failed') AND NOT EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=account_sync_events.id)`
+	pairs, err := scanPairs(tx.Query(`SELECT DISTINCT system_id,user_id FROM account_sync_events WHERE event_type='user.mfa_reset' AND ` + unsent + `
+ AND EXISTS(SELECT 1 FROM sync_resource_state st WHERE st.system_id=account_sync_events.system_id AND st.resource_id=account_sync_events.user_id)`))
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, p := range pairs {
+		var active bool
+		if err := tx.QueryRow(`SELECT active FROM sync_resource_state WHERE system_id=? AND resource_id=?`, p.systemID, p.resourceID).Scan(&active); err != nil {
+			return err
+		}
+		rows, err := tx.Query(`DELETE FROM account_sync_events WHERE system_id=? AND user_id=? AND `+unsent+`
+ AND event_type IN ('user.mfa_reset','user.created','user.updated') RETURNING `+syncEventColumns, p.systemID, p.resourceID)
+		if err != nil {
+			return err
+		}
+		events, err := scanSyncEvents(rows)
+		if err != nil {
+			return err
+		}
+		var resets, state []AccountSyncEvent
+		for _, ev := range events {
+			if ev.EventType != "user.mfa_reset" {
+				state = append(state, ev)
+				continue
+			}
+			if !active {
+				ev.PayloadJSON = string(scimInactivePayload(p.resourceID))
+			}
+			resets = append(resets, ev)
+		}
+		if err := requeueBehindTx(tx, p.systemID, p.resourceID, resets, now); err != nil {
+			return err
+		}
+		if err := requeueBehindTx(tx, p.systemID, p.resourceID, state, now); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO system_settings (key, value, updated_at) VALUES (?, '1', CURRENT_TIMESTAMP)`, resetRevisionMigrationSetting); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func insertResourceEventTx(tx *sql.Tx, systemID, resourceID, eventType string, payload []byte, revision int, now time.Time) error {
