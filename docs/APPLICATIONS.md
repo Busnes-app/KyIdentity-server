@@ -83,8 +83,12 @@ apps issue no token at all, so they receive no claims. Any role, mapping or clai
 setting change revokes the affected users' live tokens and pending codes for that app,
 bumps the app's role revision so a code issued before the change cannot be exchanged
 after it, and re-sends the users' profiles to the app's provisioning connection with
-the new roles (a connection whose app defines roles receives those instead of the
-global directory role).
+the new roles. Every app-backed SCIM or signed-webhook connection receives only that
+app's explicit roles, including `roles: []` when no roles are defined or assigned.
+A KyIdentity global administrator is not automatically an application administrator.
+KyMessages, KyPulse and ky-server-base require an explicit per-app `admin` role;
+assign it to dedicated administrators before upgrading those receivers. See
+[the rollout steps](UPGRADES-AND-RECOVERY.md#explicit-application-administrators).
 
 **Claims by scope.** `profile` grants `preferred_username`, `username` and `name`;
 `email` grants `email` and `email_verified`; `openid` always grants `sub`, `sid`, the
@@ -103,7 +107,7 @@ Group membership changes, including deletion of a mapped group and changes arriv
 over inbound SCIM, count as role changes for every app that maps the group, and a
 provisioned account whose roles are revoked receives an explicit empty `roles` list. An
 app's first role, and its last one going, re-send every account provisioned through its
-connection, since the whole role set changes shape at that point.
+connection, with an explicit empty role list when no assigned roles remain.
 
 **Per-app switches.** *Legacy global role claim* keeps the directory-wide `role`
 (`user` or `admin`) in the app's tokens; apps that existed before app roles keep it on,

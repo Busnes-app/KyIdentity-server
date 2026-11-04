@@ -178,15 +178,16 @@ func FormatUserAsSCIM(userPayload any) (*SCIMUserResource, error) {
 			return nil, err
 		}
 		var temp struct {
-			Schemas     []string `json:"schemas"`
-			ID          string   `json:"id"`
-			UserName    string   `json:"userName"`
-			DisplayName string   `json:"displayName"`
-			Email       string   `json:"email"`
-			Username    string   `json:"username"`
-			Role        string   `json:"role"`
-			Status      string   `json:"status"`
-			Active      *bool    `json:"active"`
+			Schemas     []string   `json:"schemas"`
+			ID          string     `json:"id"`
+			UserName    string     `json:"userName"`
+			DisplayName string     `json:"displayName"`
+			Email       string     `json:"email"`
+			Username    string     `json:"username"`
+			Role        string     `json:"role"`
+			Roles       []SCIMRole `json:"roles"`
+			Status      string     `json:"status"`
+			Active      *bool      `json:"active"`
 		}
 		if err := json.Unmarshal(data, &temp); err != nil {
 			return nil, err
@@ -227,7 +228,11 @@ func FormatUserAsSCIM(userPayload any) (*SCIMUserResource, error) {
 				{Value: temp.Email, Type: "work", Primary: true},
 			}
 		}
-		if temp.Role != "" {
+		// A refreshed explicit list, including [], overrides the historical
+		// singular directory role on schema-less queued profiles.
+		if temp.Roles != nil {
+			res.Roles = temp.Roles
+		} else if temp.Role != "" {
 			res.Roles = []SCIMRole{
 				{Value: temp.Role, Primary: true},
 			}

@@ -4,6 +4,43 @@
 
 Commands and unlinked file paths below are relative to the repository root.
 
+## Explicit application administrators
+
+Before upgrading KyIdentity and the KyMessages, KyPulse or ky-server-base receivers:
+
+1. In **App connections**, use the same application identity for the product's OAuth
+   client and provisioning connection. Define its exact `admin` role and assign it
+   explicitly to the dedicated application administrator (directly or through a group).
+   Verify that administrator also has access to the app. Global KyIdentity `admin`
+   alone is insufficient; keep everyday identities outside these administrator grants.
+2. Verify those assignments before upgrading receivers that require per-app `admin`.
+   After this KyIdentity update, app-backed SCIM and signed webhooks send `roles: []`
+   if the app has no roles or the user has none. Deleting the final role also clears
+   downstream roles; it never restores global administrator status.
+3. Upgrade the source and receivers together as a coordinated rollout. On each
+   connector use **Resync** (or `kyidentity resync-system --client <client-id> --wait 2m`)
+   after the source upgrade to replace retained and queued old profiles; check delivery
+   success. Before any new delivery attempt, the source refreshes only the role array
+   of unfenced app-backed user events (including old queued profiles and MFA resets)
+   from current explicit app assignments. Event ID, type, revision and other profile
+   fields stay intact. Held uncertain attempts are never rewritten or retried by this
+   refresh; establish remote quiescence and use the existing attempt-recovery action
+   before they can be claimed again. Resync and verify delivery after recovery.
+   Startup alone cannot undo an old write that already reached a receiver or stop
+   an in-flight request from an older process; stop the old source before upgrading.
+4. Sign in afresh to each product as its dedicated administrator and verify an
+   administrator action. Verify an unassigned global administrator and an everyday
+   account have no product administrator access. Confirm existing content is retained.
+   Receiver updates must treat empty `roles` as ordinary user, clear previously cached
+   grants, and never fall back to the separate legacy `role` claim.
+
+ID-token and UserInfo `roles` remain per-app. **Legacy global role claim** still emits
+singular `role` for clients deliberately retaining that compatibility switch; it is
+not an application administrator grant. Truly unmapped legacy provisioning systems
+retain their historical global-role payload. This change does not migrate mixed-use
+accounts or end sessions already held by a receiver; verify the receiver's revocation
+and role-refresh behavior during rollout.
+
 ## Upgrades and restores
 
 Upgrading is starting the new image on the existing data directory: migrations run at

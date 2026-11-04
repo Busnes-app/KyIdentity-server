@@ -117,6 +117,7 @@ func main() {
 	if cfg.AllowPrivateCallbacks {
 		log.Println("WARNING: KYIDENTITY_ALLOW_PRIVATE_CALLBACKS is on; paired systems may register internal callback URLs")
 	}
+	warnWideTrustedProxies(cfg.TrustedProxyCIDRs, log.Printf)
 	if strings.HasPrefix(cfg.IssuerURL, "https://") && len(cfg.TrustedProxyCIDRs) == 0 {
 		// Plain HTTP here, https outside: a proxy is in front, and without its address every
 		// caller is keyed as the proxy, so a stranger's wrong passwords lock the admin out.
