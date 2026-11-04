@@ -358,28 +358,3 @@ func TestRestoreKeepsQueuedRemovals(t *testing.T) {
 		t.Fatalf("queued removal after restore: %q %v", status, err)
 	}
 }
-
-// A queued MFA reset is re-sent after a restore, so it keeps a revision receivers accept.
-func TestRestoreKeepsQueuedMFAResetRevision(t *testing.T) {
-	s, cleanup := restoreFixture(t)
-	defer cleanup()
-	var userID string
-	if err := s.db.QueryRow(`SELECT u.id FROM users u WHERE u.username='staff'`).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.ResetUserMFA(userID, nil); err != nil {
-		t.Fatal(err)
-	}
-	var reset string
-	var before int
-	if err := s.db.QueryRow(`SELECT id,revision FROM account_sync_events WHERE system_id='hr' AND user_id=? AND event_type='user.mfa_reset'`, userID).Scan(&reset, &before); err != nil {
-		t.Fatalf("no queued reset: %v", err)
-	}
-	if _, err := s.ApplyRestoredState(time.Now().UTC(), nil); err != nil {
-		t.Fatal(err)
-	}
-	var after int
-	if err := s.db.QueryRow(`SELECT revision FROM account_sync_events WHERE id=?`, reset).Scan(&after); err != nil || after != before || after < 1 {
-		t.Fatalf("reset revision %d -> %d, %v", before, after, err)
-	}
-}

@@ -448,9 +448,6 @@ func (s *Store) migrate() error {
 	if err := s.migrateProvisioning(); err != nil {
 		return err
 	}
-	if err := s.migrateResetRevisions(); err != nil {
-		return err
-	}
 	if err := s.migrateReconcile(); err != nil {
 		return err
 	}

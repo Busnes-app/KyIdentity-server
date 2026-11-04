@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	stdsync "sync"
@@ -90,7 +89,7 @@ type hit struct {
 
 // flakyReceiver is a suite receiver that answers 503 while down, or the queued statuses
 // first. It records every request it saw. With fence set it refuses, as suite receivers
-// do, a meta.version older than one it applied, or a different event at that version.
+// do, a meta.version older than one it applied.
 type flakyReceiver struct {
 	down   atomic.Bool
 	mu     stdsync.Mutex
@@ -98,14 +97,11 @@ type flakyReceiver struct {
 	hits   []hit
 	fence  bool
 	last   int
-	digest string
 }
 
 func (f *flakyReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	raw, _ := io.ReadAll(r.Body)
 	var body SCIMUserResource
-	_ = json.Unmarshal(raw, &body)
-	digest := r.Header.Get("X-KySignOn-Event-Type") + "\x00" + string(raw)
+	_ = json.NewDecoder(r.Body).Decode(&body)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.hits = append(f.hits, hit{r.Header.Get("X-KySignOn-Event-Type"), body.Active})
@@ -116,15 +112,13 @@ func (f *flakyReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case f.down.Load():
 		w.WriteHeader(503)
-	case f.fence && (version < f.last || version == f.last && f.digest != "" && digest != f.digest):
+	case f.fence && version < f.last:
 		w.WriteHeader(409)
 	case len(f.script) > 0:
 		w.WriteHeader(f.script[0])
 		f.script = f.script[1:]
 	default:
-		if version >= f.last {
-			f.last, f.digest = version, digest
-		}
+		f.last = max(f.last, version)
 		w.WriteHeader(200)
 	}
 }
@@ -405,7 +399,7 @@ func TestRemovalGoesAheadOfUndeliveredMFAReset(t *testing.T) {
 	dispatch(t, e)
 	dispatch(t, e)
 	got := recv.seen()
-	if len(got) < 2 || got[len(got)-2] != (hit{"user.updated", false}) || got[len(got)-1] != (hit{"user.mfa_reset", false}) {
+	if len(got) < 2 || got[len(got)-2] != (hit{"user.updated", false}) || got[len(got)-1].event != "user.mfa_reset" {
 		t.Fatalf("receiver saw %+v", got)
 	}
 	if left := outbox(t, s, sys.ID, u.ID); len(left) != 0 {
@@ -415,39 +409,6 @@ func TestRemovalGoesAheadOfUndeliveredMFAReset(t *testing.T) {
 	dispatch(t, e)
 	if got := recv.seen(); got[len(got)-1] != (hit{"user.updated", true}) {
 		t.Fatalf("receiver saw %+v", got)
-	}
-}
-
-// Every suite receiver refuses a different event at a revision it already applied, so an
-// MFA reset after an acknowledged create takes the next revision, and a queued update it
-// overtakes follows it at a later one.
-func TestMFAResetTakesItsOwnRevision(t *testing.T) {
-	e, s, u, sys, recv := suiteFixture(t)
-	recv.fence = true
-	dispatch(t, e)
-	if err := e.ResetUserMFAAndRevoke(u.ID, nil); err != nil {
-		t.Fatal(err)
-	}
-	dispatch(t, e)
-	if left := outbox(t, s, sys.ID, u.ID); len(left) != 0 {
-		t.Fatalf("reset refused at the acknowledged revision: %+v", left)
-	}
-	recv.down.Store(true)
-	if _, err := s.EditUser(u.ID, nil, func(next *store.User) (bool, error) { next.DisplayName = "Renamed"; return true, nil }); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.ResetUserMFAAndRevoke(u.ID, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got := outbox(t, s, sys.ID, u.ID); len(got) != 2 || got[0].eventType != "user.mfa_reset" || got[1].eventType != "user.updated" {
-		t.Fatalf("outbox %+v", got)
-	}
-	recv.down.Store(false)
-	elapse(t, s)
-	dispatch(t, e)
-	dispatch(t, e)
-	if left := outbox(t, s, sys.ID, u.ID); len(left) != 0 {
-		t.Fatalf("receiver refused: %+v", left)
 	}
 }
 

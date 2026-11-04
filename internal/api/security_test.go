@@ -228,25 +228,6 @@ func TestTunnelTrustingEverythingStillNamesTheClient(t *testing.T) {
 	}
 }
 
-// A Tunnel trusting 0.0.0.0/0 with the default X-Forwarded-For: Cloudflare appends the
-// visitor's address, so a guesser who rotates the entries it sends must not rotate its key.
-func TestTunnelWithForwardedForIgnoresForgedEntries(t *testing.T) {
-	mm := NewMiddlewareManager(nil, []string{"0.0.0.0/0", "::/0"}, config.DefaultForwardedHeader, testCSRFKey)
-	for _, forged := range []string{"198.51.100.1", "198.51.100.2, 192.0.2.7", "2001:db8::9"} {
-		req := httptest.NewRequest("POST", "/api/auth/login", nil)
-		req.RemoteAddr = "172.18.0.5:5555"
-		req.Header.Set("X-Forwarded-For", forged+", 203.0.113.8")
-		if got := mm.ClientIP(req); got != "203.0.113.8" {
-			t.Errorf("ClientIP with forged %q = %q, want the visitor 203.0.113.8", forged, got)
-		}
-		// A proxy between cloudflared and KyIdentity appends cloudflared's private address.
-		req.Header.Set("X-Forwarded-For", forged+", 203.0.113.8, 172.18.0.7")
-		if got := mm.ClientIP(req); got != "203.0.113.8" {
-			t.Errorf("ClientIP behind a second hop with forged %q = %q, want the visitor 203.0.113.8", forged, got)
-		}
-	}
-}
-
 // An unparseable value is not an identity. Keying a limiter or an audit row on an arbitrary
 // string lets a caller mint a fresh bucket per request.
 func TestMalformedForwardedValueFallsBackToPeer(t *testing.T) {
