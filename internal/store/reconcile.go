@@ -449,6 +449,12 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 		if stored != "" && stored != remoteID && !dead(kind, stored) {
 			return false, nil
 		}
+		// A target that reused an ID another resource is still mapped to disputes that
+		// mapping too: count it rather than fail the whole repair on the unique index.
+		var taken bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM scim_user_links WHERE system_id=? AND kind=? AND remote_id=? AND local_id<>?)`, systemID, kind, remoteID, localID).Scan(&taken); err != nil || taken {
+			return false, err
+		}
 		r, err := tx.Exec(`INSERT INTO scim_user_links(system_id,local_id,kind,remote_id) VALUES(?,?,?,?)
  ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE kind=excluded.kind AND remote_id IN ('',?)`, systemID, localID, kind, remoteID, stored)
 		if err != nil {
