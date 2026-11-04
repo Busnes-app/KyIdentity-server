@@ -374,3 +374,53 @@ func pendingRoleEvents(t *testing.T, s *Store, userID string) int {
 	}
 	return n
 }
+
+// Retry and Repair re-send the app's roles, never the global KyIdentity role: a global
+// administrator holding only an ordinary app role must not reach the target as "admin".
+func TestRetryAndRepairSendAppRoles(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	appID := provisioningFixture(t, s, "target")
+	u := createTestUser(t, s)
+	if _, err := s.db.Exec(`UPDATE users SET role='admin' WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppPolicy(appID, "all_active_users", true, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	member, err := s.CreateAppRole(appID, "member", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppRoleAssignment(appID, member.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
+	latest := func(step string) string {
+		t.Helper()
+		var payload string
+		if err := s.db.QueryRow(`SELECT payload_json FROM account_sync_events WHERE user_id=? AND status='pending' ORDER BY rowid DESC LIMIT 1`, u.ID).Scan(&payload); err != nil {
+			t.Fatalf("%s queued nothing: %v", step, err)
+		}
+		return payload
+	}
+	if err := s.RetryProvisioning("target", u.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if p := latest("retry"); !strings.Contains(p, `"value":"member"`) || strings.Contains(p, `"value":"admin"`) {
+		t.Fatalf("retry sent the wrong roles: %s", p)
+	}
+	deliverAll(t, s)
+	fresh, err := s.GetUserByID(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing := RemoteListing{Supported: true, Complete: true,
+		Users: []RemoteAccount{{ID: "r1", ExternalID: u.ID, UserName: fresh.Username, DisplayName: "stale", Email: fresh.Email, Active: true}}}
+	if _, err := s.ReconcileDrift("target", listing, true); err != nil {
+		t.Fatal(err)
+	}
+	if p := latest("repair"); !strings.Contains(p, `"value":"member"`) || strings.Contains(p, `"value":"admin"`) {
+		t.Fatalf("repair sent the wrong roles: %s", p)
+	}
+}

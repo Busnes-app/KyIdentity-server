@@ -30,7 +30,7 @@ func enrolTOTP(t *testing.T, f *stepUpFixture) string {
 func recordFailures(t *testing.T, f *stepUpFixture, n int) {
 	t.Helper()
 	for range n {
-		if _, err := f.store.RecordFailedLogin(f.user.ID); err != nil {
+		if _, err := f.store.RecordFailedLogin(f.user.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -38,7 +38,7 @@ func recordFailures(t *testing.T, f *stepUpFixture, n int) {
 
 func assertLocked(t *testing.T, f *stepUpFixture, want bool) {
 	t.Helper()
-	locked, err := f.store.IsAccountLocked(f.user.ID)
+	locked, err := f.store.IsAccountLocked(f.user.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestLoginRefusalsAreIndistinguishable(t *testing.T) {
 	}
 	locked := other("locked-user", "active")
 	for range store.MaxFailedLogins {
-		if _, err := f.store.RecordFailedLogin(locked.ID); err != nil {
+		if _, err := f.store.RecordFailedLogin(locked.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -285,5 +285,26 @@ func TestMeFlagsLegacyRecoveryCodes(t *testing.T) {
 	}
 	if got := flag(); got != "false" {
 		t.Fatalf("regenerated codes flagged %s", got)
+	}
+}
+
+// Owner decision (login lockout): wrong passwords from one address must never lock the
+// owner out from another; the guessing address stays locked.
+func TestStrangersWrongPasswordsDoNotLockTheOwnerOut(t *testing.T) {
+	f, cleanup := newStepUpFixture(t)
+	defer cleanup()
+	for i := range store.MaxFailedLogins {
+		rec := anonPostFrom(t, f.srv, "203.0.113.9", "/api/auth/login", map[string]string{"username": f.user.Username, "password": fmt.Sprintf("wrong-password-%d", i)})
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("guess %d: %d %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	// The per-IP limiter spends its burst on the guesses; the lock itself is checked here.
+	if locked, err := f.store.IsAccountLocked(f.user.ID, "203.0.113.9"); err != nil || !locked {
+		t.Fatalf("the guessing address is not locked: %v", err)
+	}
+	rec := anonPostFrom(t, f.srv, "198.51.100.77", "/api/auth/login", map[string]string{"username": f.user.Username, "password": f.pass})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the owner is locked out by a stranger's guesses: %d %s", rec.Code, rec.Body.String())
 	}
 }

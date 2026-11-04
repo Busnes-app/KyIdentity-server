@@ -299,8 +299,18 @@ func (s *Store) DecideAccessRequest(id, actorID string, approve bool, note strin
 				at := now.Add(time.Duration(req.DurationSeconds) * time.Second).Truncate(time.Second)
 				expiresAt = &at
 			}
-			if _, err := applyAppAssignmentTx(tx, req.AppID, "users", req.UserID, true, expiresAt); err != nil {
+			// A direct grant made since the request keeps the longer life: approving
+			// a time-boxed request never shortens it.
+			var current sql.NullInt64
+			err := tx.QueryRow(`SELECT expires_at FROM app_user_assignments WHERE app_id=? AND user_id=?`, req.AppID, req.UserID).Scan(&current)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
+			}
+			keep := err == nil && (!current.Valid || expiresAt != nil && current.Int64 >= expiresAt.Unix())
+			if !keep {
+				if _, err := applyAppAssignmentTx(tx, req.AppID, "users", req.UserID, true, expiresAt); err != nil {
+					return err
+				}
 			}
 			status = "approved"
 		}

@@ -201,6 +201,43 @@ func TestFirstRunPasswordFileIsRemovedAfterAdminLogsIn(t *testing.T) {
 	}
 }
 
+// The emergency runbook bootstraps a second administrator while other users are signed
+// in; their sessions must not delete the new administrator's generated password.
+func TestFirstRunPasswordFileWaitsForTheNamedAccount(t *testing.T) {
+	dir := t.TempDir()
+	db := testStore(t)
+	if _, err := ensureBootstrapAdmin(db, "admin", "", "a-good-first-password", "test"); err != nil {
+		t.Fatal(err)
+	}
+	admin, _ := db.GetUserByUsername("admin")
+	if err := db.CreateSession(&store.Session{ID: "s1", UserID: admin.ID, SessionTokenHash: "h", IPAddress: "1.1.1.1", UserAgent: "t", ExpiresAt: adminSessionExpiry()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureBootstrapAdmin(db, "rescue", "", "another-good-password", "test"); err != nil {
+		t.Fatal(err)
+	}
+	path, err := writeFirstRunPassword(dir, "rescue", "another-good-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := clearFirstRunPasswordFile(db, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("another user's session deleted the rescue administrator's password:", err)
+	}
+	rescue, _ := db.GetUserByUsername("rescue")
+	if err := db.CreateSession(&store.Session{ID: "s2", UserID: rescue.ID, SessionTokenHash: "h2", IPAddress: "1.1.1.1", UserAgent: "t", ExpiresAt: adminSessionExpiry()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearFirstRunPasswordFile(db, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("the file survived the named administrator's sign-in")
+	}
+}
+
 func TestFirstRunPasswordFileSurvivesUntilFirstLogin(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "first-run-password.txt")

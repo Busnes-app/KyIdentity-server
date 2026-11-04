@@ -11,6 +11,16 @@ interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
 }
 
+/**
+ * No new push is sent while one is still waiting or past the hourly allowance. Say so,
+ * rather than leave a phone-only user facing a code form with no reason given.
+ */
+export function unsentPushNotice(resp: { mfaMethods: string[]; challengeId?: string }): string | null {
+  return resp.mfaMethods.includes('push') && !resp.challengeId
+    ? 'No new request could be sent to your phone just now: an earlier one may still be waiting, or too many were sent this hour. Wait a few minutes, then sign in again.'
+    : null;
+}
+
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const interaction = new URLSearchParams(window.location.search).get('interaction');
   const [interactionDetails, setInteractionDetails] = useState<{ appName: string; username: string; requiresMFA: boolean; requiresPasskey: boolean } | null>(null);
@@ -91,6 +101,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         } else {
           setMfaMode('totp');
         }
+        const notice = unsentPushNotice(resp);
+        if (notice) setError(notice);
       } else if (resp.success) {
         finishLogin(resp.user, resp.restartAuthorization);
       }

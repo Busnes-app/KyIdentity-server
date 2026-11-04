@@ -21,10 +21,6 @@ const (
 	sessionContextKey contextKey = "session"
 )
 
-// limiterIdleTTL is how long an unused rate limiter bucket is kept. Without eviction the
-// limiter map is an unbounded, remotely-driven allocation.
-const limiterIdleTTL = 10 * time.Minute
-
 // defaultMaxLimiters caps the bucket map so a stream of distinct clients cannot exhaust
 // memory. At the cap a new bucket replaces a fully refilled one; when a bounded probe finds
 // none, it is refused rather than a live bucket evicted.
@@ -181,8 +177,10 @@ func (l *RateLimiter) refilled(now time.Time) bool {
 	return l.tokens+now.Sub(l.lastRefill).Seconds()*l.refillRate >= l.maxTokens
 }
 
-// sweepLimiters drops refilled buckets idle for a minute, and any bucket idle past
-// limiterIdleTTL.
+// sweepLimiters drops buckets idle for a minute that have refilled. A bucket still
+// owed tokens is live state, however long idle: dropping it hands its owner a fresh
+// allowance (a 5-per-hour bucket refills one token every 12 minutes). Every limiter
+// refills, so each bucket goes within its refill time, and maxLimiters bounds the map.
 func (m *MiddlewareManager) sweepLimiters() {
 	now := m.now()
 	m.rateLimitersMutex.Lock()
@@ -191,7 +189,7 @@ func (m *MiddlewareManager) sweepLimiters() {
 		limiter.mu.Lock()
 		idle := now.Sub(limiter.lastRefill)
 		limiter.mu.Unlock()
-		if idle > limiterIdleTTL || (idle > time.Minute && limiter.refilled(now)) {
+		if idle > time.Minute && limiter.refilled(now) {
 			delete(m.rateLimiters, key)
 		}
 	}

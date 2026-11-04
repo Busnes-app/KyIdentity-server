@@ -1,3 +1,5 @@
+import type { DirectoryPage } from './types';
+
 let csrfTokenCache: string | null = null;
 
 /** A JSON value, which is all a response body is known to be before it is checked. */
@@ -95,6 +97,20 @@ function parseBody(text: string): unknown {
   }
 }
 
+/**
+ * Ends the server session. True once the server has ended it, or had already (401); false
+ * when it may still be live (network failure, server error), so the caller must not show
+ * a signed-out screen over a cookie that still signs this browser in.
+ */
+export async function logout(): Promise<boolean> {
+  try {
+    await apiRequest('/api/auth/logout', { method: 'POST' });
+    return true;
+  } catch (err) {
+    return err instanceof ApiError && err.status === 401;
+  }
+}
+
 /** An error carrying the server's status and machine-readable code. */
 export class ApiError extends Error {
   readonly status: number;
@@ -132,5 +148,15 @@ export async function apiJson<T>(
     return parse(body);
   } catch (err) {
     throw new Error(`${path}: ${errorMessage(err, 'unexpected response shape')}`);
+  }
+}
+
+/** Every item of a paged list, 100 at a time, for a picker that must offer all of it. */
+export async function apiAllPages<T>(path: string, parse: (value: unknown) => DirectoryPage<T>): Promise<T[]> {
+  const items: T[] = [];
+  for (;;) {
+    const page = await apiJson(`${path}?limit=100&offset=${items.length}`, parse);
+    items.push(...page.items);
+    if (page.items.length === 0 || items.length >= page.total) return items;
   }
 }

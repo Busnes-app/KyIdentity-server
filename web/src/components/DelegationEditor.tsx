@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiJson, errorMessage } from '../api';
+import { apiAllPages, apiJson, errorMessage } from '../api';
 import { parseAppRecordPage, parseDelegations } from '../parsers';
 import type { AppRecord, Delegations, User } from '../types';
 import { isCancelled, useStepUp } from './StepUpPrompt';
@@ -21,7 +21,7 @@ export function DelegationEditor({ user, onClose }: { user: User; onClose: () =>
 
   useEffect(() => {
     apiJson(path, parseDelegations).then(setD).catch(err => setError(errorMessage(err, 'Could not load delegations')));
-    apiJson('/api/admin/app-registry?limit=100', parseAppRecordPage).then(p => setApps(p.items)).catch(err => setError(errorMessage(err, 'Could not load app connections')));
+    apiAllPages('/api/admin/app-registry', parseAppRecordPage).then(setApps).catch(err => setError(errorMessage(err, 'Could not load app connections')));
   }, [path]);
 
   const save = async () => {

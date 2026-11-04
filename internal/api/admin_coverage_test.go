@@ -77,17 +77,17 @@ func TestAdminUpdateUserPasswordAndRefusals(t *testing.T) {
 	}
 
 	for i := 0; i < store.MaxFailedLogins; i++ {
-		if _, err := db.RecordFailedLogin(target.ID); err != nil {
+		if _, err := db.RecordFailedLogin(target.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if locked, _ := db.IsAccountLocked(target.ID); !locked {
+	if locked, _ := db.IsAccountLocked(target.ID, ""); !locked {
 		t.Fatal("setup: account not locked")
 	}
 	if rr := adminRequest(t, srv, "PUT", path, admin, `{"password":"brand-new-password-1"}`); rr.Code != http.StatusOK {
 		t.Fatalf("set password: %d %s", rr.Code, rr.Body.String())
 	}
-	if locked, _ := db.IsAccountLocked(target.ID); locked {
+	if locked, _ := db.IsAccountLocked(target.ID, ""); locked {
 		t.Fatal("an administrator-set password left the account locked out")
 	}
 	if u := mustUser(t, db, target.ID); !u.PasswordChangeRequired {

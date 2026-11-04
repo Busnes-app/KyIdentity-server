@@ -245,7 +245,7 @@ func (h *WebAuthnHandler) BeginLogin(w http.ResponseWriter, r *http.Request, aut
 		return
 	}
 
-	token, _, ok := auth.resolveMFAToken(w, req.MFAToken)
+	token, _, ok := auth.resolveMFAToken(w, r, req.MFAToken)
 	if !ok {
 		return
 	}
@@ -294,7 +294,7 @@ func (h *WebAuthnHandler) FinishLogin(w http.ResponseWriter, r *http.Request, au
 		return
 	}
 
-	token, user, ok := auth.resolveMFAToken(w, req.MFAToken)
+	token, user, ok := auth.resolveMFAToken(w, r, req.MFAToken)
 	if !ok {
 		return
 	}

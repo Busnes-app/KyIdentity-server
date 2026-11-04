@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -338,5 +339,54 @@ func TestGenericSCIMRejectsReassignedRemoteID(t *testing.T) {
 	err = e.deliver(context.Background(), sys, "token", "event", "user.updated", u.ID, body)
 	if !errors.Is(err, scim.ErrMalformedResponse) || writes != 0 {
 		t.Fatalf("unrelated account overwritten: err=%v writes=%d", err, writes)
+	}
+}
+
+// postRefused fails every POST before a byte is written, as a refused dial does.
+type postRefused struct{ base http.RoundTripper }
+
+func (p postRefused) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodPost {
+		return nil, errors.New("connection refused")
+	}
+	return p.base.RoundTrip(r)
+}
+
+// A create that never wrote its headers (or met a 503) cannot have been applied, so it
+// must not leave a marker that refuses every later attempt as uncertain.
+func TestSCIMCreateNeverSentIsRetried(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	posts := 0
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			_, _ = w.Write([]byte(`{"totalResults":0,"Resources":[]}`))
+			return
+		}
+		posts++
+		// An oversized error body must not hide the refusal behind its status.
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write(bytes.Repeat([]byte("x"), (1<<20)+2))
+	}))
+	defer srv.Close()
+	e.httpClient = &http.Client{Transport: &deliveryTransport{base: postRefused{srv.Client().Transport}}}
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "test", SystemType: "scim", CallbackURL: srv.URL, BearerToken: "target-token"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(UserToSCIMResource(u))
+	if err := e.deliverSCIM(context.Background(), sys, "target-token", "user.created", u.ID, payload); err == nil || errors.Is(err, errCreateUncertain) {
+		t.Fatalf("refused dial: err=%v", err)
+	}
+	if _, started, _ := s.SCIMUserLink(sys.ID, u.ID); started {
+		t.Fatal("a create that was never sent left its marker")
+	}
+	e.httpClient = &http.Client{Transport: &deliveryTransport{base: srv.Client().Transport}}
+	for i := 1; i <= 2; i++ {
+		err := e.deliverSCIM(context.Background(), sys, "target-token", "user.created", u.ID, payload)
+		var remote *scim.Error
+		if !errors.As(err, &remote) || remote.Status != http.StatusServiceUnavailable || posts != i {
+			t.Fatalf("attempt %d after 503: err=%v posts=%d", i, err, posts)
+		}
 	}
 }

@@ -116,7 +116,7 @@ func TestResetLinkReplacesPasswordAndRevokesEverything(t *testing.T) {
 	sess := seedSession(t, s, u.ID, now.Add(time.Hour), now)
 	jti, _, _ := seedGrants(t, s, u.ID, sess, "app")
 	for range 3 {
-		if _, err := s.RecordFailedLogin(u.ID); err != nil {
+		if _, err := s.RecordFailedLogin(u.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

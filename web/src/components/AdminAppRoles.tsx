@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiJson, apiRequest, errorMessage } from '../api';
+import { apiAllPages, apiJson, apiRequest, errorMessage } from '../api';
 import { parseAppRolesPage, parseGroupPage, parseUsers } from '../parsers';
 import type { AppRecord, AppRole, DirectoryGroup, User } from '../types';
 import { isCancelled, useStepUp } from './StepUpPrompt';
@@ -33,7 +33,7 @@ export function AdminAppRoles({ app: initial, onClose }: { app: AppRecord; onClo
   useEffect(() => {
     void reload();
     apiJson('/api/admin/users', parseUsers).then(setUsers).catch(err => setError(errorMessage(err, 'Could not load users to map')));
-    apiJson('/api/admin/groups?limit=100', parseGroupPage).then(p => setGroups(p.items)).catch(err => setError(errorMessage(err, 'Could not load groups to map')));
+    apiAllPages('/api/admin/groups', parseGroupPage).then(setGroups).catch(err => setError(errorMessage(err, 'Could not load groups to map')));
   }, []);
 
   const mutate = async (reason: string, method: 'POST' | 'PUT' | 'DELETE', path: string, body?: object) => {

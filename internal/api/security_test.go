@@ -275,6 +275,33 @@ func TestRateLimiterEvictsIdleEntries(t *testing.T) {
 	}
 }
 
+// An exhausted slow bucket (login pushes: 5 an hour) is live state however long idle;
+// sweeping it would hand a password holder a fresh allowance every ten minutes.
+func TestRateLimiterSweepKeepsExhaustedSlowBuckets(t *testing.T) {
+	mm := NewMiddlewareManager(nil, nil, config.DefaultForwardedHeader, testCSRFKey)
+	clock := time.Now()
+	mm.now = func() time.Time { return clock }
+	for i := 0; i < 5; i++ {
+		if !mm.allowRateLimit("login_push:u", 5, 5/3600.0) {
+			t.Fatalf("push %d refused inside the allowance", i)
+		}
+	}
+	clock = clock.Add(11 * time.Minute)
+	mm.sweepLimiters()
+	if mm.TrackedLimiters() != 1 {
+		t.Fatal("swept a bucket that had not refilled")
+	}
+	allowed := 0
+	for i := 0; i < 5; i++ {
+		if mm.allowRateLimit("login_push:u", 5, 5/3600.0) {
+			allowed++
+		}
+	}
+	if allowed != 0 {
+		t.Fatalf("%d pushes allowed 11 minutes after the hourly allowance was spent; want 0", allowed)
+	}
+}
+
 func TestRateLimiterIsHardCapped(t *testing.T) {
 	mm := NewMiddlewareManager(nil, []string{"10.0.0.0/8"}, config.DefaultForwardedHeader, testCSRFKey)
 	mm.maxLimiters = 50
@@ -580,19 +607,19 @@ func TestLoginDoesNotRevealWhetherAUserExists(t *testing.T) {
 }
 
 // Repeated failures must lock the account regardless of which IP they arrive from.
-func TestRepeatedFailuresLockTheAccountAcrossIPs(t *testing.T) {
+// Owner decision (login lockout): wrong passwords spread over many addresses never lock
+// the owner out from a clean one; the spray is the login_failures alert's to report.
+func TestFailuresFromOtherAddressesDoNotLockTheOwnerOut(t *testing.T) {
 	srv, db, _, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
 	u := newUser(t, db, "user")
 
-	// Each guess from a fresh address, so only a per-account counter can stop this.
 	for i := 0; i < store.MaxFailedLogins+2; i++ {
 		postLogin(t, srv, u.Username, "wrong-password-guess", fmt.Sprintf("198.51.100.%d", 20+i))
 	}
 
-	code, _ := postLogin(t, srv, u.Username, "correct-horse-battery", "203.0.113.99")
-	if code == http.StatusOK {
-		t.Error("the correct password still succeeded after the account exceeded its failure budget")
+	if code, _ := postLogin(t, srv, u.Username, "correct-horse-battery", "203.0.113.99"); code != http.StatusOK {
+		t.Errorf("guesses from other addresses locked the owner out: %d", code)
 	}
 }
 

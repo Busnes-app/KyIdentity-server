@@ -369,8 +369,8 @@ func TestDeliverSCIMGroupCreateLinksAssignedID(t *testing.T) {
 	}
 }
 
-// A 4xx create refusal clears the marker so a corrected target can be retried; a 5xx
-// may have been applied, so the marker stays and the retry is refused as uncertain.
+// A 4xx or 503 create refusal clears the marker so a corrected target can be retried;
+// another 5xx may have been applied, so the marker stays and the retry is refused as uncertain.
 func TestDeliverSCIMGroupCreateFailureClassification(t *testing.T) {
 	for _, tc := range []struct {
 		status    int
@@ -378,6 +378,7 @@ func TestDeliverSCIMGroupCreateFailureClassification(t *testing.T) {
 		wantRetry error
 	}{
 		{http.StatusBadRequest, true, nil},
+		{http.StatusServiceUnavailable, true, nil},
 		{http.StatusInternalServerError, false, errCreateUncertain},
 		{http.StatusRequestTimeout, false, errCreateUncertain},
 	} {

@@ -55,9 +55,14 @@ mails a 30-minute reset link when it can. Redeeming a reset link signs the accou
 everywhere and clears the lockout counter; it never removes a second factor. Losing a
 factor is a recovery-code sign-in or an administrator MFA reset, not a password reset.
 
-**Lockout.** Ten consecutive failures lock an account for 15 minutes. Wrong passwords,
-wrong second factors at sign-in and failed step-ups all count; the counter clears only
-when a sign-in fully succeeds, so a known password does not buy fresh TOTP guesses.
+**Lockout.** Ten failures, with no 15-minute gap between them, lock an account for 15
+minutes. Wrong passwords (at sign-in and step-up) count per client address (an IPv6 /64),
+so a stranger's guesses lock out only the stranger's address, never the owner signing in
+from elsewhere; a spray across many addresses raises the repeated-login-failures alert
+instead. Wrong second factors (at sign-in and step-up) count for the account from every
+address, since only someone holding the password can make them. A quiet 15 minutes
+starts a new count; a full sign-in clears that address's count and the second-factor
+count, so a known password does not buy fresh TOTP guesses.
 Each sign-in allows five second-factor attempts. A locked, disabled, pending or unknown
 account gets the same `401 invalid_credentials` as a wrong password, at the same hashing
 cost, even with the right password; only the audit row says which. A locked account that

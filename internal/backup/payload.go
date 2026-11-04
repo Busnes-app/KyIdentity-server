@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
@@ -42,7 +43,29 @@ func Members(cfg *config.Config) []string {
 	if _, err := os.Stat(filepath.Join(cfg.DataDir, config.VAPIDKeyFile)); err == nil {
 		m = append(m, vapidKeyRelPath)
 	}
+	keys, _ := relayKeys(cfg.DataDir)
+	for _, k := range keys {
+		m = append(m, "data/"+k)
+	}
 	return append(m, configRelPath)
+}
+
+// relayKeys names the self-registered push relay keys (mfa.RelayKeyFile) in dataDir. The
+// relay binds each phone's push token to the key that first sent to it, so a restore on
+// another host without them reaches no paired phone, and re-pairing keeps the same token.
+// A server that never registered with a relay has none.
+func relayKeys(dataDir string) ([]string, error) {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		if n := e.Name(); e.Type().IsRegular() && strings.HasPrefix(n, "push-relay-") && strings.HasSuffix(n, ".key") {
+			names = append(names, n)
+		}
+	}
+	return names, nil
 }
 
 // CollectSealable gathers everything a restore needs. Every member is secret or the means to
@@ -123,6 +146,20 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 		files = append(files, recoveryclient.File{Path: vapidKeyRelPath, Data: vapid, Mode: 0600})
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("failed to read VAPID key: %w", err)
+	}
+
+	// The push relay keys, so a restore keeps the identity the relay bound every phone to.
+	// A capsule from before them restores a server that registers afresh.
+	keys, err := relayKeys(cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list push relay keys: %w", err)
+	}
+	for _, k := range keys {
+		key, err := os.ReadFile(filepath.Join(cfg.DataDir, k))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read push relay key %s: %w", k, err)
+		}
+		files = append(files, recoveryclient.File{Path: "data/" + k, Data: key, Mode: 0600})
 	}
 
 	cfgJSON, err := json.MarshalIndent(map[string]any{

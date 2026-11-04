@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { User, canAdminister } from './types';
-import { apiJson, apiRequest } from './api';
+import { apiJson, logout } from './api';
 import { parseMe } from './parsers';
 import { Sidebar } from './components/Sidebar';
 import { LoginView } from './components/LoginView';
@@ -31,6 +31,7 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setTab] = useState(() => tabFromHash(window.location.hash));
   const [groupUser, setGroupUser] = useState<User | null>(null);
+  const [logoutFailed, setLogoutFailed] = useState(false);
 
   // The view lives in the URL hash, so links and the back button work.
   const setActiveTab = (tab: string) => {
@@ -67,6 +68,7 @@ export const App: React.FC = () => {
     checkSession();
 
     const handleUnauthorized = () => {
+      setLogoutFailed(false);
       setCurrentUser(null);
     };
 
@@ -76,16 +78,18 @@ export const App: React.FC = () => {
     return () => {window.removeEventListener('kyidentity:unauthorized', handleUnauthorized);window.removeEventListener('kyidentity:enrollment-required',checkSession);window.removeEventListener('kyidentity:password-change-required',checkSession);};
   }, []);
 
+  // The sign-in screen appears only once the server has ended the session: on a shared
+  // computer, a signed-out look over a live cookie hands the account to the next person.
   const handleLogout = async () => {
-    try {
-      await apiRequest('/api/auth/logout', { method: 'POST' });
-    } catch {
-      // The local session is cleared regardless; a failed logout call must not strand the
-      // user on an authenticated-looking screen.
+    if (!(await logout())) {
+      setLogoutFailed(true);
+      return;
     }
+    setLogoutFailed(false);
     setCurrentUser(null);
     setActiveTab('dashboard');
   };
+  const logoutAlert = logoutFailed && <div className="alert-box error" role="alert"><p>Sign-out did not reach the server, so this browser is still signed in. Check the connection and sign out again.</p></div>;
 
   if (loading) {
     return (
@@ -99,16 +103,17 @@ export const App: React.FC = () => {
   if (linkKind) return <AccountLinkView kind={linkKind} />;
 
   if (!currentUser || (window.location.pathname === '/login' && new URLSearchParams(window.location.search).has('interaction'))) {
-    return <LoginView onLoginSuccess={(u) => { setCurrentUser(u); checkSession(); }} />;
+    return <LoginView onLoginSuccess={(u) => { setLogoutFailed(false); setCurrentUser(u); checkSession(); }} />;
   }
 
   if (currentUser.enrollment?.restricted) return <main className="ky-content">
+    {logoutAlert}
     <div role="status" className="alert-box"><div><h1>Complete MFA enrollment</h1><p>This session can only set up account security. Permitted methods: {currentUser.enrollment.allowedMethods.map(m=>m==='webauthn'?'passkey':m.toUpperCase()).join(', ')}.</p><p>After enrolling, sign out and sign in with a permitted factor to continue.</p><button className="secondary-btn" onClick={handleLogout}>Sign out and sign in again</button></div></div>
     <DeviceSettings user={currentUser} onUserUpdate={checkSession}/>
   </main>;
 
   if (currentUser.passwordChangeRequired) {
-    return <PasswordChangeRequired user={currentUser} onLogout={handleLogout} onChanged={() => { setActiveTab('dashboard'); checkSession(); }} />;
+    return <>{logoutAlert}<PasswordChangeRequired user={currentUser} onLogout={handleLogout} onChanged={() => { setActiveTab('dashboard'); checkSession(); }} /></>;
   }
 
   return (
@@ -121,6 +126,7 @@ export const App: React.FC = () => {
       />
 
       <main className="ky-content">
+        {logoutAlert}
         {currentUser.enrollment?.required && !currentUser.enrollment.enrolled && <div role="status" className="alert-box"><p>Enroll a permitted MFA factor by {new Date(currentUser.enrollment.deadline*1000).toLocaleString()}. <button className="secondary-btn" onClick={()=>setActiveTab('settings/account')}>Set up MFA</button></p></div>}
         {activeTab === 'dashboard' && (
           <UserDashboard

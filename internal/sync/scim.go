@@ -57,6 +57,21 @@ func deliveryError(err error) string {
 	return "delivery failed; check connector configuration and downstream availability"
 }
 
+// createRefused reports whether a failed create cannot have been applied, read the way
+// the delivery fence reads it: the target refused it (4xx other than 408, or 503), or the
+// request never wrote its headers (DNS, refused dial, TLS). Only then may the create
+// marker go; anything else stays uncertain until reconciled.
+func (e *Engine) createRefused(err error) bool {
+	var rejection *scim.Error
+	if errors.As(err, &rejection) {
+		s := rejection.Status
+		return s == http.StatusServiceUnavailable || s >= 400 && s < 500 && s != http.StatusRequestTimeout
+	}
+	var transportErr *url.Error
+	t, ok := e.httpClient.Transport.(*deliveryTransport)
+	return ok && errors.As(err, &transportErr) && !t.uncertain.Load()
+}
+
 var errCreateUncertain = errors.New("SCIM create outcome unresolved; reconcile externalId at the target before retrying")
 
 func (e *Engine) findSCIMUser(ctx context.Context, c *scim.Client, localID string) (scim.User, error) {
@@ -140,12 +155,14 @@ func (e *Engine) scimRequest(ctx context.Context, c *scim.Client, method, target
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
-	if err != nil || len(raw) > 1<<20 {
-		return resp.StatusCode, nil, scim.ErrMalformedResponse
-	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err != nil || len(raw) > 1<<20 {
+			return resp.StatusCode, nil, scim.ErrMalformedResponse
+		}
 		return resp.StatusCode, raw, nil
 	}
+	// A refusal is its status: an unreadable error body must not hide a 503 or 4xx that
+	// proves the request was not applied.
 	d := time.Duration(0)
 	h := resp.Header.Get("Retry-After")
 	if seconds, err := strconv.ParseInt(h, 10, 64); err == nil {
@@ -223,8 +240,7 @@ func (e *Engine) deliverSCIM(ctx context.Context, sys *store.PairedSystem, secre
 			}
 			created, err := e.createSCIMUser(ctx, c, desired)
 			if err != nil {
-				var rejection *scim.Error
-				if errors.As(err, &rejection) && rejection.Status >= 400 && rejection.Status < 500 && rejection.Status != http.StatusRequestTimeout {
+				if e.createRefused(err) {
 					if clearErr := e.store.RejectSCIMCreate(sys.ID, "user", localID); clearErr != nil {
 						return clearErr
 					}

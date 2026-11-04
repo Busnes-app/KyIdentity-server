@@ -237,6 +237,11 @@ func TestTOTPStepUp(t *testing.T) {
 	if r := f.post(t, "/api/auth/step-up", request, ""); r.Code != 401 {
 		t.Fatal("invalid TOTP accepted")
 	}
+	// A wrong factor past the password counts for the account from every address, so
+	// rotating addresses buys no extra guesses.
+	if n, err := f.store.RecordFailedLogin(f.user.ID, ""); err != nil || n != 2 {
+		t.Fatalf("account-wide second-factor count = %d, %v; want the step-up failure counted", n, err)
+	}
 	request["code"] = testTOTPCode(t, secret)
 	grant := readStepUpReply(t, f.post(t, "/api/auth/step-up", request, ""))
 	if r := f.post(t, "/api/user/recovery-codes", nil, grant.StepUpToken); r.Code != 200 {
@@ -268,7 +273,7 @@ func TestStepUpAuditsDeniedAndPending(t *testing.T) {
 			enrolPasskey(t, f.store, f.user.ID, a)
 			if scenario == "account_locked" {
 				for range store.MaxFailedLogins {
-					if _, err := f.store.RecordFailedLogin(f.user.ID); err != nil {
+					if _, err := f.store.RecordFailedLogin(f.user.ID, ""); err != nil {
 						t.Fatal(err)
 					}
 				}

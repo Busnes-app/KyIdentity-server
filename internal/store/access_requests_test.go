@@ -208,3 +208,25 @@ func TestAccessRequestDecisionsAreRecheckedUnderTheLock(t *testing.T) {
 		t.Fatalf("expired request approved: %v", err)
 	}
 }
+
+// A permanent direct grant made while a time-boxed request waited stays permanent when
+// the request is approved later.
+func TestApprovalNeverShortensADirectGrant(t *testing.T) {
+	s, u, admin, _, a := requestFixture(t)
+	if err := s.SetAppRequestable(a.ID, true, a.Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	req, err := s.CreateAccessRequest(u.ID, a.ID, "for a week", 7*24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DecideAccessRequest(req.ID, admin.ID, true, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if end, err := s.AccessEndsAt(u.ID, "client"); err != nil || end != nil {
+		t.Fatalf("approval bounded a permanent grant: end=%v err=%v", end, err)
+	}
+}

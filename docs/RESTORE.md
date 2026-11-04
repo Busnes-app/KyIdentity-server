@@ -34,6 +34,7 @@ Everything a fresh KyIdentity needs to be the old one:
 | `data/secret.key` | 32 bytes. Signs sessions and CSRF tokens |
 | `data/recovery.pub` | The suite recovery public key, so the restored server comes back pinned (present when the backup was paired) |
 | `data/push-vapid-private.key` | The UnifiedPush VAPID key, so the restored server keeps its push identity (present once the server has started with UnifiedPush support) |
+| `data/push-relay-<transport>-<host>.key` | The API keys this server registered with the FCM/APNs push relays. The relay ties each phone's push token to the key that first sent to it, so a server restored on another address without them reaches no paired phone (present once the server has registered; a capsule from before them restores a server that registers again) |
 | `config/kyidentity.json` | Issuer URL, port, TTLs, app name. For your reference when re-deploying; nothing reads it |
 
 The restored directory is the live directory in the clear. Treat it like the running server's
@@ -55,7 +56,9 @@ server still picks up those legacy filenames through the fallback in `internal/c
   custodian shares open just as well. KyRecovery's digest is recorded from an authenticated
   deposit by this server, which is what tells the two apart.
   For a capsule written by `kyidentity export-capsule`, the digest is the one it printed;
-  record it somewhere other than beside the file.
+  record it somewhere other than beside the file. For one downloaded from the admin
+  Backup page, it is the `digest` of that download's `admin.backup_capsule_export` audit
+  event; copy it out of the server (an audit export, or by hand) while the server is up.
 - **Gather k custodians.** Each card carries one share, a single line beginning `ky2-`. They
   type or paste it themselves; do not collect the shares in a file, a chat, or an email. Two
   shares in one place is the suite key in one place.

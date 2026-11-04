@@ -295,3 +295,34 @@ func TestUpstreamGroupReplaceRejectsStaleVersion(t *testing.T) {
 		t.Fatalf("fresh delete refused: %v", err)
 	}
 }
+
+// A member a local administrator added never blocks the upstream: its PATCH starts from
+// the current members, so only the members it adds must be its own.
+func TestLocallyAddedMemberDoesNotBlockUpstreamEdits(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	a, _ := s.CreateSCIMConnector("A", nil)
+	b, _ := s.CreateSCIMConnector("B", nil)
+	alice := activated(t, s, a.ID, "ext-a", "alice")
+	bob := activated(t, s, a.ID, "ext-b", "bob")
+	other := activated(t, s, b.ID, "ext-o", "other")
+	local := createTestUser(t, s)
+	g := &Group{Name: "Finance", SourceConnectorID: a.ID, ExternalID: "grp-f"}
+	if err := s.CreateUpstreamGroup(g, []string{alice.ID, bob.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembershipForSession(g.ID, local.ID, true, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	// The upstream removes alice; the set it writes still holds the local member.
+	if err := replaceGroup(s, a.ID, g, []string{bob.ID, local.ID}, nil); err != nil {
+		t.Fatalf("upstream removal refused because of a local member: %v", err)
+	}
+	got, _ := s.GetUpstreamGroup(a.ID, g.ID)
+	if got == nil || len(got.Members) != 2 {
+		t.Fatalf("after removal: %+v", got)
+	}
+	if err := replaceGroup(s, a.ID, g, []string{bob.ID, local.ID, other.ID}, nil); !errors.Is(err, ErrGroupMemberForeign) {
+		t.Fatalf("upstream added another connector's account: %v", err)
+	}
+}
