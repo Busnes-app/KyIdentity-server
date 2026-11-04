@@ -73,9 +73,9 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
-      # Go's default is 10 minutes per package, which the api suite under -race now
-      # exceeds on a runner. This is a hang detector, not a performance budget.
-      - run: go test -race -count=1 -timeout 20m ./...
+      # Go's default is 10 minutes per package; the api and store suites under -race now
+      # take close to 20 on a runner. This is a hang detector, not a performance budget.
+      - run: go test -race -count=1 -timeout 30m ./...
       - name: profile preserves Compose configuration
         run: python3 docs/check-strong-crypto-compose.py
       # The release binary must not depend on where it is built: build it the way the
@@ -105,7 +105,7 @@ jobs:
       - name: test supported strong-key profile
         env:
           GODEBUG: fips140=on
-        run: go test -race -count=1 -timeout 20m ./...
+        run: go test -race -count=1 -timeout 30m ./...
 
   # The required check: green only when both Go legs are.
   go:
