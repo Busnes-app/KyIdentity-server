@@ -56,6 +56,9 @@ type Session struct {
 	ExpiresAt        time.Time `json:"expiresAt"`
 	CreatedAt        time.Time `json:"createdAt"`
 	LastActiveAt     time.Time `json:"lastActiveAt"`
+	// ProvenPasswordHash, when set, creates the session only while the account still has
+	// the password the sign-in proved. Not persisted.
+	ProvenPasswordHash string `json:"-"`
 }
 
 type PairedSystem struct {

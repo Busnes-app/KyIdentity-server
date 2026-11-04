@@ -31,10 +31,11 @@ func TestAuthorizationInteractionAtomicity(t *testing.T) {
 	if got, _ := s.GetSessionByID("wrong"); got != nil {
 		t.Fatal("failed binding left session")
 	}
-	// A failed session insertion rolls back the interaction's satisfied marker.
-	duplicate := session("session")
-	if err := s.CreateSessionForInteraction(duplicate, "login", "browser"); err == nil {
-		t.Fatal("duplicate session accepted")
+	// A failed session write rolls back the interaction's satisfied marker.
+	stale := session("stale")
+	stale.ProvenPasswordHash = "a password the account no longer has"
+	if err := s.CreateSessionForInteraction(stale, "login", "browser"); !errors.Is(err, ErrAppAccessDenied) {
+		t.Fatal("session for a changed password accepted", err)
 	}
 	i, err := s.GetAuthorizationInteraction("login", "browser")
 	if err != nil || i.SessionID != "" {
@@ -262,5 +263,33 @@ func TestAuthorizationInteractionCapacityMigrationOwnsCompletedRequests(t *testi
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM authorization_interactions WHERE user_id=?`, u.ID).Scan(&count); err != nil || count != 10 {
 		t.Fatal("completed requests escaped account capacity on upgrade", count, err)
+	}
+}
+
+// prompt=login or max_age from a signed-in browser renews that session rather than
+// leaving it running, with the apps signed in under it, behind a new one.
+func TestReauthenticationRenewsTheOriginalSession(t *testing.T) {
+	s, u, _ := appAccessFixture(t)
+	now := time.Now().UTC()
+	if err := s.CreateAuthorizationInteraction(&AuthorizationInteraction{Hash: "again", BrowserHash: "browser", UserID: u.ID, OriginalSessionID: "session", CreatedAt: now, ExpiresAt: now.Add(time.Minute), Request: "client_id=client"}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	sess := &Session{ID: "new", UserID: u.ID, SessionTokenHash: "new-hash", ExpiresAt: now.Add(time.Hour), AuthenticationEvidence: AuthenticationEvidence{PrimaryAuthenticatedAt: &at}}
+	if err := s.CreateSessionForInteraction(sess, "again", "browser"); err != nil {
+		t.Fatal(err)
+	}
+	if sess.ID != "session" {
+		t.Fatalf("session ID = %q, want the renewed original", sess.ID)
+	}
+	if got, _ := s.GetSessionByID("new"); got != nil {
+		t.Fatal("a second session was created")
+	}
+	if got, _ := s.GetSessionByTokenHash("hash", time.Hour); got != nil {
+		t.Fatal("the replaced cookie still authenticates")
+	}
+	got, err := s.GetSessionByTokenHash("new-hash", time.Hour)
+	if err != nil || got == nil || got.ID != "session" || got.PrimaryAuthenticatedAt == nil || !got.PrimaryAuthenticatedAt.Equal(at) {
+		t.Fatalf("renewed session = %+v, %v", got, err)
 	}
 }

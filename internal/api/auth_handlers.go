@@ -312,6 +312,7 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 		IPAddress:              ip,
 		UserAgent:              ua,
 		ExpiresAt:              expiresAt,
+		ProvenPasswordHash:     user.PasswordHash,
 	}
 
 	restartAuthorization := false
@@ -321,6 +322,11 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 		// that login without granting the cancelled/expired authorization request.
 		err = h.store.CreateSession(sess)
 		restartAuthorization = true
+	}
+	if errors.Is(err, store.ErrAppAccessDenied) {
+		h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure", map[string]any{"reason": "credentials_changed"})
+		http.Error(w, invalidCredentials, http.StatusUnauthorized)
+		return
 	}
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
