@@ -265,7 +265,7 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if passHash != "" {
-		if err := h.store.ClearFailedLogins(user.ID); err != nil {
+		if err := h.store.ClearFailedLogins(user.ID, ""); err != nil {
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 			return
 		}

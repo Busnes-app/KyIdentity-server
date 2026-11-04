@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiJson, apiRequest, fetchCSRF, isStepUpRequired } from './api';
+import { ApiError, apiAllPages, apiJson, apiRequest, fetchCSRF, isStepUpRequired, logout } from './api';
 
 /** A fetch stub that answers from a queue, recording what it was asked for. */
 function stubFetch(responses: Array<{ status?: number; body?: unknown; text?: string }>) {
@@ -162,5 +162,33 @@ describe('error and body handling', () => {
         throw new Error('expected a users response');
       }),
     ).rejects.toThrow('/api/admin/users: expected a users response');
+  });
+});
+
+describe('logout', () => {
+  // A signed-out screen over a live session cookie hands the account to the next person.
+  it('reports success only once the server has ended the session', async () => {
+    stubFetch([csrf]);
+    await fetchCSRF(true);
+    stubFetch([{ body: { success: true } }]);
+    expect(await logout()).toBe(true);
+    stubFetch([{ status: 401, body: { error: 'unauthorized' } }]);
+    expect(await logout()).toBe(true);
+    stubFetch([{ status: 500, body: { error: 'internal_error' } }]);
+    expect(await logout()).toBe(false);
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('network down'))));
+    expect(await logout()).toBe(false);
+  });
+});
+
+describe('apiAllPages', () => {
+  // A picker that shows only the first page cannot clear a grant held on a later one.
+  it('follows offsets until the total is read', async () => {
+    const page = (offset: number, n: number) => ({ body: { items: Array.from({ length: n }, (_, i) => offset + i), total: 150, limit: 100, offset } });
+    const calls = stubFetch([page(0, 100), page(100, 50)]);
+    const parse = (v: unknown) => v as { items: number[]; total: number; limit: number; offset: number };
+    const all = await apiAllPages('/api/admin/groups', parse);
+    expect(all).toHaveLength(150);
+    expect(calls.map(c => c.path)).toEqual(['/api/admin/groups?limit=100&offset=0', '/api/admin/groups?limit=100&offset=100']);
   });
 });

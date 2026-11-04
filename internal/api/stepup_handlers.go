@@ -101,7 +101,7 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		http.Error(w, `{"error":"enrollment_required"}`, 403)
 		return
 	}
-	locked, err := h.store.IsAccountLocked(user.ID)
+	locked, err := h.store.IsAccountLocked(user.ID, h.middleware.rateLimitIP(r))
 	if err != nil {
 		stepUpInternalError(w)
 		return
@@ -203,7 +203,7 @@ func (h *AuthHandler) RequestStepUp(w http.ResponseWriter, r *http.Request, wh *
 		return
 	}
 	event.Committed()
-	_ = h.store.ClearFailedLogins(user.ID)
+	_ = h.store.ClearFailedLogins(user.ID, h.middleware.rateLimitIP(r))
 	writeStepUpJSON(w, map[string]any{"kind": "grant", "stepUpToken": raw, "expiresAt": expires})
 }
 
@@ -228,7 +228,7 @@ func (h *AuthHandler) FinishStepUp(w http.ResponseWriter, r *http.Request, wh *W
 		http.Error(w, `{"error":"invalid_challenge","error_description":"Restart re-authentication"}`, 400)
 		return
 	}
-	locked, err := h.store.IsAccountLocked(user.ID)
+	locked, err := h.store.IsAccountLocked(user.ID, h.middleware.rateLimitIP(r))
 	if err != nil {
 		stepUpInternalError(w)
 		return
@@ -292,7 +292,7 @@ func (h *AuthHandler) FinishStepUp(w http.ResponseWriter, r *http.Request, wh *W
 		return
 	}
 	event.Committed()
-	_ = h.store.ClearFailedLogins(user.ID)
+	_ = h.store.ClearFailedLogins(user.ID, h.middleware.rateLimitIP(r))
 	writeStepUpJSON(w, map[string]any{"kind": "grant", "stepUpToken": req.ChallengeToken, "expiresAt": c.ExpiresAt})
 }
 
@@ -334,7 +334,13 @@ func (h *AuthHandler) CancelStepUp(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) stepUpFailure(w http.ResponseWriter, r *http.Request, reason string) {
 	user := GetUserFromContext(r.Context())
-	_, _ = h.store.RecordFailedLogin(user.ID)
+	// A wrong second factor comes from someone who passed the password, so it counts for
+	// the account from every address, as at sign-in; a wrong password counts per address.
+	source := h.middleware.rateLimitIP(r)
+	if reason == "bad_second_factor" {
+		source = ""
+	}
+	_, _ = h.store.RecordFailedLogin(user.ID, source)
 	h.audit.Observe("auth.step_up", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": reason})
 	http.Error(w, `{"error":"invalid_credentials","error_description":"Re-authentication failed"}`, 401)
 }

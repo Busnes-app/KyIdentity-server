@@ -100,7 +100,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Unknown, inactive and locked accounts answer exactly as a wrong password does, after
 	// the same Argon2 cost; anything else enumerates accounts or reveals a lockout. Audit
 	// records keep the real reason.
-	reason, err := h.loginRefusal(user)
+	reason, err := h.loginRefusal(user, h.middleware.rateLimitIP(r))
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -123,7 +123,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil || !validPass {
-		attempts, _ := h.store.RecordFailedLogin(user.ID)
+		attempts, _ := h.store.RecordFailedLogin(user.ID, h.middleware.rateLimitIP(r))
 		h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure",
 			map[string]any{"reason": "invalid_password", "consecutiveFailures": attempts})
 		http.Error(w, invalidCredentials, http.StatusUnauthorized)
@@ -268,9 +268,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 const invalidCredentials = `{"error":"invalid_credentials","error_description":"Invalid username or password"}`
 
-// loginRefusal names why an account may not attempt a password, or "" if it may. The
-// per-account lockout catches a spray the per-IP limiter cannot see.
-func (h *AuthHandler) loginRefusal(user *store.User) (string, error) {
+// loginRefusal names why an account may not attempt a password from source, or "" if it
+// may. The lockout is per account and address, so a stranger's failures never lock the
+// owner out from elsewhere.
+func (h *AuthHandler) loginRefusal(user *store.User, source string) (string, error) {
 	switch {
 	case user == nil:
 		return "user_not_found", nil
@@ -279,7 +280,7 @@ func (h *AuthHandler) loginRefusal(user *store.User) (string, error) {
 	case user.Status != "active":
 		return "user_disabled", nil
 	}
-	locked, err := h.store.IsAccountLocked(user.ID)
+	locked, err := h.store.IsAccountLocked(user.ID, source)
 	if locked {
 		return "account_locked", err
 	}
@@ -320,7 +321,7 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	if err := h.store.ClearFailedLogins(user.ID); err != nil {
+	if err := h.store.ClearFailedLogins(user.ID, h.middleware.rateLimitIP(r)); err != nil {
 		log.Printf("clearing failed logins for %s: %v", user.ID, err)
 	}
 
@@ -376,7 +377,7 @@ type MFAVerifyRequest struct {
 
 // resolveMFAToken exchanges a raw second-factor token for the user it was issued to.
 // The identity comes from the stored record, so a forged token resolves to nothing.
-func (h *AuthHandler) resolveMFAToken(w http.ResponseWriter, rawToken string) (*store.MFAToken, *store.User, bool) {
+func (h *AuthHandler) resolveMFAToken(w http.ResponseWriter, r *http.Request, rawToken string) (*store.MFAToken, *store.User, bool) {
 	token, err := h.mfaEngine.ValidateMFAToken(rawToken)
 	if err != nil {
 		http.Error(w, `{"error":"invalid_mfa_token","error_description":"Second-factor token is invalid or expired"}`, http.StatusUnauthorized)
@@ -389,7 +390,7 @@ func (h *AuthHandler) resolveMFAToken(w http.ResponseWriter, rawToken string) (*
 		return nil, nil, false
 	}
 
-	locked, err := h.store.IsAccountLocked(user.ID)
+	locked, err := h.store.IsAccountLocked(user.ID, h.middleware.rateLimitIP(r))
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return nil, nil, false
@@ -416,10 +417,11 @@ func (h *AuthHandler) reserveMFAAttempt(w http.ResponseWriter, token *store.MFAT
 	return attempts, true
 }
 
-// mfaFailure also counts a rejected login second factor against the account, so lockout
-// sees guesses spread over fresh logins made with a known password.
+// mfaFailure also counts a rejected login second factor against the account from every
+// address, so lockout sees guesses spread over fresh logins and addresses made with a
+// known password.
 func (h *AuthHandler) mfaFailure(w http.ResponseWriter, r *http.Request, user *store.User, action string, details map[string]any, status int, body string) {
-	details["consecutiveFailures"], _ = h.store.RecordFailedLogin(user.ID)
+	details["consecutiveFailures"], _ = h.store.RecordFailedLogin(user.ID, "")
 	h.audit.Observe(action, user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
 	http.Error(w, body, status)
 }
@@ -497,7 +499,7 @@ func (h *AuthHandler) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, user, ok := h.resolveMFAToken(w, req.MFAToken)
+	token, user, ok := h.resolveMFAToken(w, r, req.MFAToken)
 	if !ok {
 		return
 	}
@@ -529,7 +531,7 @@ func (h *AuthHandler) VerifyRecoveryCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	token, user, ok := h.resolveMFAToken(w, req.MFAToken)
+	token, user, ok := h.resolveMFAToken(w, r, req.MFAToken)
 	if !ok {
 		return
 	}
@@ -574,7 +576,7 @@ func (h *AuthHandler) PollPushChallenge(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	token, _, ok := h.resolveMFAToken(w, req.MFAToken)
+	token, _, ok := h.resolveMFAToken(w, r, req.MFAToken)
 	if !ok {
 		return
 	}
@@ -607,7 +609,7 @@ func (h *AuthHandler) FinishPushLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, user, ok := h.resolveMFAToken(w, req.MFAToken)
+	token, user, ok := h.resolveMFAToken(w, r, req.MFAToken)
 	if !ok {
 		return
 	}

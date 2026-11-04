@@ -108,7 +108,7 @@ Two further rules apply to the value:
 - It must parse as an IP address. An unparseable entry is discarded and the request is attributed to the peer, so a caller cannot mint a fresh rate-limit bucket per request by sending a new nonsense value each time.
 - The chain is read right to left, skipping hops inside `TRUSTED_PROXY_CIDRS`, and the first address you did not write is the client. Reading the leftmost entry instead would attribute the request to whatever the client prepended to the list.
 
-**Name the proxy's address specifically, not a wide range.** Any peer inside the range you name can forge their own client IP and bypass every rate limit and lockout. Example:
+**Name the proxy's address specifically, not a wide range.** Any peer inside the range you name can forge their own client IP and bypass every rate limit and lockout, including the per-address password lockout, by rotating forged addresses. Example:
 
 - Proxy on the same host, through the published port: the container does not see `127.0.0.1` but the address Docker forwards from, typically the `kypost-net` gateway (`TRUSTED_PROXY_CIDRS=10.89.0.1/32` with the default subnet). Confirm it with the check below.
 - Proxy pinned on `kypost-net`: `TRUSTED_PROXY_CIDRS=10.89.0.10/32` (replace with your proxy's actual Docker network IP)
@@ -162,7 +162,7 @@ Everything KyIdentity needs to keep secret lives in its data volume (`/data` in 
 ### Login Flow
 
 - Username and password, sent to the server over the TLS proxy and checked against an Argon2id hash (64 MiB, 3 iterations, parallelism 4, 16-byte salt). Passwords are 12 to 1024 characters.
-- 10 consecutive failures, wrong second factors included, lock the account for 15 minutes. A locked account gets the same answer as a wrong password.
+- 10 failures, with no 15-minute gap between them, lock the account for 15 minutes. Wrong passwords count per client address (an IPv6 /64), so a stranger's guesses never lock the owner out from elsewhere; wrong second factors count for the account from every address, since only a password holder can make them. A locked account gets the same answer as a wrong password.
 - Per-address rate limits cover sign-in, every MFA step, recovery codes, password reset and account-link redemption.
 - At most 8 password hashes run at once; a sign-in that waits more than 3 seconds for a slot gets `503`, which does not count as a failure.
 - There is no CAPTCHA.

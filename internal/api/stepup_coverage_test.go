@@ -86,7 +86,7 @@ func TestStepUpFinishRechecksState(t *testing.T) {
 	// Locked between the two steps.
 	c = begin()
 	for i := 0; i < store.MaxFailedLogins; i++ {
-		if _, err := f.store.RecordFailedLogin(f.user.ID); err != nil {
+		if _, err := f.store.RecordFailedLogin(f.user.ID, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -100,7 +100,7 @@ func TestStepUpFinishRechecksState(t *testing.T) {
 	if lockedDenials != 1 {
 		t.Fatalf("locked finish audited %d times", lockedDenials)
 	}
-	if err := f.store.ClearFailedLogins(f.user.ID); err != nil {
+	if err := f.store.ClearFailedLogins(f.user.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 

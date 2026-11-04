@@ -111,9 +111,14 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 	if err != nil {
 		return run, err
 	}
-	for _, u := range ended {
+	for _, due := range ended {
 		var endedNow bool
 		err := s.auditedTx(nil, func(tx *sql.Tx) error {
+			// Re-read under the write lock: an end date moved after the scan is not due.
+			u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=? AND ends_at IS NOT NULL AND ends_at<=? AND status='active'`, due.ID, unix))
+			if err != nil || u == nil {
+				return err
+			}
 			if u.Role == "admin" {
 				var others int
 				if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE `+activeAdminSQL+` AND id<>?`, u.ID).Scan(&others); err != nil {
@@ -140,7 +145,7 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 			return expiryAudit(tx, now, "account.ended", u.ID, "user", "success", map[string]any{"username": u.Username})
 		})
 		if err != nil {
-			fail("account.end_failed", u.ID, "user", err)
+			fail("account.end_failed", due.ID, "user", err)
 			continue
 		}
 		if endedNow {
@@ -156,10 +161,17 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 		return run, errors.Join(append(errs, err)...)
 	}
 	for _, m := range members {
+		var expired bool
 		err := s.auditedTx(nil, func(tx *sql.Tx) error {
-			if _, err := tx.Exec(`DELETE FROM group_memberships WHERE group_id=? AND user_id=?`, m.a, m.b); err != nil {
+			// The instant is checked again here: a renewal after the scan stands.
+			res, err := tx.Exec(`DELETE FROM group_memberships WHERE group_id=? AND user_id=? AND expires_at IS NOT NULL AND expires_at<=?`, m.a, m.b, unix)
+			if err != nil {
 				return err
 			}
+			if n, err := res.RowsAffected(); err != nil || n == 0 {
+				return err
+			}
+			expired = true
 			if err := groupRoleChangeTx(tx, m.a, []string{m.b}); err != nil {
 				return err
 			}
@@ -178,7 +190,9 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 			fail("group.membership_expiry_failed", m.a, "group", err)
 			continue
 		}
-		run.Memberships++
+		if expired {
+			run.Memberships++
+		}
 	}
 
 	assignments, err := scanIDPairs(s.db.Query(`SELECT app_id,user_id FROM app_user_assignments WHERE expires_at IS NOT NULL AND expires_at<=?`, unix))
@@ -186,10 +200,16 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 		return run, errors.Join(append(errs, err)...)
 	}
 	for _, d := range assignments {
+		var expired bool
 		err := s.auditedTx(nil, func(tx *sql.Tx) error {
-			if _, err := tx.Exec(`DELETE FROM app_user_assignments WHERE app_id=? AND user_id=?`, d.a, d.b); err != nil {
+			res, err := tx.Exec(`DELETE FROM app_user_assignments WHERE app_id=? AND user_id=? AND expires_at IS NOT NULL AND expires_at<=?`, d.a, d.b, unix)
+			if err != nil {
 				return err
 			}
+			if n, err := res.RowsAffected(); err != nil || n == 0 {
+				return err
+			}
+			expired = true
 			if _, err := tx.Exec(`UPDATE app_registry SET revision=revision+1 WHERE id=?`, d.a); err != nil {
 				return err
 			}
@@ -199,7 +219,9 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 			fail("app.assignment_expiry_failed", d.a, "application", err)
 			continue
 		}
-		run.Assignments++
+		if expired {
+			run.Assignments++
+		}
 	}
 
 	// The shared follow-up is set-based: it converges grants and downstream state for

@@ -261,10 +261,11 @@ are outside every connector's reach by construction.
 
 **Groups.** `/scim/v2/Groups` maps onto the flat directory groups: create, get, list
 with one exact-match filter (`displayName`, `externalId` or `id`), replace, PATCH and
-delete. A group's `displayName` and member set belong to the upstream; every member must
-be a User of the same connector (a local account, another connector's account or a
+delete. A group's `displayName` and member set belong to the upstream; every member it
+adds must be a User of the same connector (a local account, another connector's account or a
 group is refused with a clear SCIM error and nothing is applied), and nested groups are
-refused. A PATCH is validated in full and applied as one replace, so an invalid
+refused. A member a local administrator added never blocks the upstream's writes; it stays
+until an upstream write leaves it out. A PATCH is validated in full and applied as one replace, so an invalid
 operation anywhere means nothing changes. Weak ETags apply as for Users. Deleting a
 group removes what its memberships granted and never deletes a user. A group with a
 required MFA policy is refused to the upstream for any change, its name included, since

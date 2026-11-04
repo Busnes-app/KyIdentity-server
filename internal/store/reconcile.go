@@ -502,7 +502,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 		case wanted && (!remote.Active || remote.UserName != boundRemoteText(u.Username) || remote.DisplayName != boundRemoteText(u.DisplayName) || remote.Email != boundRemoteText(u.Email)):
 			appendDrift(&report.Stale, &report.StaleCount, DriftEntry{ID: u.ID, Username: u.Username, Reason: "attributes differ"})
 			if repair {
-				payload, err := scimUserPayload(u, true)
+				payload, err := scimUserPayloadTx(tx, u, true, systemID)
 				if err != nil {
 					return nil, err
 				}
@@ -551,7 +551,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 				if err := dropDead("user", id); err != nil {
 					return nil, err
 				}
-				payload, err := scimUserPayload(u, true)
+				payload, err := scimUserPayloadTx(tx, u, true, systemID)
 				if err != nil {
 					return nil, err
 				}
@@ -722,7 +722,7 @@ func (s *Store) RetryProvisioning(systemID, userID string, audit *AuditEvent) er
 	now := time.Now().UTC()
 	payload := scimInactivePayload(userID)
 	if u != nil {
-		if payload, err = scimUserPayload(u, desired); err != nil {
+		if payload, err = scimUserPayloadTx(tx, u, desired, systemID); err != nil {
 			return err
 		}
 	}

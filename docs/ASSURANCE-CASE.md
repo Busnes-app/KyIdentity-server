@@ -82,7 +82,7 @@ guidance, not by the software. See [Known limitations](../SECURITY.md#known-limi
 
 | Weakness | Counter | Where |
 |---|---|---|
-| Broken authentication, credential stuffing | Argon2id (64 MiB, 3 passes), 10-failure lockout, per-address rate limits on every auth step, bounded hashing concurrency | `internal/auth/password.go`, `internal/api` |
+| Broken authentication, credential stuffing | Argon2id (64 MiB, 3 passes), 10-failure lockout per account and address, per-address rate limits on every auth step, bounded hashing concurrency | `internal/auth/password.go`, `internal/api` |
 | Session theft or fixation | Random session token, only its SHA-256 stored; `HttpOnly`, `SameSite=Lax`, `Secure` behind HTTPS; idle and absolute expiry; revoked on sign-out and password change | `internal/store/sessions.go` |
 | CSRF | Double-submit token signed with `secret.key` on every state-changing request | `internal/api/middleware.go` (`CSRFValidate`) |
 | Authorization-code interception and injection | PKCE with S256 required for every client, confidential ones included; exact redirect-URI match | `internal/oauth/oauth.go`, `internal/api/oauth_handlers.go` |

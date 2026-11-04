@@ -119,9 +119,11 @@ func (s *Store) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
 	CREATE TABLE IF NOT EXISTS login_failures (
-		user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		source TEXT NOT NULL DEFAULT '',
 		failures INTEGER NOT NULL DEFAULT 0,
-		last_failure_at DATETIME NOT NULL
+		last_failure_at DATETIME NOT NULL,
+		PRIMARY KEY (user_id, source)
 	);
 
 	CREATE TABLE IF NOT EXISTS paired_systems (
@@ -461,7 +463,29 @@ func (s *Store) migrate() error {
 	if err := s.migrateRefreshTokens(); err != nil {
 		return err
 	}
+	if err := s.migrateLoginFailuresBySource(); err != nil {
+		return err
+	}
 	return s.migratePasswordChangeRequired()
+}
+
+// migrateLoginFailuresBySource rebuilds the account-keyed failure counter as one per
+// account and client address. Its rows are short-lived counters, so they are dropped,
+// not carried over: an upgrade at worst forgets a few recent failures.
+func (s *Store) migrateLoginFailuresBySource() error {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('login_failures') WHERE name='source'`).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	_, err := s.db.Exec(`DROP TABLE login_failures;
+	CREATE TABLE login_failures (
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		source TEXT NOT NULL DEFAULT '',
+		failures INTEGER NOT NULL DEFAULT 0,
+		last_failure_at DATETIME NOT NULL,
+		PRIMARY KEY (user_id, source)
+	);`)
+	return err
 }
 
 // migrateSyncEventLease adds the delivery lease column to pre-existing databases.
@@ -1105,11 +1129,11 @@ func (s *Store) DeleteSession(sessionID string) error {
 	return err
 }
 
-// HasAnySession reports whether anyone has ever established a session, used to decide when
-// the first-run credentials file has served its purpose.
-func (s *Store) HasAnySession() (bool, error) {
+// HasAnySession reports whether userID (anyone, when empty) holds a session, used to decide
+// when the first-run credentials file has served its purpose.
+func (s *Store) HasAnySession(userID string) (bool, error) {
 	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&count); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE ?='' OR user_id=?`, userID, userID).Scan(&count); err != nil {
 		return false, err
 	}
 	return count > 0, nil
@@ -1122,54 +1146,54 @@ func (s *Store) CleanupExpiredSessions() error {
 
 // Account lockout
 //
-// MaxFailedLogins consecutive wrong passwords lock an account for LockoutDuration. This is
-// keyed on the account, not the source address, because a password spray distributed
-// across hosts never trips a per-IP limiter.
+// MaxFailedLogins failures within LockoutDuration lock the account for LockoutDuration.
+// Wrong passwords count per account and client address (an IPv6 /64), so nobody can lock
+// the owner out from elsewhere; a spray across many hosts is the per-account
+// login_failures alert's job. Wrong second factors count for the account from every
+// address (source ""): only someone holding the password can make them, and spreading
+// them over addresses must not multiply the guesses.
 const (
 	MaxFailedLogins = 10
 	LockoutDuration = 15 * time.Minute
 )
 
-// RecordFailedLogin increments the failure counter and returns the new count.
-func (s *Store) RecordFailedLogin(userID string) (int, error) {
+// RecordFailedLogin counts a failure for userID from source ("" for a second factor) and
+// returns the count in the current window. A failure after a quiet LockoutDuration starts
+// a new window.
+func (s *Store) RecordFailedLogin(userID, source string) (int, error) {
 	now := time.Now().UTC()
-	if _, err := s.db.Exec(`
-		INSERT INTO login_failures (user_id, failures, last_failure_at)
-		VALUES (?, 1, ?)
-		ON CONFLICT(user_id) DO UPDATE SET
-			failures = login_failures.failures + 1,
-			last_failure_at = excluded.last_failure_at`, userID, now); err != nil {
-		return 0, err
-	}
 	var failures int
-	err := s.db.QueryRow(`SELECT failures FROM login_failures WHERE user_id = ?`, userID).Scan(&failures)
-	if err == sql.ErrNoRows {
-		return 0, nil
-	}
+	err := s.db.QueryRow(`
+		INSERT INTO login_failures (user_id, source, failures, last_failure_at)
+		VALUES (?, ?, 1, ?)
+		ON CONFLICT(user_id, source) DO UPDATE SET
+			failures = CASE WHEN login_failures.last_failure_at <= ? THEN 1 ELSE login_failures.failures + 1 END,
+			last_failure_at = excluded.last_failure_at
+		RETURNING failures`, userID, source, now, now.Add(-LockoutDuration)).Scan(&failures)
 	return failures, err
 }
 
-// IsAccountLocked reports whether the account is inside its lockout window.
-func (s *Store) IsAccountLocked(userID string) (bool, error) {
-	var failures int
-	var last time.Time
-	err := s.db.QueryRow(
-		`SELECT failures, last_failure_at FROM login_failures WHERE user_id = ?`, userID).
-		Scan(&failures, &last)
-	if err == sql.ErrNoRows {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if failures < MaxFailedLogins {
-		return false, nil
-	}
-	return time.Since(last.UTC()) < LockoutDuration, nil
+// IsAccountLocked reports whether the account is locked for source: its failures from
+// that address, or its second-factor failures, have reached the limit inside the window.
+func (s *Store) IsAccountLocked(userID, source string) (bool, error) {
+	var locked bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM login_failures WHERE user_id = ? AND source IN (?, '') AND failures >= ? AND last_failure_at > ?)`,
+		userID, source, MaxFailedLogins, time.Now().UTC().Add(-LockoutDuration)).Scan(&locked)
+	return locked, err
 }
 
-func (s *Store) ClearFailedLogins(userID string) error {
-	_, err := s.db.Exec(`DELETE FROM login_failures WHERE user_id = ?`, userID)
+// DeleteExpiredLoginFailures drops counters whose window has passed; with one row per
+// account and address, nothing else bounds the table.
+func (s *Store) DeleteExpiredLoginFailures() error {
+	_, err := s.db.Exec(`DELETE FROM login_failures WHERE last_failure_at <= ?`, time.Now().UTC().Add(-LockoutDuration))
+	return err
+}
+
+// ClearFailedLogins forgets userID's failures from source and its second-factor failures
+// after a full proof from source; an empty source (an administrator setting the password)
+// forgets them all.
+func (s *Store) ClearFailedLogins(userID, source string) error {
+	_, err := s.db.Exec(`DELETE FROM login_failures WHERE user_id = ? AND (? = '' OR source IN (?, ''))`, userID, source, source)
 	return err
 }
 
@@ -2841,8 +2865,18 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 	if err := revokeSessionGrantsTx(tx, `user_id=?`, now, userID); err != nil {
 		return err
 	}
+	if err := spendMFATokensTx(tx, now, userID); err != nil {
+		return err
+	}
 	// An outstanding activation or reset link is a credential too.
 	return expireAccountTokensTx(tx, now, `user_id=?`, userID)
+}
+
+// spendMFATokensTx ends sign-ins that proved the password but not yet the second factor,
+// so a password proof taken before a revocation or password change cannot finish after it.
+func spendMFATokensTx(tx *sql.Tx, now time.Time, userID string) error {
+	_, err := tx.Exec(`UPDATE mfa_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL`, now, userID)
+	return err
 }
 
 // PingContext proves the database is reachable and readable within the caller's deadline.

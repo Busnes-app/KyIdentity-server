@@ -453,3 +453,30 @@ func TestEndDatedAdministratorIsNoCoverForTheLast(t *testing.T) {
 		t.Fatalf("disabling with a spare administrator: %v", err)
 	}
 }
+
+// A renewal that lands after the follow-up listed a membership as due must stand. The
+// trigger plays the administrator: whichever due membership the pass removes first renews
+// the other, which the pass has already listed.
+func TestExpiryFollowUpKeepsARenewalMadeAfterItsScan(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	a, b := createTestUserNamed(t, s, "first"), createTestUserNamed(t, s, "second")
+	if err := s.CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []*User{a, b} {
+		if err := s.SetGroupMembershipUntil("staff", u.ID, future(time.Hour), "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustExec(t, s, `UPDATE group_memberships SET expires_at=unixepoch()-1`)
+	mustExec(t, s, `CREATE TRIGGER renew_other AFTER DELETE ON group_memberships BEGIN
+ UPDATE group_memberships SET expires_at=unixepoch()+3600 WHERE group_id=OLD.group_id AND user_id<>OLD.user_id; END`)
+	run, err := s.RunDueExpiries(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, s, `SELECT COUNT(*) FROM group_memberships WHERE expires_at>unixepoch()`); n != 1 || run.Memberships != 1 {
+		t.Fatalf("renewed memberships left=%d, expired=%d; want the renewal kept and one expiry", n, run.Memberships)
+	}
+}

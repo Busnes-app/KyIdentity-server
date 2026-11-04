@@ -474,15 +474,30 @@ func adminSessionExpiry() time.Time {
 	return time.Now().UTC().Add(24 * time.Hour)
 }
 
-// clearFirstRunPasswordFile removes the generated credentials file once any session has
-// existed, meaning someone has logged in and no longer needs a plaintext password on disk.
+// clearFirstRunPasswordFile removes the generated credentials file once the account it names
+// has signed in and no longer needs a plaintext password on disk. Other users' sessions say
+// nothing about it: the emergency bootstrap-admin runbook writes the file while they exist.
 func clearFirstRunPasswordFile(dbStore *store.Store, dataDir string) error {
 	path := filepath.Join(dataDir, "first-run-password.txt")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
 
-	loggedIn, err := dbStore.HasAnySession()
+	userID := "" // a file that names no account falls back to any sign-in
+	if first, _, _ := strings.Cut(string(raw), "\n"); strings.HasPrefix(first, "User: ") {
+		u, err := dbStore.GetUserByUsername(strings.TrimPrefix(first, "User: "))
+		if err != nil {
+			return err
+		}
+		if u != nil {
+			userID = u.ID
+		}
+	}
+	loggedIn, err := dbStore.HasAnySession(userID)
 	if err != nil {
 		return err
 	}
@@ -850,6 +865,7 @@ func purgeExpired(s *store.Store, now time.Time) {
 	}{
 		{"sessions", s.CleanupExpiredSessions},
 		{"MFA tokens", s.DeleteExpiredMFATokens},
+		{"login failure counters", s.DeleteExpiredLoginFailures},
 		{"authorization codes", s.DeleteExpiredAuthorizationCodes},
 		{"issued tokens", s.DeleteExpiredIssuedTokens},
 		{"device pairing tokens", s.DeleteExpiredDevicePairingTokens},

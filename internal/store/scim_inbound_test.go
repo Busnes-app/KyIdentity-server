@@ -554,3 +554,31 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 		t.Fatalf("lifting the override after activation: %+v", got)
 	}
 }
+
+// An invitee the upstream deactivated must not activate through a link issued earlier
+// once the connector is disconnected and the account becomes local.
+func TestDisconnectExpiresLinksOfShutOutInvitees(t *testing.T) {
+	for _, disable := range []bool{false, true} {
+		s, cleanup := setupTestStore(t)
+		c, _ := s.CreateSCIMConnector("Entra", nil)
+		u := upstream(t, s, c.ID, "ext-1", "leaver")
+		raw, err := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.SourceActive = false
+		if err := upstreamWrite(s, u); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DeleteSCIMConnector(c.ID, disable, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err == nil {
+			t.Fatalf("disable=%v: a deactivated invitee activated after the disconnect", disable)
+		}
+		if got, _ := s.GetUserByID(u.ID); got == nil || got.Status == "active" {
+			t.Fatalf("disable=%v: account %+v", disable, got)
+		}
+		cleanup()
+	}
+}

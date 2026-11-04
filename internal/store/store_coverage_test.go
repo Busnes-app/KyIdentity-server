@@ -12,33 +12,87 @@ import (
 // failures (a successful sign-in) unlocks it.
 func TestIsAccountLockedWindow(t *testing.T) {
 	s, u := newStoreWithUser(t, "user")
-	if locked, err := s.IsAccountLocked(u.ID); err != nil || locked {
+	if locked, err := s.IsAccountLocked(u.ID, ""); err != nil || locked {
 		t.Fatal("fresh account locked", err)
 	}
 	for i := 1; i < MaxFailedLogins; i++ {
-		if n, err := s.RecordFailedLogin(u.ID); err != nil || n != i {
+		if n, err := s.RecordFailedLogin(u.ID, ""); err != nil || n != i {
 			t.Fatalf("failure %d counted as %d, %v", i, n, err)
 		}
 	}
-	if locked, _ := s.IsAccountLocked(u.ID); locked {
+	if locked, _ := s.IsAccountLocked(u.ID, ""); locked {
 		t.Fatal("locked below the limit")
 	}
-	if _, err := s.RecordFailedLogin(u.ID); err != nil {
+	if _, err := s.RecordFailedLogin(u.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	if locked, err := s.IsAccountLocked(u.ID); err != nil || !locked {
+	if locked, err := s.IsAccountLocked(u.ID, ""); err != nil || !locked {
 		t.Fatal("limit reached but account open", err)
 	}
 	mustExec(t, s, `UPDATE login_failures SET last_failure_at=? WHERE user_id=?`, time.Now().UTC().Add(-LockoutDuration-time.Second), u.ID)
-	if locked, _ := s.IsAccountLocked(u.ID); locked {
+	if locked, _ := s.IsAccountLocked(u.ID, ""); locked {
 		t.Fatal("lock outlived LockoutDuration")
 	}
 	mustExec(t, s, `UPDATE login_failures SET last_failure_at=? WHERE user_id=?`, time.Now().UTC(), u.ID)
-	if err := s.ClearFailedLogins(u.ID); err != nil {
+	if err := s.ClearFailedLogins(u.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	if locked, _ := s.IsAccountLocked(u.ID); locked {
+	if locked, _ := s.IsAccountLocked(u.ID, ""); locked {
 		t.Fatal("cleared failures still locked")
+	}
+}
+
+// A stranger's wrong passwords lock the account only for the stranger's address; second
+// factors (source "") lock it everywhere; a failure after a quiet window starts a new one,
+// so one guess every fifteen minutes cannot keep a lock alive.
+func TestLockoutKeysOnAddressAndResetsAfterTheWindow(t *testing.T) {
+	s, u := newStoreWithUser(t, "user")
+	for range MaxFailedLogins {
+		if _, err := s.RecordFailedLogin(u.ID, "203.0.113.7"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if locked, _ := s.IsAccountLocked(u.ID, "203.0.113.7"); !locked {
+		t.Fatal("the guessing address is not locked")
+	}
+	if locked, _ := s.IsAccountLocked(u.ID, "198.51.100.1"); locked {
+		t.Fatal("another address is locked out by a stranger's guesses")
+	}
+	mustExec(t, s, `UPDATE login_failures SET last_failure_at=? WHERE user_id=?`, time.Now().UTC().Add(-LockoutDuration-time.Second), u.ID)
+	if n, err := s.RecordFailedLogin(u.ID, "203.0.113.7"); err != nil || n != 1 {
+		t.Fatalf("a failure after the window counted as %d, %v; want a fresh window", n, err)
+	}
+	if locked, _ := s.IsAccountLocked(u.ID, "203.0.113.7"); locked {
+		t.Fatal("one failure after the window re-locked the account")
+	}
+	for range MaxFailedLogins {
+		if _, err := s.RecordFailedLogin(u.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if locked, _ := s.IsAccountLocked(u.ID, "198.51.100.1"); !locked {
+		t.Fatal("second-factor failures did not lock the account everywhere")
+	}
+	if err := s.ClearFailedLogins(u.ID, "198.51.100.1"); err != nil {
+		t.Fatal(err)
+	}
+	if locked, _ := s.IsAccountLocked(u.ID, "198.51.100.1"); locked {
+		t.Fatal("a full proof did not clear the second-factor count")
+	}
+	if n, _ := s.RecordFailedLogin(u.ID, "203.0.113.7"); n != 2 {
+		t.Fatal("the owner's sign-in reset a stranger's count elsewhere")
+	}
+	// One row per address: housekeeping drops those whose window has passed.
+	mustExec(t, s, `UPDATE login_failures SET last_failure_at=? WHERE source='203.0.113.7'`, time.Now().UTC().Add(-LockoutDuration-time.Second))
+	if _, err := s.RecordFailedLogin(u.ID, "198.51.100.2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteExpiredLoginFailures(); err != nil {
+		t.Fatal(err)
+	}
+	var rows int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM login_failures WHERE user_id=?`, u.ID).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("after the purge %d rows remain, %v; want only the live one", rows, err)
 	}
 }
 

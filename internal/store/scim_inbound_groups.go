@@ -249,7 +249,7 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 // exact member set. edit changes a copy of the group and its members as read under the
 // write lock, so a PATCH delta lands on the current membership and an If-Match check
 // sees the current version. The whole change applies or none of it does; the external
-// id never changes and every member must be an account this connector owns. A rename of
+// id never changes and every member it adds must be an account this connector owns. A rename of
 // a group carrying a required MFA policy fails closed like any other change to such a
 // group, since no local administrator is behind an upstream write.
 func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, edit func(g *UpstreamGroup) error) error {
@@ -290,7 +290,19 @@ func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, 
 		if err := externalGroupFreeTx(tx, connectorID, g.ExternalID, g.ID); err != nil {
 			return err
 		}
-		if err := membersOwnedTx(tx, connectorID, members); err != nil {
+		// Only members the upstream adds must be its own: a member a local administrator
+		// added stays until the upstream drops it, and never blocks the upstream's edits.
+		held := map[string]bool{}
+		for _, uid := range have {
+			held[uid] = true
+		}
+		var added []string
+		for _, uid := range members {
+			if !held[uid] {
+				added = append(added, uid)
+			}
+		}
+		if err := membersOwnedTx(tx, connectorID, added); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`UPDATE directory_groups SET name=?, external_id=?, updated_at=? WHERE id=?`, g.Name, nullIfEmpty(g.ExternalID), now, g.ID); err != nil {

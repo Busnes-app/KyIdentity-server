@@ -230,6 +230,20 @@ func TestAdminBackupEndpoints(t *testing.T) {
 		if !auditHas("admin.backup_capsule_export", "success") {
 			t.Error("export not audited")
 		}
+		// restore -expect-digest needs the download's digest kept apart from the file.
+		events, _, err := dbStore.ListAuditEvents(100, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(w.Body.Bytes())
+		want := `"digest":"` + hex.EncodeToString(sum[:]) + `"`
+		recorded := false
+		for _, e := range events {
+			recorded = recorded || e.Action == "admin.backup_capsule_export" && strings.Contains(e.DetailsJSON, want)
+		}
+		if !recorded {
+			t.Error("export audit does not record the capsule digest")
+		}
 	})
 
 	t.Run("status after pairing", func(t *testing.T) {

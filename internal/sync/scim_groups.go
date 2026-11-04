@@ -113,8 +113,7 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 		}
 		status, raw, err := e.scimRequest(ctx, c, http.MethodPost, base.JoinPath("Groups").String(), body)
 		if err != nil {
-			var rejection *scim.Error
-			if errors.As(err, &rejection) && rejection.Status >= 400 && rejection.Status < 500 && rejection.Status != http.StatusRequestTimeout {
+			if e.createRefused(err) {
 				if clearErr := e.store.RejectSCIMCreate(sys.ID, "group", groupID); clearErr != nil {
 					return clearErr
 				}

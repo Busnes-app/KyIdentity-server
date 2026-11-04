@@ -449,6 +449,13 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 			if _, err := tx.Exec(`UPDATE users SET source_connector_id=NULL, external_id=NULL, source_active=1, locally_disabled=0, status=?, updated_at=? WHERE id=?`, status, now, u.ID); err != nil {
 				return err
 			}
+			// Once local, a pending account's link would activate it outright, so one
+			// the upstream or an administrator had shut out loses its link here.
+			if u.Pending && (disableUsers || !u.SourceActive || u.LocallyDisabled) {
+				if err := expireAccountTokensTx(tx, now, `user_id=?`, u.ID); err != nil {
+					return err
+				}
+			}
 		}
 		affected = len(owned)
 		if _, err := tx.Exec(`UPDATE directory_groups SET source_connector_id=NULL, external_id=NULL, updated_at=? WHERE source_connector_id=?`, now, id); err != nil {

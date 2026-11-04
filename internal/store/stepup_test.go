@@ -177,3 +177,43 @@ func TestPasswordChangeBurnsPendingStepUpChallenges(t *testing.T) {
 		t.Fatalf("pre-change challenge completed: %v %v", ok, err)
 	}
 }
+
+// A sign-in that proved the old password but not yet its second factor must not finish
+// after a password change or an access revocation.
+func TestPasswordChangeAndRevocationSpendPendingMFALogins(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	user := createTestUser(t, s)
+	now := time.Now().UTC()
+	pending := func(hash string) {
+		t.Helper()
+		if err := s.CreateMFAToken(&MFAToken{ID: hash, UserID: user.ID, TokenHash: hash, ExpiresAt: now.Add(time.Minute), PrimaryAuthenticatedAt: &now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	live := func(hash string) bool {
+		t.Helper()
+		tok, err := s.GetValidMFAToken(hash, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok != nil
+	}
+	if err := s.CreateSession(&Session{ID: "session", UserID: user.ID, SessionTokenHash: "session", ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	pending("before-change")
+	if err := s.ChangePassword(user.ID, "session", "changed", nil); err != nil {
+		t.Fatal(err)
+	}
+	if live("before-change") {
+		t.Fatal("pending MFA login survived the password change")
+	}
+	pending("before-revoke")
+	if err := s.RevokeUserAccess(user.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if live("before-revoke") {
+		t.Fatal("pending MFA login survived the revocation")
+	}
+}
