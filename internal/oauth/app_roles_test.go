@@ -161,3 +161,48 @@ func TestRoleChangesBlockExchangeAndOversizedClaimsAreRefused(t *testing.T) {
 		t.Fatalf("oversized claims: %v", err)
 	}
 }
+
+// Modern per-app roles stay empty for an unassigned global admin. The separate
+// legacy role switch still supports clients that deliberately consume that claim.
+func TestGlobalAdminTokenRolesRequireAppAssignment(t *testing.T) {
+	e, db, cleanup := setupTestOAuthEngine(t)
+	defer cleanup()
+	user := testUser(t, db)
+	if _, err := db.EditUser(user.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return true, nil }); err != nil {
+		t.Fatal(err)
+	}
+	user.Role = "admin"
+	testClient(t, db, "target", "public", []string{"https://app/cb"}, []string{"openid"})
+	app := appFor(t, db, "target")
+	check := func(legacy bool) {
+		t.Helper()
+		claims, access := exchangeFor(t, e, db, user, "target", "openid")
+		info, err := e.GetUserinfo(access)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []map[string]any{claims, info} {
+			roles, present := c["roles"]
+			if !present || roles == nil || len(stringList(roles)) != 0 {
+				t.Fatalf("global admin inherited app roles: %+v", c)
+			}
+			value, present := c["role"]
+			if present != legacy || (legacy && value != "admin") {
+				t.Fatalf("legacy role changed: %+v", c)
+			}
+		}
+	}
+	check(false)
+	if _, err := db.CreateAppRole(app.ID, "admin", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	app, err := db.GetAppRecord(app.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAppClaimSettings(app.ID, true, false, app.Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+}

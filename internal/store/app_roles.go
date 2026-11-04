@@ -456,11 +456,11 @@ func (s *Store) UserAppClaims(userID, clientID string) (AppClaims, error) {
 }
 
 // scimUserPayloadTx builds the SCIM profile for one provisioning connection. When the
-// app behind that connection defines roles, the payload carries the user's roles for
-// that app; otherwise the global role, as before roles existed.
+// connection has an app, only that app's explicit roles are sent, even when it has
+// no role definitions. Unmapped legacy systems keep their global-role contract.
 func scimUserPayloadTx(tx *sql.Tx, u *User, active bool, systemID string) ([]byte, error) {
 	var appID string
-	err := tx.QueryRow(`SELECT id FROM app_registry WHERE system_id=? AND EXISTS(SELECT 1 FROM app_roles r WHERE r.app_id=app_registry.id)`, systemID).Scan(&appID)
+	err := tx.QueryRow(`SELECT id FROM app_registry WHERE system_id=?`, systemID).Scan(&appID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return scimUserPayload(u, active)
 	}

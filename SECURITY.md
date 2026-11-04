@@ -93,6 +93,16 @@ Whichever proxy you use, set `TRUSTED_PROXY_CIDRS` to its address as KyIdentity 
 
 ### TRUSTED_PROXY_CIDRS: Client IP Trust
 
+Startup logs a warning naming each trusted range wider than its private block
+(10/8, 172.16/12, 192.168/16 or IPv6 fc00::/7). List the proxy's exact address
+instead. Use a catch-all only when the tunnel alone can reach the port; behind
+Cloudflare also set `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`. The warning
+applies with every header and does not refuse startup or change client-IP parsing.
+It mitigates configuration mistakes; catch-all trust with `X-Forwarded-For` still
+allows forged client addresses and lockout evasion. The installer network response
+is unchanged.
+
+
 When a reverse proxy sits in front of KyIdentity, the server sees the proxy's address as the client IP. The client address keys the per-address rate limits (sign-in, MFA, recovery codes, password reset, device registration) and is recorded in every audit event.
 
 **If `TRUSTED_PROXY_CIDRS` is empty, forwarded headers are discarded entirely.** Every caller is keyed as the proxy, so all users share one rate-limit bucket and the audit log shows the proxy's address instead of the user's.

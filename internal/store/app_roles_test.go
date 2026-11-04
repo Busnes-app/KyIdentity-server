@@ -318,8 +318,8 @@ func TestRevokedRolesAreSentAsAnEmptyList(t *testing.T) {
 	}
 }
 
-// An app's first role moves its provisioning connection from the global role to app
-// roles, and the last role going moves it back; both re-send everyone provisioned there.
+// First/last role edits re-send every provisioned profile, always using app roles.
+// Removing the final definition must never restore a directory-wide admin grant.
 func TestFirstAndLastRoleRepushEveryProvisionedProfile(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
@@ -361,8 +361,8 @@ func TestFirstAndLastRoleRepushEveryProvisionedProfile(t *testing.T) {
 	if err := s.DeleteAppRole(appID, roles[0].ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if p := latest("last role"); !strings.Contains(p, `"value":"user"`) {
-		t.Fatalf("last role did not restore the global role downstream: %s", p)
+	if p := latest("last role"); !strings.Contains(p, `"roles":[]`) {
+		t.Fatalf("last role did not clear roles downstream: %s", p)
 	}
 }
 
@@ -423,4 +423,44 @@ func TestRetryAndRepairSendAppRoles(t *testing.T) {
 	if p := latest("repair"); !strings.Contains(p, `"value":"member"`) || strings.Contains(p, `"value":"admin"`) {
 		t.Fatalf("repair sent the wrong roles: %s", p)
 	}
+}
+
+// App-backed SCIM never inherits directory admin, with or without definitions.
+// The no-app path retains the historical contract for genuinely unmapped systems.
+func TestProvisioningGlobalAdminNeedsExplicitAppRoles(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	appID := provisioningFixture(t, s, "target")
+	u := createTestUser(t, s)
+	if _, err := s.db.Exec(`UPDATE users SET role='admin' WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	u.Role = "admin"
+	check := func(systemID, want string) {
+		t.Helper()
+		tx, err := s.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		p, err := scimUserPayloadTx(tx, u, true, systemID)
+		if err != nil || !strings.Contains(string(p), want) {
+			t.Fatalf("%s: %s %v; want %s", systemID, p, err, want)
+		}
+	}
+	check("target", `"roles":[]`)
+	check("unmapped", `"roles":[{"value":"admin","primary":true}]`)
+	role, err := s.CreateAppRole(appID, "admin", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("target", `"roles":[]`)
+	if err := s.SetAppRoleAssignment(appID, role.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	check("target", `"roles":[{"value":"admin","primary":true}]`)
+	if err := s.DeleteAppRole(appID, role.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	check("target", `"roles":[]`)
 }

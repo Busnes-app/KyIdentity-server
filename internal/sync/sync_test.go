@@ -352,3 +352,60 @@ func mustEncrypt(t *testing.T, e *Engine, systemID, secret string) string {
 	}
 	return sealed
 }
+
+// Native signed delivery must not turn an empty app role set into a global admin
+// grant, including after the app's final role definition is deleted.
+func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
+	engine, s, admin, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	var secret string
+	received := make(chan []byte, 16)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err == nil {
+			_, err = syncauth.Verify([]byte(secret), syncauth.FromRequest(r), body, syncauth.Options{})
+		}
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(401)
+			return
+		}
+		received <- body
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	engine.httpClient = srv.Client()
+	sys, token, err := engine.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "suite_webhook", CallbackURL: srv.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret = token
+	grantAllUsers(t, s, sys.ID)
+	app := appRecordFor(t, s, sys.ID)
+	check := func(want string) {
+		t.Helper()
+		drain(t, engine)
+		select {
+		case body := <-received:
+			if !strings.Contains(string(body), `"id":"`+admin.ID+`"`) || !strings.Contains(string(body), want) {
+				t.Fatalf("unexpected webhook: %s, want %s", body, want)
+			}
+		default:
+			t.Fatal("no signed webhook delivered")
+		}
+	}
+	check(`"roles":[]`)
+	role, err := s.CreateAppRole(app.ID, "admin", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(`"roles":[]`)
+	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", admin.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	check(`"roles":[{"value":"admin","primary":true}]`)
+	if err := s.DeleteAppRole(app.ID, role.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	check(`"roles":[]`)
+}
