@@ -1974,8 +1974,23 @@ func (s *Store) CreateMFAToken(t *MFAToken) error {
 	if t.ChallengeID != "" {
 		challengeID = t.ChallengeID
 	}
-	_, err := s.db.Exec(query, t.ID, t.UserID, t.TokenHash, challengeID, t.ExpiresAt, t.CreatedAt, t.PrimaryAuthenticatedAt, t.InteractionHash)
-	return err
+	if t.ProvenPasswordHash == "" {
+		_, err := s.db.Exec(query, t.ID, t.UserID, t.TokenHash, challengeID, t.ExpiresAt, t.CreatedAt, t.PrimaryAuthenticatedAt, t.InteractionHash)
+		return err
+	}
+	// A password change, reset or disable that committed after the password was checked
+	// (push dispatch sits between the two) has already spent the pending sign-ins; this
+	// one must not be created after it.
+	res, err := s.db.Exec(`INSERT INTO mfa_tokens (id, user_id, token_hash, challenge_id, expires_at, created_at, primary_authenticated_at, interaction_hash)
+ SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND password_hash=?)`,
+		t.ID, t.UserID, t.TokenHash, challengeID, t.ExpiresAt, t.CreatedAt, t.PrimaryAuthenticatedAt, t.InteractionHash, t.UserID, t.ProvenPasswordHash)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // GetValidMFAToken returns an unused, unexpired token that still has attempts left.

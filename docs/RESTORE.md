@@ -57,8 +57,9 @@ server still picks up those legacy filenames through the fallback in `internal/c
   deposit by this server, which is what tells the two apart.
   For a capsule written by `kyidentity export-capsule`, the digest is the one it printed;
   record it somewhere other than beside the file. For one downloaded from the admin
-  Backup page, it is the `digest` of that download's `admin.backup_capsule_export` audit
-  event; copy it out of the server (an audit export, or by hand) while the server is up.
+  Backup page, the page shows the digest after the download (also sent as the
+  `X-Capsule-Digest` response header and kept in that download's
+  `admin.backup_capsule_export` audit event); copy it and keep it with the file.
 - **Gather k custodians.** Each card carries one share, a single line beginning `ky2-`. They
   type or paste it themselves; do not collect the shares in a file, a chat, or an email. Two
   shares in one place is the suite key in one place.
@@ -277,7 +278,9 @@ before, and start.
    right.
 2. Open Disaster recovery. If the backup was paired, the recovery key shows as pinned with
    the same key ID as before. The pairing token is in the database, so the restored server can
-   deposit again without re-pairing; click Back up now to prove it. If the screen says the
+   deposit again without re-pairing; click Back up now to prove it. Scheduled deposits are
+   off after a restore, so a test copy, or a copy started while the original still runs,
+   never deposits on its own. Once this server is the one in service, set the Schedule again. If the screen says the
    key is missing, `data/recovery.pub` did not come across; re-pair, which is refused unless
    KyRecovery hands back the same key.
 3. Have one downstream application sign in through KyIdentity. That proves the RSA key.

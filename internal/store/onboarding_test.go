@@ -183,6 +183,35 @@ func TestChangePasswordKeepsTheCurrentSessionAndRevokesTheRest(t *testing.T) {
 	}
 }
 
+// A change from a session that a reset or revocation has since ended must not land: the
+// request was authenticated before the owner recovered the account. Unused pairing tokens,
+// minted with the old password, end with the change.
+func TestChangePasswordNeedsTheLiveSessionAndEndsPairingTokens(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	now := time.Now().UTC()
+	keep := seedSession(t, s, u.ID, now.Add(time.Hour), now)
+	if err := s.CreateDevicePairingToken(&DevicePairingToken{ID: "pair", UserID: u.ID, TokenHash: "pair-hash", PINHash: "pin", ExpiresAt: now.Add(90 * time.Second)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ChangePassword(u.ID, keep, "changed", nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, s, `SELECT COUNT(*) FROM device_pairing_tokens WHERE id='pair' AND expires_at>?`, time.Now().UTC()); n != 0 {
+		t.Fatal("pairing token survived a password change")
+	}
+	if err := s.RevokeUserAccess(u.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ChangePassword(u.ID, keep, "attacker", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("change from a revoked session: %v", err)
+	}
+	if stored, _ := s.GetUserByID(u.ID); stored.PasswordHash != "changed" {
+		t.Fatalf("revoked session overwrote the password: %q", stored.PasswordHash)
+	}
+}
+
 // A new address is unproven: verification and every outstanding link go with the old one.
 func TestEmailChangeClearsVerificationAndOutstandingLinks(t *testing.T) {
 	s, cleanup := setupTestStore(t)

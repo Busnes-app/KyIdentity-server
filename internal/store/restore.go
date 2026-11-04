@@ -43,6 +43,8 @@ var restoredCleared = []string{
 	"sync_delivery_attempts",
 }
 
+const restoredReason = "superseded by a restore; reconcile the connector to re-derive the work"
+
 // RestoreReport is what one restore invalidated, for the log and the audit trail.
 type RestoreReport struct {
 	// Credentials counts the rows cleared across restoredCleared.
@@ -124,8 +126,11 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 		// moment a hold lifted. A revision no state row can carry never matches, and the
 		// same pass deletes the row once a real revision exists. Deletions and MFA resets
 		// carry no desired state and still retry, which only ever removes access.
-		res, err = tx.Exec(`UPDATE account_sync_events SET status='failed', revision=?, last_error=?, updated_at=?, lease_until=NULL, claim_token='' WHERE status IN ('pending','failed') AND revision<>?`,
-			restoredRevision, "superseded by a restore; reconcile the connector to re-derive the work", now, restoredRevision)
+		// A removal (an inactive update, a deletion) keeps its revision: reconciliation
+		// re-derives only what is still active, so a closed-out removal would never be sent
+		// again. It still waits behind the hold, and the safety net re-pends it.
+		res, err = tx.Exec(`UPDATE account_sync_events SET status='failed', revision=CASE WHEN `+removalSQL+` THEN revision ELSE ? END, last_error=?, updated_at=?, lease_until=NULL, claim_token='' WHERE status IN ('pending','failed') AND revision<>? AND COALESCE(last_error,'')<>?`,
+			restoredRevision, restoredReason, now, restoredRevision, restoredReason)
 		if err != nil {
 			return err
 		}
@@ -160,6 +165,11 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 		if _, err = tx.Exec(`UPDATE paired_systems SET provisioning_hold=1`); err != nil {
 			return err
 		}
+		// A restored copy does not deposit on its own (owner decision): it may be a test
+		// copy, or the original may still be in service under the same pairing.
+		if err := setSetting(tx, "backup_interval_sec", "0"); err != nil {
+			return err
+		}
 		// The caller's details say which capsule this came from; the counts join them
 		// rather than replacing them.
 		if audit != nil {
@@ -173,6 +183,7 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 			details["queuedDeliveriesClosed"] = report.QueuedDeliveries
 			details["logoutsQueued"] = report.LogoutsQueued
 			details["connectorsHeld"] = report.Connectors
+			details["scheduledDepositsOff"] = true
 			body, err := json.Marshal(details)
 			if err != nil {
 				return err

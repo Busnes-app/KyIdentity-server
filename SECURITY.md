@@ -112,7 +112,7 @@ Two further rules apply to the value:
 
 - Proxy on the same host, through the published port: the container does not see `127.0.0.1` but the address Docker forwards from, typically the `kypost-net` gateway (`TRUSTED_PROXY_CIDRS=10.89.0.1/32` with the default subnet). Confirm it with the check below.
 - Proxy pinned on `kypost-net`: `TRUSTED_PROXY_CIDRS=10.89.0.10/32` (replace with your proxy's actual Docker network IP)
-- Cloudflare Tunnel: `TRUSTED_PROXY_CIDRS=0.0.0.0/0` is unavoidable; Tunnel is the proxy and only Cloudflare can reach it. Pair it with `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`.
+- Cloudflare Tunnel: name the `cloudflared` connector's address when it is fixed (its container IP on the Docker network, as `/32`); `TRUSTED_PROXY_CIDRS=0.0.0.0/0` also works when only the tunnel can reach the port. Pair either with `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`. When every entry is inside the trusted ranges, the leftmost one is the client, so each visitor is still keyed by their own address.
 
 ### Rate limiting under pressure
 

@@ -352,3 +352,103 @@ func TestRepairReprovisionsWipedTarget(t *testing.T) {
 		t.Fatal("undelivered work remains", pending, err)
 	}
 }
+
+// After a wipe, a group can be re-created before its member is: here the member's create
+// fails at first, so the group goes out empty. Once the member is created, the group must
+// be sent again with it; nothing else changes locally to re-queue it.
+func TestRepairedGroupGetsItsMemberOnceTheMemberIsCreated(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ReviewSystem(sys, "scim", "", true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	group := &store.Group{ID: uuid.NewString(), Name: "Studio"}
+	if err := s.CreateGroup(group, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	remote.mu.Lock()
+	remote.users, remote.groups, remote.userPostStatus = map[string]scim.User{}, map[string]scimGroup{}, 503
+	remote.mu.Unlock()
+	if report := runJob(t, e, s, sys.ID, "repair"); !report.Repaired || report.MissingCount != 1 {
+		t.Fatalf("repair %+v", report)
+	}
+	drain(t, e)
+	if g, ok := remote.groupByExternal(group.ID); !ok || len(g.Members) != 0 {
+		t.Fatal("fixture: the group should be back without its member", g, ok)
+	}
+	remote.mu.Lock()
+	remote.userPostStatus = 0
+	remote.mu.Unlock()
+	if err := s.RetryProvisioning(sys.ID, u.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	created, ok := remote.userByExternal(u.ID)
+	g, _ := remote.groupByExternal(group.ID)
+	if !ok || len(g.Members) != 1 || g.Members[0].Value != created.ID {
+		t.Fatal("re-created member missing from the repaired group", g, created, ok)
+	}
+}
+
+// A stored user mapping can outlive a target wipe that gave the remote ID to someone else.
+// Adding the local user to a group must not grant that group to the other person.
+func TestGroupWriteChecksTheMappingOfAMemberItAdds(t *testing.T) {
+	e, s, u, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	remote := newFakeSCIM()
+	srv := httptest.NewTLSServer(remote)
+	defer srv.Close()
+	e.httpClient = srv.Client()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "scim", CallbackURL: srv.URL + "/scim/v2", BearerToken: "target-token"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ReviewSystem(sys, "scim", "", true, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	app := appRecordFor(t, s, sys.ID)
+	group := &store.Group{ID: uuid.NewString(), Name: "Admins"}
+	if err := s.CreateGroup(group, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	alice, ok := remote.userByExternal(u.ID)
+	if !ok {
+		t.Fatal("fixture user not delivered")
+	}
+	remote.mu.Lock()
+	bob := remote.users[alice.ID]
+	bob.ExternalID, bob.UserName = "someone-else", "bob"
+	remote.users[alice.ID] = bob
+	remote.mu.Unlock()
+
+	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	if g, ok := remote.groupByExternal(group.ID); !ok || len(g.Members) != 0 {
+		t.Fatal("group granted through a mapping the target reassigned", g, ok)
+	}
+}

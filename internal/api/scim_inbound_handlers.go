@@ -460,8 +460,8 @@ func (h *SCIMHandler) save(w http.ResponseWriter, r *http.Request, action string
 	return nil
 }
 
-// Patch applies add/replace operations to the supported attributes and remove to
-// nothing; every operation is validated before any is applied.
+// Patch applies add/replace operations to the supported attributes; remove of an optional
+// attribute is a no-op. Every operation is validated before any is applied.
 func (h *SCIMHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Schemas    []string              `json:"schemas"`
@@ -487,10 +487,19 @@ func (h *SCIMHandler) Patch(w http.ResponseWriter, r *http.Request) {
 
 func applyPatch(u *store.User, op scim.PatchOperation) string {
 	kind := strings.ToLower(op.Op)
-	if kind != "add" && kind != "replace" {
-		return "only add and replace operations are supported"
-	}
 	path := strings.TrimSpace(op.Path)
+	if kind == "remove" {
+		// Clearing an optional attribute keeps the stored value; the rest of the PATCH
+		// (say active=false) still applies.
+		switch strings.TrimPrefix(path, scim.UserSchema+":") {
+		case "userName", "externalId", "":
+			return "remove is not supported for " + strconv.Quote(path)
+		}
+		return ""
+	}
+	if kind != "add" && kind != "replace" {
+		return "only add, replace and remove operations are supported"
+	}
 	if path == "" {
 		values, ok := op.Value.(map[string]any)
 		if !ok {
@@ -527,6 +536,8 @@ func setAttribute(u *store.User, path string, value any) string {
 			return "userName must be a non-empty string"
 		}
 		u.Username = s
+	case "name.givenName", "name.familyName":
+		// Only the display name is kept; it stays the upstream's displayName.
 	case "displayName", "name.formatted":
 		s, ok := str()
 		if !ok {

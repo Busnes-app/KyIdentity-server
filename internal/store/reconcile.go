@@ -551,6 +551,11 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 				if err := dropDead("user", id); err != nil {
 					return nil, err
 				}
+				// Absent at the target, so not provisioned there: the confirmed re-create
+				// then re-queues the groups that hold this user (provisionedTx).
+				if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=0 WHERE system_id=? AND resource_id=? AND kind='user'`, systemID, id); err != nil {
+					return nil, err
+				}
 				payload, err := scimUserPayloadTx(tx, u, true, systemID)
 				if err != nil {
 					return nil, err

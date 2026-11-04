@@ -120,6 +120,11 @@ func TestRestoreInvalidatesEphemeralCredentialsAndHoldsProvisioning(t *testing.T
 		t.Fatalf("hold not visible on the connector: %+v %v", sys, err)
 	}
 
+	// A restored copy never deposits on its own.
+	if v, err := s.GetSetting("backup_interval_sec"); err != nil || v != "0" {
+		t.Fatalf("scheduled deposits after restore: %q %v", v, err)
+	}
+
 	// Applying it again is harmless: nothing left to clear, the hold stays.
 	second, err := s.ApplyRestoredState(time.Now().UTC(), nil)
 	if err != nil || second.Credentials != 0 || second.QueuedDeliveries != 0 {
@@ -316,5 +321,40 @@ func TestRestoreHoldsAConnectorThatWasDisabled(t *testing.T) {
 	held, err := s.HeldConnectors()
 	if err != nil || len(held) != 2 {
 		t.Fatalf("held connectors once it is back: %v %v", held, err)
+	}
+}
+
+// A removal queued in the capsule (here an inactive update after the user lost access) is
+// not re-derived by reconciliation, which only re-sends what is still active. It must
+// survive the restore and go out once the hold lifts, or the user stays active downstream.
+func TestRestoreKeepsQueuedRemovals(t *testing.T) {
+	s, cleanup := restoreFixture(t)
+	defer cleanup()
+	var userID, appID string
+	if err := s.db.QueryRow(`SELECT u.id FROM users u WHERE u.username='staff'`).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT id FROM app_registry WHERE system_id='hr'`).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(appID, "users", userID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	var removal string
+	if err := s.db.QueryRow(`SELECT id FROM account_sync_events WHERE system_id='hr' AND user_id=? AND event_type='user.updated' AND status='pending'`, userID).Scan(&removal); err != nil {
+		t.Fatalf("no queued removal: %v", err)
+	}
+	if _, err := s.ApplyRestoredState(time.Now().UTC(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResumeProvisioning("hr", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReconcileProvisioning(); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT status FROM account_sync_events WHERE id=?`, removal).Scan(&status); err != nil || status != "pending" {
+		t.Fatalf("queued removal after restore: %q %v", status, err)
 	}
 }

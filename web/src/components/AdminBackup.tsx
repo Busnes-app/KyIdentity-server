@@ -65,6 +65,8 @@ export const AdminBackup: React.FC = () => {
   const [running, setRunning] = useState<boolean>(false);
   const [runMessage, setRunMessage] = useState<string>('');
   const [runError, setRunError] = useState<string>('');
+  const [download, setDownload] = useState<{ name: string; digest: string } | null>(null);
+  const [digestCopied, setDigestCopied] = useState<boolean>(false);
 
   const [runningDrill, setRunningDrill] = useState<boolean>(false);
   const [drillResult, setDrillResult] = useState<BackupDrillResult | null>(null);
@@ -139,6 +141,8 @@ export const AdminBackup: React.FC = () => {
   const downloadCapsule = async () => {
     setRunError('');
     setRunMessage('');
+    setDownload(null);
+    setDigestCopied(false);
     try {
       const grant = await requestGrant('The capsule holds your entire directory and its keys, sealed to the suite recovery key.', 'GET /api/admin/backup/export-capsule');
       const res = await fetch('/api/admin/backup/export-capsule', {
@@ -160,6 +164,7 @@ export const AdminBackup: React.FC = () => {
       a.download = match ? match[1] : 'kyidentity.kycap';
       a.click();
       URL.revokeObjectURL(url);
+      setDownload({ name: a.download, digest: res.headers.get('X-Capsule-Digest') ?? '' });
     } catch (err) {
       if (isCancelled(err)) return;
       setRunError(errorMessage(err, 'Could not download the capsule'));
@@ -392,6 +397,19 @@ export const AdminBackup: React.FC = () => {
           {runError && (
             <div className="alert-box error sm mt-3">
               <XCircle size={16} /> {runError}
+            </div>
+          )}
+          {download?.digest && (
+            <div className="alert-box success sm mt-3">
+              <CheckCircle2 size={16} />
+              <div>
+                <div>Saved {download.name}. Its digest:</div>
+                <div className="font-mono cell-id">{download.digest}</div>
+                <div>Keep this with the file: restore needs it (-expect-digest).</div>
+                <button type="button" className="secondary-btn sm mt-2" onClick={() => { void navigator.clipboard?.writeText(download.digest); setDigestCopied(true); }}>
+                  {digestCopied ? 'Copied' : 'Copy digest'}
+                </button>
+              </div>
             </div>
           )}
           {hasLocal && (status?.localCopies.length ?? 0) > 0 && (

@@ -551,10 +551,13 @@ func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
 	return tx.Commit()
 }
 
+// SCIMMember is a group member that already exists at the target, by both IDs.
+type SCIMMember struct{ LocalID, RemoteID string }
+
 // SCIMGroupMembers returns what a remote group should hold right now: the group's name and
-// the remote IDs of in-scope members that already exist at the target. exists is false
-// once the group has been deleted locally; the queued group.deleted follows.
-func (s *Store) SCIMGroupMembers(systemID, groupID string) (name string, exists bool, remoteIDs []string, err error) {
+// the in-scope members that already exist at the target, ordered by remote ID. exists is
+// false once the group has been deleted locally; the queued group.deleted follows.
+func (s *Store) SCIMGroupMembers(systemID, groupID string) (name string, exists bool, members []SCIMMember, err error) {
 	err = s.db.QueryRow(`SELECT name FROM directory_groups WHERE id=?`, groupID).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil, nil
@@ -562,14 +565,23 @@ func (s *Store) SCIMGroupMembers(systemID, groupID string) (name string, exists 
 	if err != nil {
 		return "", false, nil, err
 	}
-	remoteIDs, err = scanStrings(s.db.Query(`SELECT l.remote_id FROM live_group_memberships m
+	rows, err := s.db.Query(`SELECT m.user_id, l.remote_id FROM live_group_memberships m
  JOIN scim_user_links l ON l.system_id=? AND l.kind='user' AND l.local_id=m.user_id AND l.remote_id<>''
  WHERE m.group_id=? AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=? AND e.user_id=m.user_id)
- ORDER BY l.remote_id`, systemID, groupID, systemID))
-	if remoteIDs == nil {
-		remoteIDs = []string{}
+ ORDER BY l.remote_id`, systemID, groupID, systemID)
+	if err != nil {
+		return "", false, nil, err
 	}
-	return name, true, remoteIDs, err
+	defer rows.Close()
+	members = []SCIMMember{}
+	for rows.Next() {
+		var m SCIMMember
+		if err := rows.Scan(&m.LocalID, &m.RemoteID); err != nil {
+			return "", false, nil, err
+		}
+		members = append(members, m)
+	}
+	return name, true, members, rows.Err()
 }
 
 // A confirmed first delivery establishes the remote link, so groups holding this user

@@ -117,9 +117,9 @@ func (m *MiddlewareManager) ClientIP(r *http.Request) string {
 	// and anything further left was written by someone we have no reason to believe.
 	// A single-value header (CF-Connecting-IP, X-Real-IP) is simply a chain of length one.
 	parts := strings.Split(r.Header.Get(m.forwardedHeader), ",")
+	var ip net.IP
 	for i := len(parts) - 1; i >= 0; i-- {
-		ip := net.ParseIP(strings.TrimSpace(parts[i]))
-		if ip == nil {
+		if ip = net.ParseIP(strings.TrimSpace(parts[i])); ip == nil {
 			// A malformed entry means the chain cannot be trusted past this point.
 			return remoteHost
 		}
@@ -127,7 +127,10 @@ func (m *MiddlewareManager) ClientIP(r *http.Request) string {
 			return ip.String()
 		}
 	}
-	return remoteHost
+	// Every entry is inside the trusted ranges (a Cloudflare Tunnel trusts 0.0.0.0/0):
+	// the leftmost is still the client the proxies reported, never the proxy itself, or
+	// every caller would share one lockout and rate-limit key.
+	return ip.String()
 }
 
 // rateLimitIP is ClientIP as a rate-limit bucket key. One IPv6 subscriber usually holds a

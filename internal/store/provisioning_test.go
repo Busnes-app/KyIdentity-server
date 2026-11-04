@@ -364,7 +364,7 @@ func TestGroupDeliveryFollowsAssignmentsAndMembers(t *testing.T) {
 	if got := pendingFor(t, s, "target", g.ID); len(got) != 1 || got[0].Type != "group.updated" {
 		t.Fatal("group not re-queued after member delivery", got)
 	}
-	if _, _, members, err = s.SCIMGroupMembers("target", g.ID); err != nil || len(members) != 1 || members[0] != "remote-user" {
+	if _, _, members, err = s.SCIMGroupMembers("target", g.ID); err != nil || len(members) != 1 || members[0] != (SCIMMember{u.ID, "remote-user"}) {
 		t.Fatal(members, err)
 	}
 	g.Name = "team"

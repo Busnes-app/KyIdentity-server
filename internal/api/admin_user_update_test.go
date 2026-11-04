@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
+	"github.com/google/uuid"
 )
 
 // An administrator's edit sets only the fields it names, on the row as it is at write
@@ -37,13 +39,17 @@ func TestAdminUserEditsDoNotRevertConcurrentChanges(t *testing.T) {
 			t.Fatalf("round %d lost an update: password kept=%v name=%q", i, ok, u.DisplayName)
 		}
 	}
+	keep := uuid.NewString()
+	if err := db.CreateSession(&store.Session{ID: keep, UserID: target.ID, SessionTokenHash: keep, IPAddress: "1.2.3.4", UserAgent: "test", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 	for i := range 10 {
 		name, hash := fmt.Sprintf("Again %d", i), fmt.Sprintf("changed-hash-%d", i)
 		var renamed *httptest.ResponseRecorder
 		var changeErr error
 		together(
 			put(&renamed, `{"displayName":"`+name+`"}`, mintStepUp(t, srv, admin, "PUT "+path)),
-			func() { changeErr = db.ChangePassword(target.ID, "", hash, nil) },
+			func() { changeErr = db.ChangePassword(target.ID, keep, hash, nil) },
 		)
 		if renamed.Code != http.StatusOK || changeErr != nil {
 			t.Fatalf("round %d: %d %s / %v", i, renamed.Code, renamed.Body.String(), changeErr)

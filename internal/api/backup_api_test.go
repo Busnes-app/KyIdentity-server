@@ -236,6 +236,9 @@ func TestAdminBackupEndpoints(t *testing.T) {
 			t.Fatal(err)
 		}
 		sum := sha256.Sum256(w.Body.Bytes())
+		if got := w.Header().Get("X-Capsule-Digest"); got != hex.EncodeToString(sum[:]) {
+			t.Errorf("X-Capsule-Digest %q is not the download's SHA-256", got)
+		}
 		want := `"digest":"` + hex.EncodeToString(sum[:]) + `"`
 		recorded := false
 		for _, e := range events {

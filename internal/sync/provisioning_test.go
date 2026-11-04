@@ -31,6 +31,8 @@ type fakeSCIM struct {
 	next      int
 	// putStatus, when set, is answered to every User and Group PUT without applying it.
 	putStatus int
+	// userPostStatus, when set, is answered to every Users POST without creating anything.
+	userPostStatus int
 	// failPage, when set, answers 500 to that unfiltered listing page (1-based).
 	failPage int
 	pages    int
@@ -117,6 +119,8 @@ func (f *fakeSCIM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"totalResults": len(found), "startIndex": 1, "Resources": found})
+	case r.Method == "POST" && collection == "Users" && f.userPostStatus != 0:
+		w.WriteHeader(f.userPostStatus)
 	case r.Method == "POST" && collection == "Users":
 		var u scim.User
 		raw, _ := io.ReadAll(r.Body)

@@ -23,8 +23,10 @@ ends every login here, so before the sessions go it queues a logout for each one
 relying parties that saw it, and keeps the logouts it already owed rather than deleting
 them. Nothing else would re-derive that work, and a receiver told nothing keeps its own
 session until its own timeout. Queued outbound
-deliveries are closed out with a reason rather than sent, and outbound provisioning is
-held on every connector that is not disabled. A `system.restored` audit row records the
+deliveries are closed out with a reason rather than sent, except queued removals
+(disables and deletions), which keep waiting behind the hold, and outbound provisioning is
+held on every connector that is not disabled. Scheduled backup deposits are turned off;
+set the schedule again once the restored server is the one in service. A `system.restored` audit row records the
 counts, and the marker is removed only after that has committed, so an interrupted
 start repeats the work rather than skipping it.
 

@@ -4,14 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/capsule"
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
+	"github.com/Busnes-app/kyidentity-server/internal/mfa"
 )
 
 // Relative paths inside a capsule. The restore drill and the restore command both have to
@@ -47,7 +51,83 @@ func Members(cfg *config.Config) []string {
 	for _, k := range keys {
 		m = append(m, "data/"+k)
 	}
+	for _, k := range envRelayKeys(cfg) {
+		if !slices.Contains(m, k.Path) {
+			m = append(m, k.Path)
+		}
+	}
 	return append(m, configRelPath)
+}
+
+// envRelayKeys are the relay keys configured by environment, under the file name the
+// relay sender reads when the variable is not set.
+func envRelayKeys(cfg *config.Config) []recoveryclient.File {
+	var out []recoveryclient.File
+	for _, k := range []struct{ transport, url, key string }{
+		{"fcm", cfg.PushRelayURL, cfg.PushRelayKey},
+		{"apns", cfg.APNSRelayURL, cfg.APNSRelayKey},
+	} {
+		if k.url != "" && k.key != "" {
+			name := filepath.Base(mfa.RelayKeyFile(cfg.DataDir, k.transport, k.url))
+			out = append(out, recoveryclient.File{Path: "data/" + name, Data: []byte(k.key + "\n"), Mode: 0600})
+		}
+	}
+	return out
+}
+
+// dbPartPrefix names the ordered members of a snapshot too large for one capsule member.
+const dbPartPrefix = dbRelPath + ".part"
+
+// dbMembers splits the snapshot into ordered members within capsule.MaxFileBytes. One that
+// fits stays the single member every earlier capsule has.
+func dbMembers(db []byte) []recoveryclient.File {
+	if int64(len(db)) <= capsule.MaxFileBytes {
+		return []recoveryclient.File{{Path: dbRelPath, Data: db, Mode: 0600}}
+	}
+	var out []recoveryclient.File
+	for i := 0; len(db) > 0; i++ {
+		n := min(int64(len(db)), capsule.MaxFileBytes)
+		out = append(out, recoveryclient.File{Path: fmt.Sprintf("%s%03d", dbPartPrefix, i), Data: db[:n], Mode: 0600})
+		db = db[n:]
+	}
+	return out
+}
+
+// JoinDatabaseParts rebuilds data/kyidentity.db from a split snapshot opened into dir (a
+// restore target or a drill sandbox) and removes the parts. A capsule with the single
+// member needs nothing.
+func JoinDatabaseParts(dir string) error {
+	part := func(i int) string { return filepath.Join(dir, fmt.Sprintf("%s%03d", dbPartPrefix, i)) }
+	if _, err := os.Stat(part(0)); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	out, err := os.OpenFile(filepath.Join(dir, dbRelPath), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Errorf("joining the database parts: %w", err)
+	}
+	defer out.Close()
+	for i := 0; ; i++ {
+		data, err := os.ReadFile(part(i))
+		if errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := out.Write(data); err != nil {
+			return err
+		}
+		if err := os.Remove(part(i)); err != nil {
+			return err
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, dbPartPrefix+"*")); len(left) > 0 {
+		return fmt.Errorf("database parts are not consecutive: %s is left over", filepath.Base(left[0]))
+	}
+	if err := out.Sync(); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 // relayKeys names the self-registered push relay keys (mfa.RelayKeyFile) in dataDir. The
@@ -99,7 +179,7 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 	if len(dbBytes) == 0 {
 		return nil, errors.New("database snapshot is empty")
 	}
-	files = append(files, recoveryclient.File{Path: dbRelPath, Data: dbBytes, Mode: 0600})
+	files = append(files, dbMembers(dbBytes)...)
 
 	// The RSA signing key: without it every issued token and OIDC client breaks on restore.
 	if cfg.RSAKeyPath == "" {
@@ -161,6 +241,19 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 		}
 		files = append(files, recoveryclient.File{Path: "data/" + k, Data: key, Mode: 0600})
 	}
+	// A key supplied by PUSH_RELAY_KEY or APNS_RELAY_KEY is the one in use and never
+	// reaches the disk; it goes where a restored server without that variable reads it.
+	for _, k := range envRelayKeys(cfg) {
+		replaced := false
+		for i := range files {
+			if files[i].Path == k.Path {
+				files[i], replaced = k, true
+			}
+		}
+		if !replaced {
+			files = append(files, k)
+		}
+	}
 
 	cfgJSON, err := json.MarshalIndent(map[string]any{
 		"app_name":                cfg.AppName,
@@ -183,8 +276,23 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 		portNum = 5867
 	}
 	reqFiles := make([]string, 0, len(files))
+	total := 0
 	for _, f := range files {
+		total += len(f.Data)
+		// A split database is joined back before the drill checks it.
+		if strings.HasPrefix(f.Path, dbPartPrefix) {
+			if f.Path != dbPartPrefix+"000" {
+				continue
+			}
+			f.Path = dbRelPath
+		}
 		reqFiles = append(reqFiles, f.Path)
+	}
+	// The capsule holds a gzipped tar that may expand to capsule.MaxExpandedBytes; past it
+	// every backup, export and drill fails. Say so while there is time to act.
+	if int64(total) >= capsule.MaxExpandedBytes*4/5 {
+		log.Printf("[BACKUP] WARNING: the backup payload is %d MiB, over 80%% of the %d MiB a capsule can hold; backups, exports and drills fail once it is full.",
+			total>>20, capsule.MaxExpandedBytes>>20)
 	}
 	return &recoveryclient.Payload{
 		ServiceName: cfg.AppName,

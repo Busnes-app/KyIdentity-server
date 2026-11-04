@@ -40,6 +40,7 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 		return err
 	}
 	verifyMapping := remoteID != ""
+	var current scimGroup
 	if remoteID == "" {
 		found, lookupErr := e.findSCIMResource(ctx, c, "Groups", groupID)
 		switch {
@@ -65,7 +66,6 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 		if err != nil {
 			return err
 		}
-		var current scimGroup
 		if status != http.StatusOK || json.Unmarshal(raw, &current) != nil || current.ID != remoteID || current.ExternalID != groupID {
 			return scim.ErrMalformedResponse
 		}
@@ -96,8 +96,24 @@ func (e *Engine) deliverSCIMGroup(ctx context.Context, sys *store.PairedSystem, 
 		return nil
 	}
 	desired := scimGroup{Schemas: []string{scimGroupSchema}, ExternalID: groupID, DisplayName: name, Members: []scim.MultiValue{}}
-	for _, id := range members {
-		desired.Members = append(desired.Members, scim.MultiValue{Value: id})
+	held := map[string]bool{}
+	for _, m := range current.Members {
+		held[m.Value] = true
+	}
+	for _, m := range members {
+		// A stored user mapping may outlive a target wipe that handed its ID to someone
+		// else; a member this write adds is checked first, so no one is granted the group
+		// in another person's place. Members the group already holds are not re-read.
+		if !held[m.RemoteID] {
+			u, err := c.GetUser(ctx, m.RemoteID)
+			if err != nil {
+				return err
+			}
+			if u.ID != m.RemoteID || u.ExternalID != m.LocalID {
+				return scim.ErrMalformedResponse
+			}
+		}
+		desired.Members = append(desired.Members, scim.MultiValue{Value: m.RemoteID})
 	}
 	body, err := json.Marshal(desired)
 	if err != nil {

@@ -117,6 +117,11 @@ func main() {
 	if cfg.AllowPrivateCallbacks {
 		log.Println("WARNING: KYIDENTITY_ALLOW_PRIVATE_CALLBACKS is on; paired systems may register internal callback URLs")
 	}
+	if strings.HasPrefix(cfg.IssuerURL, "https://") && len(cfg.TrustedProxyCIDRs) == 0 {
+		// Plain HTTP here, https outside: a proxy is in front, and without its address every
+		// caller is keyed as the proxy, so a stranger's wrong passwords lock the admin out.
+		log.Println("WARNING: TRUSTED_PROXY_CIDRS is not set; behind a TLS proxy every client shares the proxy's address for sign-in lockout and rate limits. Set it to the proxy's peer address (INSTALL.md).")
+	}
 
 	auditLogger := audit.NewLogger(dbStore)
 	// A restored directory is applied before anything can authenticate against it or
@@ -733,6 +738,7 @@ func applyRestoreMarker(dataDir string, s *store.Store, auditLogger *audit.Logge
 	event.Committed()
 	log.Printf("Restored directory applied: %d credential(s) invalidated, %d queued delivery/deliveries closed, %d back-channel logout(s) queued for the logins it ended, provisioning held on %v until each is reconciled; review their stored credentials for rotation",
 		report.Credentials, report.QueuedDeliveries, report.LogoutsQueued, report.Connectors)
+	log.Printf("Scheduled backup deposits are off; turn them back on (Disaster recovery, Schedule) once this server is the one in service")
 	return os.Remove(path)
 }
 
@@ -773,7 +779,10 @@ func restore(raw []byte, targetDir, expectService string, shares []string, stdou
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		return err
 	}
-	return recoveryclient.Restore(path, targetDir, expectService, shares, stdout)
+	if err := recoveryclient.Restore(path, targetDir, expectService, shares, stdout); err != nil {
+		return err
+	}
+	return backup.JoinDatabaseParts(targetDir)
 }
 
 const restoreUsage = "Usage: kyidentity restore -capsule <file.kycap> -to <dir> -expect-digest <sha256> [-service <name>]\n\n" +
@@ -840,7 +849,7 @@ func restoreCommand(args []string, stdin io.Reader, stdout, stderr io.Writer, pr
 	if err := writeRestoreMarker(*target, *capsulePath, *service, strings.ToLower(strings.TrimSpace(*digest))); err != nil {
 		return fmt.Errorf("restore unpacked but the restore marker could not be written (%v); the next start would treat the old sessions, tokens and queued deliveries as live", err)
 	}
-	fmt.Fprintln(stdout, "Restored. On first start the server invalidates the sessions, tokens and invitations this capsule contains and holds outbound provisioning until each connector is reconciled.")
+	fmt.Fprintln(stdout, "Restored. On first start the server invalidates the sessions, tokens and invitations this capsule contains, holds outbound provisioning until each connector is reconciled, and turns scheduled backup deposits off; turn them back on once this server is the one in service.")
 	return nil
 }
 
