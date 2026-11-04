@@ -213,6 +213,21 @@ func TestCloudflareDeploymentUsesItsOwnHeader(t *testing.T) {
 	}
 }
 
+// A Cloudflare Tunnel trusts 0.0.0.0/0, so every IPv4 client is inside the trusted range.
+// Each must still be keyed as itself, not as the tunnel: otherwise a stranger's failed
+// passwords lock the admin out from every address.
+func TestTunnelTrustingEverythingStillNamesTheClient(t *testing.T) {
+	mm := NewMiddlewareManager(nil, []string{"0.0.0.0/0"}, "CF-Connecting-IP", testCSRFKey)
+	for _, client := range []string{"203.0.113.8", "198.51.100.1", "2001:db8::1"} {
+		req := httptest.NewRequest("POST", "/api/auth/login", nil)
+		req.RemoteAddr = "172.18.0.5:5555"
+		req.Header.Set("CF-Connecting-IP", client)
+		if got := mm.ClientIP(req); got != client {
+			t.Errorf("ClientIP = %q, want the client %s", got, client)
+		}
+	}
+}
+
 // An unparseable value is not an identity. Keying a limiter or an audit row on an arbitrary
 // string lets a caller mint a fresh bucket per request.
 func TestMalformedForwardedValueFallsBackToPeer(t *testing.T) {

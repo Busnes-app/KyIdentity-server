@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -215,5 +216,30 @@ func TestPasswordChangeAndRevocationSpendPendingMFALogins(t *testing.T) {
 	}
 	if live("before-revoke") {
 		t.Fatal("pending MFA login survived the revocation")
+	}
+}
+
+// A sign-in that proved a password which a change, reset or disable replaced while push
+// was being dispatched gets no MFA token: the cleanup already ran and would miss it.
+func TestMFATokenNotIssuedAfterThePasswordChanged(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	user := createTestUser(t, s)
+	now := time.Now().UTC()
+	issue := func(id string) error {
+		return s.CreateMFAToken(&MFAToken{ID: id, UserID: user.ID, TokenHash: id, ExpiresAt: now.Add(time.Minute), PrimaryAuthenticatedAt: &now, ProvenPasswordHash: "x"})
+	}
+	if err := issue("current"); err != nil {
+		t.Fatalf("token for the current password: %v", err)
+	}
+	session := seedSession(t, s, user.ID, now.Add(time.Hour), now)
+	if err := s.ChangePassword(user.ID, session, "changed", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := issue("stale"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("token for a replaced password: %v", err)
+	}
+	if tok, err := s.GetValidMFAToken("stale", 5); err != nil || tok != nil {
+		t.Fatalf("stale token stored: %v %v", tok, err)
 	}
 }

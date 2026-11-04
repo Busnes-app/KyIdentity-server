@@ -249,7 +249,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 		// The token is persisted and bound to this user and challenge. The user identity is
 		// read back from that record on completion; it is never parsed from client input.
-		mfaToken, err := h.mfaEngine.IssueMFATokenForInteraction(user.ID, challengeID, primaryAt, interactionHash)
+		mfaToken, err := h.mfaEngine.IssueMFATokenForInteraction(user.ID, challengeID, primaryAt, interactionHash, user.PasswordHash)
+		if errors.Is(err, store.ErrNotFound) {
+			h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure", map[string]any{"reason": "credentials_changed"})
+			http.Error(w, invalidCredentials, http.StatusUnauthorized)
+			return
+		}
 		if err != nil {
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 			return

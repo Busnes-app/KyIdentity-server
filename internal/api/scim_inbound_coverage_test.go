@@ -335,7 +335,9 @@ func TestSCIMUserPatchAttributes(t *testing.T) {
 
 	scimRefusal(t, scimCall(t, f.srv, f.token, "PATCH", path, `{"Operations":[]}`), http.StatusBadRequest, "invalidSyntax", "1 to 50")
 	for _, tc := range []struct{ name, ops, detail string }{
-		{"remove op", `{"op":"remove","path":"displayName"}`, "only add and replace"},
+		{"move op", `{"op":"move","path":"displayName"}`, "only add, replace and remove"},
+		{"remove userName", `{"op":"remove","path":"userName"}`, "remove is not supported"},
+		{"remove without path", `{"op":"remove"}`, "remove is not supported"},
 		{"path-less scalar", `{"op":"replace","value":"x"}`, "needs an object value"},
 		{"path-less bad attr", `{"op":"replace","value":{"nickName":"x"}}`, `"nickName" is not supported`},
 		{"active number", `{"op":"replace","path":"active","value":3}`, "active must be a boolean"},
@@ -375,6 +377,15 @@ func TestSCIMUserPatchAttributes(t *testing.T) {
 	}
 	if u := mustUser(t, f.db, f.alice); u.DisplayName != "Dr. Alice" || u.Email != "primary@up.test" {
 		t.Fatalf("patched attributes: %q %q", u.DisplayName, u.Email)
+	}
+
+	// Entra's shape: name parts as separate paths and a cleared value as remove are no-ops,
+	// and the deactivation batched with them still lands.
+	if got := patch(`{"op":"replace","path":"name.givenName","value":"Ally"},{"op":"Remove","path":"name.familyName"},{"op":"remove","path":"emails[type eq \"work\"].value"},{"op":"replace","value":{"name.familyName":"L"}},{"op":"replace","path":"active","value":false}`); got.Code != http.StatusOK {
+		t.Fatalf("Entra name/remove shape: %d %s", got.Code, got.Body.String())
+	}
+	if u := mustUser(t, f.db, f.alice); u.DisplayName != "Dr. Alice" || u.Email != "primary@up.test" || u.SourceActive {
+		t.Fatalf("name parts or remove changed the account, or active=false was lost: %+v", u)
 	}
 
 	// The string form of active, which some directories send, deactivates the account.

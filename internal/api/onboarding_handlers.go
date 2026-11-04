@@ -289,7 +289,11 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		details["required"] = true
 	}
 	pending := h.audit.Prepare("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
-	if err := h.store.ChangePassword(user.ID, sess.ID, hash, pending.Row); err != nil {
+	if err := h.store.ChangePassword(user.ID, sess.ID, hash, pending.Row); errors.Is(err, store.ErrNotFound) {
+		// The session was revoked (a reset, a sign-out everywhere) while this request ran.
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	} else if err != nil {
 		log.Printf("password change for %s: %v", user.ID, err)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

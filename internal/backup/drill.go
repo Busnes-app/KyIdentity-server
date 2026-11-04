@@ -29,6 +29,10 @@ func RunRestoreDrill(ctx context.Context, dataDir, serviceName, appVersion strin
 	result, err := recoveryclient.Drill(ctx, dataDir, payload, func(scratchDir string, opened capsule.Manifest) []CheckItem {
 		recipe, _ := opened.VerificationRecipe.(map[string]any)
 		result := &DrillResult{}
+		// The restore command joins a split database the same way before anything reads it.
+		if err := JoinDatabaseParts(scratchDir); err != nil {
+			return []CheckItem{{Name: "Database Parts", Passed: false, Message: AuditSafe(err.Error())}}
+		}
 		// 2. Verify Required Files
 		if reqFiles := stringList(recipe["required_files"]); len(reqFiles) > 0 {
 			allFound := true

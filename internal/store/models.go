@@ -162,6 +162,9 @@ type MFAChallenge struct {
 // MFAToken is a single-use, server-side bearer token issued after primary password
 // verification and redeemed by exactly one second-factor completion.
 type MFAToken struct {
+	// ProvenPasswordHash, when set, stores the token only while the account is active and
+	// still has the password the sign-in proved. Not persisted.
+	ProvenPasswordHash     string     `json:"-"`
 	InteractionHash        string     `json:"-"`
 	PrimaryAuthenticatedAt *time.Time `json:"-"`
 	ID                     string     `json:"id"`

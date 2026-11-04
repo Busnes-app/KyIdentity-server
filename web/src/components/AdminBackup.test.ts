@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { scheduleFact } from './AdminBackup';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { copyText, scheduleFact } from './AdminBackup';
 import type { BackupStatus } from '../types';
 
 const ready: BackupStatus = {
@@ -22,5 +22,21 @@ describe('backup schedule fact', () => {
   it('says manual only with no schedule', () => {
     expect(scheduleFact({ ...ready, intervalSec: 0 })).toEqual({ badge: 'warning', text: 'Manual only' });
     expect(scheduleFact(null).text).toBe('Manual only');
+  });
+});
+
+describe('copying the capsule digest', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it('reports a copy only when the clipboard took it', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    expect(await copyText('abc')).toBe(true);
+    expect(writeText).toHaveBeenCalledWith('abc');
+  });
+  it('reports failure where the clipboard refuses or does not exist (plain http)', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });
+    expect(await copyText('abc')).toBe(false);
+    vi.stubGlobal('navigator', {});
+    expect(await copyText('abc')).toBe(false);
   });
 });

@@ -206,15 +206,17 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to seal capsule")
 		return
 	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
 	if !h.recordCritical(w, r, "admin.backup_capsule_export", adminID, adminUsername, m.CapsuleID, "success", map[string]any{
 		// The digest is what `restore -expect-digest` checks; keep it apart from the file.
-		"capsule_id": m.CapsuleID, "recovery_key_id": m.RecoveryKeyID, "size_bytes": len(raw), "digest": fmt.Sprintf("%x", sha256.Sum256(raw)),
+		"capsule_id": m.CapsuleID, "recovery_key_id": m.RecoveryKeyID, "size_bytes": len(raw), "digest": digest,
 	}) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.kycap"`, backup.FilenameSafe(m.CapsuleID)))
 	w.Header().Set("X-Recovery-Key-ID", m.RecoveryKeyID)
+	w.Header().Set("X-Capsule-Digest", digest)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
 }

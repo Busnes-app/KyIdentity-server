@@ -146,7 +146,10 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 func (s *Store) ChangePassword(userID, keepSessionID, passwordHash string, audit *AuditEvent) error {
 	now := time.Now().UTC()
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE users SET password_hash=?, password_change_required=0, updated_at=? WHERE id=? AND status='active' AND NOT pending`, passwordHash, now, userID)
+		// The session that proved itself must still be live under the write lock: a request
+		// held open past a reset or revocation must not overwrite the recovered password.
+		res, err := tx.Exec(`UPDATE users SET password_hash=?, password_change_required=0, updated_at=? WHERE id=? AND status='active' AND NOT pending
+ AND EXISTS(SELECT 1 FROM sessions WHERE id=? AND user_id=? AND expires_at>?)`, passwordHash, now, userID, keepSessionID, userID, now)
 		if err != nil {
 			return err
 		}
@@ -154,6 +157,9 @@ func (s *Store) ChangePassword(userID, keepSessionID, passwordHash string, audit
 			return ErrNotFound
 		}
 		if _, err := revokeSessionsTx(tx, now, `user_id=? AND id<>?`, userID, keepSessionID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE device_pairing_tokens SET expires_at=? WHERE user_id=? AND used_at IS NULL`, now, userID); err != nil {
 			return err
 		}
 		if err := revokeSessionGrantsTx(tx, `user_id=?`, now, userID); err != nil {

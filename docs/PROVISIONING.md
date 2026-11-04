@@ -234,7 +234,12 @@ describe exactly this: Users only; create, get, list with one exact-match filter
 (`userName`, `externalId`, `emails.value` or `id` with `eq`), `startIndex`/`count`
 paging up to 200, replace, PATCH with `add`/`replace` of `active`, `userName`,
 `displayName`, `name` and `emails` (single or path-less operations, 50 at most, applied
-atomically), and DELETE. Weak ETags are returned and honoured on `If-Match`; a stale
+atomically), and DELETE. KyIdentity keeps only a display name: `name.givenName` and
+`name.familyName` paths (Entra's default mapping) are accepted and ignored, so the
+display name stays the upstream's `displayName`. A `remove` (Entra sends one when a value
+is cleared) is accepted and changes nothing; the rest of the PATCH, such as
+`active=false`, still applies. `remove` of `userName` or `externalId`, or without a path,
+is refused. Weak ETags are returned and honoured on `If-Match`; a stale
 version is refused with 412. Bulk, sorting, other filters and other attributes are
 refused with a SCIM error rather than ignored. Password provisioning is unsupported and
 a `password` attribute is rejected outright; `roles` are ignored.
