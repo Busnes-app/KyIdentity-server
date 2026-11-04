@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"sync"
 	"testing"
@@ -272,5 +273,31 @@ func TestAppAuthenticationUpgradeAndLinks(t *testing.T) {
 	}
 	if err := s.LinkAppRecords(target.ID, source.ID, target.Revision, source.Revision, nil); !errors.Is(err, ErrAppLinkConflict) {
 		t.Fatal("link ignored authentication mismatch", err)
+	}
+}
+
+// Unlinking copies each grant with its end date: a seven-day grant stays seven days.
+func TestUnlinkKeepsGrantEndDates(t *testing.T) {
+	s, u, a := appAccessFixture(t)
+	if err := s.CreateApplication(&Application{ID: "launcher", Name: "Card", URL: "https://example.com", Enabled: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	launchers, _, _ := s.ListAppRecords("launcher", 25, 0)
+	if err := s.LinkAppRecords(a.ID, launchers[0].ID, a.Revision, launchers[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	apps, _, _ := s.ListAppRecords("client", 25, 0)
+	a = apps[0]
+	ends := time.Now().Add(7 * 24 * time.Hour).Unix()
+	if _, err := s.db.Exec(`INSERT INTO app_user_assignments(app_id,user_id,expires_at) VALUES(?,?,?) ON CONFLICT(app_id,user_id) DO UPDATE SET expires_at=excluded.expires_at`, a.ID, u.ID, ends); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.UnlinkAppRecord(a.ID, "client", a.Revision, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got sql.NullInt64
+	if err := s.db.QueryRow(`SELECT expires_at FROM app_user_assignments WHERE app_id=? AND user_id=?`, id, u.ID).Scan(&got); err != nil || !got.Valid || got.Int64 != ends {
+		t.Fatalf("copied grant ends %+v, want %d (%v)", got, ends, err)
 	}
 }

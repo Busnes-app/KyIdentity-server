@@ -143,6 +143,8 @@ func (h *BackupHandler) RunDrill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
+	// A large database takes longer to snapshot, seal and drill than the server's 30 s.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	adminID, adminUsername := h.actor(r)
 	payload, err := backup.CollectSealable(h.cfg, h.store, appversion.String())
 	if err != nil {
@@ -176,6 +178,8 @@ func (h *BackupHandler) RunDrill(w http.ResponseWriter, r *http.Request) {
 // custodians' shares open it, so the download is safe to store anywhere; kyrecovery is where
 // it belongs. The export is refused rather than served unrecorded.
 func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
+	// Sealing and downloading a large database takes longer than the server's 30 s.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	adminID, adminUsername := h.actor(r)
 	key, err := backup.LoadRecoveryKey(h.cfg.DataDir, h.store)
 	if errors.Is(err, backup.ErrNotPaired) {

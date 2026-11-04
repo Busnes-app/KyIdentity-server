@@ -37,7 +37,7 @@ func TestListUserDevicesIsScopedToCaller(t *testing.T) {
 }
 
 // Enabling TOTP needs a body, a step-up grant and a code that matches the secret; a wrong
-// code spends the grant and saves nothing.
+// code saves nothing and keeps the grant for the retry.
 func TestEnableTOTPRefusals(t *testing.T) {
 	f, cleanup := newStepUpFixture(t)
 	defer cleanup()
@@ -52,12 +52,16 @@ func TestEnableTOTPRefusals(t *testing.T) {
 	}
 	grant := f.grant(t, op)
 	covRefused(t, f.post(t, "/api/user/mfa/totp/enable", map[string]string{"secret": secret, "code": "000000x"}, grant), 400, "invalid_code")
-	if rr := f.post(t, "/api/user/mfa/totp/enable", map[string]string{"secret": secret, "code": testTOTPCode(t, secret)}, grant); rr.Code != http.StatusForbidden {
-		t.Fatalf("a grant spent on a wrong code was reused: %d", rr.Code)
-	}
 	methods, err := f.store.ListUserMFAMethods(f.user.ID)
 	if err != nil || len(methods) != 0 {
 		t.Fatalf("refused enrolment saved a factor: %v %v", methods, err)
+	}
+	// A typo keeps the grant, so the retry finishes with the secret already scanned.
+	if rr := f.post(t, "/api/user/mfa/totp/enable", map[string]string{"secret": secret, "code": testTOTPCode(t, secret)}, grant); rr.Code != http.StatusOK {
+		t.Fatalf("retry after a wrong code: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := f.post(t, "/api/user/mfa/totp/enable", map[string]string{"secret": secret, "code": testTOTPCode(t, secret)}, grant); rr.Code != http.StatusForbidden {
+		t.Fatalf("a spent grant was reused: %d", rr.Code)
 	}
 }
 

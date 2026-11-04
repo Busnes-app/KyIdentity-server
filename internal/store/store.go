@@ -965,6 +965,13 @@ func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u
 	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, password_change_required = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
 		return nil, enrollmentMutationError(err)
 	}
+	if oldRole != "admin" && u.Role == "admin" {
+		// A link a delegate issued while the account was ordinary must not hand them an
+		// administrator: delegates never act on administrators.
+		if err := expireAccountTokensTx(tx, now, `user_id=?`, u.ID); err != nil {
+			return nil, err
+		}
+	}
 	if !strings.EqualFold(oldEmail, u.Email) {
 		// A new address is unproven, and a link mailed to the old one must not act on it.
 		if _, err := tx.Exec(`UPDATE users SET email_verified_at = NULL WHERE id = ?`, u.ID); err != nil {
