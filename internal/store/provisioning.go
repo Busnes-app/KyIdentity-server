@@ -155,8 +155,8 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	}
 	// A removal goes ahead of an undelivered MFA reset, which would otherwise hold it in
 	// order behind a retry. The reset still follows: a regain reactivates the same account.
-	// It takes the removal's revision, as a reset queued now would, so a receiver fencing
-	// on meta.version does not refuse it as older.
+	// It takes the revision after the removal's, as a reset queued now would: receivers
+	// refuse an older revision, and a different event at one they already hold.
 	var resets []AccountSyncEvent
 	if d.kind == "user" && (!d.active || d.deleted) {
 		rows, err := tx.Query(`DELETE FROM account_sync_events WHERE `+unsent+` AND event_type='user.mfa_reset' RETURNING `+syncEventColumns, d.systemID, d.resourceID)
@@ -193,7 +193,27 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	if err := insertResourceEventTx(tx, d.systemID, d.resourceID, eventType, d.payload, revision, now); err != nil {
 		return err
 	}
-	for _, r := range resets {
+	return requeueBehindTx(tx, d.systemID, d.resourceID, resets, now)
+}
+
+// nextRevisionTx advances a resource's revision for an event that needs its own.
+func nextRevisionTx(tx *sql.Tx, systemID, resourceID string) (int, error) {
+	var revision int
+	err := tx.QueryRow(`UPDATE sync_resource_state SET revision=revision+1 WHERE system_id=? AND resource_id=? RETURNING revision`, systemID, resourceID).Scan(&revision)
+	return revision, err
+}
+
+// requeueBehindTx re-inserts taken-out events at the back of the queue under a new
+// revision, so they follow what was just queued and are still the resource's latest.
+func requeueBehindTx(tx *sql.Tx, systemID, resourceID string, events []AccountSyncEvent, now time.Time) error {
+	if len(events) == 0 {
+		return nil
+	}
+	revision, err := nextRevisionTx(tx, systemID, resourceID)
+	if err != nil {
+		return err
+	}
+	for _, r := range events {
 		if _, err := tx.Exec(`INSERT INTO account_sync_events (`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			r.ID, r.UserID, r.SystemID, r.EventType, r.PayloadJSON, r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision); err != nil {
 			return err
@@ -209,35 +229,38 @@ func insertResourceEventTx(tx *sql.Tx, systemID, resourceID, eventType string, p
 }
 
 // queueUserNotificationTx sends an event that carries no desired state (MFA reset) to
-// every connector that currently holds the account. It neither supersedes nor is superseded.
+// every connector that currently holds the account. It neither supersedes nor is
+// superseded, but takes its own revision: receivers refuse a different event at a
+// revision they already hold. Queued state it overtakes moves behind it, still current.
 func queueUserNotificationTx(tx *sql.Tx, u *User, eventType string, now time.Time) error {
-	rows, err := tx.Query(`SELECT st.system_id,st.revision FROM sync_resource_state st JOIN paired_systems s ON s.id=st.system_id
- WHERE st.resource_id=? AND st.kind='user' AND st.active AND s.status<>'disabled'`, u.ID)
+	systems, err := scanStrings(tx.Query(`SELECT st.system_id FROM sync_resource_state st JOIN paired_systems s ON s.id=st.system_id
+ WHERE st.resource_id=? AND st.kind='user' AND st.active AND s.status<>'disabled'`, u.ID))
 	if err != nil {
 		return err
 	}
-	type target struct {
-		id  string
-		rev int
-	}
-	var targets []target
-	for rows.Next() {
-		var t target
-		if err := rows.Scan(&t.id, &t.rev); err != nil {
-			rows.Close()
-			return err
-		}
-		targets = append(targets, t)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, t := range targets {
-		payload, err := scimUserPayloadTx(tx, u, u.Status == "active", t.id)
+	for _, sys := range systems {
+		payload, err := scimUserPayloadTx(tx, u, u.Status == "active", sys)
 		if err != nil {
 			return err
 		}
-		if err := insertResourceEventTx(tx, t.id, u.ID, eventType, payload, t.rev, now); err != nil {
+		rows, err := tx.Query(`DELETE FROM account_sync_events WHERE system_id=? AND user_id=? AND status IN ('pending','failed')
+ AND NOT EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=account_sync_events.id)
+ AND event_type IN ('user.created','user.updated') RETURNING `+syncEventColumns, sys, u.ID)
+		if err != nil {
+			return err
+		}
+		overtaken, err := scanSyncEvents(rows)
+		if err != nil {
+			return err
+		}
+		revision, err := nextRevisionTx(tx, sys, u.ID)
+		if err != nil {
+			return err
+		}
+		if err := insertResourceEventTx(tx, sys, u.ID, eventType, payload, revision, now); err != nil {
+			return err
+		}
+		if err := requeueBehindTx(tx, sys, u.ID, overtaken, now); err != nil {
 			return err
 		}
 	}
@@ -590,7 +613,8 @@ func provisionedTx(tx *sql.Tx, ev AccountSyncEvent, now time.Time) error {
 	if ev.EventType == "user.deleted" || ev.EventType == "user.updated" {
 		// A delivered inactive state for the current revision is the acknowledgement the
 		// offboarding view reads; a newer desired state clears it.
-		if _, err := tx.Exec(`UPDATE sync_resource_state SET offboarded_at=? WHERE system_id=? AND resource_id=? AND kind='user' AND NOT active AND revision=?`, now, ev.SystemID, ev.UserID, ev.Revision); err != nil {
+		// An MFA reset queued behind the removal may have taken the next revision.
+		if _, err := tx.Exec(`UPDATE sync_resource_state SET offboarded_at=? WHERE system_id=? AND resource_id=? AND kind='user' AND NOT active AND revision>=?`, now, ev.SystemID, ev.UserID, ev.Revision); err != nil {
 			return err
 		}
 	}
