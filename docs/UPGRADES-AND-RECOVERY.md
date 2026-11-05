@@ -4,6 +4,22 @@
 
 Commands and unlinked file paths below are relative to the repository root.
 
+## Proxy trust configuration
+
+Before upgrading, inspect `TRUSTED_PROXY_CIDRS` and `KYIDENTITY_FORWARDED_HEADER`.
+Startup now refuses a range wider than its private block with `X-Forwarded-For`
+(the default) or `Forwarded`. IPv4-mapped ranges and header-name case variants
+receive the same check. The refusal names the offending range and header.
+
+Prefer the exact proxy peer as KyIdentity sees it (`<proxy-ip>/32` or `/128`),
+keeping the existing multi-hop header. If a tunnel needs catch-all trust, use its
+overwritten single-IP header (Cloudflare: `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`)
+and ensure only the tunnel can reach the port. The edge must replace client input,
+not append or forward it; direct access to the port remains unsafe with broad trust.
+Verify the resolved address through the existing `/api/installer/network` response
+and sign-in audit, following [Security](../SECURITY.md#verification-confirm-your-setup).
+No client-IP parser or installer-network response change accompanies this check.
+
 ## Queued MFA resets
 
 Stop old workers and settle their remote operations before starting the upgraded source,

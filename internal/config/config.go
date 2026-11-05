@@ -200,6 +200,9 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateProxyTrust(trustedCIDRs, forwardedHeader); err != nil {
+		return nil, err
+	}
 	sessionTTL, err := loadPositiveDuration("KYIDENTITY_SESSION_TTL", DefaultSessionTTL)
 	if err != nil {
 		return nil, err
