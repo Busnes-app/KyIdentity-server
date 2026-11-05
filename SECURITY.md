@@ -93,14 +93,14 @@ Whichever proxy you use, set `TRUSTED_PROXY_CIDRS` to its address as KyIdentity 
 
 ### TRUSTED_PROXY_CIDRS: Client IP Trust
 
-Startup logs a warning naming each trusted range wider than its private block
-(10/8, 172.16/12, 192.168/16 or IPv6 fc00::/7). List the proxy's exact address
-instead. Use a catch-all only when the tunnel alone can reach the port; behind
-Cloudflare also set `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`. The warning
-applies with every header and does not refuse startup or change client-IP parsing.
-It mitigates configuration mistakes; catch-all trust with `X-Forwarded-For` still
-allows forged client addresses and lockout evasion. The installer network response
-is unchanged.
+Startup refuses `X-Forwarded-For` or `Forwarded` with a trusted range wider than
+its private block (10/8, 172.16/12, 192.168/16 or IPv6 fc00::/7, including equivalent
+IPv4-mapped ranges). Narrow `TRUSTED_PROXY_CIDRS` to the proxy's exact address
+(`/32` or `/128`), or explicitly select a single-IP header your edge overwrites.
+For Cloudflare use `KYIDENTITY_FORWARDED_HEADER=CF-Connecting-IP`. A single-IP
+header is safe only when the proxy overwrites client input and only that proxy can
+reach the KyIdentity port; merely renaming a header does not establish trust.
+The installer network response and client-IP parser are unchanged.
 
 
 When a reverse proxy sits in front of KyIdentity, the server sees the proxy's address as the client IP. The client address keys the per-address rate limits (sign-in, MFA, recovery codes, password reset, device registration) and is recorded in every audit event.
@@ -116,7 +116,7 @@ Only one header is consulted, on purpose. Trying several in turn (`CF-Connecting
 Two further rules apply to the value:
 
 - It must parse as an IP address. An unparseable entry is discarded and the request is attributed to the peer, so a caller cannot mint a fresh rate-limit bucket per request by sending a new nonsense value each time.
-- The chain is read right to left, skipping hops inside `TRUSTED_PROXY_CIDRS`, and the first address you did not write is the client. Reading the leftmost entry instead would attribute the request to whatever the client prepended to the list; that is done only when every entry is inside your ranges (a Tunnel's `0.0.0.0/0` with `CF-Connecting-IP`), and with a wide range and `X-Forwarded-For` it lets the client choose its address, which is why a wide range is unsafe.
+- The chain is read right to left, skipping hops inside `TRUSTED_PROXY_CIDRS`, and the first address you did not write is the client. Reading the leftmost entry instead would attribute the request to whatever the client prepended to the list; that is done only when every entry is inside your ranges (a Tunnel's `0.0.0.0/0` with `CF-Connecting-IP`), and startup refuses wide ranges with multi-hop headers. Narrow ranges still require every trusted peer to be under operator control.
 
 **Name the proxy's address specifically, not a wide range.** Any peer inside the range you name can forge their own client IP and bypass every rate limit and lockout, including the per-address password lockout, by rotating forged addresses. Example:
 
