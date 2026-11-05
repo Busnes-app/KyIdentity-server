@@ -445,7 +445,7 @@ func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncE
 			if scimUser.Meta == nil {
 				scimUser.Meta = &SCIMMeta{ResourceType: "User"}
 			}
-			scimUser.Meta.Version = fmt.Sprintf(`W/"%d"`, ev.Revision)
+			scimUser.Meta.Version = fmt.Sprintf(`W/"%d"`, ev.DeliveryRevision)
 			// "No roles" is an assertion the receiver must see, never a missing field.
 			if scimUser.Roles == nil {
 				scimUser.Roles = []SCIMRole{}
@@ -486,7 +486,7 @@ func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncE
 				return e.store.FinishSyncDelivery(ev, "pending", "", ev.Attempts, ev.NextAttempt)
 			}
 			attempts := ev.Attempts + 1
-			if attempts >= store.SyncAttemptBudget && !ev.Removal() {
+			if attempts >= store.SyncAttemptBudget && !ev.Removal() && ev.EventType != "user.mfa_reset" {
 				if serr := e.store.FinishSyncDelivery(ev, "failed", deliveryError(derr), attempts, nil); serr != nil {
 					return serr
 				}

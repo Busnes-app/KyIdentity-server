@@ -43,10 +43,10 @@ whose answer was lost is resent rather than blocked. A removal queued behind ano
 write that is blocked waits with it, even past its recovery time: that write may still
 land and restore access, so it needs the operator recovery below. The alert stays open
 meanwhile. A removal goes ahead of an undelivered MFA reset for that connector, and the
-reset follows it, so a re-grant never reactivates the account with its old factors.
+reset follows it with the inactive profile, so a re-grant never reactivates the account with its old factors. MFA resets also retry past five attempts and hold later profile changes in order. An uncertain reset still needs operator recovery; it is never treated as an idempotent removal.
 
 In **Suite sync → Deliveries**, inspect in-flight/blocked attempts and read remote state.
-**Failing deliveries** lists work given up after five attempts and removals still retrying
+**Failing deliveries** lists work given up after five attempts and removals or MFA resets still retrying
 past five; the connector's provisioning alert stays open while any of these, or an expired
 blocked attempt, remains.
 Read-back only reports a matching externalId; it neither proves a request has finished
@@ -70,7 +70,7 @@ To recover an expired attempt:
 
 The oldest 100 attempts are shown; resolving them exposes the next page. A definitive
 4xx rejection (except 408) or 503 uses ordinary backoff and the five-attempt budget
-(removals have none); Retry-After extends backoff up to 30 minutes. Do not use resync or disconnect/reconnect
+(removals and MFA resets have none); Retry-After extends backoff up to 30 minutes. Do not use resync or disconnect/reconnect
 as an uncertain-write recovery mechanism. Stop old-version workers before upgrading;
 they do not honor the new persisted fences. Existing remote operations must finish
 before the upgraded worker starts.
@@ -105,15 +105,22 @@ has not begun delivery; an attempt that has begun keeps its place and the newer 
 queues behind it, so an old create can never undo a later disable. An account removed
 before its create was acknowledged (pending, retrying or failed) still receives the
 inactive update in the create's place: the app may know the person another way, such as
-its own setup or a sign-in. Only a never-acknowledged group is forgotten. Every event
-carries a monotonic per-resource revision; suite receivers receive it as `meta.version`
-(`W/"<n>"`) and should refuse writes older than one they applied. Conditional
+its own setup or a sign-in. Only a never-acknowledged group is forgotten. The outbox desired-state revision controls supersession and retry revival. User delivery
+versions are separate monotonic per-resource counters, persisted on the first safe claim
+and retained for ordinary retries/restarts. Explicit operator recovery re-prepares an
+MFA reset at a new version after remote quiescence, allowing it to revoke credentials
+with current authority even if its uncertain version already landed. Suite receivers receive the delivery version as
+`meta.version` (`W/"<n>"`) and should refuse older versions and different events at the
+same version. A reset therefore gets its own version without obsoleting profile work.
+Old queued resets acquire a version above pre-upgrade state when first safely claimed;
+current roles and lost access constrain their profile without rewriting held uncertain
+evidence. Conditional
 `If-Match` writes to generic SCIM targets are not implemented.
 
 Work that exhausts its attempt budget is not abandoned: each reconcile pass returns it
 to the queue with a 30-minute backoff when it still describes current desired state,
 and discards it when a newer state has overtaken it. This covers suite webhooks as well
-as generic SCIM. Removals never exhaust; they keep retrying. A local deletion is sent to every
+as generic SCIM. Removals and MFA resets never exhaust; they keep retrying. A local deletion is sent to every
 enabled connector; only a connector known to hold the account receives the profile,
 the rest receive the identifier and `active=false`.
 

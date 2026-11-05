@@ -20,6 +20,19 @@ Verify the resolved address through the existing `/api/installer/network` respon
 and sign-in audit, following [Security](../SECURITY.md#verification-confirm-your-setup).
 No client-IP parser or installer-network response change accompanies this check.
 
+## Queued MFA resets
+
+Stop old workers and settle their remote operations before starting the upgraded source,
+as required by the delivery recovery procedure in [Provisioning](PROVISIONING.md).
+Queued resets retain their event ID/type and get a distinct persisted delivery version
+on their first unfenced claim. Historical failed resets resume through reconciliation;
+held uncertain attempts still require the existing quiescence and step-up recovery.
+Current app roles and lost access constrain old reset snapshots, so replay cannot restore
+queue-time administrator authority or reactivate a removed account. A removal still runs
+ahead of an unfenced reset, which keeps its inactive profile through a later regrant.
+After a restore, resets retain their desired-state revision, wait behind the connector
+hold and acquire their delivery version only after the operator resumes provisioning.
+
 ## Explicit application administrators
 
 Before upgrading KyIdentity and the KyMessages, KyPulse or ky-server-base receivers:
@@ -38,8 +51,9 @@ Before upgrading KyIdentity and the KyMessages, KyPulse or ky-server-base receiv
    after the source upgrade to replace retained and queued old profiles; check delivery
    success. Before any new delivery attempt, the source refreshes only the role array
    of unfenced app-backed user events (including old queued profiles and MFA resets)
-   from current explicit app assignments. Event ID, type, revision and other profile
-   fields stay intact. Held uncertain attempts are never rewritten or retried by this
+   from current explicit app assignments. Event ID, type and desired-state revision
+   stay intact. Reset access may additionally narrow as described above; delivery
+   versions are separate from that desired-state revision. Held uncertain attempts are never rewritten or retried by this
    refresh; establish remote quiescence and use the existing attempt-recovery action
    before they can be claimed again. Resync and verify delivery after recovery.
    Startup alone cannot undo an old write that already reached a receiver or stop
@@ -95,12 +109,13 @@ the operator's word instead, recorded as `admin.provisioning_resumed`. Connector
 were disabled at snapshot time are held too, so re-enabling one later does not deliver
 what was queued before it was disabled.
 
-The capsule's own outbox never delivers, on any of those paths. Closing a row out is not
+The capsule's active profile work never delivers on those paths. Closing a row out is not
 enough by itself: the worker re-pends exhausted work that still matches a connector's
 desired state, and a restore leaves every row eligible for that. So the closed-out rows
 are marked with a revision no connector can carry, which the re-pending cannot match and
-the next pass deletes. Deletions and MFA resets carry no desired state and do still
-retry, which only ever removes access. What reaches a resumed connector is what this
+the next pass deletes. Deletions and MFA resets still retry behind the hold. Resets preserve their revision
+and are constrained to current roles and access before first delivery; an inactive reset
+stays inactive through a regrant. What reaches a resumed connector is what this
 directory wants now, not what the capsule was in the middle of. Passwords, enrolled
 factors and recovery codes are in the capsule and keep working, so the restore runbook
 asks for connector credentials to be reviewed for rotation before delivery resumes.

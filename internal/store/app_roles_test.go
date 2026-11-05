@@ -515,8 +515,14 @@ func TestClaimRefreshesLegacyQueuedAppRoles(t *testing.T) {
 func TestLegacyRoleRefreshPreservesUncertainAttempt(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	provisioningFixture(t, s, "target")
+	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
+	// This reset's active profile represents a current app entitlement. Access-loss
+	// narrowing is covered separately; this test pins role refresh after recovery.
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	deliverAll(t, s)
 	ev := &AccountSyncEvent{ID: "legacy-reset", UserID: u.ID, SystemID: "target", EventType: "user.mfa_reset", PayloadJSON: `{"active":true,"roles":[]}`, Revision: 4, Status: "pending"}
 	if err := s.CreateAccountSyncEvent(ev); err != nil {
 		t.Fatal(err)

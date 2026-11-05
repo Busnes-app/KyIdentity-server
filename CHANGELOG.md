@@ -4,6 +4,8 @@
 
 ### Changes
 
+- Give signed user deliveries their own persisted monotonic versions, so MFA resets revoke downstream credentials without colliding with profile state. Resets retry through outages, retain uncertain fences, and preserve inactive access and current app roles across upgrade and restore.
+
 - App-backed SCIM and signed webhooks always send explicit per-app roles, including `roles: []` for no definitions or assignments and after deleting the final role. They no longer inherit the global directory role. Before a new attempt, unfenced old queued user events also refresh only their roles from current app assignments; held uncertain attempts retain their evidence and existing operator recovery requirement. ID-token/UserInfo per-app `roles` and the separate opt-in legacy `role` claim are preserved. **Before upgrading KyMessages, KyPulse and ky-server-base, assign dedicated administrators an explicit per-app `admin` role**, coordinate receiver updates and resync existing connectors; see [rollout steps](docs/UPGRADES-AND-RECOVERY.md#explicit-application-administrators).
 - Refuse startup for trusted proxy ranges wider than a private block with `X-Forwarded-For` or `Forwarded`, including case variants and IPv4-mapped networks. Narrow the proxy range or select a proxy-overwritten single-IP header with proxy-only ingress; see the upgrade guide. Client-IP parsing and `/api/installer/network` are unchanged.
 

@@ -559,7 +559,8 @@ func TestSuiteReceiverRevisionsAndInactiveNotFound(t *testing.T) {
 	}
 	drain(t, e)
 	got := hits()[u.ID]
-	if len(got) != 2 || got[0] != (suiteHit{1, true, "user.created"}) || got[1] != (suiteHit{2, false, "user.updated"}) {
+	// Wire versions are allocated above desired-state revisions, not copied from them.
+	if len(got) != 2 || got[0] != (suiteHit{2, true, "user.created"}) || got[1] != (suiteHit{3, false, "user.updated"}) {
 		t.Fatalf("suite sequence %+v", got)
 	}
 	// A receiver that never held a disabled account answers 404; that completes the disable.
@@ -586,7 +587,7 @@ func TestSuiteReceiverRevisionsAndInactiveNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	drain(t, e)
-	if got := hits()[stranger.ID]; len(got) != 1 || got[0] != (suiteHit{2, false, "user.updated"}) {
+	if got := hits()[stranger.ID]; len(got) != 1 || got[0] != (suiteHit{3, false, "user.updated"}) {
 		t.Fatalf("inactive update after 404: %+v", got)
 	}
 	pending, err := s.GetPendingSyncEvents(10)
@@ -913,7 +914,9 @@ func TestSuiteRemovalWhileCreateRetries(t *testing.T) {
 	drain(t, e)
 	mu.Lock()
 	defer mu.Unlock()
-	want := []suiteHit{{1, true, "user.created"}, {2, false, "user.updated"}, {3, false, "user.updated"}, {4, true, "user.created"}}
+	// Delivery versions start above desired revision 1 and stay distinct through
+	// the refused create, removal, replay and fresh creation.
+	want := []suiteHit{{2, true, "user.created"}, {3, false, "user.updated"}, {4, false, "user.updated"}, {5, true, "user.created"}}
 	if len(seen) != len(want) {
 		t.Fatalf("suite sequence %+v", seen)
 	}
