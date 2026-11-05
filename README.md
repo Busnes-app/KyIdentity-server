@@ -11,6 +11,10 @@ Built in Go with a focus on simplicity, minimal external dependencies, and nativ
 
 ---
 
+Proxy trust upgrades: broad ranges with multi-hop headers now refuse startup.
+Follow [Proxy trust configuration](docs/UPGRADES-AND-RECOVERY.md#proxy-trust-configuration)
+before upgrading.
+
 ## Core Capabilities
 
 1. **Authoritative User Directory & Real-Time Sync**: Create, manage, and deactivate accounts from a unified portal. Changes automatically propagate to paired KySecurity downstream products via HMAC-SHA256 signed sync webhooks. Administrators can export bounded signed [KyPost recovery evidence](docs/KYPOST_RECOVERY_EVIDENCE.md); this supplies current authority without releasing a restore hold.

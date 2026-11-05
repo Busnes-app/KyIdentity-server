@@ -27,6 +27,8 @@ KYIDENTITY_ISSUER_URL=https://auth.yourdomain.com
 
 # Your TLS proxy's address as KyIdentity sees it, and nothing wider (see SECURITY.md).
 TRUSTED_PROXY_CIDRS=<proxy-ip>/32
+# Startup refuses wider-than-private ranges with X-Forwarded-For / Forwarded.
+# A Cloudflare-only tunnel may use CF-Connecting-IP with proxy-only port access.
 
 # Optional: Pre-seed administrator credentials
 BOOTSTRAP_ADMIN_USER=admin

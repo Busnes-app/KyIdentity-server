@@ -44,7 +44,10 @@ chmod 600 .env
 Set `KYIDENTITY_ISSUER_URL` in `.env` to the exact browser-facing origin, such as
 `https://identity.example.com`. For a same-host trial, `http://localhost:5867` is accepted.
 Set `KYIDENTITY_BIND=127.0.0.1` for a proxy on the host. For HTTPS, set
-`TRUSTED_PROXY_CIDRS` to the proxy’s exact peer IP/CIDR.
+`TRUSTED_PROXY_CIDRS` to the proxy’s exact peer IP/CIDR. Startup refuses
+wider-than-private trust with `X-Forwarded-For` or `Forwarded`; a tunnel using broad
+trust must overwrite a single-IP header (Cloudflare: `CF-Connecting-IP`) and be the
+only route to the port. See the [upgrade steps](docs/UPGRADES-AND-RECOVERY.md#proxy-trust-configuration).
 
 Compose uses the external network `kypost-net` with static IP `10.89.0.2`. If it does not
 exist, create it once (first check `docker network inspect kypost-net`):
