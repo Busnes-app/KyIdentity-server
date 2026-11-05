@@ -90,13 +90,15 @@ type AccountSyncEvent struct {
 	EventType   string `json:"eventType"` // user.created|updated|deleted|mfa_reset, group.updated|deleted
 	PayloadJSON string `json:"payloadJson"`
 	// Revision is the resource's monotonic desired-state counter when this event was queued.
-	Revision    int        `json:"revision"`
-	Attempts    int        `json:"attempts"`
-	Status      string     `json:"status"` // "pending", "delivered", "failed"
-	LastError   string     `json:"lastError,omitempty"`
-	NextAttempt *time.Time `json:"nextAttemptAt,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	Revision int `json:"revision"`
+	// DeliveryRevision orders wire effects independently of desired-state supersession.
+	DeliveryRevision int        `json:"-"`
+	Attempts         int        `json:"attempts"`
+	Status           string     `json:"status"` // "pending", "delivered", "failed"
+	LastError        string     `json:"lastError,omitempty"`
+	NextAttempt      *time.Time `json:"nextAttemptAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
 }
 
 // Push transports a device can register.

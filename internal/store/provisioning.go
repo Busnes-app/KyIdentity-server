@@ -40,6 +40,9 @@ func (s *Store) migrateProvisioning() error {
  PRIMARY KEY(system_id,resource_id));
  INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision)
  SELECT a.system_id,e.user_id,1,1,1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id IS NOT NULL`},
+		{`SELECT COUNT(*) FROM pragma_table_info('sync_resource_state') WHERE name='delivery_revision'`, `ALTER TABLE sync_resource_state ADD COLUMN delivery_revision INTEGER NOT NULL DEFAULT 0;
+ UPDATE sync_resource_state SET delivery_revision=MAX(revision,COALESCE((SELECT MAX(e.revision) FROM account_sync_events e WHERE e.system_id=sync_resource_state.system_id AND e.user_id=sync_resource_state.resource_id),0))`},
+		{`SELECT COUNT(*) FROM pragma_table_info('account_sync_events') WHERE name='delivery_revision'`, `ALTER TABLE account_sync_events ADD COLUMN delivery_revision INTEGER NOT NULL DEFAULT 0`},
 		// offboarded_at is the durable acknowledgement of a deactivation or deletion; the
 		// outbox row that carried it is pruned, this is not.
 		{`SELECT COUNT(*) FROM pragma_table_info('sync_resource_state') WHERE name='offboarded_at'`, `ALTER TABLE sync_resource_state ADD COLUMN offboarded_at DATETIME`},
@@ -155,8 +158,8 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	}
 	// A removal goes ahead of an undelivered MFA reset, which would otherwise hold it in
 	// order behind a retry. The reset still follows: a regain reactivates the same account.
-	// It takes the removal's revision, as a reset queued now would, so a receiver fencing
-	// on meta.version does not refuse it as older.
+	// Its inactive snapshot follows the removal; ClaimDueSyncEvents assigns a distinct
+	// delivery version without advancing the desired-state counter.
 	var resets []AccountSyncEvent
 	if d.kind == "user" && (!d.active || d.deleted) {
 		rows, err := tx.Query(`DELETE FROM account_sync_events WHERE `+unsent+` AND event_type='user.mfa_reset' RETURNING `+syncEventColumns, d.systemID, d.resourceID)
@@ -194,8 +197,8 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 		return err
 	}
 	for _, r := range resets {
-		if _, err := tx.Exec(`INSERT INTO account_sync_events (`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			r.ID, r.UserID, r.SystemID, r.EventType, r.PayloadJSON, r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision); err != nil {
+		if _, err := tx.Exec(`INSERT INTO account_sync_events (`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			r.ID, r.UserID, r.SystemID, r.EventType, string(d.payload), r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision, 0); err != nil {
 			return err
 		}
 	}

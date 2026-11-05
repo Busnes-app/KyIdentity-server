@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -32,7 +33,7 @@ func (s *Store) migrateSyncDelivery() error {
 		return err
 	}
 	// Older versions left some exhausted work pending; pending now always means deliverable.
-	_, err = s.db.Exec(`UPDATE account_sync_events SET status='failed' WHERE status='pending' AND attempts>=? AND NOT `+removalSQL, SyncAttemptBudget)
+	_, err = s.db.Exec(`UPDATE account_sync_events SET status='failed' WHERE status='pending' AND attempts>=? AND event_type<>'user.mfa_reset' AND NOT `+removalSQL, SyncAttemptBudget)
 	return err
 }
 
@@ -56,7 +57,7 @@ func (s *Store) BeginSyncDelivery(ev AccountSyncEvent, duration time.Duration) (
 }
 
 // SyncAttemptBudget is how many attempts a create or update gets before it is failed and
-// left to the reconcile pass. A removal retries past it; one that has, still alerts.
+// left to the reconcile pass. Removals and MFA resets retry past it and still alert.
 const SyncAttemptBudget = 5
 
 // Removal reports whether the event takes access away. Every receiver applies a removal
@@ -77,7 +78,7 @@ func (ev AccountSyncEvent) Removal() bool {
 // FinishSyncDelivery only releases the exact attempt whose HTTP outcome is known.
 // The event may have been removed by account deletion while the request ran.
 func (s *Store) FinishSyncDelivery(ev AccountSyncEvent, status, message string, attempts int, next *time.Time) error {
-	if status == "pending" && attempts >= SyncAttemptBudget && !ev.Removal() {
+	if status == "pending" && attempts >= SyncAttemptBudget && !ev.Removal() && ev.EventType != "user.mfa_reset" {
 		status = "failed"
 	}
 	tx, err := s.db.Begin()
@@ -168,7 +169,7 @@ func (s *Store) ResumeSyncDelivery(systemID, token string, allowCreateRetry bool
 }
 
 func releaseAttemptEventTx(tx *sql.Tx, eventID string) error {
-	_, err := tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=NULL,lease_until=NULL,claim_token='',last_error='',updated_at=? WHERE id=?`, time.Now().UTC(), eventID)
+	_, err := tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=NULL,lease_until=NULL,claim_token='',last_error='',delivery_revision=CASE WHEN event_type='user.mfa_reset' THEN 0 ELSE delivery_revision END,updated_at=? WHERE id=?`, time.Now().UTC(), eventID)
 	return err
 }
 
@@ -328,4 +329,55 @@ func (s *Store) SyncBacklog(systemID string) (SyncBacklog, error) {
 		return b, ErrNotFound
 	}
 	return b, err
+}
+
+// prepareSyncDeliveryTx runs only after durable-fence exclusion. Wire ordering belongs
+// to deliveries, not desired-state supersession: a reset consumes a version without
+// making an exhausted create/update appear obsolete. Persist once so retries/restarts
+// sign the same version. Explicit operator recovery re-prepares a reset after remote
+// quiescence, allowing current authority even if the uncertain version already landed.
+// Old queued resets get versions above pre-upgrade state.
+func prepareSyncDeliveryTx(tx *sql.Tx, ev *AccountSyncEvent) error {
+	if ev.DeliveryRevision != 0 || !strings.HasPrefix(ev.EventType, "user.") {
+		return nil
+	}
+	if ev.EventType == "user.mfa_reset" {
+		// Historical reset snapshots must never reactivate a lost/deleted account. An
+		// inactive reset moved behind a removal stays inactive even after a regrant.
+		var profile map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(ev.PayloadJSON), &profile); err != nil {
+			return err
+		}
+		if profile == nil {
+			return errors.New("sync user profile must be a JSON object")
+		}
+		var active bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sync_resource_state st
+   JOIN users u ON u.id=st.resource_id WHERE st.system_id=? AND st.resource_id=? AND st.active
+   AND u.status='active' AND (u.ends_at IS NULL OR u.ends_at>unixepoch())
+   AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=st.system_id AND e.user_id=u.id))`, ev.SystemID, ev.UserID).Scan(&active); err != nil {
+			return err
+		}
+		if !active {
+			profile["active"] = json.RawMessage(`false`)
+			if _, exists := profile["status"]; exists {
+				profile["status"] = json.RawMessage(`"disabled"`)
+			}
+		}
+		payload, err := json.Marshal(profile)
+		if err != nil {
+			return err
+		}
+		ev.PayloadJSON = string(payload)
+	}
+	// Some historical/manual outbox rows have no desired-state record. Their event
+	// revision still supplies the floor, without inventing active/provisioned state.
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,revision) VALUES(?,?,'user',0,0)`, ev.SystemID, ev.UserID); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(`UPDATE sync_resource_state SET delivery_revision=MAX(delivery_revision+1,revision+1,?) WHERE system_id=? AND resource_id=? RETURNING delivery_revision`, ev.Revision, ev.SystemID, ev.UserID).Scan(&ev.DeliveryRevision); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`UPDATE account_sync_events SET delivery_revision=?,payload_json=? WHERE id=?`, ev.DeliveryRevision, ev.PayloadJSON, ev.ID)
+	return err
 }

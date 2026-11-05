@@ -1305,7 +1305,7 @@ func (s *Store) DeletePairedSystem(systemID string, audit *AuditEvent) (bool, er
 	return true, tx.Commit()
 }
 
-const syncEventColumns = `id, user_id, system_id, event_type, payload_json, attempts, status, last_error, next_attempt_at, created_at, updated_at, claim_token, revision`
+const syncEventColumns = `id, user_id, system_id, event_type, payload_json, attempts, status, last_error, next_attempt_at, created_at, updated_at, claim_token, revision, delivery_revision`
 
 func scanSyncEvents(rows *sql.Rows) ([]AccountSyncEvent, error) {
 	defer rows.Close()
@@ -1315,7 +1315,7 @@ func scanSyncEvents(rows *sql.Rows) ([]AccountSyncEvent, error) {
 		var lastErr sql.NullString
 		var next sql.NullTime
 		if err := rows.Scan(&ev.ID, &ev.UserID, &ev.SystemID, &ev.EventType, &ev.PayloadJSON,
-			&ev.Attempts, &ev.Status, &lastErr, &next, &ev.CreatedAt, &ev.UpdatedAt, &ev.ClaimToken, &ev.Revision); err != nil {
+			&ev.Attempts, &ev.Status, &lastErr, &next, &ev.CreatedAt, &ev.UpdatedAt, &ev.ClaimToken, &ev.Revision, &ev.DeliveryRevision); err != nil {
 			return nil, err
 		}
 		if lastErr.Valid {
@@ -1355,14 +1355,14 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
 	}
 
 	// Pending is always deliverable: a create or update is failed at its attempt budget,
-	// a removal never is.
+	// removals and MFA resets never are.
 	rows, err := tx.Query(`SELECT `+syncEventColumns+` FROM account_sync_events
 		WHERE status = 'pending'
           AND NOT EXISTS (SELECT 1 FROM sync_delivery_attempts a
             WHERE a.system_id=account_sync_events.system_id AND a.user_id=account_sync_events.user_id)
           AND NOT EXISTS (SELECT 1 FROM account_sync_events older
             WHERE older.system_id=account_sync_events.system_id AND older.user_id=account_sync_events.user_id
-            AND older.status='pending' AND older.rowid<account_sync_events.rowid)
+            AND (older.status='pending' OR (older.status='failed' AND older.event_type='user.mfa_reset')) AND older.rowid<account_sync_events.rowid)
           AND NOT EXISTS (SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id
             AND (p.status='disabled' OR p.provisioning_hold
              OR p.system_type NOT IN `+deliverableTypes+`))
@@ -1380,6 +1380,9 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
 		return nil, tx.Commit()
 	}
 	for i := range events {
+		if err := prepareSyncDeliveryTx(tx, &events[i]); err != nil {
+			return nil, err
+		}
 		if err := refreshSyncEventRolesTx(tx, &events[i]); err != nil {
 			return nil, err
 		}
