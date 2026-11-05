@@ -64,10 +64,16 @@ func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 	if got := claim(); len(got) != 0 {
 		t.Fatalf("expired in-flight attempt reclaimed: %+v", got)
 	}
-	// Local deletion removes the old event but not its in-flight resource fence.
-	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision) VALUES('target',?,1,1,1)`, u.ID); err != nil {
+	// Claim preparation already owns this row. Seed only the desired state; keep
+	// its persisted delivery counter and the in-flight resource fence across restart.
+	if _, err := s.db.Exec(`UPDATE sync_resource_state SET active=1,provisioned=1,revision=1 WHERE system_id='target' AND resource_id=?`, u.ID); err != nil {
 		t.Fatal(err)
 	}
+	var deliveryRevision int
+	if err := s.db.QueryRow(`SELECT delivery_revision FROM sync_resource_state WHERE system_id='target' AND resource_id=?`, u.ID).Scan(&deliveryRevision); err != nil || deliveryRevision != first.DeliveryRevision {
+		t.Fatal("restart or fixture reset the delivery counter", deliveryRevision, err)
+	}
+	// Local deletion removes the old event but not its in-flight resource fence.
 	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
