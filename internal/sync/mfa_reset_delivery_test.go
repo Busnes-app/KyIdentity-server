@@ -2,7 +2,6 @@ package sync
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +18,7 @@ import (
 // versions and different bytes at an acknowledged version BEFORE revoking grants.
 // Accepted resets apply active/roles as well as deleting sessions and app passwords.
 func TestSignedMFAResetDelivery(t *testing.T) {
+	store.SkipOnPostgres(t, "edits a queued payload with SQLite json_set")
 	for _, scenario := range []string{"ordinary", "retry", "uncertain-applied", "restart", "restore", "legacy-demoted", "legacy-disabled", "removal-regain"} {
 		t.Run(scenario, func(t *testing.T) {
 			e, s, _, cleanup := setupTestSyncEngine(t)
@@ -162,7 +162,7 @@ func TestSignedMFAResetDelivery(t *testing.T) {
 					t.Fatal(err)
 				}
 				var resetRevision int
-				db, openErr := sql.Open("sqlite", syncTestDBs[s])
+				db, openErr := store.OpenRawForTest(syncTestDBs[s])
 				if openErr != nil {
 					t.Fatal(openErr)
 				}

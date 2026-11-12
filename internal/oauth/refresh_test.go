@@ -41,7 +41,7 @@ func newRefreshFixture(t *testing.T) *refreshFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", filepath.Join(dir, "test.db")+"?_pragma=busy_timeout(5000)")
+	raw, err := store.OpenRawForTest(filepath.Join(dir, "test.db") + "?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}

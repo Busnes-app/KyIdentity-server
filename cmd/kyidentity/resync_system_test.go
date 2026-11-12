@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -31,7 +30,7 @@ func TestResyncSystem(t *testing.T) {
 	if err := s.CreatePairedSystem(&store.PairedSystem{ID: "target", Name: "target", SystemType: "scim", CallbackURL: "https://app.test/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", dbPath)
+	raw, err := store.OpenRawForTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,9 +54,13 @@ func TestResyncSystem(t *testing.T) {
 			return
 		}
 		for _, ev := range events {
-			if ok, err := s.BeginSyncDelivery(ev, time.Minute); err != nil || !ok {
-				t.Error("begin", ok, err)
+			ok, err := s.BeginSyncDelivery(ev, time.Minute)
+			if err != nil {
+				t.Error("begin", err)
 				return
+			}
+			if !ok {
+				continue // superseded by a resync between claim and begin; the dispatcher skips it too
 			}
 			if err := s.FinishSyncDelivery(ev, "delivered", "", ev.Attempts+1, nil); err != nil {
 				t.Error(err)
@@ -194,7 +197,7 @@ func TestResyncSystemReportsAbandonedAttempt(t *testing.T) {
 	if err := runResyncSystem([]string{"--client", "kydrive"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", dbPath)
+	raw, err := store.OpenRawForTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

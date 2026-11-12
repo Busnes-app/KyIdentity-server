@@ -2,8 +2,8 @@ package api
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"net/url"
 	"strings"
 	"testing"
@@ -47,7 +47,7 @@ func TestSSOBounceToSecondApp(t *testing.T) {
 	}
 
 	// The user then works in KyNotes for 31 minutes; KyNotes never calls KyIdentity.
-	rawDB, err := sql.Open("sqlite", srv.cfg.DBPath)
+	rawDB, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -123,7 +122,7 @@ func TestSetupAmendmentRefusals(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			parent, a, _, file, db := amendmentFixture(t)
 			exec := func(q string) {
-				w, err := sql.Open("sqlite", db)
+				w, err := store.OpenRawForTest(db)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -168,7 +167,7 @@ func TestSetupAmendmentRefusals(t *testing.T) {
 					t.Fatalf("amendment %v accepted", args)
 				}
 			}
-			r, err := sql.Open("sqlite", db)
+			r, err := store.OpenRawForTest(db)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -45,16 +45,12 @@ func TestInstallerGroupsOwnedClaimsReadOnlyAndDrift(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT count(*) FROM audit_events`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	stores := []*Store{s}
-	if !OnPostgresTest() { // read-only inspection (apply-setup --check) is SQLite only for now
-		ro, err := OpenInstallerStore(path, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer ro.Close()
-		stores = append(stores, ro)
+	ro, err := OpenInstallerStore(path, true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, st := range stores {
+	defer ro.Close()
+	for _, st := range []*Store{s, ro} {
 		r, err := st.ApplyInstallerSetup(p, true)
 		if err != nil || len(r.Created) != 0 || len(r.Reused) != 6 {
 			t.Fatalf("read-only group inspection %+v %v", r, err)

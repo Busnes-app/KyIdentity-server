@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -95,12 +94,12 @@ func TestRecoveryEvidenceValidationAndUnavailableAuthority(t *testing.T) {
 			t.Fatalf("invalid request: %d %s", res.Code, res.Body.String())
 		}
 	}
-	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	for _, change := range []string{`provisioning_hold=1`, `status='disabled'`, `system_type='scim'`, `hmac_secret_encrypted='broken'`} {
+	for _, change := range []string{`provisioning_hold=TRUE`, `status='disabled'`, `system_type='scim'`, `hmac_secret_encrypted='broken'`} {
 		if _, err := raw.Exec(`UPDATE paired_systems SET `+change+` WHERE id=?`, sys.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -120,7 +119,7 @@ func TestRecoveryEvidenceValidationAndUnavailableAuthority(t *testing.T) {
 	}
 	// Mint before breaking audit so step-up setup itself remains real and successful.
 	grant := mintStepUp(t, srv, cookie, "POST "+path)
-	if _, err := raw.Exec(`DROP TABLE audit_events`); err != nil {
+	if _, err := raw.Exec(dropAuditTable); err != nil {
 		t.Fatal(err)
 	}
 	res := adminRequestWithStepUp(t, srv, "POST", path, cookie, valid, grant)

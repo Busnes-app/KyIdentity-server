@@ -35,15 +35,18 @@ func (s *Store) Postgres() bool { return s.postgres }
 // NewPostgres opens the shared Postgres database at rawURL and brings its schema to the
 // version this code knows. Logs and errors name only the host and the database.
 func NewPostgres(rawURL string) (*Store, error) {
-	return openPostgres(rawURL, "", true)
+	return openPostgres(rawURL, "", true, false)
 }
 
-func openPostgres(rawURL, searchPath string, migrate bool) (*Store, error) {
+// openPostgres opens the pools; migrate brings the schema up to date, otherwise the schema
+// must exist already. readOnly makes both pools read-only sessions (OpenInstallerStore's
+// inspection mode): every write is refused by the server, as SQLite's mode=ro does.
+func openPostgres(rawURL, searchPath string, migrate, readOnly bool) (*Store, error) {
 	where := pgdialect.Describe(rawURL)
 	if searchPath != "" {
 		rawURL = withSearchPath(rawURL, searchPath)
 	}
-	write, err := pgdialect.NewConnector(rawURL, false)
+	write, err := pgdialect.NewConnector(rawURL, readOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -225,35 +228,58 @@ var testSetup = sync.OnceValue(func() error {
 	return nil
 })
 
+// testSchema names the Postgres schema a test path maps to and the note that lets a later
+// run drop it once the test is gone.
+func testSchema(path string) (schema, note string, err error) {
+	if path == ":memory:" || path == "" {
+		var b [8]byte
+		_, _ = rand.Read(b[:])
+		return "kt_mem_" + hex.EncodeToString(b[:]), "memory:" + time.Now().UTC().Format(time.RFC3339), nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", "", err
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return "kt_" + hex.EncodeToString(sum[:12]), "path:" + abs, nil
+}
+
 // newTestPostgres is New(path) in a test binary with KYIDENTITY_TEST_DATABASE_URL set.
 func newTestPostgres(rawURL, path string, migrate bool) (*Store, error) {
 	if err := testSetup(); err != nil {
 		return nil, fmt.Errorf("preparing the test database: %w", err)
 	}
-	var schema, note string
-	if path == ":memory:" || path == "" {
-		var b [8]byte
-		_, _ = rand.Read(b[:])
-		schema, note = "kt_mem_"+hex.EncodeToString(b[:]), "memory:"+time.Now().UTC().Format(time.RFC3339)
-	} else {
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			return nil, err
-		}
-		sum := sha256.Sum256([]byte(abs))
-		schema, note = "kt_"+hex.EncodeToString(sum[:12]), "path:"+abs
-	}
-	db, err := sql.Open("kypg", rawURL)
+	schema, note, err := testSchema(path)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
 	if migrate {
+		db, err := sql.Open("kypg", rawURL)
+		if err != nil {
+			return nil, err
+		}
+		defer db.Close()
 		if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS "` + schema + `"; COMMENT ON SCHEMA "` + schema + `" IS '` + strings.ReplaceAll(note, "'", "''") + `'`); err != nil {
 			return nil, err
 		}
 	}
-	return openPostgres(rawURL, schema+",public", migrate)
+	return openPostgres(rawURL, schema+",public", migrate, false)
+}
+
+// OpenRawForTest opens the database New(path) uses, for tests that read or change rows
+// directly: the SQLite file (a ?query suffix is kept), or on Postgres its test schema
+// through the kypg driver, so the same SQL runs.
+func OpenRawForTest(path string) (*sql.DB, error) {
+	rawURL := testDatabaseURL()
+	if rawURL == "" {
+		return sql.Open("sqlite", path)
+	}
+	path, _, _ = strings.Cut(path, "?")
+	schema, _, err := testSchema(path)
+	if err != nil {
+		return nil, err
+	}
+	return sql.Open("kypg", withSearchPath(rawURL, schema+",public"))
 }
 
 // SkipOnPostgres skips a test that is about SQLite itself (it opens the file, reads the

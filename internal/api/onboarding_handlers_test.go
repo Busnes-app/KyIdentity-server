@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -296,7 +295,7 @@ func TestForgotAnswersBeforeTalkingToTheRelay(t *testing.T) {
 // verifyEmail marks u's address proven, as redeeming a mailed link would.
 func verifyEmail(t *testing.T, srv *Server, u *store.User) {
 	t.Helper()
-	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

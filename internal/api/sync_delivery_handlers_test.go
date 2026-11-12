@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -223,7 +222,7 @@ func TestBulkSyncDeliveryResumeKeepsEveryGate(t *testing.T) {
 // the mutation paths would only queue after configuring scope.
 func insertSyncEvent(t *testing.T, dbPath string, ev store.AccountSyncEvent) {
 	t.Helper()
-	raw, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
+	raw, err := store.OpenRawForTest(dbPath + "?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}

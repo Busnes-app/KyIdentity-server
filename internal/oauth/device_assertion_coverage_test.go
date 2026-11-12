@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 // does not expose, and for injecting write failures.
 func (f *signOnFixture) covRaw(t *testing.T) *sql.DB {
 	t.Helper()
-	raw, err := sql.Open("sqlite", f.dbPath+"?_pragma=busy_timeout(5000)")
+	raw, err := store.OpenRawForTest(f.dbPath + "?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +124,7 @@ func TestExchangeDeviceAssertionRefusesEndedAccount(t *testing.T) {
 // A lost write anywhere in issuance refuses the sign-on and never leaves an orphaned
 // device session: the deferred cleanup removes it.
 func TestExchangeDeviceAssertionFailsClosedOnStoreErrors(t *testing.T) {
+	store.SkipOnPostgres(t, "injects store failures with SQLite triggers")
 	for _, table := range []string{"device_signon_jtis", "sessions", "issued_tokens", "oidc_client_sessions"} {
 		t.Run(table, func(t *testing.T) {
 			f := newSignOnFixture(t)

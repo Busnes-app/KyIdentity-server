@@ -1,7 +1,7 @@
 package api
 
 import (
-	"database/sql"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,7 +44,7 @@ func TestSessionSettings(t *testing.T) {
 	}
 
 	// The new limits apply to sessions that already exist.
-	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

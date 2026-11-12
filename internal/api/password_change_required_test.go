@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -124,7 +123,7 @@ func TestPasswordChangeRequiredGatesIssuedTokens(t *testing.T) {
 	if err := db.RecordIssuedToken(&store.IssuedToken{JTI: jti, UserID: u.ID, ClientID: "app", SessionID: sid, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

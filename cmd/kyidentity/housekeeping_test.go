@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -32,7 +31,7 @@ func TestHousekeepingPurgesExpiredStepUpGrants(t *testing.T) {
 
 	purgeExpired(s, now)
 
-	raw, err := sql.Open("sqlite", path)
+	raw, err := store.OpenRawForTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -54,9 +54,6 @@ func TestInstallerPreparationOwnershipAndAtomicAudit(t *testing.T) {
 			t.Fatal("credential receipt drift accepted")
 		}
 	}
-	if OnPostgresTest() {
-		return // read-only inspection (apply-setup --check) is SQLite only for now
-	}
 	readOnly, err := OpenInstallerStore(dbPath, true)
 	if err != nil {
 		t.Fatal(err)

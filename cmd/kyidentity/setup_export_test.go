@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"testing"
@@ -111,7 +110,7 @@ func TestSetupClientExportScopeAndReadOnly(t *testing.T) {
 	if err := os.WriteFile(prepared.Admin.PasswordFile, password, 0600); err != nil {
 		t.Fatal(err)
 	}
-	writable, err := sql.Open("sqlite", db)
+	writable, err := store.OpenRawForTest(db)
 	if err != nil {
 		t.Fatal(err)
 	}

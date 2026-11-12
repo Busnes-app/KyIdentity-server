@@ -2,8 +2,8 @@ package api
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,7 +20,7 @@ func TestAppStepUpWithMaxAgeAndACR(t *testing.T) {
 	u := newUser(t, db, "user")
 	cookie := newSession(t, db, u, time.Now().UTC().Add(24*time.Hour))
 	newClient(t, db, "kypasswords", []string{"https://vault.example/cb"}, []string{"openid"})
-	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

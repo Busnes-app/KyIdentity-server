@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -45,7 +44,7 @@ func TestDisableUser(t *testing.T) {
 	if err := os.WriteFile(pass, []byte("User: kyq-bootstrap\nPassword: generated-password\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", dbPath)
+	raw, err := store.OpenRawForTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

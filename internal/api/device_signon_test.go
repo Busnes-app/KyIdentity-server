@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -365,9 +364,10 @@ func TestDeviceSignOnNotPermittedIsNamed(t *testing.T) {
 // engine's hook, so a trigger on the device login session's insert applies the reset's
 // device effect inside that window.
 func TestDeviceSignOnResetMidExchangeIsDisabled(t *testing.T) {
+	store.SkipOnPostgres(t, "injects a race with a SQLite trigger")
 	e := newSignOnEnv(t)
 	c := e.client(t, "public", "")
-	raw, err := sql.Open("sqlite", e.server.cfg.DBPath)
+	raw, err := store.OpenRawForTest(e.server.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

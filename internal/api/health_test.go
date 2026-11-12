@@ -1,8 +1,8 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,12 +94,12 @@ func TestHealthDatabaseDownOnFreshHandler(t *testing.T) {
 func TestHealthAuditDegradedWithFixedReason(t *testing.T) {
 	srv, _, _, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
-	rawDB, err := sql.Open("sqlite", srv.cfg.DBPath)
+	rawDB, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rawDB.Close()
-	if _, err := rawDB.Exec(`DROP TABLE audit_events`); err != nil {
+	if _, err := rawDB.Exec(dropAuditTable); err != nil {
 		t.Fatal(err)
 	}
 	if err := srv.audit.Record("health.test", "", "", "", "", "", "", "failure", nil); err == nil {
@@ -115,3 +115,7 @@ func TestHealthAuditDegradedWithFixedReason(t *testing.T) {
 		t.Fatalf("health disclosed audit error: %s", raw)
 	}
 }
+
+// dropAuditTable breaks audit persistence; Postgres needs CASCADE for the alert queue's
+// foreign key and trigger.
+var dropAuditTable = map[bool]string{false: `DROP TABLE audit_events`, true: `DROP TABLE audit_events CASCADE`}[store.OnPostgresTest()]

@@ -465,8 +465,7 @@ func runSetupInput(args []string, input io.Reader, out io.Writer) error {
 	}
 	*db = setupDatabasePath(*db)
 	// Setup is deliberately limited to an initialized product, never an accidental new DB.
-	st, err := os.Stat(*db)
-	if err != nil || !st.Mode().IsRegular() {
+	if sqliteFileMissing(*db) {
 		return errors.New("apply-setup requires an initialized KyIdentity database")
 	}
 	s, err := store.OpenInstallerStore(*db, *check)

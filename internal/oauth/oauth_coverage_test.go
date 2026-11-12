@@ -216,6 +216,7 @@ func TestExchangeAuthorizationCodeRefusals(t *testing.T) {
 // A storage failure at any write of the exchange returns no tokens, and a failed
 // spend leaves the code unspent.
 func TestExchangeAuthorizationCodeFailsClosedOnStoreErrors(t *testing.T) {
+	store.SkipOnPostgres(t, "injects store failures with SQLite triggers")
 	for _, c := range []struct{ table, op string }{
 		{"authorization_codes", "UPDATE"},
 		{"refresh_families", "INSERT"},

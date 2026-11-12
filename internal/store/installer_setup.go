@@ -73,13 +73,18 @@ func OpenInstallerStore(path string, inspect bool) (*Store, error) {
 		}
 	}
 	if rawURL != "" {
-		if inspect {
-			return nil, notOnPostgres("read-only inspection (apply-setup --check)")
-		}
+		searchPath := ""
 		if testDatabaseURL() != "" {
-			return newTestPostgres(rawURL, path, false)
+			if err := testSetup(); err != nil {
+				return nil, err
+			}
+			schema, _, err := testSchema(path)
+			if err != nil {
+				return nil, err
+			}
+			searchPath = schema + ",public"
 		}
-		return openPostgres(rawURL, "", false)
+		return openPostgres(rawURL, searchPath, false, inspect)
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {

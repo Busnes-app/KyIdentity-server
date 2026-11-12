@@ -195,6 +195,7 @@ func TestExistingSetupEncryptionKeyDefaultsToDataDirectory(t *testing.T) {
 // apply-setup refuses stray arguments, unreadable input and anything that is not an
 // initialized database, and prints nothing when it refuses.
 func TestRunSetupInputRefusals(t *testing.T) {
+	store.SkipOnPostgres(t, "checks the missing-SQLite-file message among its cases")
 	b, dir := credentialFixture(t)
 	file := filepath.Join(dir, "bundle.json")
 	if err := os.WriteFile(file, mustSetupJSON(t, b), 0600); err != nil {
@@ -315,6 +316,7 @@ func TestStageSetupRefusalsBeforeWrites(t *testing.T) {
 // Preparation never creates a database: a missing or unreadable one is refused before
 // any directory or credential is created.
 func TestStageSetupRequiresAnInitializedDatabase(t *testing.T) {
+	store.SkipOnPostgres(t, "checks the missing-SQLite-file message")
 	b, file, _ := stageFixture(t)
 	data := os.Getenv("KYIDENTITY_DATA_DIR")
 	raw := mustSetupJSON(t, b)
@@ -333,6 +335,7 @@ func TestStageSetupRequiresAnInitializedDatabase(t *testing.T) {
 // The default database is $KYIDENTITY_DB_PATH, then data/kyidentity.db, falling back to a
 // legacy kysignon.db only when the current one is absent.
 func TestSetupDatabasePathResolution(t *testing.T) {
+	store.SkipOnPostgres(t, "resolves SQLite file paths")
 	dir := t.TempDir()
 	t.Setenv("KYIDENTITY_DATA_DIR", dir)
 	t.Setenv("KYIDENTITY_DB_PATH", "/explicit/identity.db")
