@@ -201,6 +201,11 @@ Failures you may see, and what they mean:
 | `restore target directory is not empty` | Use an empty directory. The restore never overwrites |
 | a decrypt or integrity error | Wrong shares (from a different ceremony), a share mistyped, or a damaged file. Re-download and retry with the custodians |
 
+Restoring into Postgres (`KYIDENTITY_DATABASE_URL` or `_FILE` set): the same command loads
+the database into Postgres and applies the restored state there; add `-replace-database` to
+overwrite a database that holds rows. See [RUNNING.md](RUNNING.md#restoring-into-postgres).
+Step 3's empty-volume rule then applies to the keys only.
+
 ## Step 2: check what came out
 
 ```bash

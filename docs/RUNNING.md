@@ -127,10 +127,8 @@ The files must be readable by the container's non-root user (`kyidentity`).
 
 ## Running more than one replica
 
-> Not for production yet. Replicas share one Postgres database, and backup, Back up now,
-> the restore drill and `restore` are not supported on Postgres yet: they fail with an
-> error naming the limitation. A deployment you cannot back up or restore must not hold
-> real accounts. Run exactly one replica on SQLite until a release says otherwise.
+Replicas share one Postgres database. An install on SQLite moves there with
+`migrate-to-postgres` (below); backup, the restore drill and `restore` work on both.
 
 ### The shared database
 
@@ -169,8 +167,49 @@ All writes are serialised: every write transaction takes one advisory lock, as S
 one writer in at a time. Write throughput is therefore that of one connection, however many
 replicas run; reads are not affected.
 
-`apply-setup`, `disable-user` and `resync-system` act on the Postgres database when the
-variable is set. `backup-drill`, `export-capsule`, `deposit` and `restore` refuse.
+`apply-setup`, `disable-user`, `resync-system`, `backup-drill`, `export-capsule`,
+`deposit` and `restore` act on the Postgres database when the variable is set.
+
+### Backups on Postgres
+
+A backup copies the database out of one consistent Postgres snapshot into a SQLite file, so
+it takes no write lock and a capsule made on Postgres has the same members as one made on
+SQLite. Scheduled backups, Back up now and the drill work unchanged, and either kind of
+capsule restores onto either backend.
+
+### Moving an install from SQLite to Postgres
+
+1. Stop the server. The copy refuses a file with a `-wal` beside it, which a server that
+   is still running (or did not stop cleanly) leaves; start and stop it once if so.
+2. Create the database as above. Nothing else may have written to it.
+3. Copy the data:
+
+   ```bash
+   KYIDENTITY_DATABASE_URL_FILE=/run/secrets/db-url kyidentity migrate-to-postgres -from /data/kyidentity.db
+   ```
+
+   It copies every table in one transaction and prints each table's row count, then
+   counts again after the commit and fails if any table differs. It refuses a database
+   that holds any row, and a file at a schema version this release does not know (a file
+   from before schema versions is brought up to date on a private copy first). The file
+   is never modified. If the copy fails, the database is left as it was.
+4. Set the variable on the server and start it. The keys stay where they are; for
+   replicas, move them into a Secret as described under Keys.
+
+There is no command back. To return to SQLite, take a capsule on Postgres (Back up now or
+`export-capsule`) and restore it with the variable unset ([RESTORE.md](RESTORE.md)).
+
+### Restoring into Postgres
+
+Stop every replica, then run `restore` with the variable set. The keys and configuration go
+to `-to` as always. The capsule's database is loaded into Postgres in one transaction, which
+also ends the capsule's sessions and tokens, holds outbound provisioning, turns scheduled
+deposits off and writes the `system.restored` audit row, so no replica ever serves the
+capsule's logins. `kyidentity.db` and the restore marker are then removed from `-to`; start
+the servers with its `data` directory (or its keys in the Secret).
+
+A database that holds any row is refused. `-replace-database` empties every table first,
+inside the same transaction: if the load fails, the old rows are still there.
 
 ### Keys
 
