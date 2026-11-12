@@ -32,16 +32,23 @@ type Store struct {
 	// migration advisory lock.
 	postgres     bool
 	migrationKey int64
+	// path is what New was given; tests open more handles on it as replicas.
+	path string
 }
 
 var ErrLastActiveAdmin = errors.New("cannot remove the last active administrator")
 
 // New opens the SQLite database and creates the schema.
 func New(dbPath string) (*Store, error) {
+	open := newSQLite
 	if u := testDatabaseURL(); u != "" {
-		return newTestPostgres(u, dbPath, true)
+		open = func(path string) (*Store, error) { return newTestPostgres(u, path, true) }
 	}
-	return newSQLite(dbPath)
+	s, err := open(dbPath)
+	if s != nil {
+		s.path = dbPath
+	}
+	return s, err
 }
 
 func newSQLite(dbPath string) (*Store, error) {
