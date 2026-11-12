@@ -91,6 +91,10 @@ func claimAll(t *testing.T, stores []*Store, claim func(s *Store) ([]string, err
 			mu.Lock()
 			for _, id := range ids {
 				seen[id]++
+				if seen[id] > 1 {
+					mu.Unlock()
+					return fmt.Errorf("row %s was claimed twice", id)
+				}
 			}
 			mu.Unlock()
 		}

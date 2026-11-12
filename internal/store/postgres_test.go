@@ -135,3 +135,27 @@ func TestUnixepochTruncates(t *testing.T) {
 		time.Sleep(13 * time.Millisecond)
 	}
 }
+
+// The database URL carries a password: no error from opening it may repeat it.
+func TestPostgresErrorsNeverRepeatThePassword(t *testing.T) {
+	requirePostgres(t)
+	const secret = "not-the-password-7f3a9c"
+	u, err := url.Parse(testDatabaseURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.User = url.UserPassword(u.User.Username(), secret)
+	q := u.Query()
+	q.Set("sslmode", "disable")
+	u.RawQuery = q.Encode()
+	for _, raw := range []string{u.String(), strings.Replace(u.String(), "@", ":bad-port@", 1), "postgres://user:" + secret + "@[bad/db"} {
+		s, err := NewPostgres(raw)
+		if err == nil { // a server that trusts every connection ignores the password
+			s.Close()
+			continue
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("error repeats the password: %v", err)
+		}
+	}
+}
