@@ -542,8 +542,10 @@ func openImportSource(path string) (*sql.DB, func(), error) {
 	if _, err := os.Stat(path + "-wal"); err == nil {
 		return nil, nil, fmt.Errorf("%s has a write-ahead log beside it: stop the server that uses it (a clean stop folds the log into the file) and try again", path)
 	}
+	// immutable: read the file alone and create nothing beside it (mode=ro alone leaves a
+	// -wal and -shm next to a WAL-mode file). A log beside it is refused above.
 	open := func(p string) (*sql.DB, error) {
-		db, err := sql.Open("sqlite", "file:"+strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(p)+"?mode=ro")
+		db, err := sql.Open("sqlite", "file:"+strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(p)+"?mode=ro&immutable=1")
 		if err != nil {
 			return nil, err
 		}

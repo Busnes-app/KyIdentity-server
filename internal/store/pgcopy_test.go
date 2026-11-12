@@ -1,12 +1,16 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -308,5 +312,367 @@ func TestCopyRoundTripIsLossless(t *testing.T) {
 	empty = compareDumps(t, dump(t, origin.db, pgCatalogFor(t, origin)), dump(t, back.db, pgCatalogFor(t, back)))
 	if len(empty) > 0 {
 		t.Errorf("Postgres round trip: the fixture leaves %v empty", empty)
+	}
+}
+
+// liteFixture writes a SQLite file holding copyFixture's rows and returns its path.
+func liteFixture(t *testing.T, path string) string {
+	t.Helper()
+	s, err := newSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyFixture(t, s)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// rawSQLite edits a SQLite file with foreign keys off.
+func rawSQLite(t *testing.T, path string, queries ...string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, q := range queries {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+}
+
+// withOrphan copies src and adds a row Postgres refuses to the table copied last.
+func withOrphan(t *testing.T, src, dest string) string {
+	t.Helper()
+	if err := copyFile(src, dest); err != nil {
+		t.Fatal(err)
+	}
+	rawSQLite(t, dest, `INSERT INTO oidc_client_sessions(sid,client_id,session_id,user_id,created_at) VALUES('orphan','client-1','no-such-session','nobody','2026-01-01 00:00:00')`)
+	return dest
+}
+
+func pgDump(t *testing.T, s *Store) map[string][]string {
+	t.Helper()
+	return dump(t, s.db, pgCatalogFor(t, s))
+}
+
+// schemaObjects counts the relations in the schema a test URL points at.
+func schemaObjects(t *testing.T, rawURL string) int {
+	t.Helper()
+	db, err := sql.Open("kypg", rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pg_class WHERE relnamespace=current_schema()::regnamespace`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Writes committed while an export runs are in it whole or not at all: each writer
+// transaction inserts a pair of rows in two tables the export copies at different times.
+func TestExportIsAConsistentSnapshot(t *testing.T) {
+	requirePostgres(t)
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	var stop atomic.Bool
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !stop.Load() {
+				key := fmt.Sprintf("pair-%d", next.Add(1))
+				if err := s.inTx(func(tx *sql.Tx) error {
+					if _, err := tx.Exec(`INSERT INTO leases(name,token,until_ms) VALUES(?,'x',0)`, key); err != nil {
+						return err
+					}
+					_, err := tx.Exec(`INSERT INTO system_settings(key,value,updated_at) VALUES(?,'x',?)`, key, time.Now().UTC())
+					return err
+				}); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	defer func() { stop.Store(true); wg.Wait() }()
+	read := func(db *sql.DB, q string) map[string]bool {
+		rows, err := db.Query(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		out := map[string]bool{}
+		for rows.Next() {
+			var k string
+			if err := rows.Scan(&k); err != nil {
+				t.Fatal(err)
+			}
+			out[k] = true
+		}
+		return out
+	}
+	for i := range 5 {
+		path := filepath.Join(t.TempDir(), fmt.Sprintf("snap-%d.db", i))
+		before := next.Load()
+		if err := s.SnapshotTo(path); err != nil {
+			t.Fatal(err)
+		}
+		db := openSQLiteForTest(t, path)
+		leases := read(db, `SELECT name FROM leases WHERE name LIKE 'pair-%'`)
+		settings := read(db, `SELECT key FROM system_settings WHERE key LIKE 'pair-%'`)
+		if !maps.Equal(leases, settings) {
+			t.Fatalf("export %d holds half a transaction: %d lease rows, %d setting rows", i, len(leases), len(settings))
+		}
+		t.Logf("export %d: %d whole pairs, %d writes ran during it", i, len(leases), next.Load()-before)
+	}
+}
+
+// The exported file is a SQLite install: it opens without the legacy migration, finds a
+// user by a case-different name and has the triggers and views of a fresh install.
+func TestExportedFileIsAWorkingSQLiteInstall(t *testing.T) {
+	requirePostgres(t)
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUserNamed(t, s, "Mixed.Case")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "export.db")
+	if err := s.SnapshotTo(path); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("snapshot mode %v %v, want 0600", fi.Mode().Perm(), err)
+	}
+	if left, _ := filepath.Glob(path + "-*"); len(left) != 0 {
+		t.Fatalf("the snapshot left %v beside it", left)
+	}
+	runs := legacyRuns.Load()
+	lite, err := newSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lite.Close()
+	if legacyRuns.Load() != runs {
+		t.Fatal("opening the exported file ran the legacy migration")
+	}
+	got, err := lite.GetUserByUsername("mIXED.cASE")
+	if err != nil || got == nil || got.ID != u.ID {
+		t.Fatalf("user by a case-different name: %+v %v", got, err)
+	}
+	var versions string
+	if err := lite.db.QueryRow(`SELECT group_concat(version||':'||name) FROM schema_migrations`).Scan(&versions); err != nil || versions != "1:legacy" {
+		t.Fatalf("schema_migrations %q %v", versions, err)
+	}
+	fresh, err := newSQLite(filepath.Join(dir, "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Close()
+	objects := func(s *Store) string {
+		var names string
+		if err := s.db.QueryRow(`SELECT group_concat(type||' '||name, ', ') FROM (SELECT type, name FROM sqlite_master WHERE type IN ('trigger','view','index') ORDER BY 1, 2)`).Scan(&names); err != nil {
+			t.Fatal(err)
+		}
+		return names
+	}
+	if a, b := objects(lite), objects(fresh); a != b || !strings.Contains(a, "trigger ") {
+		t.Fatalf("exported file's triggers, views and indexes:\n%s\nfresh install's:\n%s", a, b)
+	}
+}
+
+// An import that fails part-way leaves nothing behind, and a database holding rows is
+// refused without a change.
+func TestImportLeavesPostgresUnchangedOnFailure(t *testing.T) {
+	requirePostgres(t)
+	dir := t.TempDir()
+	src := liteFixture(t, filepath.Join(dir, "src.db"))
+	bad := withOrphan(t, src, filepath.Join(dir, "bad.db"))
+	url := testURL(t, filepath.Join(dir, "pg"))
+	if _, err := ImportSQLite(url, bad, ImportOptions{}); err == nil || !strings.Contains(err.Error(), "oidc_client_sessions") {
+		t.Fatalf("an orphan row in the last table: %v", err)
+	}
+	if n := schemaObjects(t, url); n != 0 {
+		t.Fatalf("a failed import into a fresh database left %d relations", n)
+	}
+	if _, err := ImportSQLite(url, src, ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	pg := testPostgres(t, filepath.Join(dir, "pg"))
+	before := pgDump(t, pg)
+
+	// A file whose rows conflict with nothing: only the guard can refuse it.
+	other := filepath.Join(dir, "other.db")
+	o, err := newSQLite(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Close()
+	rawSQLite(t, other, `DELETE FROM enrollment_policies`, `DELETE FROM system_settings`,
+		`INSERT INTO users(id,username,display_name,email,password_hash,role,status) VALUES('u-other','other','Other','other@test.invalid','x','user','active')`)
+	if _, err := ImportSQLite(url, other, ImportOptions{}); err == nil || !strings.Contains(err.Error(), "not empty") {
+		t.Fatalf("an import over rows: %v", err)
+	}
+	compareDumps(t, before, pgDump(t, pg))
+}
+
+// -replace-database's import replaces every row in one transaction; a failure part-way
+// keeps the old rows.
+func TestImportReplaceIsOneTransaction(t *testing.T) {
+	requirePostgres(t)
+	dir := t.TempDir()
+	src := liteFixture(t, filepath.Join(dir, "src.db"))
+	small := filepath.Join(dir, "small.db")
+	sm, err := newSQLite(small)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createTestUserNamed(t, sm, "only-here")
+	sm.Close()
+
+	url := testURL(t, filepath.Join(dir, "pg"))
+	if _, err := ImportSQLite(url, src, ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ImportSQLite(url, small, ImportOptions{Replace: true}); err != nil {
+		t.Fatal(err)
+	}
+	pg := testPostgres(t, filepath.Join(dir, "pg"))
+	refURL := testURL(t, filepath.Join(dir, "ref"))
+	if _, err := ImportSQLite(refURL, small, ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	replaced := pgDump(t, pg)
+	compareDumps(t, pgDump(t, testPostgres(t, filepath.Join(dir, "ref"))), replaced)
+
+	bad := withOrphan(t, src, filepath.Join(dir, "bad.db"))
+	if _, err := ImportSQLite(url, bad, ImportOptions{Replace: true}); err == nil {
+		t.Fatal("a replace with an orphan row succeeded")
+	}
+	compareDumps(t, replaced, pgDump(t, pg))
+}
+
+// Imported rows keep their rowid and ids; new rows are numbered after them.
+func TestImportMovesIdentitiesPastImportedRows(t *testing.T) {
+	requirePostgres(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.db")
+	s, err := newSQLite(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := createTestUser(t, s)
+	provisioningFixture(t, s, "hr")
+	for i := range 4 {
+		if err := s.CreateAccountSyncEvent(&AccountSyncEvent{ID: fmt.Sprintf("ev-%d", i), UserID: u.ID, SystemID: "hr", EventType: "user.updated", PayloadJSON: "{}", Status: "delivered"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`DELETE FROM account_sync_events WHERE id='ev-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO alerts(id,rule,key,severity,status,title,summary,first_seen,last_seen) VALUES('al','r','k','warning','open','t','s',?,?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO alert_deliveries(id,alert_id,user_id,kind,status,next_attempt_at,created_at,updated_at) VALUES(9,'al','u','opened','pending',?,?,?)`, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	var wantRowids string
+	if err := s.db.QueryRow(`SELECT group_concat(id||'@'||rowid) FROM (SELECT id, rowid FROM account_sync_events ORDER BY rowid)`).Scan(&wantRowids); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if _, err := ImportSQLite(testURL(t, filepath.Join(dir, "pg")), src, ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	pg := testPostgres(t, filepath.Join(dir, "pg"))
+	var gotRowids string
+	if err := pg.db.QueryRow(`SELECT string_agg(id||'@'||rowid, ',' ORDER BY rowid) FROM account_sync_events`).Scan(&gotRowids); err != nil {
+		t.Fatal(err)
+	}
+	if gotRowids != wantRowids {
+		t.Fatalf("rowids on Postgres %s, on SQLite %s", gotRowids, wantRowids)
+	}
+	if err := pg.CreateAccountSyncEvent(&AccountSyncEvent{ID: "ev-new", UserID: u.ID, SystemID: "hr", EventType: "user.updated", PayloadJSON: "{}", Status: "pending"}); err != nil {
+		t.Fatal("a new event after the import:", err)
+	}
+	var order string
+	if err := pg.db.QueryRow(`SELECT string_agg(id, ',' ORDER BY rowid) FROM account_sync_events`).Scan(&order); err != nil || order != "ev-0,ev-2,ev-3,ev-new" {
+		t.Fatalf("events by rowid: %q %v", order, err)
+	}
+	var id int64
+	if err := pg.db.QueryRow(`INSERT INTO alert_deliveries(alert_id,user_id,kind,status,next_attempt_at,created_at,updated_at) VALUES('al','v','opened','pending',?,?,?) RETURNING id`, now, now, now).Scan(&id); err != nil || id <= 9 {
+		t.Fatalf("a new alert delivery got id %d (%v), want above 9", id, err)
+	}
+}
+
+// dirState is every file in dir with its content hash.
+func dirState(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[e.Name()] = fmt.Sprintf("%x", sha256.Sum256(b))
+	}
+	return out
+}
+
+// The import reads its file and nothing else: a versioned file is opened read-only, an
+// unversioned one is brought up to date on a copy, and a newer one is refused by version.
+func TestImportNeverWritesTheFile(t *testing.T) {
+	requirePostgres(t)
+	srcDir := t.TempDir()
+	src := liteFixture(t, filepath.Join(srcDir, "kyidentity.db"))
+	before := dirState(t, srcDir)
+	if _, err := ImportSQLite(testURL(t, filepath.Join(t.TempDir(), "pg")), src, ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if after := dirState(t, srcDir); !maps.Equal(before, after) {
+		t.Fatalf("the import changed the source directory: %v -> %v", before, after)
+	}
+
+	legacyDir := t.TempDir()
+	legacy := filepath.Join(legacyDir, "old.db")
+	s, err := newSQLite(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := createTestUserNamed(t, s, "Legacy.User")
+	forgetSchemaVersions(t, s)
+	s.Close()
+	before = dirState(t, legacyDir)
+	runs := legacyRuns.Load()
+	pgPath := filepath.Join(t.TempDir(), "pg")
+	if _, err := ImportSQLite(testURL(t, pgPath), legacy, ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if legacyRuns.Load() != runs+1 {
+		t.Fatal("an unversioned file was not brought up to date once")
+	}
+	if after := dirState(t, legacyDir); !maps.Equal(before, after) {
+		t.Fatalf("the import changed the unversioned file's directory: %v -> %v", before, after)
+	}
+	if got, err := testPostgres(t, pgPath).GetUserByUsername("legacy.user"); err != nil || got == nil || got.ID != u.ID {
+		t.Fatalf("the unversioned file's user: %+v %v", got, err)
+	}
+
+	rawSQLite(t, src, `INSERT INTO schema_migrations(version,name,applied_at) VALUES(99,'future','2030-01-01 00:00:00')`)
+	_, err = ImportSQLite(testURL(t, filepath.Join(t.TempDir(), "pg")), src, ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "[1 99]") || !strings.Contains(err.Error(), "knows [1]") {
+		t.Fatalf("a file at a newer schema version: %v", err)
 	}
 }
