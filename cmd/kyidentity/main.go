@@ -571,7 +571,11 @@ func openStoreForBackup(cfg *config.Config) *store.Store {
 	}
 	dbStore, err := openStore(cfg)
 	if err != nil {
-		log.Fatalf("Failed to open the database: %v", err)
+		where := cfg.DBPath
+		if cfg.DatabaseURL != "" {
+			where = pgdialect.Describe(cfg.DatabaseURL)
+		}
+		log.Fatalf("Failed to open the database at %s: %v", where, err)
 	}
 	return dbStore
 }
