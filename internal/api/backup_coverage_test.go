@@ -101,6 +101,16 @@ func TestBackupPairedButKeyFileMissing(t *testing.T) {
 	if err := os.Remove(recoveryclient.RecoveryKeyPath(srv.cfg.DataDir)); err != nil {
 		t.Fatal(err)
 	}
+	// The settings copy puts a lost file back.
+	if st := covStatus(t, srv, cookie); st["key_pinned"] != true || st["recovery_key_error"] != nil {
+		t.Fatalf("status after losing only the file: %v", st)
+	}
+	if err := os.Remove(recoveryclient.RecoveryKeyPath(srv.cfg.DataDir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.DeleteSetting("kyrecovery_public_key"); err != nil {
+		t.Fatal(err)
+	}
 	st := covStatus(t, srv, cookie)
 	if msg, _ := st["recovery_key_error"].(string); !strings.Contains(msg, "recovery.pub is missing") {
 		t.Fatalf("status: %v", st)

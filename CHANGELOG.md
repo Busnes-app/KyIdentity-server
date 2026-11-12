@@ -4,6 +4,15 @@
 
 ### Changes
 
+- **Replicas on Postgres.** KyIdentity can run as two or more replicas behind a load balancer, on a shared Postgres 16+ database. SQLite stays the default and is unchanged; nothing changes until the variables below are set. See [Running more than one replica](docs/RUNNING.md#running-more-than-one-replica).
+  - `KYIDENTITY_DATABASE_URL` or `KYIDENTITY_DATABASE_URL_FILE` (a mounted Secret) selects Postgres. The URL is never logged. The database must be UTF8 with the C locale, checked at startup, so names compare as on SQLite.
+  - `KYIDENTITY_REPLICATED=true` makes a replica load all four keys from a mounted Secret (`KYIDENTITY_SECRET_KEY_FILE`, `KYIDENTITY_ENCRYPTION_KEY_FILE`, `KYIDENTITY_RSA_KEY_PATH`, `KYIDENTITY_VAPID_KEY_PATH`) and never generate one. It refuses SQLite, and refuses to start with no administrator and no `BOOTSTRAP_ADMIN_PASS`.
+  - Rate limits, push relay keys, session limits and once-only work (scheduled backup, Back up now, the restore drill, the attestation sweep, relay registration, alert mail) are held or leased in the database, so replicas agree.
+  - The schema is versioned: migrations run once, in order, under a lock, on both backends. A database written by a newer release is refused.
+  - Backup, the restore drill and `restore` work on Postgres with the same sealed capsule, and a capsule from either backend restores onto either. `restore -replace-database` empties a Postgres database inside the restore's transaction.
+  - `kyidentity migrate-to-postgres -from <file>` copies a stopped SQLite install into an empty Postgres database in one transaction. It is one-way; the file is not modified.
+  - The pinned backup key is also kept in the database, sealed under the encryption key, so a replica without `recovery.pub` can seal the scheduled backup. A scheduled backup that finds a pinned key it cannot load is now audited as a failed `admin.backup_run` instead of being skipped quietly; this applies to single-instance installs too.
+
 - Give signed user deliveries their own persisted monotonic versions, so MFA resets revoke downstream credentials without colliding with profile state. Resets retry through outages, retain uncertain fences, and preserve inactive access and current app roles across upgrade and restore.
 
 - App-backed SCIM and signed webhooks always send explicit per-app roles, including `roles: []` for no definitions or assignments and after deleting the final role. They no longer inherit the global directory role. Before a new attempt, unfenced old queued user events also refresh only their roles from current app assignments; held uncertain attempts retain their evidence and existing operator recovery requirement. ID-token/UserInfo per-app `roles` and the separate opt-in legacy `role` claim are preserved. **Before upgrading KyMessages, KyPulse and ky-server-base, assign dedicated administrators an explicit per-app `admin` role**, coordinate receiver updates and resync existing connectors; see [rollout steps](docs/UPGRADES-AND-RECOVERY.md#explicit-application-administrators).

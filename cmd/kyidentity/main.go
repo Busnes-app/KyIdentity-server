@@ -595,13 +595,14 @@ func runBackupDrill() {
 	// log.Fatalf skips defers, and a lease left behind would refuse the next drill.
 	result, err := func() (*backup.DrillResult, error) {
 		defer release()
+		// Before the collect: on a replica this is what writes recovery.pub, a capsule member.
+		pinned, err := backup.LoadRecoveryKey(cfg, dbStore)
+		if err != nil && !errors.Is(err, backup.ErrNotPaired) {
+			return nil, fmt.Errorf("recovery key: %w", err)
+		}
 		payload, err := backup.CollectSealable(cfg, dbStore, appversion.String())
 		if err != nil {
 			return nil, fmt.Errorf("failed to collect backup payload: %w", err)
-		}
-		pinned, err := backup.LoadRecoveryKey(cfg.DataDir, dbStore)
-		if err != nil && !errors.Is(err, backup.ErrNotPaired) {
-			return nil, fmt.Errorf("recovery key: %w", err)
 		}
 		return backup.RunRestoreDrill(context.Background(), cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
 	}()
@@ -639,7 +640,7 @@ func runExportCapsule(outPath string) {
 	dbStore := openStoreForBackup(cfg)
 	defer dbStore.Close()
 
-	key, err := backup.LoadRecoveryKey(cfg.DataDir, dbStore)
+	key, err := backup.LoadRecoveryKey(cfg, dbStore)
 	if err != nil {
 		log.Fatalf("Recovery key: %v", err)
 	}
@@ -707,6 +708,11 @@ func describe(res backup.Result) string {
 // cannot end the process between KyRecovery storing a capsule and the receipt being written.
 func backupLoop(ctx context.Context, cfg *config.Config, dbStore *store.Store, auditLogger *audit.Logger) {
 	client := backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery)
+	// An install paired before the key was kept in the database shares it now, before
+	// another replica's backup comes due and needs it.
+	if _, err := backup.LoadRecoveryKey(cfg, dbStore); err != nil && !errors.Is(err, backup.ErrNotPaired) {
+		log.Printf("[BACKUP] recovery key: %s", backup.AuditSafe(err.Error()))
+	}
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -740,7 +746,15 @@ func scheduledBackup(ctx context.Context, cfg *config.Config, dbStore *store.Sto
 		return
 	}
 	res, err := backup.RunBackup(context.WithoutCancel(ctx), cfg, dbStore, dbStore, client, appversion.String())
-	if errors.Is(err, backup.ErrNotPaired) || errors.Is(err, backup.ErrNoDestination) {
+	if errors.Is(err, backup.ErrNotPaired) {
+		// Nothing to back up to is quiet. A pinned key this server cannot load is a backup
+		// that silently never runs.
+		if !backup.KeyPinned(dbStore) {
+			return
+		}
+		err = fmt.Errorf("a recovery key is pinned but this server cannot load it: %w", err)
+	}
+	if errors.Is(err, backup.ErrNoDestination) {
 		return
 	}
 	action, outcome, details := backup.Outcome(res, err)

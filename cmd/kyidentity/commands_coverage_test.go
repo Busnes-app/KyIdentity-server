@@ -61,7 +61,7 @@ func commandInstance(t *testing.T, pinned bool) (*config.Config, recoverykey.Pri
 		if priv, err = recoverykey.Generate(); err != nil {
 			t.Fatal(err)
 		}
-		if err := backup.StoreRecoveryKey(cfg.DataDir, s, backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		if err := backup.StoreRecoveryKey(cfg, s, backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
 			t.Fatal(err)
 		}
 	}

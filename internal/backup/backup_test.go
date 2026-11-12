@@ -67,7 +67,7 @@ func pair(t *testing.T, cfg *config.Config, st *store.Store) recoverykey.Private
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := backup.StoreRecoveryKey(cfg.DataDir, st, backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+	if err := backup.StoreRecoveryKey(cfg, st, backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if err := backup.StorePairing(st, cfg.EncryptionKey, "https://recovery.example.test", "kyrec_live_t"); err != nil {
@@ -199,7 +199,7 @@ func TestDrillProvesARestoreIsUsable(t *testing.T) {
 	}
 
 	priv := pair(t, cfg, st)
-	pinned, err := backup.LoadRecoveryKey(cfg.DataDir, st)
+	pinned, err := backup.LoadRecoveryKey(cfg, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestLocalCopiesWithoutKyRecovery(t *testing.T) {
 	cfg.BackupDir = filepath.Join(t.TempDir(), "capsules")
 	cfg.BackupKeep = 2
 	priv, _ := recoverykey.Generate()
-	if err := backup.StoreRecoveryKey(cfg.DataDir, st, backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+	if err := backup.StoreRecoveryKey(cfg, st, backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
 		t.Fatal(err)
 	}
 	fake := &fakeStore{}
@@ -313,12 +313,13 @@ func TestRecoveryTokenIsNeverStoredInTheClear(t *testing.T) {
 			t.Errorf("%s holds the token in the clear", key)
 		}
 	}
-	p, err := backup.LoadPairing(cfg.DataDir, st, cfg.EncryptionKey)
+	p, err := backup.LoadPairing(cfg, st)
 	if err != nil || p.Token != "kyrec_live_t" {
 		t.Fatalf("load: %+v %v", p, err)
 	}
-	other := make([]byte, config.KeyLength)
-	if _, err := backup.LoadPairing(cfg.DataDir, st, other); err == nil {
+	other := *cfg
+	other.EncryptionKey = make([]byte, config.KeyLength)
+	if _, err := backup.LoadPairing(&other, st); err == nil {
 		t.Error("the token decrypted under a different deployment key")
 	}
 }
@@ -327,6 +328,9 @@ func TestALostKeyPinIsNotSilentlyUnpaired(t *testing.T) {
 	cfg, st := instance(t)
 	pair(t, cfg, st)
 	if err := os.Remove(backup.RecoveryKeyPath(cfg.DataDir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteSetting("kyrecovery_public_key"); err != nil {
 		t.Fatal(err)
 	}
 	_, err := backup.RunBackup(context.Background(), cfg, st, st, &fakeStore{}, "1.0.0")
@@ -356,7 +360,7 @@ func TestClearPairingRemovesRowsAndKeepsThePin(t *testing.T) {
 	if _, err := st.GetSetting("kyrecovery_token_enc"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("token row: %v", err)
 	}
-	if k, err := backup.LoadRecoveryKey(cfg.DataDir, st); err != nil || k.Public.ID() != priv.Public().ID() {
+	if k, err := backup.LoadRecoveryKey(cfg, st); err != nil || k.Public.ID() != priv.Public().ID() {
 		t.Errorf("key pin lost: %v", err)
 	}
 	if err := backup.ClearPairing(st); !errors.Is(err, backup.ErrNotPaired) {
@@ -379,7 +383,7 @@ func TestClearPairingRemovesRowsAndKeepsThePin(t *testing.T) {
 func TestAPairingSealedBeforeTheLibStillOpens(t *testing.T) {
 	cfg, st := instance(t)
 	priv, _ := recoverykey.Generate()
-	if err := backup.StoreRecoveryKey(cfg.DataDir, st, backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+	if err := backup.StoreRecoveryKey(cfg, st, backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := crypto.EncryptAESGCM(crypto.DeriveKey(cfg.EncryptionKey, "kysignon:setting:kyrecovery_token"), []byte("kyrec_live_old"))
@@ -392,7 +396,7 @@ func TestAPairingSealedBeforeTheLibStillOpens(t *testing.T) {
 	if err := st.SetSetting("kyrecovery_token_enc", sealed); err != nil {
 		t.Fatal(err)
 	}
-	p, err := backup.LoadPairing(cfg.DataDir, st, cfg.EncryptionKey)
+	p, err := backup.LoadPairing(cfg, st)
 	if err != nil || p.Token != "kyrec_live_old" {
 		t.Fatalf("%v %+v", err, p)
 	}
@@ -401,7 +405,7 @@ func TestAPairingSealedBeforeTheLibStillOpens(t *testing.T) {
 // The store's not-found must read as the lib's, or a never-paired instance would look broken.
 func TestSettingsAdapterMapsNotFound(t *testing.T) {
 	cfg, st := instance(t)
-	if _, err := backup.LoadRecoveryKey(cfg.DataDir, st); !errors.Is(err, backup.ErrNotPaired) {
+	if _, err := backup.LoadRecoveryKey(cfg, st); !errors.Is(err, backup.ErrNotPaired) {
 		t.Fatalf("fresh store: %v", err)
 	}
 	if backup.HasPairing(st) {
@@ -419,5 +423,129 @@ func TestPrivateDestinationRefusalNamesTheSwitch(t *testing.T) {
 	}
 	if err := backup.ValidateRecoveryURL("https://192.168.1.91", true); err != nil {
 		t.Fatalf("with the switch: %v", err)
+	}
+}
+
+// replica is a second server on the same database with its own, empty data directory.
+func replica(t *testing.T, cfg *config.Config) *config.Config {
+	t.Helper()
+	r := *cfg
+	r.DataDir = t.TempDir()
+	return &r
+}
+
+// A replica that did not do the pairing has no recovery.pub. It takes the key from the
+// settings, so whichever replica the scheduler picks can seal the backup.
+func TestEveryReplicaLoadsThePinnedKey(t *testing.T) {
+	cfg, st := instance(t)
+	priv := pair(t, cfg, st)
+	other := replica(t, cfg)
+	k, err := backup.LoadRecoveryKey(other, st)
+	if err != nil || k.Public.ID() != priv.Public().ID() || k.Threshold != 2 || k.TotalShares != 3 {
+		t.Fatalf("replica load: %+v %v", k, err)
+	}
+	third := replica(t, cfg)
+	third.BackupDir, third.BackupKeep = t.TempDir(), 1
+	if _, err := backup.RunBackup(context.Background(), third, st, st, &fakeStore{}, "1.0.0"); err != nil {
+		t.Fatal("a replica with an empty data directory could not back up:", err)
+	}
+	// The key never sits in the settings in the clear.
+	v, err := st.GetSetting("kyrecovery_public_key")
+	if err != nil || strings.Contains(v, hex.EncodeToString(priv.Public().Bytes()[:16])) {
+		t.Fatalf("settings copy: %v", err)
+	}
+}
+
+// An install paired before the settings copy existed gains one the first time the server
+// that holds recovery.pub loads the key.
+func TestAnEarlierPairingIsSharedOnFirstLoad(t *testing.T) {
+	cfg, st := instance(t)
+	priv := pair(t, cfg, st)
+	if err := st.DeleteSetting("kyrecovery_public_key"); err != nil {
+		t.Fatal(err)
+	}
+	other := replica(t, cfg)
+	if _, err := backup.LoadRecoveryKey(other, st); !errors.Is(err, backup.ErrNotPaired) {
+		t.Fatalf("a replica loaded a key nobody shared: %v", err)
+	}
+	if _, err := backup.LoadRecoveryKey(cfg, st); err != nil {
+		t.Fatal(err)
+	}
+	if k, err := backup.LoadRecoveryKey(other, st); err != nil || k.Public.ID() != priv.Public().ID() {
+		t.Fatalf("replica load after the holder shared it: %v", err)
+	}
+}
+
+// Whoever can write the database, and nothing else, must not choose the key capsules are
+// sealed to. Every forged or relocated copy leaves the replica without a key.
+func TestADatabaseWriterCannotChooseTheRecoveryKey(t *testing.T) {
+	attacker, err := recoverykey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := make([]byte, config.KeyLength)
+	foreign[0] = 1
+	sealedUnder := func(key []byte, label string) string {
+		t.Helper()
+		v, err := crypto.EncryptAESGCM(crypto.DeriveKey(key, label), attacker.Public().Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	cfg, st := instance(t)
+	pair(t, cfg, st)
+	token, err := st.GetSetting("kyrecovery_token_enc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, forged := range map[string]string{
+		"in the clear":                 hex.EncodeToString(attacker.Public().Bytes()),
+		"sealed under another key":     sealedUnder(foreign, "kyidentity:setting:kyrecovery_public_key"),
+		"sealed for another setting":   sealedUnder(cfg.EncryptionKey, "kysignon:setting:kyrecovery_token"),
+		"another sealed setting moved": token,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := st.SetSetting("kyrecovery_public_key", forged); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetSetting("kyrecovery_key_id", attacker.Public().ID()); err != nil {
+				t.Fatal(err)
+			}
+			other := replica(t, cfg)
+			other.BackupDir, other.BackupKeep = t.TempDir(), 1
+			if k, err := backup.LoadRecoveryKey(other, st); err == nil {
+				t.Fatalf("loaded key %s from a forged copy", k.Public.ID())
+			}
+			if _, err := backup.RunBackup(context.Background(), other, st, st, &fakeStore{}, "1.0.0"); err == nil {
+				t.Fatal("a backup was sealed after the copy was forged")
+			}
+			if _, err := os.Stat(backup.RecoveryKeyPath(other.DataDir)); err == nil {
+				t.Fatal("the forged key was written to recovery.pub")
+			}
+			if left, _ := os.ReadDir(other.BackupDir); len(left) != 0 {
+				t.Fatalf("capsules written: %v", left)
+			}
+		})
+	}
+}
+
+// A copy of a key that is no longer the pinned one is never written out.
+func TestAStaleCopyIsNotWritten(t *testing.T) {
+	cfg, st := instance(t)
+	pair(t, cfg, st)
+	attacker, err := recoverykey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSetting("kyrecovery_key_id", attacker.Public().ID()); err != nil {
+		t.Fatal(err)
+	}
+	other := replica(t, cfg)
+	if _, err := backup.LoadRecoveryKey(other, st); err == nil {
+		t.Fatal("loaded a key that does not match the pin")
+	}
+	if _, err := os.Stat(backup.RecoveryKeyPath(other.DataDir)); err == nil {
+		t.Fatal("a key that is not pinned was written to recovery.pub")
 	}
 }

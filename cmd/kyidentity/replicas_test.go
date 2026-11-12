@@ -155,3 +155,43 @@ func TestScheduledBackupRunsOnOneReplica(t *testing.T) {
 		t.Fatalf("the due backup did not run once the lease was free: %d capsules", n)
 	}
 }
+
+// A replica whose data directory holds no recovery.pub takes the pinned key from the
+// database and runs the due backup. With no copy to take it from, the run is audited as
+// a failure: it used to return without a word, and nothing was backed up.
+func TestScheduledBackupOnAReplicaWithoutTheKeyFile(t *testing.T) {
+	cfg, _ := commandInstance(t, true)
+	cfg.BackupDir = t.TempDir()
+	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
+		t.Fatal(err)
+	}
+	s := handles(t, cfg.DBPath, 1)[0]
+	replica := *cfg
+	replica.DataDir = t.TempDir()
+	failures := func() int {
+		t.Helper()
+		_, n, err := s.SearchAuditEvents(store.AuditFilter{Action: "admin.backup_run", Outcome: "failure", Limit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	scheduledBackup(context.Background(), &replica, s, nil, audit.NewLogger(s))
+	copies, err := backup.ListLocalCopies(cfg.BackupDir, cfg.AppName)
+	if err != nil || len(copies) != 1 || failures() != 0 {
+		t.Fatalf("replica without recovery.pub: %d capsules, %d failures, %v", len(copies), failures(), err)
+	}
+
+	for _, key := range []string{"kyrecovery_public_key", "backup_last_attempt"} {
+		if err := s.DeleteSetting(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bare := *cfg
+	bare.DataDir = t.TempDir()
+	scheduledBackup(context.Background(), &bare, s, nil, audit.NewLogger(s))
+	if failures() != 1 {
+		t.Fatal("a pinned key this replica cannot load was skipped without an audit row")
+	}
+}

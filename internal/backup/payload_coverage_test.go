@@ -125,7 +125,7 @@ func TestCollectSealableCarriesThePinAndDefaultsThePort(t *testing.T) {
 func TestSealNamesServiceAndPinnedKey(t *testing.T) {
 	cfg, st := instance(t)
 	priv := pair(t, cfg, st)
-	key, err := backup.LoadRecoveryKey(cfg.DataDir, st)
+	key, err := backup.LoadRecoveryKey(cfg, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestSealNamesServiceAndPinnedKey(t *testing.T) {
 func TestParsePinRequestRefusesBadInput(t *testing.T) {
 	cfg, st := instance(t)
 	pair(t, cfg, st)
-	key, err := backup.LoadRecoveryKey(cfg.DataDir, st)
+	key, err := backup.LoadRecoveryKey(cfg, st)
 	if err != nil {
 		t.Fatal(err)
 	}
