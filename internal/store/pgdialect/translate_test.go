@@ -15,7 +15,7 @@ func TestTranslate(t *testing.T) {
 		{`INSERT OR IGNORE INTO t(a) SELECT x FROM (SELECT 1 x) s; INSERT OR IGNORE INTO u VALUES(?)`, `INSERT INTO t(a) SELECT x FROM (SELECT 1 x) s ON CONFLICT DO NOTHING; INSERT INTO u VALUES($1) ON CONFLICT DO NOTHING`},
 		{`INSERT INTO t(a) VALUES(?) ON CONFLICT(a) DO NOTHING`, `INSERT INTO t(a) VALUES($1) ON CONFLICT(a) DO NOTHING`},
 		{`INSERT OR REPLACE INTO t VALUES(1)`, `INSERT OR REPLACE INTO t VALUES(1)`},
-		{`SELECT 1 WHERE e>unixepoch() AND f<UNIXEPOCH ( )+?`, `SELECT 1 WHERE e>(extract(epoch from statement_timestamp())::bigint) AND f<(extract(epoch from statement_timestamp())::bigint)+$1`},
+		{`SELECT 1 WHERE e>unixepoch() AND f<UNIXEPOCH ( )+?`, `SELECT 1 WHERE e>(floor(extract(epoch from statement_timestamp()))::bigint) AND f<(floor(extract(epoch from statement_timestamp()))::bigint)+$1`},
 		{`SELECT unixepoch_x, my_unixepoch() FROM t`, `SELECT unixepoch_x, my_unixepoch() FROM t`},
 		{`SELECT 'unixepoch()' FROM t`, `SELECT 'unixepoch()' FROM t`},
 		{`WHERE action LIKE ? ESCAPE '\' AND b NOT like 'group:%'`, `WHERE action ILIKE $1 ESCAPE '\' AND b NOT ILIKE 'group:%'`},

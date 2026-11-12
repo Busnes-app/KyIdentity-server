@@ -66,6 +66,8 @@ func scanLogoutDelivery(row interface{ Scan(...any) error }) (*LogoutDelivery, e
 // ClaimLogoutDelivery leases the oldest due delivery whose client has nothing in flight,
 // or returns nil, so one unresponsive receiver never holds more than one worker. A lapsed
 // lease is claimable again; a delivery out of attempts is marked failed rather than retried.
+// The UPDATE's own WHERE repeats the subquery's test, so a row is only taken while it is
+// still claimable, whatever serialises the writers.
 func (s *Store) ClaimLogoutDelivery(lease time.Duration) (*LogoutDelivery, error) {
 	now := time.Now().UTC()
 	tx, err := s.db.Begin()
@@ -80,8 +82,10 @@ func (s *Store) ClaimLogoutDelivery(lease time.Duration) (*LogoutDelivery, error
 	token := uuid.NewString()
 	res, err := tx.Exec(`UPDATE logout_deliveries SET claim_token=?, lease_until=?, attempts=attempts+1, updated_at=?
  WHERE id=(SELECT id FROM logout_deliveries WHERE status='queued' AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) AND attempts<?
-   AND client_id NOT IN (SELECT client_id FROM logout_deliveries WHERE status='queued' AND lease_until>?) ORDER BY created_at LIMIT 1)`,
-		token, now.Add(lease), now, now, now, logoutDeliveryAttempts, now)
+   AND client_id NOT IN (SELECT client_id FROM logout_deliveries WHERE status='queued' AND lease_until>?) ORDER BY created_at LIMIT 1)
+ AND status='queued' AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) AND attempts<?
+ AND client_id NOT IN (SELECT client_id FROM logout_deliveries WHERE status='queued' AND lease_until>?)`,
+		token, now.Add(lease), now, now, now, logoutDeliveryAttempts, now, now, now, logoutDeliveryAttempts, now)
 	if err != nil {
 		return nil, err
 	}

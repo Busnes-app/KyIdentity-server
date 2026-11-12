@@ -160,7 +160,9 @@ func (s *Store) ScheduleReconcileJobs(now time.Time) error {
 }
 
 // ClaimReconcileJob takes the oldest queued job, or a running one whose lease expired.
-// A job interrupted repeatedly is failed rather than retried forever.
+// A job interrupted repeatedly is failed rather than retried forever. The UPDATE's own
+// WHERE repeats the subquery's test, so a row is only taken while it is still claimable,
+// whatever serialises the writers.
 func (s *Store) ClaimReconcileJob(lease time.Duration) (*ReconcileJob, error) {
 	now := time.Now().UTC()
 	tx, err := s.db.Begin()
@@ -175,7 +177,8 @@ func (s *Store) ClaimReconcileJob(lease time.Duration) (*ReconcileJob, error) {
 	token := uuid.NewString()
 	job, err := scanReconcileJob(tx.QueryRow(`UPDATE sync_reconcile_jobs SET status='running',claim_token=?,lease_until=?,started_at=COALESCE(started_at,?),attempts=attempts+1
  WHERE id=(SELECT id FROM sync_reconcile_jobs WHERE (status='queued' OR (status='running' AND lease_until<=?)) AND attempts<? ORDER BY created_at LIMIT 1)
- RETURNING `+reconcileJobColumns, token, now.Add(lease), now, now, reconcileAttempts))
+ AND (status='queued' OR (status='running' AND lease_until<=?)) AND attempts<?
+ RETURNING `+reconcileJobColumns, token, now.Add(lease), now, now, reconcileAttempts, now, reconcileAttempts))
 	if err != nil {
 		return nil, err
 	}

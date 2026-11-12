@@ -131,7 +131,7 @@ func Translate(q string) string {
 				}
 			case "UNIXEPOCH":
 				if rest, ok := skipWords(q[j:], "(", ")"); ok {
-					b.WriteString("(extract(epoch from statement_timestamp())::bigint)")
+					b.WriteString("(floor(extract(epoch from statement_timestamp()))::bigint)")
 					i = len(q) - len(rest)
 					continue
 				}

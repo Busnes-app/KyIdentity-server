@@ -507,12 +507,12 @@ CREATE INDEX idx_issued_tokens_family ON issued_tokens(family_jti);
 CREATE INDEX idx_refresh_tokens_family ON refresh_tokens(family_jti);
 CREATE INDEX idx_rate_limits_tat ON rate_limits(tat);
 
-CREATE VIEW live_group_memberships AS SELECT group_id,user_id FROM group_memberships WHERE expires_at IS NULL OR expires_at>(extract(epoch from statement_timestamp())::bigint);
+CREATE VIEW live_group_memberships AS SELECT group_id,user_id FROM group_memberships WHERE expires_at IS NULL OR expires_at>(floor(extract(epoch from statement_timestamp()))::bigint);
 
 CREATE VIEW app_access_facts AS SELECT a.id app_id,u.id user_id,
- (u.status='active' AND (u.ends_at IS NULL OR u.ends_at>(extract(epoch from statement_timestamp())::bigint))) active,a.access_mode,a.enabled,
+ (u.status='active' AND (u.ends_at IS NULL OR u.ends_at>(floor(extract(epoch from statement_timestamp()))::bigint))) active,a.access_mode,a.enabled,
  (a.client_id IS NULL OR EXISTS(SELECT 1 FROM oauth_clients c WHERE c.id=a.client_id AND c.enabled)) client_enabled,
- EXISTS(SELECT 1 FROM app_user_assignments d WHERE d.app_id=a.id AND d.user_id=u.id AND (d.expires_at IS NULL OR d.expires_at>(extract(epoch from statement_timestamp())::bigint))) direct,
+ EXISTS(SELECT 1 FROM app_user_assignments d WHERE d.app_id=a.id AND d.user_id=u.id AND (d.expires_at IS NULL OR d.expires_at>(floor(extract(epoch from statement_timestamp()))::bigint))) direct,
  EXISTS(SELECT 1 FROM app_group_assignments g JOIN live_group_memberships m ON m.group_id=g.group_id WHERE g.app_id=a.id AND m.user_id=u.id) group_assigned
  FROM app_registry a CROSS JOIN users u;
 
@@ -537,7 +537,7 @@ CREATE VIEW enrolled_factors AS
 
 CREATE VIEW mfa_session_access AS
  SELECT sess.id,sess.user_id,NOT sess.enrollment_only AND (NOT r.required OR
- (sess.factor_method<>'recovery' AND r.due_at>(extract(epoch from statement_timestamp())::bigint) AND NOT EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=sess.user_id AND (f.bit&r.allowed_mask)<>0)) OR
+ (sess.factor_method<>'recovery' AND r.due_at>(floor(extract(epoch from statement_timestamp()))::bigint) AND NOT EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=sess.user_id AND (f.bit&r.allowed_mask)<>0)) OR
  (sess.primary_authenticated_at IS NOT NULL AND sess.factor_authenticated_at IS NOT NULL AND
  ((CASE sess.factor_method WHEN 'totp' THEN 1 WHEN 'push' THEN 2 WHEN 'webauthn' THEN 4 ELSE 0 END)&r.allowed_mask)<>0 AND
  EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=sess.user_id AND f.bit=CASE sess.factor_method WHEN 'totp' THEN 1 WHEN 'push' THEN 2 WHEN 'webauthn' THEN 4 ELSE 0 END))) allowed
@@ -571,7 +571,7 @@ CREATE TRIGGER registry_cleanup_paired_systems AFTER DELETE ON paired_systems FO
 
 -- Enrollment deadlines and policies.
 CREATE FUNCTION enrollment_new_user() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
- INSERT INTO enrollment_deadlines SELECT p.user_id,p.scope,(extract(epoch from statement_timestamp())::bigint)+p.grace_seconds FROM applicable_enrollment_policies p WHERE p.user_id=NEW.id ON CONFLICT DO NOTHING;
+ INSERT INTO enrollment_deadlines SELECT p.user_id,p.scope,(floor(extract(epoch from statement_timestamp()))::bigint)+p.grace_seconds FROM applicable_enrollment_policies p WHERE p.user_id=NEW.id ON CONFLICT DO NOTHING;
  RETURN NULL; END $$;
 CREATE TRIGGER enrollment_new_user AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION enrollment_new_user();
 CREATE TRIGGER enrollment_user_role AFTER UPDATE OF role ON users FOR EACH ROW EXECUTE FUNCTION enrollment_new_user();
@@ -579,7 +579,7 @@ CREATE FUNCTION enrollment_new_group() RETURNS trigger LANGUAGE plpgsql AS $$ BE
  INSERT INTO enrollment_policies(scope,group_id) VALUES('group:'||NEW.id,NEW.id); RETURN NULL; END $$;
 CREATE TRIGGER enrollment_new_group AFTER INSERT ON directory_groups FOR EACH ROW EXECUTE FUNCTION enrollment_new_group();
 CREATE FUNCTION enrollment_new_member() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
- INSERT INTO enrollment_deadlines SELECT p.user_id,p.scope,(extract(epoch from statement_timestamp())::bigint)+p.grace_seconds FROM applicable_enrollment_policies p WHERE p.user_id=NEW.user_id AND p.scope='group:'||NEW.group_id ON CONFLICT DO NOTHING;
+ INSERT INTO enrollment_deadlines SELECT p.user_id,p.scope,(floor(extract(epoch from statement_timestamp()))::bigint)+p.grace_seconds FROM applicable_enrollment_policies p WHERE p.user_id=NEW.user_id AND p.scope='group:'||NEW.group_id ON CONFLICT DO NOTHING;
  RETURN NULL; END $$;
 CREATE TRIGGER enrollment_new_member AFTER INSERT ON group_memberships FOR EACH ROW EXECUTE FUNCTION enrollment_new_member();
 CREATE FUNCTION enrollment_role_compatibility() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
@@ -588,7 +588,7 @@ CREATE FUNCTION enrollment_role_compatibility() RETURNS trigger LANGUAGE plpgsql
 CREATE TRIGGER enrollment_role_compatibility AFTER UPDATE OF role ON users FOR EACH ROW EXECUTE FUNCTION enrollment_role_compatibility();
 CREATE FUNCTION enrollment_new_delegation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
  IF EXISTS(SELECT 1 FROM enrollment_requirements WHERE user_id=NEW.user_id AND allowed_mask=0) THEN RAISE EXCEPTION 'conflicting enrollment policies'; END IF;
- INSERT INTO enrollment_deadlines SELECT p.user_id,p.scope,(extract(epoch from statement_timestamp())::bigint)+p.grace_seconds FROM applicable_enrollment_policies p WHERE p.user_id=NEW.user_id AND p.scope='administrators' ON CONFLICT DO NOTHING;
+ INSERT INTO enrollment_deadlines SELECT p.user_id,p.scope,(floor(extract(epoch from statement_timestamp()))::bigint)+p.grace_seconds FROM applicable_enrollment_policies p WHERE p.user_id=NEW.user_id AND p.scope='administrators' ON CONFLICT DO NOTHING;
  RETURN NULL; END $$;
 CREATE TRIGGER enrollment_new_delegation AFTER INSERT ON admin_delegations FOR EACH ROW EXECUTE FUNCTION enrollment_new_delegation();
 

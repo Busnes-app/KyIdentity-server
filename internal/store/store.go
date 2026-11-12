@@ -2984,8 +2984,14 @@ func spendMFATokensTx(tx *sql.Tx, now time.Time, userID string) error {
 
 // PingContext proves the database is reachable and readable within the caller's deadline.
 // It reads the table every login touches, so a volume that has gone read-only or vanished
-// fails here rather than at the next sign-in.
+// fails here rather than at the next sign-in. On Postgres it also fails while the server
+// cannot take writes (a standby, or a primary set read-only), so readiness follows failover.
 func (s *Store) PingContext(ctx context.Context) error {
+	if s.postgres {
+		if err := s.db.PingContext(ctx); err != nil {
+			return err
+		}
+	}
 	var n int
 	return s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 1`).Scan(&n)
 }

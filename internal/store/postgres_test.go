@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -114,5 +115,23 @@ func TestPostgresRefusesANonCLocaleDatabase(t *testing.T) {
 	var tables int
 	if err := probe.QueryRow(`SELECT count(*) FROM information_schema.tables WHERE table_schema='public'`).Scan(&tables); err != nil || tables != 0 {
 		t.Fatalf("a refused start left %d tables: %v", tables, err)
+	}
+}
+
+// unixepoch() is whole seconds rounded down on both backends, never up: an expiry stored
+// as unix seconds must not fire before its second has begun.
+func TestUnixepochTruncates(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	for range 40 {
+		before := time.Now().Unix()
+		var got int64
+		if err := s.db.QueryRow(`SELECT unixepoch()`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if after := time.Now().Unix(); got < before || got > after {
+			t.Fatalf("unixepoch() = %d outside [%d, %d]", got, before, after)
+		}
+		time.Sleep(13 * time.Millisecond)
 	}
 }
