@@ -145,14 +145,17 @@ func TestPostgresErrorsNeverRepeatThePassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.User = url.UserPassword(u.User.Username(), secret)
+	// A database that does not exist: the open must fail even on a server that trusts every
+	// connection, and must never create a schema in the database the other tests share.
+	u.Path = "/kt_no_such_database"
 	q := u.Query()
 	q.Set("sslmode", "disable")
 	u.RawQuery = q.Encode()
 	for _, raw := range []string{u.String(), strings.Replace(u.String(), "@", ":bad-port@", 1), "postgres://user:" + secret + "@[bad/db"} {
 		s, err := NewPostgres(raw)
-		if err == nil { // a server that trusts every connection ignores the password
+		if err == nil {
 			s.Close()
-			continue
+			t.Fatal("a store opened on a database that does not exist")
 		}
 		if strings.Contains(err.Error(), secret) {
 			t.Fatalf("error repeats the password: %v", err)
