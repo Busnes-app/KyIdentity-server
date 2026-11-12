@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"math"
 	"time"
 
@@ -50,6 +51,7 @@ func (s *Store) withMigrationLease(fn func() error) error {
 	if _, err := s.db.Exec(leasesSchema); err != nil {
 		return err
 	}
+	waited := false
 	for {
 		release, ok, err := s.AcquireLease("migrate", migrationLease)
 		if err != nil {
@@ -58,6 +60,10 @@ func (s *Store) withMigrationLease(fn func() error) error {
 		if ok {
 			defer release()
 			return fn()
+		}
+		if !waited {
+			waited = true
+			log.Printf("database: another process is migrating; waiting for it (at most %s if it died)", migrationLease)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -71,12 +77,13 @@ const migrationLease = 2 * time.Minute
 // statement and N replicas share one allowance. create=false never adds a bucket, for a
 // table at its cap.
 func (s *Store) AllowRate(bucket string, burst, perSecond float64, now time.Time, create bool) (bool, error) {
-	// Microseconds one request takes to refill; a rate of zero never refills.
-	interval := int64(math.MaxInt64 / 4)
-	if perSecond > 0 && 1e6/perSecond < float64(interval) {
+	// Microseconds one request takes to refill, capped at about 30 years so a rate of zero
+	// never refills and burst*interval cannot overflow.
+	interval := int64(1e15)
+	if perSecond > 0 && 1e6/perSecond < 1e15 {
 		interval = int64(1e6 / perSecond)
 	}
-	n, tolerance := now.UnixMicro(), int64(math.Min((burst-1)*float64(interval), float64(math.MaxInt64/4)))
+	n, tolerance := now.UnixMicro(), int64(math.Min((burst-1)*float64(interval), 1e18))
 	const spend = `tat = CASE WHEN rate_limits.tat > ? THEN rate_limits.tat ELSE ? END + ? WHERE rate_limits.tat - ? <= ?`
 	var res sql.Result
 	var err error

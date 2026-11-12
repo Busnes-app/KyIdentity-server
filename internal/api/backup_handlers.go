@@ -324,13 +324,12 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 	// One backup at a time across replicas, the scheduler's included.
 	var res backup.Result
 	release, ok, err := h.store.AcquireLease(backup.Lease, backup.LeaseTTL)
-	switch {
-	case err != nil:
-	case !ok:
+	if err == nil && !ok {
 		err = backup.ErrDepositInProgress
-	default:
+	}
+	if err == nil {
+		defer release()
 		res, err = backup.RunBackup(ctx, h.cfg, h.store, h.store, h.recovery, appversion.String())
-		release()
 	}
 	action, outcome, details := backup.Outcome(res, err)
 	h.observe(r, action, adminID, adminUsername, res.Manifest.CapsuleID, outcome, details)

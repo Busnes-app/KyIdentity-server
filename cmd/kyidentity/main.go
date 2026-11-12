@@ -653,13 +653,12 @@ func runDeposit() {
 
 	var res backup.Result
 	release, ok, err := dbStore.AcquireLease(backup.Lease, backup.LeaseTTL)
-	switch {
-	case err != nil:
-	case !ok:
+	if err == nil && !ok {
 		err = backup.ErrDepositInProgress
-	default:
+	}
+	if err == nil {
 		res, err = backup.RunBackup(context.Background(), cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appversion.String())
-		release()
+		release() // before log.Fatalf below, which skips defers
 	}
 	action, outcome, details := backup.Outcome(res, err)
 	auditLogger.Observe(action, "", "cli", res.Manifest.CapsuleID, "backup", "", "kyidentity-cli", outcome, details)

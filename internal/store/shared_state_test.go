@@ -162,8 +162,8 @@ func TestSharedRateLimitRefills(t *testing.T) {
 		}
 	}
 	// A limit that never refills stays spent.
-	for i, want := range []bool{true, false} {
-		if ok, _ := s.AllowRate("never", 1, 0, later.Add(time.Duration(i)*1000*time.Hour), true); ok != want {
+	for i, want := range []bool{true, true, true, false, false} {
+		if ok, _ := s.AllowRate("never", 3, 0, later.Add(time.Duration(i)*1000*time.Hour), true); ok != want {
 			t.Fatalf("zero-rate request %d: allowed=%v want %v", i, ok, want)
 		}
 	}
