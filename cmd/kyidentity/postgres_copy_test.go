@@ -273,3 +273,19 @@ func TestReplaceDatabaseNeedsPostgres(t *testing.T) {
 		t.Fatal("the refused restore wrote the target:", err)
 	}
 }
+
+// A table missing on either side, or counted differently, fails the check after commit.
+func TestSameCountsNamesEveryDifference(t *testing.T) {
+	if err := sameCounts(map[string]int64{"users": 2, "audit_events": 5}, map[string]int64{"users": 2, "audit_events": 5}); err != nil {
+		t.Fatal(err)
+	}
+	err := sameCounts(map[string]int64{"users": 2, "audit_events": 5}, map[string]int64{"users": 1, "groups": 0})
+	if err == nil {
+		t.Fatal("different counts passed")
+	}
+	for _, want := range []string{"users: file 2, Postgres 1", "audit_events: file 5, Postgres 0", "groups: file 0, Postgres 0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q does not say %q", err, want)
+		}
+	}
+}

@@ -1013,16 +1013,33 @@ func migrateToPostgres(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("the migration committed, but counting the rows in %s failed: %w", where, err)
 	}
-	var wrong []string
-	for _, name := range slices.Sorted(maps.Keys(got)) {
-		if want, ok := res.Rows[name]; !ok || want != got[name] {
-			wrong = append(wrong, fmt.Sprintf("%s: file %d, Postgres %d", name, want, got[name]))
-		}
-	}
-	if len(wrong) > 0 || len(got) != len(res.Rows) {
-		return fmt.Errorf("the migration committed, but the row counts differ (%s); do not start a server on %s", strings.Join(wrong, "; "), where)
+	if err := sameCounts(res.Rows, got); err != nil {
+		return fmt.Errorf("the migration committed, but %w; do not start a server on %s", err, where)
 	}
 	fmt.Fprintf(stdout, "Migrated %d tables into %s; every table's row count matches the file. Set KYIDENTITY_DATABASE_URL on the server and start it.\n", len(got), where)
+	return nil
+}
+
+// sameCounts refuses unless both sides count the same rows in the same tables.
+func sameCounts(file, pg map[string]int64) error {
+	names := map[string]bool{}
+	for name := range file {
+		names[name] = true
+	}
+	for name := range pg {
+		names[name] = true
+	}
+	var wrong []string
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		want, inFile := file[name]
+		got, inPG := pg[name]
+		if !inFile || !inPG || want != got {
+			wrong = append(wrong, fmt.Sprintf("%s: file %d, Postgres %d", name, want, got))
+		}
+	}
+	if len(wrong) > 0 {
+		return fmt.Errorf("the row counts differ (%s)", strings.Join(wrong, "; "))
+	}
 	return nil
 }
 

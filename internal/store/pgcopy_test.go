@@ -676,3 +676,82 @@ func TestImportNeverWritesTheFile(t *testing.T) {
 		t.Fatalf("a file at a newer schema version: %v", err)
 	}
 }
+
+// Foreign keys that form a cycle have no insert order; the copy refuses rather than guess.
+func TestFKOrderRefusesACycle(t *testing.T) {
+	order, err := fkOrder(catalog{"a": {refs: []string{"b"}}, "b": {refs: []string{"c"}}, "c": {}, "d": {refs: []string{"a"}}})
+	if err != nil || strings.Join(order, ",") != "c,b,a,d" {
+		t.Fatalf("order %v %v", order, err)
+	}
+	if _, err := fkOrder(catalog{"a": {refs: []string{"b"}}, "b": {refs: []string{"a"}}, "c": {}}); err == nil || !strings.Contains(err.Error(), "[a b]") {
+		t.Fatalf("a cycle: %v", err)
+	}
+	if _, err := fkOrder(catalog{"a": {refs: []string{"a"}}}); err == nil {
+		t.Fatal("a table referencing itself was ordered")
+	}
+}
+
+// The two schemas must have the same tables and columns, and a difference is named.
+func TestMatchCatalogsNamesTheDifference(t *testing.T) {
+	cols := func(names ...string) []copyColumn {
+		var out []copyColumn
+		for _, n := range names {
+			out = append(out, copyColumn{name: n})
+		}
+		return out
+	}
+	lite := catalog{"users": {cols: cols("id", "name")}, "events": {cols: cols("id"), rowid: true}, "old": {}}
+	pg := catalog{"users": {cols: cols("email", "id")}, "events": {cols: cols("id", "rowid"), identity: []string{"rowid"}}, "new": {}}
+	err := matchCatalogs(lite, pg)
+	if err == nil {
+		t.Fatal("different schemas matched")
+	}
+	for _, want := range []string{"table new exists only on Postgres", "table old exists only on SQLite", "table users has columns [id name] on SQLite and [email id] on Postgres"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q does not say %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "events") {
+		t.Errorf("the Postgres rowid identity must stand for SQLite's rowid: %v", err)
+	}
+}
+
+// The export's last checks refuse a file with a dangling reference.
+func TestSQLiteChecksRefuseAnOrphan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orphan.db")
+	s, err := newSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := sqliteChecks(db); err != nil {
+		t.Fatal("a fresh install failed the checks:", err)
+	}
+	if _, err := db.Exec(`INSERT INTO sessions(id,user_id,session_token_hash,ip_address,user_agent,expires_at) VALUES('s','nobody','h','::1','ua','2030-01-01 00:00:00')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteChecks(db); err == nil || !strings.Contains(err.Error(), "sessions") {
+		t.Fatalf("an orphan session: %v", err)
+	}
+}
+
+// A value that does not convert stops the import, naming the table and column, never the value.
+func TestImportNamesAValueThatDoesNotConvert(t *testing.T) {
+	requirePostgres(t)
+	dir := t.TempDir()
+	src := liteFixture(t, filepath.Join(dir, "src.db"))
+	rawSQLite(t, src, `UPDATE sessions SET expires_at='sometime-secret-ish' WHERE id='sess-1'`)
+	url := testURL(t, filepath.Join(dir, "pg"))
+	_, err := ImportSQLite(url, src, ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "table sessions column expires_at") || strings.Contains(err.Error(), "secret-ish") {
+		t.Fatalf("an unconvertible time: %v", err)
+	}
+	if n := schemaObjects(t, url); n != 0 {
+		t.Fatalf("the failed import left %d relations", n)
+	}
+}
