@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -674,6 +675,88 @@ func TestImportNeverWritesTheFile(t *testing.T) {
 	_, err = ImportSQLite(testURL(t, filepath.Join(t.TempDir(), "pg")), src, ImportOptions{})
 	if err == nil || !strings.Contains(err.Error(), "[1 99]") || !strings.Contains(err.Error(), "knows [1]") {
 		t.Fatalf("a file at a newer schema version: %v", err)
+	}
+}
+
+// A capsule taken before an upgrade is at an older schema version. The import migrates a
+// copy, as a start on the file would, and leaves the file alone.
+func TestImportBringsAnOlderFileUpToDate(t *testing.T) {
+	requirePostgres(t)
+	srcDir := t.TempDir()
+	src := liteFixture(t, filepath.Join(srcDir, "kyidentity.db"))
+	before := dirState(t, srcDir)
+	withTestMigration(t, migration{version: 2, name: "test", up: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE users SET display_name = 'migrated'`)
+		return err
+	}})
+	pgPath := filepath.Join(t.TempDir(), "pg")
+	res, err := ImportSQLite(testURL(t, pgPath), src, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after := dirState(t, srcDir); !maps.Equal(before, after) {
+		t.Fatalf("the import changed the older file's directory: %v -> %v", before, after)
+	}
+	pg := testPostgres(t, pgPath)
+	var users, migrated int64
+	if err := pg.db.QueryRow(`SELECT COUNT(*), COUNT(*) FILTER (WHERE display_name = 'migrated') FROM users`).Scan(&users, &migrated); err != nil {
+		t.Fatal(err)
+	}
+	if users == 0 || users != migrated || users != res.Rows["users"] {
+		t.Fatalf("%d of %d users carry the migration (file had %d)", migrated, users, res.Rows["users"])
+	}
+	if got := fmt.Sprint(mustVersions(t, pg.db)); got != "[1 2]" {
+		t.Fatalf("Postgres schema versions %s", got)
+	}
+}
+
+func mustVersions(t *testing.T, q querier) []int {
+	t.Helper()
+	v, err := readVersions(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// A NULL never exercises a column's conversion, so the round trip alone could miss a
+// column whose two types have no mapping until a real row fills it. Every column must
+// carry a value of its Postgres type to SQLite and back.
+func TestEveryColumnConvertsBothWays(t *testing.T) {
+	requirePostgres(t)
+	dir := t.TempDir()
+	pg, err := New(filepath.Join(dir, "pg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pg.Close()
+	lite, err := newSQLite(filepath.Join(dir, "lite.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lite.Close()
+	pgCat := pgCatalogFor(t, pg)
+	liteCat := liteCatalogFor(t, lite.db, pgCat)
+	now := time.Now().UTC()
+	samples := map[string]any{"bool": true, "int8": int64(7), "text": "x", "citext": "x", "timestamptz": now, "bytea": []byte{1}}
+	for name, p := range pgCat {
+		for i, col := range p.cols {
+			where := name + "." + col.name + " (" + liteCat[name].cols[i].typ + ", " + col.typ + ")"
+			v, ok := samples[col.typ]
+			if !ok {
+				t.Errorf("%s: no mapping for the Postgres type", where)
+				continue
+			}
+			inLite, err := toSQLite(v, liteCat[name].cols[i].typ)
+			if err != nil {
+				t.Errorf("%s: to SQLite: %v", where, err)
+				continue
+			}
+			back, err := toPostgres(inLite, col.typ)
+			if err != nil || !reflect.DeepEqual(back, v) {
+				t.Errorf("%s: back to Postgres: %v %v", where, back, err)
+			}
+		}
 	}
 }
 

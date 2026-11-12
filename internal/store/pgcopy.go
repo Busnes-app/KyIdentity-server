@@ -514,7 +514,7 @@ type ImportResult struct {
 // if absent, refuses a database holding rows (unless Replace), copies every table in
 // foreign key order with user triggers disabled, moves each identity past its largest
 // value and commits. A failure leaves Postgres as it was. The file is never written: a
-// file from before schema versions is brought up to date on a private copy.
+// file older than this binary is brought up to date on a private copy.
 func ImportSQLite(rawURL, srcPath string, opt ImportOptions) (ImportResult, error) {
 	return importSQLite(rawURL, "", srcPath, opt)
 }
@@ -538,8 +538,8 @@ func importSQLite(rawURL, searchPath, srcPath string, opt ImportOptions) (res Im
 	return res, err
 }
 
-// openImportSource opens the file read-only after checking its schema version. A file
-// from before versions is first opened once by the normal SQLite path, on a copy.
+// openImportSource opens the file read-only after checking its schema version. An older
+// file is first opened once by the normal SQLite path, on a copy; a newer one is refused.
 func openImportSource(path string) (*sql.DB, func(), error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, nil, err
@@ -562,18 +562,21 @@ func openImportSource(path string) (*sql.DB, func(), error) {
 		return nil, nil, err
 	}
 	versions, err := readVersions(db)
-	if err == nil && slices.Contains(versions, 1) {
-		if !slices.Equal(versions, knownVersions()) {
-			_ = db.Close()
-			return nil, nil, fmt.Errorf("the SQLite file is at schema versions %v but this binary knows %v: open it with the matching release first", versions, knownVersions())
-		}
+	known := knownVersions()
+	if err == nil && slices.Equal(versions, known) {
 		return db, func() { _ = db.Close() }, nil
 	}
 	_ = db.Close()
 	if err != nil && !strings.Contains(err.Error(), "no such table") {
 		return nil, nil, fmt.Errorf("reading the schema version of %s: %w", path, err)
 	}
-	// Unversioned: an install from before schema versions. Bring a copy up to date.
+	for _, v := range versions {
+		if !slices.Contains(known, v) {
+			return nil, nil, fmt.Errorf("the SQLite file is at schema versions %v but this binary knows %v: use a release at least as new as the one that wrote it", versions, known)
+		}
+	}
+	// Older than this binary, or from before schema versions: bring a copy up to date, as
+	// a start on the file would.
 	dir, err := os.MkdirTemp("", "kyidentity-import-") // mode 0700
 	if err != nil {
 		return nil, nil, err
@@ -593,7 +596,7 @@ func openImportSource(path string) (*sql.DB, func(), error) {
 	}
 	if err != nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("bringing a copy of the unversioned file %s up to date: %w", path, err)
+		return nil, nil, fmt.Errorf("bringing a copy of the older file %s up to date: %w", path, err)
 	}
 	return db, func() { _ = db.Close(); cleanup() }, nil
 }

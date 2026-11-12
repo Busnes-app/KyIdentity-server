@@ -190,8 +190,8 @@ capsule restores onto either backend.
 
    It copies every table in one transaction and prints each table's row count, then
    counts again after the commit and fails if any table differs. It refuses a database
-   that holds any row, and a file at a schema version this release does not know (a file
-   from before schema versions is brought up to date on a private copy first). The file
+   that holds any row, and a file from a newer release than this one (a file from an older
+   release is brought up to date on a private copy first). The file
    is never modified. If the copy fails, the database is left as it was.
 4. Set the variable on the server and start it. The keys stay where they are; for
    replicas, move them into a Secret as described under Keys.
