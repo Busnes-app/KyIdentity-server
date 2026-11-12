@@ -2891,17 +2891,17 @@ func deleteSetting(q settingsQuerier, key string) error {
 }
 
 // SnapshotTo writes a transactionally consistent copy of the database to destPath through
-// the live connection. Copying the main database file is not a backup procedure in WAL mode:
+// the live connection; on Postgres the copy is a SQLite file too (exportToSQLite). Copying the main database file is not a backup procedure in WAL mode:
 // recently committed transactions can live only in the -wal file, so a file copy silently
 // restores an older directory. destPath must not already exist.
 func (s *Store) SnapshotTo(destPath string) error {
-	if s.postgres {
-		return notOnPostgres("database snapshot for backup")
-	}
 	if _, err := os.Stat(destPath); err == nil {
 		return fmt.Errorf("snapshot destination %s already exists", destPath)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	if s.postgres {
+		return s.exportToSQLite(destPath)
 	}
 	// VACUUM INTO takes its own read transaction, so the copy is a single point in time and
 	// includes everything committed to the WAL.

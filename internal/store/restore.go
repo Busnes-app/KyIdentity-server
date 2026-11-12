@@ -79,8 +79,18 @@ func (s *Store) migrateRestoreHold() error {
 // leaves the holds alone.
 func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreReport, error) {
 	var report RestoreReport
-	err := s.auditedTx(audit, func(tx *sql.Tx) error {
-		report = RestoreReport{}
+	err := s.auditedTx(audit, func(tx *sql.Tx) (err error) {
+		report, err = s.applyRestoredStateTx(tx, now, audit)
+		return err
+	})
+	return report, err
+}
+
+// applyRestoredStateTx is ApplyRestoredState inside the caller's transaction; the caller
+// records audit after it.
+func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEvent) (RestoreReport, error) {
+	report := RestoreReport{}
+	err := func() error {
 		// Before the sessions go: every login this restore ends is announced to the
 		// relying parties that saw it, because a receiver told nothing keeps its own
 		// session until its own timeout. The sid mapping cascades away with the
@@ -198,7 +208,7 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 			audit.DetailsJSON = string(body)
 		}
 		return nil
-	})
+	}()
 	return report, err
 }
 

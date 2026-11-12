@@ -24,12 +24,6 @@ import (
 	"modernc.org/sqlite"
 )
 
-// ErrNotOnPostgres marks a production path that is not supported on Postgres yet. Every
-// such path returns it, naming itself, rather than doing nothing.
-var ErrNotOnPostgres = errors.New("not supported on Postgres yet")
-
-func notOnPostgres(what string) error { return fmt.Errorf("%s: %w", what, ErrNotOnPostgres) }
-
 // Postgres reports whether this store runs on Postgres.
 func (s *Store) Postgres() bool { return s.postgres }
 
@@ -44,47 +38,57 @@ func NewPostgres(rawURL string) (*Store, error) {
 // inspection mode): every write is refused by the server, as SQLite's mode=ro does.
 func openPostgres(rawURL, searchPath string, migrate, readOnly bool) (*Store, error) {
 	where := pgdialect.Describe(rawURL)
-	if searchPath != "" {
-		rawURL = withSearchPath(rawURL, searchPath)
-	}
-	write, err := pgdialect.NewConnector(rawURL, readOnly)
+	s, read, err := connectPostgres(rawURL, searchPath, readOnly)
 	if err != nil {
 		return nil, err
 	}
-	read, err := pgdialect.NewConnector(rawURL, true)
-	if err != nil {
-		return nil, err
-	}
-	db := openPool(write)
-	if err := db.Ping(); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("connecting to Postgres at %s: %w", where, err)
-	}
-	_, migrationKey := pgdialect.LockKeys(searchPath)
-	s := &Store{db: db, rdb: db, postgres: true, migrationKey: migrationKey}
 	if migrate {
 		if err := s.withMigrationLease(func() error {
 			if _, err := s.db.Exec(`CREATE EXTENSION IF NOT EXISTS citext`); err != nil {
 				return fmt.Errorf("creating the citext extension: %w", err)
 			}
-			if err := s.checkPostgresCollation(); err != nil {
+			if err := checkPostgresCollation(s.db); err != nil {
 				return err
 			}
 			return s.migrate()
 		}); err != nil {
-			_ = db.Close()
+			_ = s.db.Close()
 			return nil, fmt.Errorf("schema creation failed on %s: %w", where, err)
 		}
 	} else {
 		var initialized bool
-		if err := db.QueryRow(`SELECT to_regclass('schema_migrations') IS NOT NULL`).Scan(&initialized); err != nil || !initialized {
-			_ = db.Close()
+		if err := s.db.QueryRow(`SELECT to_regclass('schema_migrations') IS NOT NULL`).Scan(&initialized); err != nil || !initialized {
+			_ = s.db.Close()
 			return nil, fmt.Errorf("the Postgres database at %s is not initialized (err %v)", where, err)
 		}
 	}
 	s.rdb = openPool(read)
 	log.Printf("database: Postgres at %s", where)
 	return s, nil
+}
+
+// connectPostgres opens the write pool, checks it connects, and returns a Store on it with
+// the read pool's connector; nothing in the database is read or written.
+func connectPostgres(rawURL, searchPath string, readOnly bool) (*Store, driver.Connector, error) {
+	where := pgdialect.Describe(rawURL)
+	if searchPath != "" {
+		rawURL = withSearchPath(rawURL, searchPath)
+	}
+	write, err := pgdialect.NewConnector(rawURL, readOnly)
+	if err != nil {
+		return nil, nil, err
+	}
+	read, err := pgdialect.NewConnector(rawURL, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	db := openPool(write)
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("connecting to Postgres at %s: %w", where, err)
+	}
+	_, migrationKey := pgdialect.LockKeys(searchPath)
+	return &Store{db: db, rdb: db, postgres: true, migrationKey: migrationKey}, read, nil
 }
 
 // openPool bounds a pool and retires each connection after five minutes, so the pool
@@ -100,9 +104,9 @@ func openPool(c driver.Connector) *sql.DB {
 // checkPostgresCollation refuses a database whose text rules differ from SQLite's: NOCASE
 // and lower() fold ASCII letters only and compare bytes otherwise, which on Postgres needs
 // the C locale (LC_COLLATE and LC_CTYPE) and citext for the case-insensitive columns.
-func (s *Store) checkPostgresCollation() error {
+func checkPostgresCollation(q interface{ QueryRow(string, ...any) *sql.Row }) error {
 	var recent, utf8, lowerASCII, citextKeepsAccents, citextFoldsASCII, bytewise bool
-	err := s.db.QueryRow(`SELECT current_setting('server_version_num')::int>=160000, current_setting('server_encoding')='UTF8', lower('É')='É', 'É'::citext<>'é'::citext, 'A'::citext='a'::citext, 'B'<'a'`).
+	err := q.QueryRow(`SELECT current_setting('server_version_num')::int>=160000, current_setting('server_encoding')='UTF8', lower('É')='É', 'É'::citext<>'é'::citext, 'A'::citext='a'::citext, 'B'<'a'`).
 		Scan(&recent, &utf8, &lowerASCII, &citextKeepsAccents, &citextFoldsASCII, &bytewise)
 	if err != nil {
 		return fmt.Errorf("checking the database collation: %w", err)
@@ -260,16 +264,41 @@ func newTestPostgres(rawURL, path string, migrate bool) (*Store, error) {
 		return nil, err
 	}
 	if migrate {
-		db, err := sql.Open("kypg", rawURL)
-		if err != nil {
-			return nil, err
-		}
-		defer db.Close()
-		if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS "` + schema + `"; COMMENT ON SCHEMA "` + schema + `" IS '` + strings.ReplaceAll(note, "'", "''") + `'`); err != nil {
+		if err := createTestSchema(rawURL, schema, note); err != nil {
 			return nil, err
 		}
 	}
 	return openPostgres(rawURL, schema+",public", migrate, false)
+}
+
+func createTestSchema(rawURL, schema, note string) error {
+	db, err := sql.Open("kypg", rawURL)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE SCHEMA IF NOT EXISTS "` + schema + `"; COMMENT ON SCHEMA "` + schema + `" IS '` + strings.ReplaceAll(note, "'", "''") + `'`)
+	return err
+}
+
+// PostgresURLForTest is the test database URL with search_path set to the schema New(path)
+// would use, created empty, for commands that take a database URL. Test binaries only.
+func PostgresURLForTest(path string) (string, error) {
+	rawURL := testDatabaseURL()
+	if rawURL == "" {
+		return "", errors.New("KYIDENTITY_TEST_DATABASE_URL is not set")
+	}
+	if err := testSetup(); err != nil {
+		return "", err
+	}
+	schema, note, err := testSchema(path)
+	if err != nil {
+		return "", err
+	}
+	if err := createTestSchema(rawURL, schema, note); err != nil {
+		return "", err
+	}
+	return withSearchPath(rawURL, schema+",public"), nil
 }
 
 // OpenRawForTest opens the database New(path) uses, for tests that read or change rows
