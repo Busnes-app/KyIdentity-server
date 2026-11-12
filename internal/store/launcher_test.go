@@ -17,6 +17,7 @@ func TestLauncherColumnsMigrate(t *testing.T) {
 	if _, err := s.db.Exec(`ALTER TABLE oauth_clients DROP COLUMN launcher_name; ALTER TABLE oauth_clients DROP COLUMN launcher_audience; ALTER TABLE app_roles DROP COLUMN administrator`); err != nil {
 		t.Fatal(err)
 	}
+	forgetSchemaVersions(t, s)
 	if err := s.migrate(); err != nil {
 		t.Fatal(err)
 	}

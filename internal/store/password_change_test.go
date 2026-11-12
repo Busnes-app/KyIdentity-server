@@ -77,6 +77,7 @@ func TestPasswordChangeMigrationFlagsUnchangedBootstrapAdminOnce(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM system_settings WHERE key=?`, PasswordChangeMigrationSetting); err != nil {
 		t.Fatal(err)
 	}
+	forgetSchemaVersions(t, s)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}

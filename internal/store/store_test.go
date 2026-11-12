@@ -778,6 +778,7 @@ func TestNativeDeviceCHECKsWidenForLinux(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE native_devices SET push_token_updated_at_ms = 7 WHERE id = 'phone'`); err != nil {
 		t.Fatal(err)
 	}
+	forgetSchemaVersions(t, s)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}

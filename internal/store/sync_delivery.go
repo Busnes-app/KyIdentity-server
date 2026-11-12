@@ -27,13 +27,21 @@ func (s *Store) migrateSyncDelivery() error {
  recover_after DATETIME NOT NULL, PRIMARY KEY(system_id,user_id));
  CREATE INDEX IF NOT EXISTS sync_resource_queue ON account_sync_events(system_id,user_id,status);
  CREATE TRIGGER IF NOT EXISTS delete_sync_delivery_system AFTER DELETE ON paired_systems
- BEGIN DELETE FROM sync_delivery_attempts WHERE system_id=OLD.id; END;
- DELETE FROM account_sync_events WHERE NOT EXISTS(SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id);`)
+ BEGIN DELETE FROM sync_delivery_attempts WHERE system_id=OLD.id; END;`)
 	if err != nil {
 		return err
 	}
+	return s.reconcileSyncEvents()
+}
+
+// reconcileSyncEvents runs on every start (reconcileOnStart): it drops events whose
+// connector is gone and fails exhausted legacy pending rows.
+func (s *Store) reconcileSyncEvents() error {
+	if _, err := s.db.Exec(`DELETE FROM account_sync_events WHERE NOT EXISTS(SELECT 1 FROM paired_systems p WHERE p.id=account_sync_events.system_id)`); err != nil {
+		return err
+	}
 	// Older versions left some exhausted work pending; pending now always means deliverable.
-	_, err = s.db.Exec(`UPDATE account_sync_events SET status='failed' WHERE status='pending' AND attempts>=? AND event_type<>'user.mfa_reset' AND NOT `+removalSQL, SyncAttemptBudget)
+	_, err := s.db.Exec(`UPDATE account_sync_events SET status='failed' WHERE status='pending' AND attempts>=? AND event_type<>'user.mfa_reset' AND NOT `+removalSQL, SyncAttemptBudget)
 	return err
 }
 
