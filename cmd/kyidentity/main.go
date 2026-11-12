@@ -924,8 +924,10 @@ func restoreCommand(args []string, stdin io.Reader, stdout, stderr io.Writer, pr
 }
 
 func runRestore(args []string) {
-	if u, err := config.LoadDatabaseURL(); err != nil || u != "" {
-		log.Fatalf("Restore: restoring into Postgres is not supported yet (%v)", err)
+	if u, err := config.LoadDatabaseURL(); err != nil {
+		log.Fatalf("Restore: %v", err)
+	} else if u != "" {
+		log.Fatalf("Restore: restoring into Postgres is not supported yet")
 	}
 	if err := restoreCommand(args, os.Stdin, os.Stdout, os.Stderr, stdinIsTerminal()); err != nil {
 		log.Fatalf("Restore: %v", err)

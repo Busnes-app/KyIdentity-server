@@ -167,6 +167,10 @@ func (c *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 		if sql.IsolationLevel(opts.Isolation) == sql.LevelDefault {
 			opts.Isolation = driver.IsolationLevel(sql.LevelRepeatableRead)
 		}
+	} else if sql.IsolationLevel(opts.Isolation) == sql.LevelDefault {
+		// The writer lock is taken after BEGIN, so each statement must see what the
+		// previous holder committed: READ COMMITTED, whatever the server's default is.
+		opts.Isolation = driver.IsolationLevel(sql.LevelReadCommitted)
 	}
 	tx, err := c.inner.BeginTx(ctx, opts)
 	if err != nil {

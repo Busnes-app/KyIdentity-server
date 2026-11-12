@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -54,12 +55,7 @@ func openPostgres(rawURL, searchPath string, migrate, readOnly bool) (*Store, er
 	if err != nil {
 		return nil, err
 	}
-	db := sql.OpenDB(write)
-	for _, p := range []*sql.DB{db} {
-		p.SetMaxOpenConns(runtime.NumCPU() + 4)
-		p.SetMaxIdleConns(4)
-		p.SetConnMaxLifetime(5 * time.Minute)
-	}
+	db := openPool(write)
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("connecting to Postgres at %s: %w", where, err)
@@ -86,23 +82,33 @@ func openPostgres(rawURL, searchPath string, migrate, readOnly bool) (*Store, er
 			return nil, fmt.Errorf("the Postgres database at %s is not initialized (err %v)", where, err)
 		}
 	}
-	s.rdb = sql.OpenDB(read)
-	s.rdb.SetMaxOpenConns(runtime.NumCPU() + 4)
-	s.rdb.SetMaxIdleConns(4)
-	s.rdb.SetConnMaxLifetime(5 * time.Minute)
+	s.rdb = openPool(read)
 	log.Printf("database: Postgres at %s", where)
 	return s, nil
+}
+
+// openPool bounds a pool and retires each connection after five minutes, so the pool
+// follows a failover instead of keeping connections to the old primary.
+func openPool(c driver.Connector) *sql.DB {
+	db := sql.OpenDB(c)
+	db.SetMaxOpenConns(runtime.NumCPU() + 4)
+	db.SetMaxIdleConns(4)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	return db
 }
 
 // checkPostgresCollation refuses a database whose text rules differ from SQLite's: NOCASE
 // and lower() fold ASCII letters only and compare bytes otherwise, which on Postgres needs
 // the C locale (LC_COLLATE and LC_CTYPE) and citext for the case-insensitive columns.
 func (s *Store) checkPostgresCollation() error {
-	var utf8, lowerASCII, citextKeepsAccents, citextFoldsASCII, bytewise bool
-	err := s.db.QueryRow(`SELECT current_setting('server_encoding')='UTF8', lower('É')='É', 'É'::citext<>'é'::citext, 'A'::citext='a'::citext, 'B'<'a'`).
-		Scan(&utf8, &lowerASCII, &citextKeepsAccents, &citextFoldsASCII, &bytewise)
+	var recent, utf8, lowerASCII, citextKeepsAccents, citextFoldsASCII, bytewise bool
+	err := s.db.QueryRow(`SELECT current_setting('server_version_num')::int>=160000, current_setting('server_encoding')='UTF8', lower('É')='É', 'É'::citext<>'é'::citext, 'A'::citext='a'::citext, 'B'<'a'`).
+		Scan(&recent, &utf8, &lowerASCII, &citextKeepsAccents, &citextFoldsASCII, &bytewise)
 	if err != nil {
 		return fmt.Errorf("checking the database collation: %w", err)
+	}
+	if !recent {
+		return errors.New("Postgres 16 or newer is required") // IS JSON
 	}
 	if !utf8 || !lowerASCII || !citextKeepsAccents || !citextFoldsASCII || !bytewise {
 		return errors.New("the Postgres database must use encoding UTF8 with the C locale (LC_COLLATE and LC_CTYPE C), so names compare exactly as on SQLite; create it with CREATE DATABASE ... ENCODING 'UTF8' LOCALE 'C' TEMPLATE template0")

@@ -146,8 +146,9 @@ Setting both is refused. Unset means the SQLite file, exactly as before. The URL
 the password: the server logs only the host and the database name, and never repeats the
 URL in an error.
 
-The database must be UTF8 with the C locale, so that names compare exactly as on SQLite
-(case-insensitive for ASCII letters only). Create it with:
+The server must be Postgres 16 or newer. The database must be UTF8 with the C locale, so
+that names compare exactly as on SQLite (case-insensitive for ASCII letters only). Create
+it with:
 
 ```sql
 CREATE DATABASE kyidentity ENCODING 'UTF8' LOCALE 'C' TEMPLATE template0;
