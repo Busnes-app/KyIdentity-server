@@ -125,6 +125,35 @@ The files must be readable by the container's non-root user (`kyidentity`).
 
 ---
 
+## Running more than one replica
+
+> Not supported yet. This section covers shared keys only, the first step. The database is
+> still one SQLite file, so run exactly one replica until a release says otherwise.
+
+Several replicas behind one load balancer must be one identity: the same four keys in each.
+A replica that generated its own would reject the others' tokens, cookies and sealed secrets.
+
+Set `KYIDENTITY_REPLICATED=true` on every replica. It then never generates a key and stops
+at startup, naming the variable, when one is missing. Supply the keys from a mounted Secret:
+
+| Key | Variable | Contents |
+|---|---|---|
+| Cookie and CSRF secret | `KYIDENTITY_SECRET_KEY_FILE` | 32 raw bytes, or 64 hex characters (`openssl rand -hex 32`) |
+| Encryption key | `KYIDENTITY_ENCRYPTION_KEY_FILE` | the same format |
+| RSA signing key | `KYIDENTITY_RSA_KEY_PATH` | PEM, PKCS#1 or PKCS#8, 2048 bits or more |
+| UnifiedPush VAPID key | `KYIDENTITY_VAPID_KEY_PATH` | the base64url P-256 private scalar on one line |
+
+- An existing install already has all four in its data directory (`secret.key`,
+  `encryption.key`, `jwt_rs256.key`, `push-vapid-private.key`). Copy those files into the
+  Secret unchanged; new keys would end every session and orphan every sealed secret.
+- `KYIDENTITY_SECRET_KEY` and `KYIDENTITY_ENCRYPTION_KEY` (hex in the environment) still
+  work; setting one together with its `_FILE` variable is refused.
+- Mount the Secret with `defaultMode: 0440`. The VAPID key is refused when others can read
+  it; group read is allowed at a path you name because the kubelet grants it to the pod's
+  `fsGroup`.
+- Without the flag nothing changes: a single instance generates and keeps its keys in the
+  data directory as before.
+
 ## Health & Status Verification
 
 You can verify the status of the server at any time:

@@ -44,7 +44,7 @@ func Members(cfg *config.Config) []string {
 	if _, err := os.Stat(RecoveryKeyPath(cfg.DataDir)); err == nil {
 		m = append(m, recoveryPubPath)
 	}
-	if _, err := os.Stat(filepath.Join(cfg.DataDir, config.VAPIDKeyFile)); err == nil {
+	if _, err := os.Stat(cfg.VAPIDKeyPath); err == nil {
 		m = append(m, vapidKeyRelPath)
 	}
 	keys, _ := relayKeys(cfg.DataDir)
@@ -222,7 +222,7 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 
 	// The UnifiedPush VAPID key, so a restore keeps the server's push identity. Created at first
 	// start; a capsule from before UnifiedPush has none and the restored server makes a new one.
-	if vapid, err := os.ReadFile(filepath.Join(cfg.DataDir, config.VAPIDKeyFile)); err == nil {
+	if vapid, err := os.ReadFile(cfg.VAPIDKeyPath); err == nil {
 		files = append(files, recoveryclient.File{Path: vapidKeyRelPath, Data: vapid, Mode: 0600})
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("failed to read VAPID key: %w", err)

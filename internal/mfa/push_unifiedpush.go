@@ -30,9 +30,15 @@ type UnifiedPushSender struct {
 }
 
 // NewUnifiedPushSender loads the VAPID key at keyFile, creating it on first start.
-// subscriber is the issuer origin, sent as the VAPID JWT subject.
-func NewUnifiedPushSender(keyFile, subscriber string) (*UnifiedPushSender, error) {
-	private, public, err := loadOrCreateVAPIDKey(keyFile)
+// subscriber is the issuer origin, sent as the VAPID JWT subject. mounted is an
+// operator-supplied path: the kubelet makes a Secret group-readable for the pod's
+// fsGroup, so only access by others is refused there.
+func NewUnifiedPushSender(keyFile, subscriber string, mounted bool) (*UnifiedPushSender, error) {
+	tooOpen := os.FileMode(0o077)
+	if mounted {
+		tooOpen = 0o007
+	}
+	private, public, err := loadOrCreateVAPIDKey(keyFile, tooOpen)
 	if err != nil {
 		return nil, fmt.Errorf("vapid key %s: %w", keyFile, err)
 	}
@@ -89,7 +95,7 @@ func (s *UnifiedPushSender) SendPush(dev store.NativeDevice, ch MFAChallengePush
 }
 
 // loadOrCreateVAPIDKey returns the base64url private scalar and uncompressed public key.
-func loadOrCreateVAPIDKey(path string) (private, public string, err error) {
+func loadOrCreateVAPIDKey(path string, tooOpen os.FileMode) (private, public string, err error) {
 	if err := createVAPIDKey(path); err != nil {
 		return "", "", err
 	}
@@ -97,8 +103,8 @@ func loadOrCreateVAPIDKey(path string) (private, public string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return "", "", fmt.Errorf("permissions %v are too open; chmod 600 it", info.Mode().Perm())
+	if info.Mode().Perm()&tooOpen != 0 {
+		return "", "", fmt.Errorf("permissions %v are too open; chmod 600 it (a mounted Secret: defaultMode 0440)", info.Mode().Perm())
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

@@ -65,7 +65,7 @@ func (ps *pushServer) received() ([]byte, http.Header) {
 // newTestUnifiedPushSender keeps the netguard client and only trusts the test certificate.
 func newTestUnifiedPushSender(t *testing.T, ps *pushServer) *UnifiedPushSender {
 	t.Helper()
-	s, err := NewUnifiedPushSender(filepath.Join(t.TempDir(), "vapid.key"), "https://id.example.com")
+	s, err := NewUnifiedPushSender(filepath.Join(t.TempDir(), "vapid.key"), "https://id.example.com", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestUnifiedPushSenderRequiresKeys(t *testing.T) {
 
 func TestVAPIDKeyIsCreatedOnceWithPrivateMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "push-vapid-private.key")
-	priv, pub, err := loadOrCreateVAPIDKey(path)
+	priv, pub, err := loadOrCreateVAPIDKey(path, 0o077)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestVAPIDKeyIsCreatedOnceWithPrivateMode(t *testing.T) {
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("mode = %v, want 0600", info.Mode().Perm())
 	}
-	priv2, pub2, err := loadOrCreateVAPIDKey(path)
+	priv2, pub2, err := loadOrCreateVAPIDKey(path, 0o077)
 	if err != nil || priv2 != priv || pub2 != pub {
 		t.Fatalf("reload changed the key: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestVAPIDKeyIsCreatedOnceWithPrivateMode(t *testing.T) {
 	if err := os.WriteFile(path, []byte("garbage\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := loadOrCreateVAPIDKey(path); err == nil {
+	if _, _, err := loadOrCreateVAPIDKey(path, 0o077); err == nil {
 		t.Fatal("a corrupt key was accepted")
 	}
 }
@@ -338,5 +338,28 @@ func TestGoneUnifiedPushEndpointIsCleared(t *testing.T) {
 	}
 	if stored.PushToken != "" || stored.PushP256dh != "" || stored.PushAuth != "" || !stored.IsMFAApprover {
 		t.Fatalf("stored device = %+v", stored)
+	}
+}
+
+// A mounted Secret is group-readable under the pod's fsGroup; only access by others is refused.
+func TestMountedVAPIDKeyAllowsGroupRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vapid.key")
+	if _, _, err := loadOrCreateVAPIDKey(path, 0o077); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o440); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewUnifiedPushSender(path, "https://id.example.com", false); err == nil {
+		t.Fatal("a group-readable key in the data directory was accepted")
+	}
+	if _, err := NewUnifiedPushSender(path, "https://id.example.com", true); err != nil {
+		t.Fatalf("mounted group-readable key refused: %v", err)
+	}
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewUnifiedPushSender(path, "https://id.example.com", true); err == nil {
+		t.Fatal("a world-readable mounted key was accepted")
 	}
 }
