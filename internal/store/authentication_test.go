@@ -48,6 +48,7 @@ func TestAuthenticationEvidenceMigration(t *testing.T) {
 	if _, err := s.db.Exec(`INSERT INTO issued_tokens (jti, user_id, client_id, expires_at) VALUES ('legacy-token', ?, 'app', ?)`, user.ID, time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	forgetSchemaVersions(t, s)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}

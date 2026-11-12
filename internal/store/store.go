@@ -93,7 +93,10 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) migrate() error {
+// migrateLegacy is the schema before versioning: every step probes and is idempotent. It
+// runs only on a database without schema version 1 and lands it on version 1.
+func (s *Store) migrateLegacy() error {
+	legacyRuns.Add(1)
 	schema := `
 	CREATE TABLE IF NOT EXISTS users (
 		id TEXT PRIMARY KEY,

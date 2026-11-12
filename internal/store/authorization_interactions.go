@@ -53,13 +53,20 @@ func (s *Store) migrateAuthorizationInteractions() error {
 	if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_authorization_interactions_client ON authorization_interactions(client_id)`); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(`DELETE FROM authorization_interactions WHERE expires_at<=?`, time.Now().UTC()); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(repairAuthorizationAccountsSQL); err != nil {
+	if err = reconcileAuthorizationInteractionsTx(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// reconcileAuthorizationInteractionsTx runs on every start (reconcileOnStart): it drops
+// expired interactions and repairs account bindings and overages.
+func reconcileAuthorizationInteractionsTx(tx *sql.Tx) error {
+	if _, err := tx.Exec(`DELETE FROM authorization_interactions WHERE expires_at<=?`, time.Now().UTC()); err != nil {
+		return err
+	}
+	_, err := tx.Exec(repairAuthorizationAccountsSQL)
+	return err
 }
 
 func (s *Store) CreateAuthorizationInteraction(i *AuthorizationInteraction) error {

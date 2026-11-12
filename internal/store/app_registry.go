@@ -37,6 +37,26 @@ type AppRecord struct {
 	SystemName   string `json:"systemName"`
 }
 
+var appRegistrySources = []struct{ table, column string }{{"oauth_clients", "client_id"}, {"applications", "launcher_id"}, {"paired_systems", "system_id"}}
+
+// backfillAppRegistrySQL gives every row of table without an app record its own.
+// Identifiers are constants from appRegistrySources, never request data.
+func backfillAppRegistrySQL(table, column string) string {
+	return fmt.Sprintf(`INSERT INTO app_registry(id,%[2]s) SELECT lower(hex(randomblob(16))),s.id FROM %[1]s s
+ WHERE NOT EXISTS(SELECT 1 FROM app_registry a WHERE a.%[2]s=s.id)`, table, column)
+}
+
+// backfillAppRegistryTx runs on every start (reconcileOnStart); the triggers keep the
+// records complete in between.
+func backfillAppRegistryTx(tx *sql.Tx) error {
+	for _, source := range appRegistrySources {
+		if _, err := tx.Exec(backfillAppRegistrySQL(source.table, source.column)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Source rows remain authoritative for connection settings. Triggers cover every
 // creation path (including pairing), and never infer linkage from names or URLs.
 func (s *Store) migrateAppRegistry() error {
@@ -54,11 +74,12 @@ func (s *Store) migrateAppRegistry() error {
  )`); err != nil {
 		return err
 	}
-	for _, source := range []struct{ table, column string }{{"oauth_clients", "client_id"}, {"applications", "launcher_id"}, {"paired_systems", "system_id"}} {
+	for _, source := range appRegistrySources {
+		if _, err = tx.Exec(backfillAppRegistrySQL(source.table, source.column)); err != nil {
+			return err
+		}
 		// Identifiers below are constants, never request data.
 		ddl := fmt.Sprintf(`
- INSERT INTO app_registry(id,%[2]s) SELECT lower(hex(randomblob(16))),s.id FROM %[1]s s
- WHERE NOT EXISTS(SELECT 1 FROM app_registry a WHERE a.%[2]s=s.id);
  CREATE TRIGGER IF NOT EXISTS registry_insert_%[1]s AFTER INSERT ON %[1]s BEGIN
  INSERT INTO app_registry(id,%[2]s) VALUES(lower(hex(randomblob(16))),NEW.id); END;
  CREATE TRIGGER IF NOT EXISTS registry_delete_%[1]s BEFORE DELETE ON %[1]s BEGIN

@@ -188,6 +188,7 @@ func TestAppAccessMigrationAndLinkSafety(t *testing.T) {
 	if _, err := s.db.Exec(`DROP VIEW effective_app_access;DROP VIEW app_access_facts;ALTER TABLE app_registry DROP COLUMN access_mode;ALTER TABLE app_registry DROP COLUMN enabled;`); err != nil {
 		t.Fatal(err)
 	}
+	forgetSchemaVersions(t, s)
 	if err := s.migrate(); err != nil {
 		t.Fatal(err)
 	}
