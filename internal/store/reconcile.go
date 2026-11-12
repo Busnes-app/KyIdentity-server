@@ -456,7 +456,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 			return false, err
 		}
 		r, err := tx.Exec(`INSERT INTO scim_user_links(system_id,local_id,kind,remote_id) VALUES(?,?,?,?)
- ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE kind=excluded.kind AND remote_id IN ('',?)`, systemID, localID, kind, remoteID, stored)
+ ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE scim_user_links.kind=excluded.kind AND scim_user_links.remote_id IN ('',?)`, systemID, localID, kind, remoteID, stored)
 		if err != nil {
 			return false, err
 		}
@@ -470,7 +470,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 	// A managed account with no desired-state row (pre-upgrade delivery, or a resource
 	// found only at the target) is recorded as held so a disable can be queued for it.
 	hold := func(kind, id string) error {
-		_, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,1,1,0) ON CONFLICT(system_id,resource_id) DO UPDATE SET provisioned=1`, systemID, id, kind)
+		_, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,TRUE,TRUE,0) ON CONFLICT(system_id,resource_id) DO UPDATE SET provisioned=TRUE`, systemID, id, kind)
 		return err
 	}
 	seen := map[string]bool{}
@@ -559,7 +559,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 				}
 				// Absent at the target, so not provisioned there: the confirmed re-create
 				// then re-queues the groups that hold this user (provisionedTx).
-				if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=0 WHERE system_id=? AND resource_id=? AND kind='user'`, systemID, id); err != nil {
+				if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=FALSE WHERE system_id=? AND resource_id=? AND kind='user'`, systemID, id); err != nil {
 					return nil, err
 				}
 				payload, err := scimUserPayloadTx(tx, u, true, systemID)
@@ -677,7 +677,7 @@ func (s *Store) ListProvisioningState(systemID, query string, limit, offset int)
  COALESCE(st.active,0),COALESCE(st.provisioned,0),COALESCE(st.observed,''),st.observed_at,COALESCE(st.revision,0),
  EXISTS(SELECT 1 FROM sync_delivery_attempts d WHERE d.system_id=? AND d.user_id=u.id),
  ev.event_type,ev.status,ev.last_error,ev.attempts,ev.next_attempt_at,ev.updated_at`+from+
-		` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, systemID, systemID, systemID, systemID, systemID, query, query, limit, offset)
+		` ORDER BY u.username,u.id LIMIT ? OFFSET ?`, systemID, systemID, systemID, systemID, systemID, query, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

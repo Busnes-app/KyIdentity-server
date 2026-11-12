@@ -131,7 +131,7 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 					return expiryAudit(tx, now, "account.end_refused", u.ID, "user", "denied", map[string]any{"username": u.Username, "reason": "last_active_admin"})
 				}
 			}
-			if _, err := tx.Exec(`UPDATE users SET status='disabled', locally_disabled=1, updated_at=? WHERE id=?`, now, u.ID); err != nil {
+			if _, err := tx.Exec(`UPDATE users SET status='disabled', locally_disabled=TRUE, updated_at=? WHERE id=?`, now, u.ID); err != nil {
 				return err
 			}
 			u.Status, u.LocallyDisabled = "disabled", true
@@ -176,7 +176,7 @@ func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
 				return err
 			}
 			var required bool
-			if err := tx.QueryRow(`SELECT COALESCE((SELECT required FROM enrollment_policies WHERE group_id=?),0)`, m.a).Scan(&required); err != nil {
+			if err := tx.QueryRow(`SELECT COALESCE((SELECT required FROM enrollment_policies WHERE group_id=?),FALSE)`, m.a).Scan(&required); err != nil {
 				return err
 			}
 			if required {

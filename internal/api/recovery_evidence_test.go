@@ -108,7 +108,7 @@ func TestRecoveryEvidenceValidationAndUnavailableAuthority(t *testing.T) {
 		if res.Code != 409 || res.Header().Get(syncauth.HeaderSignature) != "" {
 			t.Fatalf("unavailable %s: %d %s", change, res.Code, res.Body.String())
 		}
-		if _, err := raw.Exec(`UPDATE paired_systems SET provisioning_hold=0,status='active',system_type='kypost',hmac_secret_encrypted=? WHERE id=?`, sys.HMACSecretEncrypted, sys.ID); err != nil {
+		if _, err := raw.Exec(`UPDATE paired_systems SET provisioning_hold=FALSE,status='active',system_type='kypost',hmac_secret_encrypted=? WHERE id=?`, sys.HMACSecretEncrypted, sys.ID); err != nil {
 			t.Fatal(err)
 		}
 	}

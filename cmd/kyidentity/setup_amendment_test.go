@@ -147,7 +147,7 @@ func TestSetupAmendmentRefusals(t *testing.T) {
 			case "parent-client":
 				a.Clients[0].ID = parent.Clients[0].ID
 			case "foreign-client":
-				exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,enabled,created_at,post_logout_redirect_uris_json) VALUES('recovery','Foreign','confidential','x','[]','["openid"]',1,CURRENT_TIMESTAMP,'[]')`)
+				exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,enabled,created_at,post_logout_redirect_uris_json) VALUES('recovery','Foreign','confidential','x','[]','["openid"]',TRUE,CURRENT_TIMESTAMP,'[]')`)
 			}
 			_, err := stageCommand(t, a, file, db, false)
 			if !staged {

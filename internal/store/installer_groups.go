@@ -19,7 +19,7 @@ func configureInstallerGroups(tx *sql.Tx, p InstallerSetup, everydayID string, i
 			members = 1
 		}
 		var id, name, description, source, external string
-		err := tx.QueryRow(`SELECT id,name,description,COALESCE(source_connector_id,''),COALESCE(external_id,'') FROM directory_groups WHERE name=? COLLATE NOCASE`, g.Name).Scan(&id, &name, &description, &source, &external)
+		err := tx.QueryRow(`SELECT id,name,description,COALESCE(source_connector_id,''),COALESCE(external_id,'') FROM directory_groups WHERE name=?`, g.Name).Scan(&id, &name, &description, &source, &external)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -33,7 +33,7 @@ func configureInstallerGroups(tx *sql.Tx, p InstallerSetup, everydayID string, i
 				return nil, errors.New("owned group configuration drift")
 			}
 			var count, matching int
-			if err := tx.QueryRow(`SELECT count(*),COALESCE(sum(user_id=? AND expires_at IS NULL),0) FROM group_memberships WHERE group_id=?`, everydayID, id).Scan(&count, &matching); err != nil {
+			if err := tx.QueryRow(`SELECT count(*),COALESCE(sum(CASE WHEN user_id=? AND expires_at IS NULL THEN 1 ELSE 0 END),0) FROM group_memberships WHERE group_id=?`, everydayID, id).Scan(&count, &matching); err != nil {
 				return nil, err
 			}
 			if count != members || matching != members {

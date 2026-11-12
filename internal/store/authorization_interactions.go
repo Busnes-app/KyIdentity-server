@@ -93,7 +93,7 @@ func (s *Store) CreateAuthorizationInteraction(i *AuthorizationInteraction) erro
 	// in-limit account requests and completed proofs are preserved.
 	if _, err = tx.Exec(`DELETE FROM authorization_interactions WHERE hash IN (
  SELECT hash FROM authorization_interactions WHERE session_id='' AND user_id=''
- ORDER BY created_at,hash LIMIT MAX(0,(SELECT COUNT(*) FROM authorization_interactions)-9999))`); err != nil {
+ ORDER BY created_at,hash LIMIT (SELECT CASE WHEN COUNT(*)>9999 THEN COUNT(*)-9999 ELSE 0 END FROM authorization_interactions))`); err != nil {
 		return err
 	}
 	// Bound concurrent tabs per browser and per account, independent of cookie rotation.

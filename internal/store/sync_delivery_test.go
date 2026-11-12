@@ -66,7 +66,7 @@ func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 	}
 	// Claim preparation already owns this row. Seed only the desired state; keep
 	// its persisted delivery counter and the in-flight resource fence across restart.
-	if _, err := s.db.Exec(`UPDATE sync_resource_state SET active=1,provisioned=1,revision=1 WHERE system_id='target' AND resource_id=?`, u.ID); err != nil {
+	if _, err := s.db.Exec(`UPDATE sync_resource_state SET active=TRUE,provisioned=TRUE,revision=1 WHERE system_id='target' AND resource_id=?`, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	var deliveryRevision int

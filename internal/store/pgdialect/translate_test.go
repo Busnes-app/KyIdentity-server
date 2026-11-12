@@ -21,6 +21,8 @@ func TestTranslate(t *testing.T) {
 		{`WHERE action LIKE ? ESCAPE '\' AND b NOT like 'group:%'`, `WHERE action ILIKE $1 ESCAPE '\' AND b NOT ILIKE 'group:%'`},
 		{`SELECT likes, unlike, x ILIKE y FROM t`, `SELECT likes, unlike, x ILIKE y FROM t`},
 		{`CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN INSERT INTO t VALUES(NEW.a) ON CONFLICT DO NOTHING; RETURN NULL; END $$ LANGUAGE plpgsql; SELECT ?`, `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN INSERT INTO t VALUES(NEW.a) ON CONFLICT DO NOTHING; RETURN NULL; END $$ LANGUAGE plpgsql; SELECT $1`},
+		{`WHERE instr(lower(u.name),lower(?))>0 AND instr (a,b) AND my_instr(a,b)`, `WHERE strpos(lower(u.name),lower($1))>0 AND instr (a,b) AND my_instr(a,b)`},
+		{`INSERT INTO t(id) SELECT lower(hex(randomblob(16))), lower( hex( randomblob( 16 ) ) ), lower(hex(randomblob(8))) FROM s`, `INSERT INTO t(id) SELECT replace(gen_random_uuid()::text,'-',''), replace(gen_random_uuid()::text,'-',''), lower(hex(randomblob(8))) FROM s`},
 		{`SELECT $1, ? FROM t`, `SELECT $1, $1 FROM t`}, // mixing styles is a caller bug; it is not detected
 		{`SELECT 'unterminated ?`, `SELECT 'unterminated ?`},
 	} {
@@ -49,5 +51,13 @@ func TestIsRead(t *testing.T) {
 		if got := IsRead(q); got != want {
 			t.Errorf("IsRead(%q) = %v, want %v", q, got, want)
 		}
+	}
+}
+
+func TestSplit(t *testing.T) {
+	stmts, params := Split("UPDATE a SET x=?; DELETE FROM b; -- c;\nUPDATE c SET y=';?' WHERE z=? AND w=?;\n")
+	want := []string{"UPDATE a SET x=?", " DELETE FROM b", " -- c;\nUPDATE c SET y=';?' WHERE z=? AND w=?"}
+	if len(stmts) != 3 || stmts[0] != want[0] || stmts[1] != want[1] || stmts[2] != want[2] || params[0] != 1 || params[1] != 0 || params[2] != 2 {
+		t.Fatalf("Split = %q %v", stmts, params)
 	}
 }

@@ -14,7 +14,9 @@ import (
 //     a top-level RETURNING, otherwise at the end of the statement);
 //   - unixepoch() becomes the current statement's time in whole seconds;
 //   - LIKE becomes ILIKE: SQLite's LIKE folds ASCII case, and ILIKE does the same on a C-locale
-//     database, so every LIKE keeps its meaning (ESCAPE clauses are unchanged).
+//     database, so every LIKE keeps its meaning (ESCAPE clauses are unchanged);
+//   - instr( becomes strpos( (same arguments, same 1-based result, 0 when absent);
+//   - the random identifier idiom lower(hex(randomblob(16))) becomes 32 random hex digits.
 //
 // Anything else that differs is written out at the call site for each backend. This is
 // not a parser: keep it to rules that are true token by token.
@@ -115,6 +117,18 @@ func Translate(q string) string {
 				b.WriteString("ILIKE")
 				i = j
 				continue
+			case "INSTR":
+				if strings.HasPrefix(q[j:], "(") {
+					b.WriteString("strpos")
+					i = j
+					continue
+				}
+			case "LOWER":
+				if rest, ok := skipWords(q[j:], "(", "hex", "(", "randomblob", "(", "16", ")", ")", ")"); ok {
+					b.WriteString("replace(gen_random_uuid()::text,'-','')")
+					i = len(q) - len(rest)
+					continue
+				}
 			case "UNIXEPOCH":
 				if rest, ok := skipWords(q[j:], "(", ")"); ok {
 					b.WriteString("(extract(epoch from statement_timestamp())::bigint)")
@@ -156,6 +170,48 @@ func isWordStart(c byte) bool {
 }
 
 func isWordByte(c byte) bool { return isWordStart(c) || c >= '0' && c <= '9' || c == '$' }
+
+// Split cuts a script into its statements at top-level semicolons (outside literals,
+// quoted identifiers, comments and $$ bodies) and counts each one's ? placeholders.
+// Postgres takes several statements in one call only without arguments, while the
+// store's SQLite scripts sometimes bind them; the driver runs such a script piece by piece.
+func Split(q string) (stmts []string, params []int) {
+	start, n := 0, 0
+	for i := 0; i < len(q); i++ {
+		switch c := q[i]; {
+		case c == '\'' || c == '"':
+			for i++; i < len(q) && q[i] != c; i++ {
+			}
+		case c == '-' && strings.HasPrefix(q[i:], "--"):
+			for i < len(q) && q[i] != '\n' {
+				i++
+			}
+		case c == '/' && strings.HasPrefix(q[i:], "/*"):
+			if j := strings.Index(q[i+2:], "*/"); j >= 0 {
+				i += j + 3
+			} else {
+				i = len(q)
+			}
+		case c == '$' && strings.HasPrefix(q[i:], "$$"):
+			if j := strings.Index(q[i+2:], "$$"); j >= 0 {
+				i += j + 3
+			} else {
+				i = len(q)
+			}
+		case c == '?':
+			n++
+		case c == ';':
+			if strings.TrimSpace(q[start:i]) != "" {
+				stmts, params = append(stmts, q[start:i]), append(params, n)
+			}
+			start, n = i+1, 0
+		}
+	}
+	if strings.TrimSpace(q[start:]) != "" {
+		stmts, params = append(stmts, q[start:]), append(params, n)
+	}
+	return stmts, params
+}
 
 // IsRead reports whether a statement only reads: it starts with SELECT, VALUES, SHOW or
 // EXPLAIN. Everything else, a WITH included, is treated as a write.

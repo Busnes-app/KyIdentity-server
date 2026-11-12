@@ -188,7 +188,7 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 	switch attribute {
 	case "":
 	case "displayName":
-		where += ` AND g.name=? COLLATE NOCASE`
+		where += ` AND g.name=?`
 		args = append(args, value)
 	case "externalId":
 		where += ` AND g.external_id=?`

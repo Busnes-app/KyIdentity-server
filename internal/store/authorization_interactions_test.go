@@ -275,7 +275,7 @@ func TestReauthenticationRenewsTheOriginalSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A restriction the old sign-in earned is decided afresh, as for a new session.
-	if _, err := s.db.Exec(`UPDATE sessions SET enrollment_only=1 WHERE id='session'`); err != nil {
+	if _, err := s.db.Exec(`UPDATE sessions SET enrollment_only=TRUE WHERE id='session'`); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Now().UTC()

@@ -372,7 +372,7 @@ func TestDeviceSignOnResetMidExchangeIsDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if _, err := raw.Exec(`CREATE TRIGGER reset_mid_exchange AFTER INSERT ON sessions BEGIN UPDATE native_devices SET is_mfa_approver=0, can_sign_on=0 WHERE user_id=NEW.user_id; END`); err != nil {
+	if _, err := raw.Exec(`CREATE TRIGGER reset_mid_exchange AFTER INSERT ON sessions BEGIN UPDATE native_devices SET is_mfa_approver=FALSE, can_sign_on=FALSE WHERE user_id=NEW.user_id; END`); err != nil {
 		t.Fatal(err)
 	}
 	const want = `{"error":"invalid_grant","error_description":"device_signon_disabled"}`

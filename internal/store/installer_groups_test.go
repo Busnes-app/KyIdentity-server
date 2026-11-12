@@ -139,7 +139,7 @@ func TestInstallerGroupAssignmentAndDefinitionDriftAreNotRepaired(t *testing.T) 
 			case "assignment":
 				err = s.SetAppAssignment(appID, "groups", groupID, false, nil)
 			case "claim":
-				_, err = s.db.Exec(`UPDATE app_registry SET groups_claim=0 WHERE id=?`, appID)
+				_, err = s.db.Exec(`UPDATE app_registry SET groups_claim=FALSE WHERE id=?`, appID)
 			case "definition":
 				err = s.UpdateGroup(&Group{ID: groupID, Name: "Suite users", Description: "retain operator change"}, nil)
 			}

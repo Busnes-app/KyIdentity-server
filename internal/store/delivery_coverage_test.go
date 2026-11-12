@@ -196,8 +196,8 @@ func TestSyncBacklogStates(t *testing.T) {
 		t.Fatalf("uncertain write not counted as failed: %+v", b)
 	}
 	for blocked, q := range map[string]string{
-		"held":        `UPDATE paired_systems SET status='active', provisioning_hold=1 WHERE id='target'`,
-		"unsupported": `UPDATE paired_systems SET provisioning_hold=0, system_type='ldap' WHERE id='target'`,
+		"held":        `UPDATE paired_systems SET status='active', provisioning_hold=TRUE WHERE id='target'`,
+		"unsupported": `UPDATE paired_systems SET provisioning_hold=FALSE, system_type='ldap' WHERE id='target'`,
 		"disabled":    `UPDATE paired_systems SET status='disabled' WHERE id='target'`,
 	} {
 		mustExec(t, s, q)

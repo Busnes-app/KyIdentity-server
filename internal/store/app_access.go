@@ -253,7 +253,7 @@ func (s *Store) ListAppAccessUsers(id, query, previewMode string, previewEnabled
 		return nil, err
 	}
 	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.status,f.direct,f.group_assigned,(`+current+`),(`+proposed+`),`+accessReasonSQL+`,
- (SELECT d.expires_at FROM app_user_assignments d WHERE d.app_id=f.app_id AND d.user_id=u.id)`+from+` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, enabled, mode, id, query, query, limit, offset)
+ (SELECT d.expires_at FROM app_user_assignments d WHERE d.app_id=f.app_id AND d.user_id=u.id)`+from+` ORDER BY u.username,u.id LIMIT ? OFFSET ?`, enabled, mode, id, query, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +299,7 @@ func (s *Store) ListAppAccessGroups(id, query string, limit, offset int) ([]AppA
 	if err = tx.QueryRow(`SELECT COUNT(*) FROM directory_groups g`+where, query).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := tx.Query(`SELECT g.id,g.name,EXISTS(SELECT 1 FROM app_group_assignments x WHERE x.app_id=? AND x.group_id=g.id) FROM directory_groups g`+where+` ORDER BY g.name COLLATE NOCASE,g.id LIMIT ? OFFSET ?`, id, query, limit, offset)
+	rows, err := tx.Query(`SELECT g.id,g.name,EXISTS(SELECT 1 FROM app_group_assignments x WHERE x.app_id=? AND x.group_id=g.id) FROM directory_groups g`+where+` ORDER BY g.name,g.id LIMIT ? OFFSET ?`, id, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

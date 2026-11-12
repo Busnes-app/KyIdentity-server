@@ -126,8 +126,8 @@ func principalsTx(tx *sql.Tx, query, roleID string) ([]AppRolePrincipal, error) 
 	return out, rows.Err()
 }
 
-const roleUsersSQL = `SELECT u.id,u.username FROM app_role_user_assignments a JOIN users u ON u.id=a.user_id WHERE a.role_id=? ORDER BY u.username COLLATE NOCASE`
-const roleGroupsSQL = `SELECT g.id,g.name FROM app_role_group_assignments a JOIN directory_groups g ON g.id=a.group_id WHERE a.role_id=? ORDER BY g.name COLLATE NOCASE`
+const roleUsersSQL = `SELECT u.id,u.username FROM app_role_user_assignments a JOIN users u ON u.id=a.user_id WHERE a.role_id=? ORDER BY u.username`
+const roleGroupsSQL = `SELECT g.id,g.name FROM app_role_group_assignments a JOIN directory_groups g ON g.id=a.group_id WHERE a.role_id=? ORDER BY g.name`
 
 // ListAppRoles returns an app's roles with their explicit mappings.
 func (s *Store) ListAppRoles(appID string) ([]AppRole, error) {
@@ -143,7 +143,7 @@ func (s *Store) ListAppRoles(appID string) ([]AppRole, error) {
 	if !exists {
 		return nil, ErrAppRecordMissing
 	}
-	rows, err := tx.Query(`SELECT id,app_id,name,description,created_at FROM app_roles WHERE app_id=? ORDER BY name COLLATE NOCASE`, appID)
+	rows, err := tx.Query(`SELECT id,app_id,name,description,created_at FROM app_roles WHERE app_id=? ORDER BY lower(name)`, appID)
 	if err != nil {
 		return nil, err
 	}

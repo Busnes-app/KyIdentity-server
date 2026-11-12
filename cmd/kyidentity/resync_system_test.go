@@ -163,7 +163,7 @@ func TestResyncSystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	deliver()
-	if _, err := raw.Exec(`UPDATE paired_systems SET provisioning_hold=1 WHERE id='target'`); err != nil {
+	if _, err := raw.Exec(`UPDATE paired_systems SET provisioning_hold=TRUE WHERE id='target'`); err != nil {
 		t.Fatal(err)
 	}
 	if r, err := run("--client", "kyq-app", "--wait", "5s"); err == nil || r.Status != "blocked" || r.Blocked != "held" {

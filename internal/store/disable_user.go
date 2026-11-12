@@ -48,7 +48,7 @@ func (s *Store) DisableUserByName(username, guard string, audit *AuditEvent) (bo
 				return false, errAlreadyDisabled
 			}
 		}
-		if err := requirePermanentAdminTx(tx, `username=? COLLATE NOCASE AND id<>?`, guard, u.ID); err != nil {
+		if err := requirePermanentAdminTx(tx, `username=? AND id<>?`, guard, u.ID); err != nil {
 			if errors.Is(err, ErrLastActiveAdmin) {
 				return false, ErrGuardAdministrator
 			}

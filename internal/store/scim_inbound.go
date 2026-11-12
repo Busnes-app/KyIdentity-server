@@ -86,7 +86,7 @@ func (u *User) ApplySourceState() {
 // as either its username or its email: an upstream must not shadow a local identifier.
 func rejectCrossIdentityTx(tx *sql.Tx, excludeID, username, email string) error {
 	var clash bool
-	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id<>? AND (username=? COLLATE NOCASE OR email=? COLLATE NOCASE OR username=? COLLATE NOCASE OR email=? COLLATE NOCASE))`,
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id<>? AND (username=? OR email=? OR username=? OR email=?))`,
 		excludeID, username, username, email, email).Scan(&clash); err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func (s *Store) GetSCIMConnector(id string) (*SCIMConnector, error) {
 }
 
 func (s *Store) ListSCIMConnectors() ([]SCIMConnector, error) {
-	rows, err := s.db.Query(`SELECT id, name, status, created_at, updated_at FROM scim_connectors ORDER BY name COLLATE NOCASE, id`)
+	rows, err := s.db.Query(`SELECT id, name, status, created_at, updated_at FROM scim_connectors ORDER BY lower(name), id`)
 	if err != nil {
 		return nil, err
 	}
@@ -311,13 +311,13 @@ func (s *Store) ListUpstreamUsers(connectorID, attribute, value string, startInd
 	switch attribute {
 	case "":
 	case "userName":
-		where += ` AND username=? COLLATE NOCASE`
+		where += ` AND username=?`
 		args = append(args, value)
 	case "externalId":
 		where += ` AND external_id=?`
 		args = append(args, value)
 	case "emails.value", "emails":
-		where += ` AND email=? COLLATE NOCASE`
+		where += ` AND email=?`
 		args = append(args, value)
 	case "id":
 		where += ` AND id=?`
@@ -427,7 +427,7 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 				return err
 			}
 			if ownedAdmins {
-				if err := requirePermanentAdminTx(tx, `source_connector_id IS NOT ?`, id); err != nil {
+				if err := requirePermanentAdminTx(tx, `source_connector_id IS DISTINCT FROM ?`, id); err != nil {
 					return err
 				}
 			}
@@ -442,7 +442,7 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 			if disableUsers {
 				status = "disabled"
 			}
-			if _, err := tx.Exec(`UPDATE users SET source_connector_id=NULL, external_id=NULL, source_active=1, locally_disabled=0, status=?, updated_at=? WHERE id=?`, status, now, u.ID); err != nil {
+			if _, err := tx.Exec(`UPDATE users SET source_connector_id=NULL, external_id=NULL, source_active=TRUE, locally_disabled=FALSE, status=?, updated_at=? WHERE id=?`, status, now, u.ID); err != nil {
 				return err
 			}
 			// Once local, a pending account's link would activate it outright, so one

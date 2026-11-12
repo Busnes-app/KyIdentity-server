@@ -102,7 +102,7 @@ func (s *Store) RequestableApps(userID string) ([]RequestableApp, error) {
 	rows, err := s.db.Query(`SELECT a.id,`+appDisplayName+`,
  EXISTS(SELECT 1 FROM access_requests r WHERE r.app_id=a.id AND r.user_id=? AND r.status='pending')`+appRecordFrom+`
  WHERE a.requestable AND a.enabled AND a.access_mode='assigned_only'
- AND NOT EXISTS(SELECT 1 FROM effective_app_access e WHERE e.app_id=a.id AND e.user_id=?) ORDER BY 2 COLLATE NOCASE, a.id`, userID, userID)
+ AND NOT EXISTS(SELECT 1 FROM effective_app_access e WHERE e.app_id=a.id AND e.user_id=?) ORDER BY lower(`+appDisplayName+`), a.id`, userID, userID)
 	if err != nil {
 		return nil, err
 	}

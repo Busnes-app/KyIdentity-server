@@ -102,7 +102,7 @@ func TestLauncherAdminClientsFallsBackToGlobalAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`UPDATE app_roles SET administrator=1 WHERE id=?`, role.ID); err != nil {
+	if _, err := s.db.Exec(`UPDATE app_roles SET administrator=TRUE WHERE id=?`, role.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.LauncherAdminClients(admin.ID); got["client"] {

@@ -93,7 +93,7 @@ func TestDeleteUserWithSyncEventsMigratesLegacyForeignKey(t *testing.T) {
 	if err := s.CreatePairedSystem(&PairedSystem{ID: "system", Name: "system", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision) VALUES('system','deleted-user',1,1,1)`); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision) VALUES('system','deleted-user',TRUE,TRUE,1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteUserWithSyncEvents("deleted-user", nil); err != nil {

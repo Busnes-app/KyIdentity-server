@@ -417,7 +417,7 @@ func TestEndDatedAdministratorIsNoCoverForTheLast(t *testing.T) {
 	defer cleanup()
 	c, _ := s.CreateSCIMConnector("A", nil)
 	permanent := upstream(t, s, c.ID, "ext-1", "permanent")
-	if _, err := s.db.Exec(`UPDATE users SET role='admin', status='active', pending=0, password_hash='x' WHERE id=?`, permanent.ID); err != nil {
+	if _, err := s.db.Exec(`UPDATE users SET role='admin', status='active', pending=FALSE, password_hash='x' WHERE id=?`, permanent.ID); err != nil {
 		t.Fatal(err)
 	}
 	ending := createTestUserNamed(t, s, "ending")

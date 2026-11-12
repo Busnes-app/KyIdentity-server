@@ -62,7 +62,7 @@ func TestRevokeTokenEndsAccessTokenOnlyForItsOwnClient(t *testing.T) {
 	if err := f.e.RevokeToken(resp.AccessToken, "no-such-client", f.secret); err == nil {
 		t.Fatal("revoke by an unknown client accepted")
 	}
-	f.exec(`UPDATE oauth_clients SET enabled=0 WHERE id=?`, other.ID)
+	f.exec(`UPDATE oauth_clients SET enabled=FALSE WHERE id=?`, other.ID)
 	if err := f.e.RevokeToken(resp.AccessToken, other.ID, f.secret); err == nil {
 		t.Fatal("revoke by a disabled client accepted")
 	}
@@ -177,7 +177,7 @@ func TestExchangeAuthorizationCodeRefusals(t *testing.T) {
 	t.Run("disabled client", func(t *testing.T) {
 		f := newRefreshFixture(t)
 		code, verifier := f.covCodeFor("openid")
-		f.exec(`UPDATE oauth_clients SET enabled=0 WHERE id=?`, f.client.ID)
+		f.exec(`UPDATE oauth_clients SET enabled=FALSE WHERE id=?`, f.client.ID)
 		if _, err := f.e.ExchangeAuthorizationCode(code, f.client.ID, f.secret, "https://app.example/cb", verifier); err == nil || !strings.Contains(err.Error(), "disabled client") {
 			t.Fatalf("disabled client: %v", err)
 		}
@@ -281,11 +281,11 @@ func TestExchangeRefreshTokenRefusesIneligibleClients(t *testing.T) {
 	if _, user, err := f.e.ExchangeRefreshToken("unknown-refresh-token", f.client.ID, f.secret, ""); !errors.Is(err, store.ErrRefreshInvalid) || user != "" {
 		t.Fatalf("unknown token: user %q err %v", user, err)
 	}
-	f.exec(`UPDATE oauth_clients SET enabled=0 WHERE id=?`, f.client.ID)
+	f.exec(`UPDATE oauth_clients SET enabled=FALSE WHERE id=?`, f.client.ID)
 	if _, _, err := f.e.ExchangeRefreshToken(first.RefreshToken, f.client.ID, f.secret, ""); err == nil {
 		t.Fatal("disabled client refreshed")
 	}
-	f.exec(`UPDATE oauth_clients SET enabled=1 WHERE id=?`, f.client.ID)
+	f.exec(`UPDATE oauth_clients SET enabled=TRUE WHERE id=?`, f.client.ID)
 	// None of the refusals spent the token.
 	if _, err := f.refresh(first.RefreshToken); err != nil {
 		t.Fatalf("refused refreshes spent the token: %v", err)
@@ -331,7 +331,7 @@ func TestCreateAuthorizationCodeForInteractionRefusals(t *testing.T) {
 	if after := f.covCount(`SELECT COUNT(*) FROM authorization_codes WHERE authentication_expires_at IS NOT NULL`); after != before+1 {
 		t.Fatal("max_age deadline not recorded on the code")
 	}
-	f.exec(`UPDATE oauth_clients SET enabled=0 WHERE id=?`, f.client.ID)
+	f.exec(`UPDATE oauth_clients SET enabled=FALSE WHERE id=?`, f.client.ID)
 	if _, err := create(f.client.ID, f.session, AuthenticationRequest{}, ""); err == nil || !strings.Contains(err.Error(), "disabled client") {
 		t.Fatalf("disabled client: %v", err)
 	}

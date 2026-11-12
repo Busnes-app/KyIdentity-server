@@ -387,10 +387,10 @@ func prepareSyncDeliveryTx(tx *sql.Tx, ev *AccountSyncEvent) error {
 	}
 	// Some historical/manual outbox rows have no desired-state record. Their event
 	// revision still supplies the floor, without inventing active/provisioned state.
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,revision) VALUES(?,?,'user',0,0)`, ev.SystemID, ev.UserID); err != nil {
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,revision) VALUES(?,?,'user',FALSE,0)`, ev.SystemID, ev.UserID); err != nil {
 		return err
 	}
-	if err := tx.QueryRow(`UPDATE sync_resource_state SET delivery_revision=MAX(delivery_revision+1,revision+1,?) WHERE system_id=? AND resource_id=? RETURNING delivery_revision`, ev.Revision, ev.SystemID, ev.UserID).Scan(&ev.DeliveryRevision); err != nil {
+	if err := tx.QueryRow(`UPDATE sync_resource_state SET delivery_revision=CASE WHEN delivery_revision>=revision AND delivery_revision+1>=? THEN delivery_revision+1 WHEN revision+1>=? THEN revision+1 ELSE ? END WHERE system_id=? AND resource_id=? RETURNING delivery_revision`, ev.Revision, ev.Revision, ev.Revision, ev.SystemID, ev.UserID).Scan(&ev.DeliveryRevision); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`UPDATE account_sync_events SET delivery_revision=?,payload_json=? WHERE id=?`, ev.DeliveryRevision, ev.PayloadJSON, ev.ID)

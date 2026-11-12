@@ -96,11 +96,11 @@ func TestInstallerSuiteConnectorRefusesDriftAndRollsBack(t *testing.T) {
 				case "protocol":
 					query = `UPDATE paired_systems SET system_type='scim'`
 				case "hold":
-					query = `UPDATE paired_systems SET provisioning_hold=1`
+					query = `UPDATE paired_systems SET provisioning_hold=TRUE`
 				case "endpoint":
 					query = `UPDATE paired_systems SET callback_url='https://foreign.test/sync/events'`
 				case "groups":
-					query = `UPDATE paired_systems SET groups_enabled=1`
+					query = `UPDATE paired_systems SET groups_enabled=TRUE`
 				case "foreign":
 					query = `DELETE FROM installer_setup_resources WHERE kind='connector'`
 				case "intent":

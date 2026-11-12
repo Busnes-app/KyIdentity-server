@@ -183,18 +183,14 @@ var testSetup = sync.OnceValue(func() error {
 		return err
 	}
 	defer db.Close()
-	tx, err := db.Begin() // takes the default writer lock: one process at a time
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	// citext lives in public, shared by every test schema, so dropping one keeps it.
-	if _, err := tx.Exec(`CREATE EXTENSION IF NOT EXISTS citext SCHEMA public`); err != nil {
+	// citext lives in public, shared by every test schema, so dropping one keeps it. The
+	// statement runs under the default writer lock: one process at a time.
+	if _, err := db.Exec(`CREATE EXTENSION IF NOT EXISTS citext SCHEMA public`); err != nil {
 		return err
 	}
 	// Drop the schemas of finished tests: their directory is gone, or, for :memory:, they
-	// are hours old.
-	rows, err := tx.Query(`SELECT nspname, COALESCE(obj_description(oid, 'pg_namespace'), '') FROM pg_namespace WHERE nspname LIKE 'kt\_%'`)
+	// are hours old. One at a time: a schema holds hundreds of objects to lock.
+	rows, err := db.Query(`SELECT nspname, COALESCE(obj_description(oid, 'pg_namespace'), '') FROM pg_namespace WHERE nspname LIKE 'kt\_%'`)
 	if err != nil {
 		return err
 	}
@@ -217,11 +213,11 @@ var testSetup = sync.OnceValue(func() error {
 	}
 	rows.Close()
 	for _, name := range stale {
-		if _, err := tx.Exec(`DROP SCHEMA IF EXISTS "` + name + `" CASCADE`); err != nil {
+		if _, err := db.Exec(`DROP SCHEMA IF EXISTS "` + name + `" CASCADE`); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 })
 
 // newTestPostgres is New(path) in a test binary with KYIDENTITY_TEST_DATABASE_URL set.
@@ -253,4 +249,13 @@ func newTestPostgres(rawURL, path string, migrate bool) (*Store, error) {
 		}
 	}
 	return openPostgres(rawURL, schema+",public", migrate)
+}
+
+// SkipOnPostgres skips a test that is about SQLite itself (it opens the file, reads the
+// SQLite catalog or fakes a legacy install) when the suite runs on Postgres.
+func SkipOnPostgres(t testing.TB, reason string) {
+	t.Helper()
+	if OnPostgresTest() {
+		t.Skip("SQLite only: " + reason)
+	}
 }

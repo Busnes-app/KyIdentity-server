@@ -924,11 +924,11 @@ func (s *Store) GetUserByID(id string) (*User, error) {
 }
 
 func (s *Store) GetUserByUsername(username string) (*User, error) {
-	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE username = ? COLLATE NOCASE`, username))
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE username = ?`, username))
 }
 
 func (s *Store) GetUserByEmail(email string) (*User, error) {
-	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE email = ? COLLATE NOCASE`, email))
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE email = ?`, email))
 }
 
 func (s *Store) ListUsers() ([]User, error) {
@@ -1081,7 +1081,7 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 	// The bare deletion is recorded as a target too, so the completion view cannot claim
 	// every connector is done while it is still queued.
 	for _, sys := range strangers {
-		if _, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',0,0,0)`, sys, userID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',FALSE,FALSE,0)`, sys, userID); err != nil {
 			return err
 		}
 		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", scimInactivePayload(userID), 0, now); err != nil {
@@ -1154,7 +1154,7 @@ func (s *Store) CreateSessionForInteraction(sess *Session, interactionHash, brow
 	query := `INSERT INTO sessions (session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method, id, user_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ` + eligible
 	if renew {
 		// enrollment_only starts clear, as on a new session: the fresh login decides it below.
-		query = `UPDATE sessions SET session_token_hash=?, ip_address=?, user_agent=?, expires_at=?, created_at=?, last_active_at=?, primary_authenticated_at=?, factor_authenticated_at=?, factor_method=?, enrollment_only=0 WHERE id=? AND user_id=? AND ` + eligible
+		query = `UPDATE sessions SET session_token_hash=?, ip_address=?, user_agent=?, expires_at=?, created_at=?, last_active_at=?, primary_authenticated_at=?, factor_authenticated_at=?, factor_method=?, enrollment_only=FALSE WHERE id=? AND user_id=? AND ` + eligible
 	}
 	result, err := tx.Exec(query, sess.SessionTokenHash, sess.IPAddress, sess.UserAgent, sess.ExpiresAt, now, now, sess.PrimaryAuthenticatedAt, sess.FactorAuthenticatedAt, sess.FactorMethod, id, sess.UserID, sess.UserID, sess.ProvenPasswordHash, sess.ProvenPasswordHash)
 	if err != nil {
@@ -1859,7 +1859,7 @@ func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool, 
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (? = 0 OR is_mfa_approver = 1)`, enabled, deviceID, userID, enabled)
+	res, err := tx.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (NOT ? OR is_mfa_approver)`, enabled, deviceID, userID, enabled)
 	if err != nil {
 		return err
 	}
@@ -2921,7 +2921,7 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 	if _, err := tx.Exec(`DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0, can_sign_on = 0 WHERE user_id = ?`, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = FALSE, can_sign_on = FALSE WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	if err := revokeUserAccessTx(tx, userID, now); err != nil {

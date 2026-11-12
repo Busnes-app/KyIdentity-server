@@ -29,7 +29,7 @@ const writerLockKey int64 = 0x4b79_4964_0001 // "KyId", 1
 func init() { sql.Register("kypg", Driver{}) }
 
 // Driver is the kypg database/sql driver: pgx's stdlib driver with Translate applied to
-// every statement, Go bools sent as 0/1, and the writer lock.
+// every statement, and the writer lock.
 type Driver struct{}
 
 func (Driver) Open(name string) (driver.Conn, error) {
@@ -199,15 +199,32 @@ func (c *conn) autoWrap(query string) bool {
 }
 
 func (c *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	query = Translate(query)
+	run := func() (driver.Result, error) { return c.inner.ExecContext(ctx, Translate(query), args) }
+	if stmts, params := Split(query); len(args) > 0 && len(stmts) > 1 {
+		run = func() (driver.Result, error) {
+			var res driver.Result
+			for i, q := range stmts {
+				part := args[:params[i]]
+				args = args[params[i]:]
+				for j := range part {
+					part[j].Ordinal = j + 1
+				}
+				var err error
+				if res, err = c.inner.ExecContext(ctx, Translate(q), part); err != nil {
+					return nil, err
+				}
+			}
+			return res, nil
+		}
+	}
 	if !c.autoWrap(query) {
-		return c.inner.ExecContext(ctx, query, args)
+		return run()
 	}
 	tx, err := c.BeginTx(ctx, driver.TxOptions{})
 	if err != nil {
 		return nil, err
 	}
-	res, err := c.inner.ExecContext(ctx, query, args)
+	res, err := run()
 	if err != nil {
 		_ = tx.Rollback()
 		return nil, err
@@ -294,35 +311,8 @@ func (c *conn) ResetSession(ctx context.Context) error { return c.inner.ResetSes
 
 func (c *conn) IsValid() bool { return !c.inner.Conn().IsClosed() }
 
-// CheckNamedValue sends Go bools (and driver.Valuers that yield one) as 0/1: the store's
-// booleans are INTEGER columns on both backends.
-func (c *conn) CheckNamedValue(nv *driver.NamedValue) error {
-	if v, ok := nv.Value.(driver.Valuer); ok {
-		val, err := v.Value()
-		if err != nil {
-			return err
-		}
-		nv.Value = val
-	}
-	switch v := nv.Value.(type) {
-	case bool:
-		nv.Value = boolInt(v)
-	case *bool:
-		if v == nil {
-			nv.Value = nil
-		} else {
-			nv.Value = boolInt(*v)
-		}
-	}
-	return nil
-}
-
-func boolInt(b bool) int64 {
-	if b {
-		return 1
-	}
-	return 0
-}
+// CheckNamedValue passes every argument to pgx unchanged, as pgx's own driver does.
+func (c *conn) CheckNamedValue(nv *driver.NamedValue) error { return c.inner.CheckNamedValue(nv) }
 
 type stmt struct {
 	c     *conn

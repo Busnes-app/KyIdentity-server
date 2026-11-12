@@ -318,7 +318,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 	for _, u := range []InstallerUser{p.Admin, p.Everyday} {
 		var id, email, role, status, source string
 		var pending bool
-		err := tx.QueryRow(`SELECT id,email,role,status,pending,COALESCE(source_connector_id,'') FROM users WHERE username=? COLLATE NOCASE`, u.Username).Scan(&id, &email, &role, &status, &pending, &source)
+		err := tx.QueryRow(`SELECT id,email,role,status,pending,COALESCE(source_connector_id,'') FROM users WHERE username=?`, u.Username).Scan(&id, &email, &role, &status, &pending, &source)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -361,7 +361,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		}
 		id = uuid.NewString()
 		// The installer owns these identities and took the address from the owner's plan.
-		if _, err := tx.Exec(`INSERT INTO users(id,username,display_name,email,password_hash,role,status,pending,email_verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,'active',0,?,?,?)`, id, u.Username, u.Username, u.Email, u.PasswordHash, u.Role, now, now, now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO users(id,username,display_name,email,password_hash,role,status,pending,email_verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,'active',FALSE,?,?,?)`, id, u.Username, u.Username, u.Email, u.PasswordHash, u.Role, now, now, now); err != nil {
 			return nil, errors.New("installer account creation conflicts with an existing account")
 		}
 		if err := remember("user", u.Username, id, contract); err != nil {
@@ -370,10 +370,10 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		report.Created = append(report.Created, InstallerObject{"user", u.Username, id})
 	}
 	var everydayID, adminID string
-	if err := tx.QueryRow(`SELECT id FROM users WHERE username=? COLLATE NOCASE`, p.Everyday.Username).Scan(&everydayID); err != nil {
+	if err := tx.QueryRow(`SELECT id FROM users WHERE username=?`, p.Everyday.Username).Scan(&everydayID); err != nil {
 		return nil, err
 	}
-	if err := tx.QueryRow(`SELECT id FROM users WHERE username=? COLLATE NOCASE`, p.Admin.Username).Scan(&adminID); err != nil {
+	if err := tx.QueryRow(`SELECT id FROM users WHERE username=?`, p.Admin.Username).Scan(&adminID); err != nil {
 		return nil, err
 	}
 	if err := configureInstallerMail(tx, p, inspect, report, ownership, remember); err != nil {
@@ -532,7 +532,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		if inspect {
 			return nil, fmt.Errorf("client %s is not configured", c.ID)
 		}
-		if _, err := tx.Exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,launch_url,enabled,created_at,post_logout_redirect_uris_json) VALUES(?,?,'confidential',?,?,?,NULL,1,?,?)`, c.ID, c.Name, c.SecretHash, string(redirects), `["openid","profile","email"]`, now, string(logout)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,launch_url,enabled,created_at,post_logout_redirect_uris_json) VALUES(?,?,'confidential',?,?,?,NULL,TRUE,?,?)`, c.ID, c.Name, c.SecretHash, string(redirects), `["openid","profile","email"]`, now, string(logout)); err != nil {
 			return nil, err
 		}
 		var appID string

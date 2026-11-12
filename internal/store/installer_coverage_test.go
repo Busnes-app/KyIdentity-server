@@ -23,7 +23,7 @@ func TestInstallerSetupRefusesManagedDrift(t *testing.T) {
 		"admin email":           {nil, `UPDATE users SET email='moved@example.test' WHERE username='owner-admin'`, "no longer matches installer account requirements"},
 		"admin end date":        {nil, `UPDATE users SET ends_at=unixepoch()+3600 WHERE username='owner-admin'`, "conflicting account lifecycle"},
 		"client secret":         {nil, `UPDATE oauth_clients SET client_secret_hash='other' WHERE id='kydrive'`, "client kydrive differs from its installer configuration"},
-		"client disabled":       {nil, `UPDATE oauth_clients SET enabled=0 WHERE id='kydrive'`, "client kydrive differs"},
+		"client disabled":       {nil, `UPDATE oauth_clients SET enabled=FALSE WHERE id='kydrive'`, "client kydrive differs"},
 		"client scopes":         {nil, `UPDATE oauth_clients SET allowed_scopes_json='["openid"]' WHERE id='kydrive'`, "client kydrive differs"},
 		"everyday unassigned":   {nil, `DELETE FROM app_user_assignments WHERE user_id=(SELECT id FROM users WHERE username='owner')`, "access assignments differ"},
 		"open to everyone":      {nil, `UPDATE app_registry SET access_mode='all_active_users' WHERE client_id='kydrive'`, "access assignments differ"},
