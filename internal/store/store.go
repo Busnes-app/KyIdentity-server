@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 type Store struct {
@@ -23,8 +23,11 @@ type Store struct {
 	// rdb serves read-only snapshot transactions, which must not take the
 	// IMMEDIATE write lock db's transactions begin with.
 	rdb *sql.DB
-	// limits caches the browser session limits every session lookup applies.
-	limits atomic.Pointer[SessionLimits]
+	// limits caches the browser session limits every session lookup applies; limitsSeed and
+	// limitsAt let SessionLimits re-read them, so another replica's change is picked up.
+	limits     atomic.Pointer[SessionLimits]
+	limitsSeed atomic.Pointer[SessionLimits]
+	limitsAt   atomic.Int64
 }
 
 var ErrLastActiveAdmin = errors.New("cannot remove the last active administrator")
@@ -48,8 +51,23 @@ func New(dbPath string) (*Store, error) {
 	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(time.Hour)
 
+	// Opening a connection sets journal_mode(WAL), which fails with SQLITE_BUSY at once,
+	// without the busy timeout, while another process is creating the file. Retry the open
+	// for as long as a busy statement would wait.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		var busy *sqlite.Error
+		if err = db.Ping(); err == nil || !errors.As(err, &busy) || busy.Code()&0xff != 5 || time.Now().After(deadline) {
+			break
+		}
+	}
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+	}
+
 	s := &Store{db: db, rdb: db}
-	if err := s.migrate(); err != nil {
+	// Two processes starting on one database migrate one after the other.
+	if err := s.withMigrationLease(s.migrate); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("schema creation failed: %w", err)
 	}
@@ -464,6 +482,9 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if err := s.migrateLoginFailuresBySource(); err != nil {
+		return err
+	}
+	if err := s.migrateSharedState(); err != nil {
 		return err
 	}
 	return s.migratePasswordChangeRequired()

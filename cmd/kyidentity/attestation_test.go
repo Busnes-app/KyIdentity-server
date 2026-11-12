@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
@@ -51,24 +50,18 @@ func TestSweepRequireLocked(t *testing.T) {
 }
 
 func TestRunAttestationHousekeeping(t *testing.T) {
-	now := time.Now()
 	var refreshed, swept int
 	refresh, sweep := func() { refreshed++ }, func() { swept++ }
+	claim := func(ok bool) func() bool { return func() bool { return ok } }
 
-	last := runAttestationHousekeeping(now, now.Add(-time.Hour), true, refresh, sweep)
-	if refreshed != 1 || swept != 0 || !last.Equal(now.Add(-time.Hour)) {
-		t.Fatalf("stale, sweep not due: refreshed=%d swept=%d", refreshed, swept)
+	if runAttestationHousekeeping(true, claim(false), refresh, sweep); refreshed != 1 || swept != 0 {
+		t.Fatalf("stale, sweep not claimed: refreshed=%d swept=%d", refreshed, swept)
 	}
-	last = runAttestationHousekeeping(now, now.Add(-time.Hour), false, refresh, sweep)
-	if refreshed != 1 || swept != 0 || !last.Equal(now.Add(-time.Hour)) {
-		t.Fatalf("fresh, sweep not due: refreshed=%d swept=%d", refreshed, swept)
+	if runAttestationHousekeeping(false, claim(false), refresh, sweep); refreshed != 1 || swept != 0 {
+		t.Fatalf("fresh, sweep not claimed: refreshed=%d swept=%d", refreshed, swept)
 	}
-	last = runAttestationHousekeeping(now, now.Add(-24*time.Hour), false, refresh, sweep)
-	if refreshed != 2 || swept != 1 || !last.Equal(now) {
-		t.Fatalf("sweep due: refreshed=%d swept=%d last=%v", refreshed, swept, last)
-	}
-	if last = runAttestationHousekeeping(now, time.Time{}, true, refresh, sweep); refreshed != 3 || swept != 2 || !last.Equal(now) {
-		t.Fatalf("first run: refreshed=%d swept=%d", refreshed, swept)
+	if runAttestationHousekeeping(false, claim(true), refresh, sweep); refreshed != 2 || swept != 1 {
+		t.Fatalf("sweep claimed: refreshed=%d swept=%d", refreshed, swept)
 	}
 }
 

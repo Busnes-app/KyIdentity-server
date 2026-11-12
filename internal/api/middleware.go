@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
@@ -37,7 +39,10 @@ type MiddlewareManager struct {
 	rateLimiters      map[string]*RateLimiter
 	rateLimitersMutex sync.Mutex
 	maxLimiters       int
-	csrfKey           []byte
+	// shared keeps the buckets in the database, so N replicas enforce one allowance, not N.
+	shared     bool
+	sharedFull atomic.Bool
+	csrfKey    []byte
 	// now is injectable so eviction behaviour can be tested without waiting real minutes.
 	now func() time.Time
 }
@@ -186,6 +191,13 @@ func (l *RateLimiter) refilled(now time.Time) bool {
 // refills, so each bucket goes within its refill time, and maxLimiters bounds the map.
 func (m *MiddlewareManager) sweepLimiters() {
 	now := m.now()
+	if m.shared {
+		if n, err := m.store.SweepRateLimits(now); err != nil {
+			log.Printf("rate limit: sweep failed: %v", err)
+		} else {
+			m.sharedFull.Store(n >= m.maxLimiters)
+		}
+	}
 	m.rateLimitersMutex.Lock()
 	defer m.rateLimitersMutex.Unlock()
 	for key, limiter := range m.rateLimiters {
@@ -263,8 +275,26 @@ func (m *MiddlewareManager) RateLimit(bucket string, maxTokens, refillRate float
 }
 
 // Protocol endpoints can reuse the same bounded limiter and send their own error.
+// With shared set the request must also fit the database bucket all replicas spend from;
+// the in-memory bucket still goes first, so a flood is refused without a query.
 func (m *MiddlewareManager) allowRateLimit(key string, maxTokens, refillRate float64) bool {
 	now := m.now()
+	if !m.allowLocal(key, maxTokens, refillRate, now) {
+		return false
+	}
+	if !m.shared {
+		return true
+	}
+	// At the cap no bucket is added, as in memory: live buckets are never evicted. A
+	// database that cannot answer refuses the request rather than waving it through.
+	ok, err := m.store.AllowRate(key, maxTokens, refillRate, now, !m.sharedFull.Load())
+	if err != nil {
+		log.Printf("rate limit: refusing, the shared limiter is unavailable: %v", err)
+	}
+	return ok
+}
+
+func (m *MiddlewareManager) allowLocal(key string, maxTokens, refillRate float64, now time.Time) bool {
 	m.rateLimitersMutex.Lock()
 	limiter, exists := m.rateLimiters[key]
 	if !exists {

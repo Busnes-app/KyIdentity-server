@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -30,8 +31,11 @@ var (
 const (
 	alertSettingsKey      = "alert_settings"
 	alertDeliveryAttempts = 8
-	alertBatch            = 500
-	alertMaxBatches       = 10
+	// alertDeliveryLease is how long a claimed delivery stays with the replica sending it;
+	// longer than a pass, so only a dead replica's claim is ever taken over.
+	alertDeliveryLease = 2 * time.Minute
+	alertBatch         = 500
+	alertMaxBatches    = 10
 	// loginAlertCeiling bounds live login-failure alerts: past it, further sources
 	// fold into one alert rather than each minting an alert and its mail.
 	loginAlertCeiling = 10
@@ -633,23 +637,45 @@ func (s *Store) DeliverAlerts(ctx context.Context, now time.Time, send func(to, 
 		attempts, count                          int
 		first, last                              time.Time
 	}
-	rows, err := s.db.Query(`SELECT d.id, d.user_id, d.kind, d.attempts, a.title, a.summary, a.severity, a.status, a.count, a.first_seen, a.last_seen
- FROM alert_deliveries d JOIN alerts a ON a.id=d.alert_id WHERE d.status='pending' AND d.next_attempt_at<=? ORDER BY d.id LIMIT 50`, now)
+	// Claim before sending, as ClaimDueSyncEvents does: the outer WHERE re-checks the lease,
+	// so two replicas never hold the same row. A claim a dead replica left expires.
+	nowMS := now.UnixMilli()
+	claimed, err := s.db.Query(`UPDATE alert_deliveries SET lease_until_ms=?
+ WHERE id IN (SELECT id FROM alert_deliveries WHERE status='pending' AND next_attempt_at<=? AND lease_until_ms<=? ORDER BY id LIMIT 50)
+ AND status='pending' AND lease_until_ms<=? RETURNING id`, nowMS+alertDeliveryLease.Milliseconds(), now, nowMS, nowMS)
 	if err != nil {
 		return 0, err
 	}
+	var ids []int64
+	for claimed.Next() {
+		var id int64
+		if err := claimed.Scan(&id); err != nil {
+			claimed.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := errors.Join(claimed.Err(), claimed.Close()); err != nil {
+		return 0, err
+	}
+	slices.Sort(ids)
+	// What this pass never reached goes back at once rather than waiting out the lease. A
+	// row whose mail may have left keeps its lease, so a lost outcome is not resent at once.
+	unreached := map[int64]bool{}
+	defer func() {
+		for id := range unreached {
+			_, _ = s.db.Exec(`UPDATE alert_deliveries SET lease_until_ms=0 WHERE id=? AND status='pending'`, id)
+		}
+	}()
 	var batch []due
-	for rows.Next() {
-		var d due
-		if err := rows.Scan(&d.id, &d.userID, &d.kind, &d.attempts, &d.title, &d.summary, &d.sev, &d.state, &d.count, &d.first, &d.last); err != nil {
-			rows.Close()
+	for _, id := range ids {
+		unreached[id] = true
+		d := due{id: id}
+		if err := s.db.QueryRow(`SELECT d.user_id, d.kind, d.attempts, a.title, a.summary, a.severity, a.status, a.count, a.first_seen, a.last_seen
+ FROM alert_deliveries d JOIN alerts a ON a.id=d.alert_id WHERE d.id=?`, id).Scan(&d.userID, &d.kind, &d.attempts, &d.title, &d.summary, &d.sev, &d.state, &d.count, &d.first, &d.last); err != nil {
 			return 0, err
 		}
 		batch = append(batch, d)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
 	}
 	sent := 0
 	for _, d := range batch {
@@ -671,6 +697,7 @@ func (s *Store) DeliverAlerts(ctx context.Context, now time.Time, send func(to, 
 			if err != nil {
 				return sent, err
 			}
+			delete(unreached, d.id)
 			continue
 		}
 		tx.Rollback()
@@ -678,6 +705,7 @@ func (s *Store) DeliverAlerts(ctx context.Context, now time.Time, send func(to, 
 			// Out of budget for this pass; the rest stay pending for the next one.
 			return sent, nil
 		}
+		delete(unreached, d.id)
 		subject := "KySignOn alert: " + d.title
 		if d.kind == "resolved" {
 			subject = "KySignOn alert resolved: " + d.title
@@ -693,7 +721,7 @@ func (s *Store) DeliverAlerts(ctx context.Context, now time.Time, send func(to, 
 		case attempts >= alertDeliveryAttempts:
 			_, err = s.db.Exec(`UPDATE alert_deliveries SET status='failed', attempts=?, last_error=?, updated_at=? WHERE id=?`, attempts, alertText(sendErr.Error()), now, d.id)
 		default:
-			_, err = s.db.Exec(`UPDATE alert_deliveries SET attempts=?, last_error=?, next_attempt_at=?, updated_at=? WHERE id=?`, attempts, alertText(sendErr.Error()), now.Add(alertBackoff(attempts)), now, d.id)
+			_, err = s.db.Exec(`UPDATE alert_deliveries SET attempts=?, last_error=?, next_attempt_at=?, updated_at=?, lease_until_ms=0 WHERE id=?`, attempts, alertText(sendErr.Error()), now.Add(alertBackoff(attempts)), now, d.id)
 		}
 		if err != nil {
 			return sent, err

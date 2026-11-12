@@ -131,7 +131,7 @@ func TestBootstrapRefusesAnExistingNonAdmin(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := bootstrapOnStart(db, "admin", "", dir); err == nil {
+	if err := bootstrapOnStart(db, "admin", "", dir, false); err == nil {
 		t.Fatal("first start reported success over an existing ordinary user")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "first-run-password.txt")); !os.IsNotExist(err) {

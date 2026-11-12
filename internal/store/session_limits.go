@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/config"
@@ -23,27 +24,46 @@ func (l SessionLimits) AbsoluteTTL() time.Duration { return time.Duration(l.Abso
 func (l SessionLimits) IdleTTL() time.Duration     { return time.Duration(l.Idle) * time.Second }
 func (l SessionLimits) Valid() bool                { return config.ValidSessionLimits(l.AbsoluteTTL(), l.IdleTTL()) }
 
+// sessionLimitsRefresh bounds how long a replica keeps applying limits another replica has
+// since changed. The change itself ends over-limit sessions in the database at once; only
+// the limit applied to later activity lags.
+var sessionLimitsRefresh = 5 * time.Second
+
 // LoadSessionLimits caches the administrator's limits, or seed when none are stored.
 func (s *Store) LoadSessionLimits(seed SessionLimits) error {
+	l, err := storedSessionLimits(s.db, seed)
+	if err != nil {
+		return err
+	}
+	s.limits.Store(&l)
+	s.limitsSeed.Store(&seed)
+	s.limitsAt.Store(time.Now().UnixNano())
+	return nil
+}
+
+func storedSessionLimits(q settingsQuerier, seed SessionLimits) (SessionLimits, error) {
 	l := seed
-	raw, err := s.GetSetting(sessionLimitsKey)
+	raw, err := getSetting(q, sessionLimitsKey)
 	if err == nil {
 		err = json.Unmarshal([]byte(raw), &l)
 	} else if errors.Is(err, ErrNotFound) {
 		err = nil
 	}
-	if err != nil {
-		return err
+	if err == nil && !l.Valid() {
+		err = errors.New("stored session limits are out of bounds")
 	}
-	if !l.Valid() {
-		return errors.New("stored session limits are out of bounds")
-	}
-	s.limits.Store(&l)
-	return nil
+	return l, err
 }
 
-// SessionLimits returns the cached limits, or the defaults before any load.
+// SessionLimits returns the cached limits, or the defaults before any load. Once loaded
+// they are re-read every sessionLimitsRefresh by one caller at a time; a failed re-read
+// keeps the last good limits.
 func (s *Store) SessionLimits() SessionLimits {
+	if at, now := s.limitsAt.Load(), time.Now().UnixNano(); at != 0 && now-at > int64(sessionLimitsRefresh) && s.limitsAt.CompareAndSwap(at, now) {
+		if err := s.LoadSessionLimits(*s.limitsSeed.Load()); err != nil {
+			log.Printf("session limits: re-read failed, keeping the current ones: %v", err)
+		}
+	}
 	if l := s.limits.Load(); l != nil {
 		return *l
 	}
@@ -62,10 +82,15 @@ func (s *Store) SetSessionLimits(l SessionLimits, audit *AuditEvent) (int64, err
 	if err != nil {
 		return 0, err
 	}
-	old := s.SessionLimits()
-	strict := SessionLimits{Absolute: min(old.Absolute, l.Absolute), Idle: min(old.Idle, l.Idle)}
 	var ended int64
+	cached := s.SessionLimits()
 	if err := s.auditedTx(audit, func(tx *sql.Tx) error {
+		// The stored limits, not this replica's cache: another replica may have just changed them.
+		old, err := storedSessionLimits(tx, cached)
+		if err != nil {
+			return err
+		}
+		strict := SessionLimits{Absolute: min(old.Absolute, l.Absolute), Idle: min(old.Idle, l.Idle)}
 		if _, err := tx.Exec(`INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
  ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`, sessionLimitsKey, string(raw)); err != nil {
 			return err

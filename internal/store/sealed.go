@@ -18,6 +18,8 @@ const (
 	SealConnector = "paired_system"
 	// Settings key.
 	SealMail = "mail_settings"
+	// push_relay_keys name. Never legacy ciphertext, so it is not in sealedColumns.
+	SealRelayKey = "push_relay_key"
 )
 
 // MailSettingKey is the system_settings row holding the sealed relay configuration.

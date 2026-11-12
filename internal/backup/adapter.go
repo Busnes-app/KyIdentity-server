@@ -68,6 +68,15 @@ func privateSwitch(err error) error {
 // been encrypted under. Changing it would orphan every live pairing.
 const recoveryTokenLabel = "kysignon:setting:kyrecovery_token"
 
+// Lease names the database lease one backup run holds, so replicas never run two at once;
+// DrillLease does the same for the restore drill. LeaseTTL has no renewal behind it, so it
+// is far longer than either takes; a holder that dies delays the next run by it.
+const (
+	Lease      = "backup"
+	DrillLease = "restore-drill"
+	LeaseTTL   = 2 * time.Hour
+)
+
 // SettingsStore is the slice of the store this adapter needs; *store.Store satisfies it.
 type SettingsStore interface {
 	GetSetting(key string) (string, error)

@@ -1,6 +1,7 @@
 package backup_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/mail"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
@@ -36,6 +38,16 @@ func TestDrillCoversLifecycleStateAndEncryptedConfiguration(t *testing.T) {
 	if err := mail.Save(st, cfg.EncryptionKey, &mail.Settings{Host: "smtp.example.test", Port: 587, Username: "sso", Password: "relay-password", From: "sso@example.test", Security: "starttls"}); err != nil {
 		t.Fatal(err)
 	}
+	// A push relay key as the relay sender stores it, and one sealed under another key.
+	for name, key := range map[string][]byte{"push-relay-fcm.key": cfg.EncryptionKey, "push-relay-apns.key": bytes.Repeat([]byte{1}, config.KeyLength)} {
+		sealed, err := crypto.Seal(key, store.SealRelayKey, name, []byte("relay-key"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := st.SetRelayKey(name, sealed, 0); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+	}
 	payload, err := backup.CollectSealable(cfg, st, "1.0.0")
 	if err != nil {
 		t.Fatal(err)
@@ -45,10 +57,18 @@ func TestDrillCoversLifecycleStateAndEncryptedConfiguration(t *testing.T) {
 	if c := checks["Mail Settings Decryption"]; !c.Passed || strings.Contains(c.Message, "not configured") {
 		t.Fatalf("configured relay was not proven readable: %+v", c)
 	}
+	if c := checks["Push Relay Key Decryption"]; c.Passed || !strings.Contains(c.Message, "1 of 2") {
+		t.Fatalf("a relay key sealed under another key drilled clean: %+v", c)
+	}
 	for name, c := range checks {
 		if strings.HasPrefix(name, "Table Present") && !c.Passed {
 			t.Errorf("%s: %s", name, c.Message)
 		}
+	}
+
+	// A capsule taken before relay keys moved into the database has no such table.
+	if c := drillChecks(t, cfg.DataDir, payload, withoutTable(t, payload.Files, "push_relay_keys"))["Push Relay Key Decryption"]; !c.Passed || !strings.Contains(c.Message, "No push relay key") {
+		t.Fatalf("a capsule older than the relay key table failed its drill: %+v", c)
 	}
 
 	// Losing one lifecycle table must fail the drill by name, not pass quietly because
