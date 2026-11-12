@@ -101,10 +101,15 @@ func TestBackupPairedButKeyFileMissing(t *testing.T) {
 	if err := os.Remove(recoveryclient.RecoveryKeyPath(srv.cfg.DataDir)); err != nil {
 		t.Fatal(err)
 	}
-	// The settings copy puts a lost file back.
+	// The settings copy puts a lost file back only for the key the configuration names.
+	if st := covStatus(t, srv, cookie); st["key_pinned"] != false || !strings.Contains(st["recovery_key_error"].(string), "recovery.pub is missing") {
+		t.Fatalf("status after losing the file, nothing configured: %v", st)
+	}
+	srv.cfg.RecoveryKeyID = priv.Public().ID()
 	if st := covStatus(t, srv, cookie); st["key_pinned"] != true || st["recovery_key_error"] != nil {
 		t.Fatalf("status after losing only the file: %v", st)
 	}
+	srv.cfg.RecoveryKeyID = ""
 	if err := os.Remove(recoveryclient.RecoveryKeyPath(srv.cfg.DataDir)); err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +124,35 @@ func TestBackupPairedButKeyFileMissing(t *testing.T) {
 	covBackupError(t, adminRequest(t, srv, "GET", "/api/admin/backup/export-capsule", cookie, ""), http.StatusPreconditionFailed, "Not paired")
 	if fake.got != nil {
 		t.Fatal("a capsule reached KyRecovery without its pinned key file")
+	}
+}
+
+// A server configured for one recovery key refuses to pin another, and one whose
+// configuration stops naming the pinned key says so and seals nothing.
+func TestBackupHoldsToTheConfiguredRecoveryKey(t *testing.T) {
+	srv, cookie, cleanup := covBackupServer(t, &fakeRecovery{})
+	defer cleanup()
+	srv.cfg.BackupDir, srv.cfg.BackupKeep = t.TempDir(), 1
+	priv, err := recoverykey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"public_key": base64.StdEncoding.EncodeToString(priv.Public().Bytes()), "threshold": 2, "total_shares": 3})
+	const other = "00000000000000000000000000000000000000000000000000000000000000aa"
+	srv.cfg.RecoveryKeyID = other
+	covBackupError(t, adminRequest(t, srv, "POST", "/api/admin/backup/pin-key", cookie, string(body)), http.StatusConflict, "KYIDENTITY_RECOVERY_KEY_ID names")
+	srv.cfg.RecoveryKeyID = priv.Public().ID()
+	if rr := adminRequest(t, srv, "POST", "/api/admin/backup/pin-key", cookie, string(body)); rr.Code != http.StatusOK {
+		t.Fatalf("pin: %d %s", rr.Code, rr.Body.String())
+	}
+	srv.cfg.RecoveryKeyID = other
+	covBackupError(t, adminRequest(t, srv, "POST", "/api/admin/backup/deposit", cookie, ""), http.StatusConflict, "KYIDENTITY_RECOVERY_KEY_ID names")
+	covBackupError(t, adminRequest(t, srv, "GET", "/api/admin/backup/export-capsule", cookie, ""), http.StatusConflict, "KYIDENTITY_RECOVERY_KEY_ID names")
+	if st := covStatus(t, srv, cookie); st["key_pinned"] != false || !strings.Contains(st["recovery_key_error"].(string), "KYIDENTITY_RECOVERY_KEY_ID names") {
+		t.Fatalf("status: %v", st)
+	}
+	if left, _ := os.ReadDir(srv.cfg.BackupDir); len(left) != 0 {
+		t.Fatalf("capsules written under a refused key: %v", left)
 	}
 }
 

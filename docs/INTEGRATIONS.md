@@ -387,6 +387,10 @@ only the digest from KyRecovery's deposit record (or printed by `export-capsule`
 server's capsules apart. A local-only deployment should keep those digests off the server.
 A server with no key pinned can run drills but cannot make a capsule.
 
+`KYIDENTITY_RECOVERY_KEY_ID` (optional on a single instance, required with replicas) holds
+the server to one recovery key: it pins and seals to the key with that ID and refuses any
+other, whatever the database or `recovery.pub` say. Take the ID from KyRecovery.
+
 **KyRecovery must be reached over HTTPS, and by default at a public address.** TLS is not
 for the capsule, which is sealed anyway; it protects the recovery public key that arrives at
 pairing (trust on first use), the deposit token, and the receipts. For a KyRecovery on your

@@ -195,6 +195,10 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "Recovery key file does not match the pinned key ID; refusing to seal")
 		return
 	}
+	if errors.Is(err, backup.ErrKeyRefused) {
+		writeError(w, http.StatusConflict, backup.AuditSafe(err.Error()))
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to load recovery key")
 		return
@@ -291,6 +295,9 @@ func (h *BackupHandler) PairRemote(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, fs.ErrExist):
 		fail(http.StatusConflict, "Already paired to a different recovery key")
 		return
+	case errors.Is(err, backup.ErrKeyRefused):
+		fail(http.StatusConflict, backup.AuditSafe(err.Error()))
+		return
 	case !keyStored:
 		log.Printf("[BACKUP] pair: store recovery key failed: %s", backup.AuditSafe(err.Error()))
 		fail(http.StatusInternalServerError, "Failed to save recovery key")
@@ -349,6 +356,8 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusPreconditionFailed, "Nowhere to put a capsule: pair with KyRecovery or set KYIDENTITY_BACKUP_DIR")
 		case errors.Is(err, backup.ErrRecoveryKeyMismatch):
 			writeError(w, http.StatusConflict, "Recovery key file does not match the pinned key ID; refusing to seal")
+		case errors.Is(err, backup.ErrKeyRefused):
+			writeError(w, http.StatusConflict, backup.AuditSafe(err.Error()))
 		case errors.Is(err, backup.ErrDepositInProgress):
 			writeError(w, http.StatusConflict, "A backup is already in progress")
 		case errors.Is(err, capsule.ErrCapsuleTooLarge):
@@ -438,6 +447,8 @@ func (h *BackupHandler) PinKey(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, fs.ErrExist):
 			fail(http.StatusConflict, "Already pinned to a different recovery key")
+		case errors.Is(err, backup.ErrKeyRefused):
+			fail(http.StatusConflict, backup.AuditSafe(err.Error()))
 		case strings.Contains(err.Error(), "custodian topology"):
 			fail(http.StatusBadRequest, "threshold and total_shares must describe a k-of-n split with k at least 2")
 		default:
@@ -511,12 +522,14 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		out["recovery_key_id"] = key.Public.ID()
 		out["threshold"] = key.Threshold
 		out["total_shares"] = key.TotalShares
+	} else if errors.Is(err, backup.ErrKeyRefused) {
+		out["recovery_key_error"] = backup.AuditSafe(err.Error())
 	} else if errors.Is(err, backup.ErrRecoveryKeyMismatch) {
 		out["recovery_key_error"] = "recovery.pub does not match the pinned key ID"
 	} else if backup.HasPairing(h.store) {
 		out["recovery_key_error"] = "paired, but recovery.pub is missing; restore it or re-pair"
 	} else if backup.KeyPinned(h.store) {
-		out["recovery_key_error"] = "a recovery key is pinned, but recovery.pub is missing; restore it or pin the key again"
+		out["recovery_key_error"] = "a recovery key is pinned, but recovery.pub is missing; restore it, pin the key again, or name the key in KYIDENTITY_RECOVERY_KEY_ID"
 	}
 	out["members"] = backup.Members(h.cfg)
 	if last, ok, err := backup.LastDeposit(h.store); err == nil && ok {

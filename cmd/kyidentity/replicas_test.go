@@ -157,7 +157,7 @@ func TestScheduledBackupRunsOnOneReplica(t *testing.T) {
 }
 
 // A replica whose data directory holds no recovery.pub takes the pinned key from the
-// database and runs the due backup. With no copy to take it from, the run is audited as
+// database, once its configuration names that key, and runs the due backup. With no copy to take it from, the run is audited as
 // a failure: it used to return without a word, and nothing was backed up.
 func TestScheduledBackupOnAReplicaWithoutTheKeyFile(t *testing.T) {
 	cfg, _ := commandInstance(t, true)
@@ -168,6 +168,10 @@ func TestScheduledBackupOnAReplicaWithoutTheKeyFile(t *testing.T) {
 	s := handles(t, cfg.DBPath, 1)[0]
 	replica := *cfg
 	replica.DataDir = t.TempDir()
+	var err error
+	if replica.RecoveryKeyID, err = s.GetSetting("kyrecovery_key_id"); err != nil {
+		t.Fatal(err)
+	}
 	failures := func() int {
 		t.Helper()
 		_, n, err := s.SearchAuditEvents(store.AuditFilter{Action: "admin.backup_run", Outcome: "failure", Limit: 1})
@@ -177,9 +181,22 @@ func TestScheduledBackupOnAReplicaWithoutTheKeyFile(t *testing.T) {
 		return n
 	}
 
+	// Not before its configuration names the key: the database alone does not choose it.
+	unnamed := replica
+	unnamed.RecoveryKeyID = ""
+	for range 2 {
+		scheduledBackup(context.Background(), &unnamed, s, nil, audit.NewLogger(s))
+	}
+	if copies, _ := backup.ListLocalCopies(cfg.BackupDir, cfg.AppName); len(copies) != 0 || failures() != 1 {
+		t.Fatalf("replica with no key named: %d capsules, %d failures, want none and one", len(copies), failures())
+	}
+	if err := s.DeleteSetting("backup_last_attempt"); err != nil {
+		t.Fatal(err)
+	}
+
 	scheduledBackup(context.Background(), &replica, s, nil, audit.NewLogger(s))
 	copies, err := backup.ListLocalCopies(cfg.BackupDir, cfg.AppName)
-	if err != nil || len(copies) != 1 || failures() != 0 {
+	if err != nil || len(copies) != 1 || failures() != 1 {
 		t.Fatalf("replica without recovery.pub: %d capsules, %d failures, %v", len(copies), failures(), err)
 	}
 
@@ -191,7 +208,7 @@ func TestScheduledBackupOnAReplicaWithoutTheKeyFile(t *testing.T) {
 	bare := *cfg
 	bare.DataDir = t.TempDir()
 	scheduledBackup(context.Background(), &bare, s, nil, audit.NewLogger(s))
-	if failures() != 1 {
+	if failures() != 2 {
 		t.Fatal("a pinned key this replica cannot load was skipped without an audit row")
 	}
 }

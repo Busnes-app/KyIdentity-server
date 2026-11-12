@@ -289,8 +289,8 @@ before, and start.
    deposit again without re-pairing; click Back up now to prove it. Scheduled deposits are
    off after a restore, so a test copy, or a copy started while the original still runs,
    never deposits on its own. Once this server is the one in service, set the Schedule again. If the screen says the
-   key is missing, neither `data/recovery.pub` nor the database's sealed copy of it came
-   across; re-pair, which is refused unless KyRecovery hands back the same key.
+   key is missing, `data/recovery.pub` did not come across, and the database's sealed copy
+   of it is used only when `KYIDENTITY_RECOVERY_KEY_ID` names the key; set that, or re-pair, which is refused unless KyRecovery hands back the same key.
 3. Have one downstream application sign in through KyIdentity. That proves the RSA key.
 4. Check the audit log: the last events before the restore are there, followed by your
    sign-in.
