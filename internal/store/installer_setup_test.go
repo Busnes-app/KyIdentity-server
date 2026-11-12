@@ -84,7 +84,7 @@ func TestInstallerRolesRollbackWithAuditFailure(t *testing.T) {
 	p := installerFixture()
 	p.Clients[0].AdministratorRole = "admin"
 	p.Clients[0].EverydayRole = "user"
-	if _, err := s.db.Exec(`CREATE TRIGGER refuse_installer_role_audit BEFORE INSERT ON audit_events WHEN NEW.action='installer.role_created' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER refuse_installer_role_audit BEFORE INSERT ON audit_events WHEN NEW.action='installer.role_created' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ApplyInstallerSetup(p, false); err == nil {
@@ -165,7 +165,7 @@ func TestInstallerSetupRollbackOnConflictOrAuditFailure(t *testing.T) {
 			if cause == "account-conflict" {
 				createTestUserNamed(t, s, p.Everyday.Username)
 			} else {
-				if _, err := s.db.Exec(`CREATE TRIGGER refuse_installer_audit BEFORE INSERT ON audit_events WHEN NEW.actor_username='kyquickstart' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+				if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER refuse_installer_audit BEFORE INSERT ON audit_events WHEN NEW.actor_username='kyquickstart' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 					t.Fatal(err)
 				}
 			}

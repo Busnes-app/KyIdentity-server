@@ -97,7 +97,7 @@ func rejectCrossIdentityTx(tx *sql.Tx, excludeID, username, email string) error 
 }
 
 func (s *Store) CreateSCIMConnector(name string, audit *AuditEvent) (*SCIMConnector, error) {
-	now := time.Now().UTC()
+	now := rowTime()
 	c := &SCIMConnector{ID: uuid.NewString(), Name: strings.TrimSpace(name), Status: "active", CreatedAt: now, UpdatedAt: now}
 	if c.Name == "" {
 		return nil, InputError("name is required")
@@ -257,7 +257,7 @@ func (s *Store) AuthenticateSCIMToken(raw string) (*SCIMConnector, string, error
 	if err != nil {
 		return nil, "", err
 	}
-	now := time.Now().UTC()
+	now := rowTime()
 	if !used.Valid || now.Sub(used.Time) > time.Minute {
 		if _, err := s.db.Exec(`UPDATE scim_connector_tokens SET last_used_at=? WHERE id=?`, now, id); err != nil {
 			return nil, "", err
@@ -276,7 +276,7 @@ func (s *Store) CreateUpstreamUser(u *User, audit *AuditEvent) error {
 	}
 	u.ID, u.Role, u.Pending, u.PasswordHash, u.LocallyDisabled = uuid.NewString(), "user", true, "", false
 	u.ApplySourceState()
-	now := time.Now().UTC()
+	now := rowTime()
 	u.CreatedAt, u.UpdatedAt = now, now
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
 		if err := rejectCrossIdentityTx(tx, u.ID, u.Username, u.Email); err != nil {
@@ -401,7 +401,7 @@ func (s *Store) UpdateUpstreamUser(connectorID, id string, audit *AuditEvent, ed
 // kept as they are, or disabled first when the operator chose deactivation. Either way
 // the upstream can no longer touch them.
 func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEvent) (int, error) {
-	now := time.Now().UTC()
+	now := rowTime()
 	affected := 0
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
 		rows, err := tx.Query(`SELECT `+userColumns+` FROM users WHERE source_connector_id=?`, id)

@@ -12,6 +12,7 @@ import (
 // A file copy of a WAL-mode database can miss recently committed rows. The snapshot must
 // contain them.
 func TestSnapshotToCapturesCommittedWALWrites(t *testing.T) {
+	SkipOnPostgres(t, "VACUUM INTO snapshot of the SQLite file (backup is not supported on Postgres yet)")
 	dir := t.TempDir()
 	s, err := New(filepath.Join(dir, "live.db"))
 	if err != nil {

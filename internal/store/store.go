@@ -41,6 +41,10 @@ func New(dbPath string) (*Store, error) {
 	if u := testDatabaseURL(); u != "" {
 		return newTestPostgres(u, dbPath, true)
 	}
+	return newSQLite(dbPath)
+}
+
+func newSQLite(dbPath string) (*Store, error) {
 	// Enable WAL mode, busy timeout, and foreign keys in DSN. Transactions begin
 	// IMMEDIATE: a deferred transaction that reads and then writes cannot wait out a
 	// concurrent writer and fails with SQLITE_BUSY at the upgrade instead, which the
@@ -888,7 +892,7 @@ func (s *Store) CreateUser(u *User) error {
 	query := `
 	INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, password_change_required, created_at, updated_at)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	now := time.Now().UTC()
+	now := rowTime()
 	u.CreatedAt = now
 	u.UpdatedAt = now
 	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.CreatedAt, u.UpdatedAt)
@@ -902,7 +906,7 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 		return err
 	}
 	defer tx.Rollback()
-	now := time.Now().UTC()
+	now := rowTime()
 	u.CreatedAt, u.UpdatedAt = now, now
 	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, password_change_required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.CreatedAt, u.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
@@ -995,7 +999,7 @@ func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u
 			return nil, err
 		}
 	}
-	now := time.Now().UTC()
+	now := rowTime()
 	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, password_change_required = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
 		return nil, enrollmentMutationError(err)
 	}
@@ -2884,6 +2888,9 @@ func deleteSetting(q settingsQuerier, key string) error {
 // recently committed transactions can live only in the -wal file, so a file copy silently
 // restores an older directory. destPath must not already exist.
 func (s *Store) SnapshotTo(destPath string) error {
+	if s.postgres {
+		return notOnPostgres("database snapshot for backup")
+	}
 	if _, err := os.Stat(destPath); err == nil {
 		return fmt.Errorf("snapshot destination %s already exists", destPath)
 	} else if !errors.Is(err, os.ErrNotExist) {

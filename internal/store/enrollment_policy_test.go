@@ -28,6 +28,7 @@ func enrollmentPolicy(scope string, grace int64) EnrollmentPolicy {
 }
 
 func TestEnrollmentGracePersistsAndExpiresWithoutWorker(t *testing.T) {
+	SkipOnPostgres(t, "reruns a SQLite legacy migration step")
 	s, u, _ := enrollmentFixture(t)
 	p := enrollmentPolicy("organization", 3600)
 	preview, err := s.PreviewEnrollmentPolicy(p, "admin-session")
@@ -169,7 +170,7 @@ func TestEnrollmentActivationAndAuditRollback(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE sessions SET factor_authenticated_at=? WHERE id='admin-session'`, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`CREATE TRIGGER fail_enrollment_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit failure'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER fail_enrollment_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit failure'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetEnrollmentPolicy(p, "admin-session", &AuditEvent{ID: "failed", Action: "policy", Outcome: "success"}); err == nil {
@@ -179,7 +180,7 @@ func TestEnrollmentActivationAndAuditRollback(t *testing.T) {
 	if status.Required || status.Restricted {
 		t.Fatal("policy escaped rollback")
 	}
-	if _, err := s.db.Exec(`DROP TRIGGER fail_enrollment_audit`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `DROP TRIGGER fail_enrollment_audit`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetEnrollmentPolicy(p, "admin-session", nil); err != nil {

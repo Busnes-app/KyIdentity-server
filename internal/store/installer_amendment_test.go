@@ -140,7 +140,7 @@ func TestInstallerAmendmentRefusals(t *testing.T) {
 
 func mustExec(t *testing.T, s *Store, q string, args ...any) {
 	t.Helper()
-	if _, err := s.db.Exec(q, args...); err != nil {
+	if _, err := s.db.Exec(dialect(s, q), args...); err != nil {
 		t.Fatal(err)
 	}
 }

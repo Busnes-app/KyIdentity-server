@@ -52,7 +52,7 @@ func (s *Store) CreateGroup(g *Group, audit *AuditEvent) error {
 		return err
 	}
 	defer tx.Rollback()
-	g.CreatedAt = time.Now().UTC()
+	g.CreatedAt = rowTime()
 	g.UpdatedAt = g.CreatedAt
 	if _, err = tx.Exec(`INSERT INTO directory_groups(id,name,description,created_at,updated_at) VALUES (?,?,?,?,?)`, g.ID, g.Name, g.Description, g.CreatedAt, g.UpdatedAt); err != nil {
 		return groupWriteError(err)
@@ -69,7 +69,7 @@ func (s *Store) UpdateGroup(g *Group, audit *AuditEvent) error {
 		return err
 	}
 	defer tx.Rollback()
-	g.UpdatedAt = time.Now().UTC()
+	g.UpdatedAt = rowTime()
 	var sourceOwned bool
 	if err = tx.QueryRow(`SELECT source_connector_id IS NOT NULL AND name<>? FROM directory_groups WHERE id=?`, g.Name, g.ID).Scan(&sourceOwned); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err

@@ -203,7 +203,7 @@ func TestCreateRefreshFamilyRequiresSpentCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Idle = 0
-	if err := s.CreateRefreshFamily(f, "unspent", "rt1"); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+	if err := s.CreateRefreshFamily(f, "unspent", "rt1"); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") && !strings.Contains(err.Error(), "violates check constraint") {
 		t.Fatalf("zero idle not refused by the CHECK constraint: %v", err)
 	}
 	if count(t, s, `SELECT COUNT(*) FROM issued_tokens`) != 0 {

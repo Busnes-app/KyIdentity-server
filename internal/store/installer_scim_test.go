@@ -90,7 +90,7 @@ func TestInstallerSCIMRefusesDriftAndRollsBackAuditFailure(t *testing.T) {
 			defer close()
 			p := installerSCIMFixture()
 			if cause == "audit" {
-				if _, err := s.db.Exec(`CREATE TRIGGER refuse_scim_audit BEFORE INSERT ON audit_events WHEN NEW.action='admin.system_created' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+				if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER refuse_scim_audit BEFORE INSERT ON audit_events WHEN NEW.action='admin.system_created' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 					t.Fatal(err)
 				}
 			} else {

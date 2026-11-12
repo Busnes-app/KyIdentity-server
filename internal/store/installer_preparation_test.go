@@ -22,7 +22,7 @@ func TestInstallerPreparationOwnershipAndAtomicAudit(t *testing.T) {
 	if exists, err := s.InstallerSetupExists(id); err != nil || exists {
 		t.Fatal("inspection created ownership", err)
 	}
-	if _, err := s.db.Exec(`CREATE TRIGGER reject_preparation_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'fixture audit unavailable'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER reject_preparation_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'fixture audit unavailable'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordInstallerPreparation(id, contract, false); err == nil {
@@ -31,7 +31,7 @@ func TestInstallerPreparationOwnershipAndAtomicAudit(t *testing.T) {
 	if exists, err := s.InstallerSetupExists(id); err != nil || exists {
 		t.Fatal("failed audit retained ownership", err)
 	}
-	if _, err := s.db.Exec(`DROP TRIGGER reject_preparation_audit`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `DROP TRIGGER reject_preparation_audit`)); err != nil {
 		t.Fatal(err)
 	}
 	for _, inspect := range []bool{false, true, false} {
@@ -53,6 +53,9 @@ func TestInstallerPreparationOwnershipAndAtomicAudit(t *testing.T) {
 		if err := s.RecordInstallerPreparation(id, strings.Repeat("b", 64), inspect); err == nil {
 			t.Fatal("credential receipt drift accepted")
 		}
+	}
+	if OnPostgresTest() {
+		return // read-only inspection (apply-setup --check) is SQLite only for now
 	}
 	readOnly, err := OpenInstallerStore(dbPath, true)
 	if err != nil {

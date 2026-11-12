@@ -95,6 +95,11 @@ func NewConnector(rawURL string, readOnly bool) (driver.Connector, error) {
 	}
 	if readOnly {
 		cfg.RuntimeParams["default_transaction_read_only"] = "on"
+		// Its own sessions are read-only by the line above; what matters is that it reads
+		// the primary the writes go to, never a lagging standby.
+		if cfg.ValidateConnect != nil {
+			cfg.ValidateConnect = pgconn.ValidateConnectTargetSessionAttrsPrimary
+		}
 	}
 	writer, _ := LockKeys(cfg.RuntimeParams["search_path"])
 	base := stdlib.GetConnector(*cfg, stdlib.OptionAfterConnect(func(_ context.Context, c *pgx.Conn) error {

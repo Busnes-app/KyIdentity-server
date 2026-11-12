@@ -45,12 +45,16 @@ func TestInstallerGroupsOwnedClaimsReadOnlyAndDrift(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT count(*) FROM audit_events`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	ro, err := OpenInstallerStore(path, true)
-	if err != nil {
-		t.Fatal(err)
+	stores := []*Store{s}
+	if !OnPostgresTest() { // read-only inspection (apply-setup --check) is SQLite only for now
+		ro, err := OpenInstallerStore(path, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ro.Close()
+		stores = append(stores, ro)
 	}
-	defer ro.Close()
-	for _, st := range []*Store{s, ro} {
+	for _, st := range stores {
 		r, err := st.ApplyInstallerSetup(p, true)
 		if err != nil || len(r.Created) != 0 || len(r.Reused) != 6 {
 			t.Fatalf("read-only group inspection %+v %v", r, err)
@@ -95,7 +99,7 @@ func TestInstallerGroupsRollbackForeignConflictsAndAuditFailure(t *testing.T) {
 				if cause == "assignment audit" {
 					action = "installer.group_assignment_created"
 				}
-				if _, err := s.db.Exec(`CREATE TRIGGER refuse_installer_group_audit BEFORE INSERT ON audit_events WHEN NEW.action='` + action + `' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+				if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER refuse_installer_group_audit BEFORE INSERT ON audit_events WHEN NEW.action='`+action+`' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 					t.Fatal(err)
 				}
 			}

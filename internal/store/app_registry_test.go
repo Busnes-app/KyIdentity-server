@@ -36,6 +36,7 @@ func registryFixtures(t *testing.T, s *Store) (AppRecord, AppRecord, AppRecord) 
 	return c, l, p
 }
 func TestAppRegistryMigrationAndLinkLifecycle(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	c, l, p := registryFixtures(t, s)
@@ -144,7 +145,7 @@ func TestAppRegistryConflictConcurrencyAndAuditRollback(t *testing.T) {
 	defer cleanup()
 	c, l, p := registryFixtures(t, s)
 	audit := &AuditEvent{ID: "audit", Action: "admin.app_linked", Outcome: "success", CreatedAt: time.Now().UTC()}
-	if _, err := s.db.Exec(`CREATE TRIGGER fail_registry_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER fail_registry_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.LinkAppRecords(l.ID, c.ID, 1, 1, audit); err == nil {
@@ -159,7 +160,7 @@ func TestAppRegistryConflictConcurrencyAndAuditRollback(t *testing.T) {
 			t.Fatal("failed audit changed revision")
 		}
 	}
-	if _, err = s.db.Exec("DROP TRIGGER fail_registry_audit"); err != nil {
+	if _, err = s.db.Exec(dialect(s, "DROP TRIGGER fail_registry_audit")); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -190,7 +191,7 @@ func TestAppRegistryConflictConcurrencyAndAuditRollback(t *testing.T) {
 	if rows[0].SystemID != "" {
 		kind = "system"
 	}
-	if _, err = s.db.Exec(`CREATE TRIGGER fail_registry_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+	if _, err = s.db.Exec(dialect(s, `CREATE TRIGGER fail_registry_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.UnlinkAppRecord(l.ID, kind, 2, audit); err == nil {
@@ -200,7 +201,7 @@ func TestAppRegistryConflictConcurrencyAndAuditRollback(t *testing.T) {
 	if err != nil || total != 2 {
 		t.Fatal("unlink rollback", err)
 	}
-	if _, err = s.db.Exec("DROP TRIGGER fail_registry_audit"); err != nil {
+	if _, err = s.db.Exec(dialect(s, "DROP TRIGGER fail_registry_audit")); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.CreateApplication(&Application{ID: "other", Name: "Other", URL: "https://other.example", IconName: "globe"}, nil); err != nil {

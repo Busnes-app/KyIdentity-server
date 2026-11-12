@@ -28,7 +28,7 @@ func TestStepUpCompletionIsAtomicAndCancellable(t *testing.T) {
 		return &StepUpToken{ID: c.TokenHash, TokenHash: c.TokenHash, UserID: c.UserID, SessionID: c.SessionID, Operation: c.Operation, FactorMethod: c.Method, ExpiresAt: c.ExpiresAt}
 	}
 	c := newChallenge("audit")
-	if _, err := s.db.Exec(`CREATE TRIGGER fail_step_up_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT, 'audit failed'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER fail_step_up_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT, 'audit failed'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	rejected := *c
@@ -48,7 +48,7 @@ func TestStepUpCompletionIsAtomicAndCancellable(t *testing.T) {
 	if ok, err := s.HasValidStepUpToken(c.TokenHash, c.UserID, c.SessionID, c.Operation); err != nil || ok {
 		t.Fatal("failed audit left grant")
 	}
-	if _, err := s.db.Exec("DROP TRIGGER fail_step_up_audit"); err != nil {
+	if _, err := s.db.Exec(dialect(s, "DROP TRIGGER fail_step_up_audit")); err != nil {
 		t.Fatal(err)
 	}
 	var wins atomic.Int32
@@ -120,6 +120,7 @@ func TestStepUpCompletionIsAtomicAndCancellable(t *testing.T) {
 }
 
 func TestStepUpMigrationInvalidatesUnscopedGrants(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	user := createTestUser(t, s)

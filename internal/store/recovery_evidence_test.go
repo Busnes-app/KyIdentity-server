@@ -158,7 +158,7 @@ func TestRecoveryEvidenceFailsClosedWithoutPartialOutput(t *testing.T) {
 		return s.ExportRecoveryEvidence("mail", "https://identity.test", strings.Repeat("a", 64), []string{u.ID}, audit, sign)
 	}
 	noop := func(*PairedSystem, []byte, time.Time) error { return nil }
-	for _, change := range []string{`status='disabled'`, `status='failing'`, `provisioning_hold=1`, `system_type='scim'`, `system_type='suite_webhook'`, `hmac_secret_encrypted=''`} {
+	for _, change := range []string{`status='disabled'`, `status='failing'`, `provisioning_hold=TRUE`, `system_type='scim'`, `system_type='suite_webhook'`, `hmac_secret_encrypted=''`} {
 		if _, err := s.db.Exec(`UPDATE paired_systems SET ` + change + ` WHERE id='mail'`); err != nil {
 			t.Fatal(err)
 		}

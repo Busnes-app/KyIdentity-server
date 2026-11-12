@@ -208,6 +208,9 @@ func TestConcurrentFirstStartMigratesOnce(t *testing.T) {
 		"upgrade": legacyDatabase(t),
 	} {
 		t.Run(name, func(t *testing.T) {
+			if name == "upgrade" {
+				SkipOnPostgres(t, "upgrades a legacy SQLite file")
+			}
 			const n = 6
 			stores := make([]*Store, n)
 			errs := make([]error, n)

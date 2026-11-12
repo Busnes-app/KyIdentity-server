@@ -56,7 +56,7 @@ func TestAppAuthenticationRevocationAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := AppAuthenticationPolicy{Mode: "fresh", Factor: "passkey", FactorMaxAge: 60}
-	if _, err := s.db.Exec(`CREATE TRIGGER fail_policy_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER fail_policy_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAuthenticationPolicy(a.ID, p, a.Revision, &AuditEvent{ID: "audit", Action: "policy", Outcome: "success"}); err == nil {
@@ -74,7 +74,7 @@ func TestAppAuthenticationRevocationAndRollback(t *testing.T) {
 	if _, err := s.GetAuthorizationInteraction("interaction", "browser"); err != nil {
 		t.Fatal("interaction deletion escaped rollback", err)
 	}
-	if _, err := s.db.Exec(`DROP TRIGGER fail_policy_audit`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `DROP TRIGGER fail_policy_audit`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAuthenticationPolicy(a.ID, p, a.Revision, &AuditEvent{ID: "audit", Action: "policy", Outcome: "success"}); err != nil {
@@ -98,8 +98,10 @@ func TestAppAuthenticationRevocationAndRollback(t *testing.T) {
 	if err := s.RecordIssuedToken(accessToken(u, "raced", "spent")); !errors.Is(err, ErrAppAccessDenied) {
 		t.Fatal("relaxation revived code", err)
 	}
-	if err := s.migrateAppAuthentication(); err != nil {
-		t.Fatal(err)
+	if !s.postgres { // reruns a SQLite legacy migration step
+		if err := s.migrateAppAuthentication(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if got, _ := s.ClientAuthenticationPolicy("client"); got != a.Authentication {
 		t.Fatal("restart changed policy")
@@ -190,6 +192,7 @@ func TestAppAuthenticationExchangeRace(t *testing.T) {
 }
 
 func TestAppAuthenticationUpgradeAndLinks(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, u, a := appAccessFixture(t)
 	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)

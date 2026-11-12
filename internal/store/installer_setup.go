@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,22 @@ type InstallerReport struct {
 // OpenInstallerStore opens an already initialized database without running migrations.
 // Check mode uses SQLite's read-only connection, preventing side effects even on errors.
 func OpenInstallerStore(path string, inspect bool) (*Store, error) {
+	rawURL := testDatabaseURL()
+	if rawURL == "" {
+		var err error
+		if rawURL, err = config.LoadDatabaseURL(); err != nil {
+			return nil, err
+		}
+	}
+	if rawURL != "" {
+		if inspect {
+			return nil, notOnPostgres("read-only inspection (apply-setup --check)")
+		}
+		if testDatabaseURL() != "" {
+			return newTestPostgres(rawURL, path, false)
+		}
+		return openPostgres(rawURL, "", false)
+	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err

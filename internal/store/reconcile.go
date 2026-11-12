@@ -674,7 +674,7 @@ func (s *Store) ListProvisioningState(systemID, query string, limit, offset int)
 	}
 	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,
  EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=? AND e.user_id=u.id),
- COALESCE(st.active,0),COALESCE(st.provisioned,0),COALESCE(st.observed,''),st.observed_at,COALESCE(st.revision,0),
+ COALESCE(st.active,FALSE),COALESCE(st.provisioned,FALSE),COALESCE(st.observed,''),st.observed_at,COALESCE(st.revision,0),
  EXISTS(SELECT 1 FROM sync_delivery_attempts d WHERE d.system_id=? AND d.user_id=u.id),
  ev.event_type,ev.status,ev.last_error,ev.attempts,ev.next_attempt_at,ev.updated_at`+from+
 		` ORDER BY u.username,u.id LIMIT ? OFFSET ?`, systemID, systemID, systemID, systemID, systemID, query, query, limit, offset)

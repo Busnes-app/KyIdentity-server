@@ -115,7 +115,7 @@ func TestAppAccessPreviewAndAuditRollback(t *testing.T) {
 	if err := s.RecordIssuedToken(accessToken(u, "token", "")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`CREATE TRIGGER fail_access_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER fail_access_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	audit := &AuditEvent{ID: "audit", Action: "admin.app_access_changed", Outcome: "success", CreatedAt: time.Now().UTC()}
@@ -138,7 +138,7 @@ func TestAppAccessPreviewAndAuditRollback(t *testing.T) {
 	if err != nil || p.Users[0].Direct {
 		t.Fatal("failed audit retained assignment", err)
 	}
-	if _, err := s.db.Exec("DROP TRIGGER fail_access_audit"); err != nil {
+	if _, err := s.db.Exec(dialect(s, "DROP TRIGGER fail_access_audit")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppPolicy(a.ID, "all_active_users", false, 2, nil); err != nil {
@@ -183,6 +183,7 @@ func TestAppAccessRegistrationRace(t *testing.T) {
 	}
 }
 func TestAppAccessMigrationAndLinkSafety(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, u, a := appAccessFixture(t)
 	// Reproduce the released PR04a registry, before access columns existed.
 	if _, err := s.db.Exec(`DROP VIEW effective_app_access;DROP VIEW app_access_facts;ALTER TABLE app_registry DROP COLUMN access_mode;ALTER TABLE app_registry DROP COLUMN enabled;`); err != nil {

@@ -144,6 +144,11 @@ func withSearchPath(rawURL, searchPath string) string {
 	return u.String()
 }
 
+// rowTime is now for a row whose time is also handed back to the caller as a version (the
+// SCIM ETag is updated_at in nanoseconds). Postgres keeps microseconds, so the value is
+// truncated to them on both backends and the caller's copy equals what a later read sees.
+func rowTime() time.Time { return time.Now().UTC().Truncate(time.Microsecond) }
+
 // isUniqueViolation and isForeignKeyViolation classify a constraint error on either backend.
 func isUniqueViolation(err error) bool {
 	var pg *pgconn.PgError

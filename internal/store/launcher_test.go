@@ -12,6 +12,7 @@ func launcherEvent() *AuditEvent {
 }
 
 func TestLauncherColumnsMigrate(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, close := setupTestStore(t)
 	defer close()
 	if _, err := s.db.Exec(`ALTER TABLE oauth_clients DROP COLUMN launcher_name; ALTER TABLE oauth_clients DROP COLUMN launcher_audience; ALTER TABLE app_roles DROP COLUMN administrator`); err != nil {
