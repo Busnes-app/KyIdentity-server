@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 type Store struct {
@@ -50,6 +50,20 @@ func New(dbPath string) (*Store, error) {
 	db.SetMaxOpenConns(runtime.NumCPU() + 4)
 	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(time.Hour)
+
+	// Opening a connection sets journal_mode(WAL), which fails with SQLITE_BUSY at once,
+	// without the busy timeout, while another process is creating the file. Retry the open
+	// for as long as a busy statement would wait.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		var busy *sqlite.Error
+		if err = db.Ping(); err == nil || !errors.As(err, &busy) || busy.Code()&0xff != 5 || time.Now().After(deadline) {
+			break
+		}
+	}
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+	}
 
 	s := &Store{db: db, rdb: db}
 	// Two processes starting on one database migrate one after the other.
