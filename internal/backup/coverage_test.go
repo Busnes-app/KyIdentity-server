@@ -66,6 +66,11 @@ func TestDrillCoversLifecycleStateAndEncryptedConfiguration(t *testing.T) {
 		}
 	}
 
+	// A capsule taken before relay keys moved into the database has no such table.
+	if c := drillChecks(t, cfg.DataDir, payload, withoutTable(t, payload.Files, "push_relay_keys"))["Push Relay Key Decryption"]; !c.Passed || !strings.Contains(c.Message, "No push relay key") {
+		t.Fatalf("a capsule older than the relay key table failed its drill: %+v", c)
+	}
+
 	// Losing one lifecycle table must fail the drill by name, not pass quietly because
 	// the users table happens to be intact.
 	for _, table := range []string{"app_user_assignments", "enrollment_policies", "scim_user_links", "sync_resource_state"} {

@@ -311,16 +311,20 @@ func proveSecretDecryption(ctx context.Context, scratchDir string, recipe map[st
 		purpose string
 		query   string
 		empty   string
+		// table, when set, may be absent: a capsule taken before the table existed.
+		table string
 	}{
 		{
 			"MFA Secret Decryption", store.SealTOTP,
 			`SELECT user_id, encrypted_secret FROM mfa_methods WHERE method_type = 'totp' AND encrypted_secret IS NOT NULL AND encrypted_secret != ''`,
 			"No TOTP secrets are enrolled, so none could be checked",
+			"",
 		},
 		{
 			"Paired System Token Decryption", store.SealConnector,
 			`SELECT id, hmac_secret_encrypted FROM paired_systems WHERE hmac_secret_encrypted IS NOT NULL AND hmac_secret_encrypted != ''`,
 			"No paired systems are configured, so none could be checked",
+			"",
 		},
 		{
 			// Mail settings are the one encrypted blob in system_settings; a restore
@@ -328,6 +332,7 @@ func proveSecretDecryption(ctx context.Context, scratchDir string, recipe map[st
 			"Mail Settings Decryption", store.SealMail,
 			`SELECT key, value FROM system_settings WHERE key = '` + store.MailSettingKey + `' AND value != ''`,
 			"Mail delivery is not configured, so nothing could be checked",
+			"",
 		},
 		{
 			// Without it the restored server registers afresh, which is recoverable, but a
@@ -335,8 +340,16 @@ func proveSecretDecryption(ctx context.Context, scratchDir string, recipe map[st
 			"Push Relay Key Decryption", store.SealRelayKey,
 			`SELECT name, key_sealed FROM push_relay_keys`,
 			"No push relay key is stored, so none could be checked",
+			"push_relay_keys",
 		},
 	} {
+		if target.table != "" {
+			var present int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, target.table).Scan(&present); err == nil && present == 0 {
+				pass(target.name, target.empty)
+				continue
+			}
+		}
 		rows, err := db.QueryContext(ctx, target.query)
 		if err != nil {
 			fail(target.name, fmt.Sprintf("Could not read the restored ciphertext: %v", err))
