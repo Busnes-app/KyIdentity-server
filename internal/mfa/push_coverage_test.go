@@ -375,13 +375,13 @@ func TestUnifiedPushVAPIDKeyFileRefusals(t *testing.T) {
 		"zero scalar":    write("zero.key", zero, 0o600),
 		"parent is file": filepath.Join(write("plain", "", 0o600), "vapid.key"),
 	} {
-		if s, err := NewUnifiedPushSender(path, "https://id.example.com"); s != nil || err == nil {
+		if s, err := NewUnifiedPushSender(path, "https://id.example.com", false); s != nil || err == nil {
 			t.Errorf("%s: sender=%v err=%v", name, s, err)
 		}
 	}
 	if os.Geteuid() != 0 {
 		unreadable := write("unreadable.key", zero, 0o000)
-		if _, err := NewUnifiedPushSender(unreadable, "https://id.example.com"); err == nil {
+		if _, err := NewUnifiedPushSender(unreadable, "https://id.example.com", false); err == nil {
 			t.Error("unreadable key accepted")
 		}
 	}

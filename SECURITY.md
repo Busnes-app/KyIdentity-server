@@ -148,14 +148,15 @@ Everything KyIdentity needs to keep secret lives in its data volume (`/data` in 
 | File | Purpose |
 |---|---|
 | `kyidentity.db` (or legacy `kysignon.db`) | SQLite database |
-| `encryption.key` | AES-256-GCM key for secrets at rest (`KYIDENTITY_ENCRYPTION_KEY`) |
-| `secret.key` | HMAC key for CSRF tokens and signed browser cookies (`KYIDENTITY_SECRET_KEY`) |
+| `encryption.key` | AES-256-GCM key for secrets at rest (`KYIDENTITY_ENCRYPTION_KEY` or `KYIDENTITY_ENCRYPTION_KEY_FILE`) |
+| `secret.key` | HMAC key for CSRF tokens and signed browser cookies (`KYIDENTITY_SECRET_KEY` or `KYIDENTITY_SECRET_KEY_FILE`) |
 | `jwt_rs256.key` | RSA signing key for ID and access tokens (`KYIDENTITY_RSA_KEY_PATH`) |
-| `push-vapid-private.key` | VAPID key for UnifiedPush; startup refuses a mode looser than `0600` |
+| `push-vapid-private.key` | VAPID key for UnifiedPush (`KYIDENTITY_VAPID_KEY_PATH`); startup refuses a mode looser than `0600`, or any access by others at a path you name |
 | `push-relay-fcm.key`, `push-relay-apns.key` | Keys returned by the push relays at registration |
 | `first-run-password.txt` | Generated bootstrap password, until first sign-in |
 
 - Keys not supplied through the environment are generated on first start, written `0600` in a `0700` directory, and reused.
+- With `KYIDENTITY_REPLICATED=true` no key is ever generated: a replica that cannot load all four stops at startup. See [Running more than one replica](docs/RUNNING.md#running-more-than-one-replica).
 - A key of the wrong length is a startup error, never a silently weakened key. There is no key rotation: losing or replacing `encryption.key` makes the data sealed under it unrecoverable.
 - RSA signing keys must be at least 2048 bits, whether loaded as PKCS#1 or PKCS#8. An undersized existing key is refused and preserved; startup never replaces it. See [signing-key upgrades](docs/UPGRADES-AND-RECOVERY.md#rsa-signing-key-minimum) before replacing an old key.
 - **Back up the whole volume and protect it like the keys it holds.** See [docs/RESTORE.md](docs/RESTORE.md).

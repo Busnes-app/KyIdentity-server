@@ -61,13 +61,20 @@ type Config struct {
 	IssuerURL  string
 	// RPID and Origin are the WebAuthn relying party identity, derived from IssuerURL at
 	// load so a malformed issuer fails startup rather than the first passkey ceremony.
-	RPID              string
-	Origin            string
-	DBPath            string
-	DataDir           string
-	SecretKey         []byte
-	EncryptionKey     []byte
-	RSAKeyPath        string
+	RPID          string
+	Origin        string
+	DBPath        string
+	DataDir       string
+	SecretKey     []byte
+	EncryptionKey []byte
+	RSAKeyPath    string
+	// VAPIDKeyPath is the UnifiedPush VAPID private key. VAPIDKeyMounted is set when the
+	// operator named the path (a mounted Secret) rather than leaving it in the data directory.
+	VAPIDKeyPath    string
+	VAPIDKeyMounted bool
+	// Replicated says this process is one of several behind a load balancer. Every replica
+	// must hold the same keys, so none may generate its own.
+	Replicated        bool
 	TrustedProxyCIDRs []string
 	// ForwardedHeader names the single header a trusted proxy uses to report the client
 	// address. Exactly one header is honoured per deployment: trying several in turn means
@@ -162,7 +169,26 @@ func Load() (*Config, error) {
 	}
 
 	dbPath := databasePath(dataDir)
+	replicated, err := loadBool("KYIDENTITY_REPLICATED")
+	if err != nil {
+		return nil, err
+	}
 	rsaKeyPath := getEnv("KYIDENTITY_RSA_KEY_PATH", filepath.Join(dataDir, "jwt_rs256.key"))
+	vapidKeyPath := strings.TrimSpace(os.Getenv("KYIDENTITY_VAPID_KEY_PATH"))
+	vapidKeyMounted := vapidKeyPath != ""
+	if !vapidKeyMounted {
+		vapidKeyPath = filepath.Join(dataDir, VAPIDKeyFile)
+	}
+	if replicated {
+		for _, k := range []struct{ name, path string }{
+			{"KYIDENTITY_RSA_KEY_PATH", rsaKeyPath},
+			{"KYIDENTITY_VAPID_KEY_PATH", vapidKeyPath},
+		} {
+			if _, err := os.Stat(k.path); err != nil {
+				return nil, fmt.Errorf("KYIDENTITY_REPLICATED is set and the key at %s is unreadable (%v); every replica must load the same key, so none is generated: mount it and set %s", k.path, err, k.name)
+			}
+		}
+	}
 
 	port := getEnv("KYIDENTITY_PORT", "5867")
 	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
@@ -182,12 +208,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("KYIDENTITY_ISSUER_URL cannot be used as a WebAuthn relying party: %w", err)
 	}
 
-	secretKey, err := loadKey("KYIDENTITY_SECRET_KEY", filepath.Join(dataDir, "secret.key"))
+	secretKey, err := loadKey("KYIDENTITY_SECRET_KEY", filepath.Join(dataDir, "secret.key"), !replicated)
 	if err != nil {
 		return nil, err
 	}
 
-	encKey, err := loadKey("KYIDENTITY_ENCRYPTION_KEY", filepath.Join(dataDir, "encryption.key"))
+	encKey, err := loadKey("KYIDENTITY_ENCRYPTION_KEY", filepath.Join(dataDir, "encryption.key"), !replicated)
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +304,9 @@ func Load() (*Config, error) {
 		SecretKey:                  secretKey,
 		EncryptionKey:              encKey,
 		RSAKeyPath:                 rsaKeyPath,
+		VAPIDKeyPath:               vapidKeyPath,
+		VAPIDKeyMounted:            vapidKeyMounted,
+		Replicated:                 replicated,
 		TrustedProxyCIDRs:          trustedCIDRs,
 		ForwardedHeader:            forwardedHeader,
 		BootstrapUser:              getEnv("BOOTSTRAP_ADMIN_USER", "admin"),
@@ -441,10 +470,38 @@ func getEnv(key, defaultVal string) string {
 	return defaultVal
 }
 
-// loadKey reads a 32-byte key from the environment as hex, falling back to a generated
-// file. Both paths are strict; there is no shortening, padding, or silent regeneration.
-func loadKey(envName, path string) ([]byte, error) {
-	if raw := os.Getenv(envName); raw != "" {
+// loadBool reads a true/false variable; unset or empty is false, anything else is an error.
+func loadBool(name string) (bool, error) {
+	switch v := strings.ToLower(strings.TrimSpace(os.Getenv(name))); v {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	default:
+		return false, fmt.Errorf("%s: %q is not true or false", name, v)
+	}
+}
+
+// loadKey reads a 32-byte key: hex in envName, a file named by envName_FILE (a mounted
+// Secret; 32 raw bytes or 64 hex characters), or the file at path, which is generated on
+// first start only when generate is set. Every source is strict; there is no shortening,
+// padding, or silent regeneration.
+func loadKey(envName, path string, generate bool) ([]byte, error) {
+	raw, file := os.Getenv(envName), strings.TrimSpace(os.Getenv(envName+"_FILE"))
+	if raw != "" && file != "" {
+		return nil, fmt.Errorf("%s and %s_FILE are both set; keep one", envName, envName)
+	}
+	if file != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("%s_FILE: %w", envName, err)
+		}
+		if len(data) == KeyLength {
+			return data, nil
+		}
+		raw = string(data)
+	}
+	if raw != "" {
 		key, err := hex.DecodeString(strings.TrimSpace(raw))
 		if err != nil || len(key) != KeyLength {
 			return nil, fmt.Errorf(
@@ -452,6 +509,11 @@ func loadKey(envName, path string) ([]byte, error) {
 				envName, KeyLength*2, KeyLength, KeyLength)
 		}
 		return key, nil
+	}
+	if !generate {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return nil, fmt.Errorf("KYIDENTITY_REPLICATED is set and there is no key at %s; every replica must load the same key, so none is generated: set %s_FILE to a mounted Secret", path, envName)
+		}
 	}
 	return loadOrGenerateKeyFile(path)
 }

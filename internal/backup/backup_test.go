@@ -34,6 +34,7 @@ func instance(t *testing.T) (*config.Config, *store.Store) {
 		DBPath:        filepath.Join(dir, "kyidentity.db"),
 		DataDir:       dir,
 		RSAKeyPath:    filepath.Join(dir, "jwt_rs256.key"),
+		VAPIDKeyPath:  filepath.Join(dir, config.VAPIDKeyFile),
 		SecretKey:     make([]byte, config.KeyLength),
 		EncryptionKey: make([]byte, config.KeyLength),
 		AppName:       config.DefaultAppName,
