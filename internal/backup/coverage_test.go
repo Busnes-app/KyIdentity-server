@@ -130,6 +130,8 @@ func TestDrillAndRestoreOfALegacyCapsule(t *testing.T) {
 	if err := os.WriteFile(restoredPath, dbBytes, 0600); err != nil {
 		t.Fatal(err)
 	}
+	// The capsule's database is a SQLite file on either backend.
+	t.Setenv("KYIDENTITY_TEST_DATABASE_URL", "")
 	restored, err := store.New(restoredPath)
 	if err != nil {
 		t.Fatal(err)

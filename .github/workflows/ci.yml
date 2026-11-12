@@ -142,7 +142,7 @@ jobs:
       - name: test on Postgres
         env:
           KYIDENTITY_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres?sslmode=disable
-        run: go test -race -count=1 -timeout 60m -p 2 ./internal/store/... ./internal/api/... ./internal/oauth/... ./internal/mfa/... ./internal/sync/... ./cmd/...
+        run: go test -race -count=1 -timeout 60m -p 2 ./internal/store/... ./internal/api/... ./internal/oauth/... ./internal/mfa/... ./internal/sync/... ./internal/backup/... ./cmd/...
 
   web:
     runs-on: ubuntu-latest

@@ -122,7 +122,6 @@ func withStdin(t *testing.T, text string, fn func()) {
 // A drill on a paired instance with an administrator must pass every check, including the
 // signing key the command materializes itself on a never-started install, and say so.
 func TestBackupDrillCommandPassesOnAPairedInstance(t *testing.T) {
-	store.SkipOnPostgres(t, "backup is not supported on Postgres yet")
 	cfg, priv := commandInstance(t, true)
 	if _, err := os.Stat(cfg.RSAKeyPath); !os.IsNotExist(err) {
 		t.Fatal("fixture already has a signing key; the command must create it")
@@ -150,7 +149,6 @@ func TestBackupDrillCommandPassesOnAPairedInstance(t *testing.T) {
 // export-capsule writes a private file sealed to the pinned suite key, named after the
 // capsule when no path is given, and logs the digest restore -expect-digest checks.
 func TestExportCapsuleWritesAPrivateCapsuleSealedToThePin(t *testing.T) {
-	store.SkipOnPostgres(t, "backup is not supported on Postgres yet")
 	cfg, priv := commandInstance(t, true)
 	out := filepath.Join(t.TempDir(), "export.kycap")
 	logged := captureLog(t, func() { runExportCapsule(out) })
@@ -194,7 +192,6 @@ func TestExportCapsuleWritesAPrivateCapsuleSealedToThePin(t *testing.T) {
 // deposit with only a local backup directory writes a capsule there, records the run in
 // the audit log, and reports where the capsule went.
 func TestDepositCommandWritesALocalCopyAndAudits(t *testing.T) {
-	store.SkipOnPostgres(t, "backup is not supported on Postgres yet")
 	cfg, _ := commandInstance(t, true)
 	backupDir := t.TempDir()
 	t.Setenv("KYIDENTITY_BACKUP_DIR", backupDir)

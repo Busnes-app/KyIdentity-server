@@ -65,13 +65,7 @@ func (s *Store) migrate() error {
 		return fmt.Errorf("database schema is version %d but this binary knows only up to %d: run a release at least as new as the one that last migrated it", top, known)
 	}
 	if !applied[1] && s.postgres {
-		if err := s.inTx(func(tx *sql.Tx) error {
-			if _, err := tx.Exec(pgSchemaV1); err != nil {
-				return err
-			}
-			_, err := tx.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(1, 'postgres', ?)`, time.Now().UTC())
-			return err
-		}); err != nil {
+		if err := s.inTx(pgSchemaV1Tx); err != nil {
 			return fmt.Errorf("creating the Postgres schema: %w", err)
 		}
 	} else if !applied[1] {
@@ -91,6 +85,38 @@ func (s *Store) migrate() error {
 		}
 	}
 	return s.reconcileOnStart()
+}
+
+func pgSchemaV1Tx(tx *sql.Tx) error {
+	if _, err := tx.Exec(pgSchemaV1); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(1, 'postgres', ?)`, time.Now().UTC())
+	return err
+}
+
+// createPostgresSchemaTx creates the whole current Postgres schema inside tx, for an
+// import that must leave nothing behind when it fails.
+func createPostgresSchemaTx(tx *sql.Tx) error {
+	if _, err := tx.Exec(pgSchemaMigrationsSQL); err != nil {
+		return err
+	}
+	if err := pgSchemaV1Tx(tx); err != nil {
+		return err
+	}
+	for _, m := range migrations {
+		up := m.up
+		if m.pgUp != nil {
+			up = m.pgUp
+		}
+		if err := up(tx); err != nil {
+			return fmt.Errorf("migration %d %s: %w", m.version, m.name, err)
+		}
+		if _, err := tx.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, ?)`, m.version, m.name, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) applyMigration(m migration) error {

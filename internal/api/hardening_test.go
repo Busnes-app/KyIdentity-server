@@ -150,7 +150,6 @@ func TestReadinessReflectsDatabaseHealth(t *testing.T) {
 // An export whose durable record vanished is an unattributed disclosure of the whole
 // directory and its keys. Refusing is the only outcome that keeps the trail meaning anything.
 func TestSecretExportIsRefusedWhenTheAuditTrailCannotBeWritten(t *testing.T) {
-	store.SkipOnPostgres(t, "exports a backup capsule; backup is not supported on Postgres yet")
 	priv, err := recoverykey.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +177,13 @@ func TestSecretExportIsRefusedWhenTheAuditTrailCannotBeWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if _, err := raw.Exec(dropAuditTable); err != nil {
+	// On Postgres the table stays, because the export refuses a schema missing a table.
+	breakAudit := dropAuditTable
+	if store.OnPostgresTest() {
+		breakAudit = `CREATE FUNCTION kt_no_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'audit volume failed'; END $$;
+ CREATE TRIGGER kt_no_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION kt_no_audit()`
+	}
+	if _, err := raw.Exec(breakAudit); err != nil {
 		t.Fatalf("could not break the audit table: %v", err)
 	}
 

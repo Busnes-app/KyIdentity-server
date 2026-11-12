@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"net/mail"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -36,6 +38,7 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/netguard"
 	"github.com/Busnes-app/kyidentity-server/internal/oauth"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
+	"github.com/Busnes-app/kyidentity-server/internal/store/pgdialect"
 	"github.com/Busnes-app/kyidentity-server/internal/sync"
 	"github.com/Busnes-app/kyidentity-server/web"
 	"github.com/google/uuid"
@@ -85,6 +88,11 @@ func main() {
 		case "restore":
 			runRestore(os.Args[2:])
 			return
+		case "migrate-to-postgres":
+			if err := migrateToPostgres(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+				log.Fatal(err)
+			}
+			return
 		}
 	}
 
@@ -96,9 +104,6 @@ func main() {
 	dbStore, err := openStore(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize database store: %v", err)
-	}
-	if dbStore.Postgres() {
-		log.Printf("WARNING: backup, Back up now, the restore drill and restore are not supported on Postgres yet; they fail with an error. Do not use this deployment in production yet.")
 	}
 	defer dbStore.Close()
 	// The environment seeds session limits until an administrator stores their own.
@@ -561,15 +566,16 @@ func openStore(cfg *config.Config) (*store.Store, error) {
 // fail on a missing file — and a capsule without the signing key cannot restore a working
 // service, which is why its absence is fatal rather than skipped.
 func openStoreForBackup(cfg *config.Config) *store.Store {
-	if cfg.DatabaseURL != "" {
-		log.Fatalf("Backups (backup-drill, export-capsule, deposit) are not supported on Postgres yet")
-	}
 	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
 		log.Fatalf("Failed to load the RSA signing key at %s: %v", cfg.RSAKeyPath, err)
 	}
-	dbStore, err := store.New(cfg.DBPath)
+	dbStore, err := openStore(cfg)
 	if err != nil {
-		log.Fatalf("Failed to open the database at %s: %v", cfg.DBPath, err)
+		where := cfg.DBPath
+		if cfg.DatabaseURL != "" {
+			where = pgdialect.Describe(cfg.DatabaseURL)
+		}
+		log.Fatalf("Failed to open the database at %s: %v", where, err)
 	}
 	return dbStore
 }
@@ -799,17 +805,25 @@ func applyRestoreMarker(dataDir string, s *store.Store, auditLogger *audit.Logge
 		// An unreadable marker still means a restore happened. Apply it.
 		log.Printf("Restore marker at %s is unreadable (%v); applying the restore anyway", path, err)
 	}
-	event := auditLogger.Prepare("system.restored", "", "restore", "", "system", "", "", "success",
-		map[string]any{"capsule": marker.Capsule, "restoredAt": marker.RestoredAt, "digest": marker.Digest, "authenticated": marker.Digest != ""})
+	event := restoredEvent(auditLogger, marker)
 	report, err := s.ApplyRestoredState(time.Now().UTC(), event.Row)
 	if err != nil {
 		return err
 	}
 	event.Committed()
-	log.Printf("Restored directory applied: %d credential(s) invalidated, %d queued delivery/deliveries closed, %d back-channel logout(s) queued for the logins it ended, provisioning held on %v until each is reconciled; review their stored credentials for rotation",
-		report.Credentials, report.QueuedDeliveries, report.LogoutsQueued, report.Connectors)
+	log.Print(describeRestore(report))
 	log.Printf("Scheduled backup deposits are off; turn them back on (Disaster recovery, Schedule) once this server is the one in service")
 	return os.Remove(path)
+}
+
+func restoredEvent(l *audit.Logger, marker restoreMarker) *audit.Pending {
+	return l.Prepare("system.restored", "", "restore", "", "system", "", "", "success",
+		map[string]any{"capsule": marker.Capsule, "restoredAt": marker.RestoredAt, "digest": marker.Digest, "authenticated": marker.Digest != ""})
+}
+
+func describeRestore(report store.RestoreReport) string {
+	return fmt.Sprintf("Restored directory applied: %d credential(s) invalidated, %d queued delivery/deliveries closed, %d back-channel logout(s) queued for the logins it ended, provisioning held on %v until each is reconciled; review their stored credentials for rotation",
+		report.Credentials, report.QueuedDeliveries, report.LogoutsQueued, report.Connectors)
 }
 
 // sha256Hex is a capsule's digest as KyRecovery records it at deposit.
@@ -855,11 +869,14 @@ func restore(raw []byte, targetDir, expectService string, shares []string, stdou
 	return backup.JoinDatabaseParts(targetDir)
 }
 
-const restoreUsage = "Usage: kyidentity restore -capsule <file.kycap> -to <dir> -expect-digest <sha256> [-service <name>]\n\n" +
+const restoreUsage = "Usage: kyidentity restore -capsule <file.kycap> -to <dir> -expect-digest <sha256> [-service <name>] [-replace-database]\n\n" +
 	"-expect-digest is the capsule's digest from KyRecovery's deposit record (or the one\n" +
 	"export-capsule printed), checked before any share is read: anyone can seal a capsule to\n" +
 	"the public recovery key. Custodian shares are read from stdin, one ky2-... share per\n" +
-	"line, and never from the command line: argv is world-readable and lands in shell history.\n\n"
+	"line, and never from the command line: argv is world-readable and lands in shell history.\n\n" +
+	"With KYIDENTITY_DATABASE_URL[_FILE] set, the keys go to -to as always and the database is\n" +
+	"loaded into Postgres, with the restored state applied in the same transaction. A Postgres\n" +
+	"database that holds rows is refused unless -replace-database is given.\n\n"
 
 func restoreCommand(args []string, stdin io.Reader, stdout, stderr io.Writer, prompt bool) error {
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
@@ -869,6 +886,7 @@ func restoreCommand(args []string, stdin io.Reader, stdout, stderr io.Writer, pr
 	service := fs.String("service", "", restoreServiceHelp())
 	digest := fs.String("expect-digest", "", "SHA-256 of the capsule from KyRecovery's deposit record")
 	unauthenticated := fs.Bool("accept-unauthenticated-capsule", false, "restore without -expect-digest: whoever could write the capsule file chooses the restored administrators and keys")
+	replace := fs.Bool("replace-database", false, "Postgres only: replace every row of a database that is not empty, in the restore's one transaction")
 	fs.Usage = func() {
 		fmt.Fprint(stderr, restoreUsage)
 		fs.PrintDefaults()
@@ -880,8 +898,14 @@ func restoreCommand(args []string, stdin io.Reader, stdout, stderr io.Writer, pr
 		fs.Usage()
 		return errors.New("-capsule and -to are required")
 	}
+	databaseURL, err := config.LoadDatabaseURL()
+	if err != nil {
+		return err
+	}
+	if *replace && databaseURL == "" {
+		return errors.New("-replace-database applies only to a restore into Postgres (KYIDENTITY_DATABASE_URL)")
+	}
 	var raw []byte
-	var err error
 	switch {
 	case *digest != "" && *unauthenticated:
 		return errors.New("-expect-digest and -accept-unauthenticated-capsule contradict each other")
@@ -919,16 +943,111 @@ func restoreCommand(args []string, stdin io.Reader, stdout, stderr io.Writer, pr
 	if err := writeRestoreMarker(*target, *capsulePath, *service, strings.ToLower(strings.TrimSpace(*digest))); err != nil {
 		return fmt.Errorf("restore unpacked but the restore marker could not be written (%v); the next start would treat the old sessions, tokens and queued deliveries as live", err)
 	}
+	if databaseURL != "" {
+		return restoreIntoPostgres(databaseURL, *target, *capsulePath, strings.ToLower(strings.TrimSpace(*digest)), *replace, stdout)
+	}
 	fmt.Fprintln(stdout, "Restored. On first start the server invalidates the sessions, tokens and invitations this capsule contains, holds outbound provisioning until each connector is reconciled, and turns scheduled backup deposits off; turn them back on once this server is the one in service.")
 	return nil
 }
 
-func runRestore(args []string) {
-	if u, err := config.LoadDatabaseURL(); err != nil {
-		log.Fatalf("Restore: %v", err)
-	} else if u != "" {
-		log.Fatalf("Restore: restoring into Postgres is not supported yet")
+// restoreIntoPostgres loads the unpacked capsule's database into Postgres and applies the
+// restored state with its audit row in the same transaction, so no replica ever sees the
+// capsule's sessions. The SQLite file and the marker stay until that commits: a failure
+// leaves Postgres unchanged and the directory as a SQLite restore would leave it.
+func restoreIntoPostgres(databaseURL, target, capsulePath, digest string, replace bool, stdout io.Writer) error {
+	dbPath := filepath.Join(target, "data", "kyidentity.db")
+	event := restoredEvent(audit.NewLogger(nil), restoreMarker{Capsule: filepath.Base(capsulePath), Digest: digest, RestoredAt: time.Now().UTC()})
+	res, err := store.ImportSQLite(databaseURL, dbPath, store.ImportOptions{Replace: replace, Restored: event.Row})
+	if err != nil {
+		return fmt.Errorf("loading the capsule's database into Postgres at %s failed; the database is unchanged: %w", pgdialect.Describe(databaseURL), err)
 	}
+	event.Committed()
+	printCounts(stdout, res.Rows)
+	fmt.Fprintln(stdout, describeRestore(res.Restore))
+	for _, p := range []string{filepath.Join(target, "data", restoreMarkerName), dbPath} {
+		if err := os.Remove(p); err != nil {
+			return fmt.Errorf("the restore committed to Postgres, but %s could not be removed: %w; remove it before starting a server on this directory", p, err)
+		}
+	}
+	fmt.Fprintf(stdout, "Restored into Postgres at %s; start the servers with -to's data directory for the keys. Scheduled backup deposits are off; turn them back on once this server is the one in service.\n", pgdialect.Describe(databaseURL))
+	return nil
+}
+
+func printCounts(w io.Writer, rows map[string]int64) {
+	for _, name := range slices.Sorted(maps.Keys(rows)) {
+		fmt.Fprintf(w, "  %-36s %d\n", name, rows[name])
+	}
+}
+
+const migrateUsage = "Usage: kyidentity migrate-to-postgres -from <kyidentity.db>\n\n" +
+	"Copies a stopped server's SQLite database into the empty Postgres database named by\n" +
+	"KYIDENTITY_DATABASE_URL or KYIDENTITY_DATABASE_URL_FILE, in one transaction. The file is\n" +
+	"never modified. Going back is a restore of a capsule into SQLite.\n\n"
+
+// migrateToPostgres is the one-way move of a SQLite install onto Postgres.
+func migrateToPostgres(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("migrate-to-postgres", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	from := fs.String("from", "", "the SQLite database file (never modified)")
+	fs.Usage = func() {
+		fmt.Fprint(stderr, migrateUsage)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *from == "" {
+		fs.Usage()
+		return errors.New("-from is required")
+	}
+	databaseURL, err := config.LoadDatabaseURL()
+	if err != nil {
+		return err
+	}
+	if databaseURL == "" {
+		return errors.New("set KYIDENTITY_DATABASE_URL or KYIDENTITY_DATABASE_URL_FILE to the Postgres database to migrate into")
+	}
+	where := pgdialect.Describe(databaseURL)
+	res, err := store.ImportSQLite(databaseURL, *from, store.ImportOptions{})
+	if err != nil {
+		return fmt.Errorf("migration into %s failed; the database is unchanged: %w", where, err)
+	}
+	printCounts(stdout, res.Rows)
+	got, err := store.PostgresRowCounts(databaseURL)
+	if err != nil {
+		return fmt.Errorf("the migration committed, but counting the rows in %s failed: %w", where, err)
+	}
+	if err := sameCounts(res.Rows, got); err != nil {
+		return fmt.Errorf("the migration committed, but %w; do not start a server on %s", err, where)
+	}
+	fmt.Fprintf(stdout, "Migrated %d tables into %s; every table's row count matches the file. Set KYIDENTITY_DATABASE_URL on the server and start it.\n", len(got), where)
+	return nil
+}
+
+// sameCounts refuses unless both sides count the same rows in the same tables.
+func sameCounts(file, pg map[string]int64) error {
+	names := map[string]bool{}
+	for name := range file {
+		names[name] = true
+	}
+	for name := range pg {
+		names[name] = true
+	}
+	var wrong []string
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		want, inFile := file[name]
+		got, inPG := pg[name]
+		if !inFile || !inPG || want != got {
+			wrong = append(wrong, fmt.Sprintf("%s: file %d, Postgres %d", name, want, got))
+		}
+	}
+	if len(wrong) > 0 {
+		return fmt.Errorf("the row counts differ (%s)", strings.Join(wrong, "; "))
+	}
+	return nil
+}
+
+func runRestore(args []string) {
 	if err := restoreCommand(args, os.Stdin, os.Stdout, os.Stderr, stdinIsTerminal()); err != nil {
 		log.Fatalf("Restore: %v", err)
 	}

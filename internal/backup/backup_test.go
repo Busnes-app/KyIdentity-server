@@ -149,6 +149,8 @@ func TestCollectSealableCarriesEverythingARestoreNeeds(t *testing.T) {
 	if err := os.WriteFile(restored, got["data/kyidentity.db"], 0600); err != nil {
 		t.Fatal(err)
 	}
+	// The capsule's database is a SQLite file on either backend.
+	t.Setenv("KYIDENTITY_TEST_DATABASE_URL", "")
 	copyStore, err := store.New(restored)
 	if err != nil {
 		t.Fatalf("snapshot does not open: %v", err)
