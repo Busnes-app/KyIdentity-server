@@ -26,7 +26,7 @@ type outboxRow struct {
 
 func outbox(t *testing.T, s *store.Store, systemID, userID string) []outboxRow {
 	t.Helper()
-	db, err := sql.Open("sqlite", syncTestDBs[s]+"?_pragma=busy_timeout(5000)")
+	db, err := store.OpenRawForTest(syncTestDBs[s] + "?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}

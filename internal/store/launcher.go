@@ -79,7 +79,7 @@ func (s *Store) setInstallerLauncher(setupID, clientID, column, value, adminRole
 	}
 	fields := map[string]string{column: value, "setupId": setupID, "via": "cli"}
 	if adminRole != "" {
-		if _, err := tx.Exec(`UPDATE app_roles SET administrator=1 WHERE lower(name)=lower(?) AND app_id IN (SELECT id FROM app_registry WHERE client_id=?)`, adminRole, clientID); err != nil {
+		if _, err := tx.Exec(`UPDATE app_roles SET administrator=TRUE WHERE lower(name)=lower(?) AND app_id IN (SELECT id FROM app_registry WHERE client_id=?)`, adminRole, clientID); err != nil {
 			return false, err
 		}
 		fields["administratorRole"] = adminRole

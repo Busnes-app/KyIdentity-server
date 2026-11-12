@@ -30,12 +30,12 @@ func withTestMigration(t *testing.T, m migration) {
 
 func schemaVersions(t *testing.T, path string) string {
 	t.Helper()
-	db, err := sql.Open("sqlite", path)
+	s, err := OpenInstallerStore(path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	rows, err := db.Query(`SELECT version, name FROM schema_migrations ORDER BY version`)
+	defer s.Close()
+	rows, err := s.db.Query(`SELECT version, name FROM schema_migrations ORDER BY version`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +52,10 @@ func schemaVersions(t *testing.T, path string) string {
 	return strings.Join(out, ",")
 }
 
+// v1 is the version-1 row a fresh database records: the legacy pass on SQLite, the
+// hand-written schema on Postgres.
+var v1 = map[bool]string{false: "1:legacy", true: "1:postgres"}[OnPostgresTest()]
+
 func openAndClose(t *testing.T, path string) {
 	t.Helper()
 	s, err := New(path)
@@ -65,6 +69,7 @@ func openAndClose(t *testing.T, path string) {
 
 // A fresh database records version 1 once, and a later start never probes the legacy schema.
 func TestFreshDatabaseRecordsVersionOneAndSkipsLegacyAfter(t *testing.T) {
+	SkipOnPostgres(t, "counts runs of the SQLite legacy migration")
 	path := filepath.Join(t.TempDir(), "fresh.db")
 	before := legacyRuns.Load()
 	openAndClose(t, path)
@@ -83,6 +88,7 @@ func TestFreshDatabaseRecordsVersionOneAndSkipsLegacyAfter(t *testing.T) {
 // A database from a release before versions is upgraded in place to version 1 and the
 // shape of a fresh install, with its data.
 func TestUnversionedDatabaseUpgradesToVersionOne(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	refPath := filepath.Join(t.TempDir(), "reference.db")
 	openAndClose(t, refPath)
 	want := schemaFingerprint(t, refPath)
@@ -168,10 +174,10 @@ func TestVersionedMigrationAppliesOnceAcrossReplicas(t *testing.T) {
 	if err := stores[0].db.QueryRow(`SELECT COUNT(*) FROM test_probe`).Scan(&rows); err != nil || rows != 1 || ups.Load() != 1 {
 		t.Fatalf("migration applied %d times, %d rows: %v", ups.Load(), rows, err)
 	}
-	if got := legacyRuns.Load() - before; got != 1 {
+	if got := legacyRuns.Load() - before; got != 1 && !OnPostgresTest() {
 		t.Fatalf("migrateLegacy ran %d times across replicas, want 1", got)
 	}
-	if got := schemaVersions(t, path); got != "1:legacy,2:test_probe" {
+	if got := schemaVersions(t, path); got != v1+",2:test_probe" {
 		t.Fatalf("schema_migrations = %q", got)
 	}
 }
@@ -196,7 +202,7 @@ func TestFailingMigrationRollsBackAndRetries(t *testing.T) {
 		}
 		t.Fatalf("failing migration started: %v", err)
 	}
-	if got := schemaVersions(t, path); got != "1:legacy" {
+	if got := schemaVersions(t, path); got != v1 {
 		t.Fatalf("schema_migrations after failure = %q", got)
 	}
 	if _, ok := schemaFingerprint(t, path)["table test_flaky"]; ok {
@@ -204,7 +210,7 @@ func TestFailingMigrationRollsBackAndRetries(t *testing.T) {
 	}
 	fail = false
 	openAndClose(t, path)
-	if got := schemaVersions(t, path); got != "1:legacy,2:test_flaky" {
+	if got := schemaVersions(t, path); got != v1+",2:test_flaky" {
 		t.Fatalf("schema_migrations after retry = %q", got)
 	}
 	if _, ok := schemaFingerprint(t, path)["table test_flaky"]; !ok {

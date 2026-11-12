@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -365,14 +364,15 @@ func TestDeviceSignOnNotPermittedIsNamed(t *testing.T) {
 // engine's hook, so a trigger on the device login session's insert applies the reset's
 // device effect inside that window.
 func TestDeviceSignOnResetMidExchangeIsDisabled(t *testing.T) {
+	store.SkipOnPostgres(t, "injects a race with a SQLite trigger")
 	e := newSignOnEnv(t)
 	c := e.client(t, "public", "")
-	raw, err := sql.Open("sqlite", e.server.cfg.DBPath)
+	raw, err := store.OpenRawForTest(e.server.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if _, err := raw.Exec(`CREATE TRIGGER reset_mid_exchange AFTER INSERT ON sessions BEGIN UPDATE native_devices SET is_mfa_approver=0, can_sign_on=0 WHERE user_id=NEW.user_id; END`); err != nil {
+	if _, err := raw.Exec(`CREATE TRIGGER reset_mid_exchange AFTER INSERT ON sessions BEGIN UPDATE native_devices SET is_mfa_approver=FALSE, can_sign_on=FALSE WHERE user_id=NEW.user_id; END`); err != nil {
 		t.Fatal(err)
 	}
 	const want = `{"error":"invalid_grant","error_description":"device_signon_disabled"}`

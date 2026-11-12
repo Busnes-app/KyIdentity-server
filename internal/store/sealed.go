@@ -32,7 +32,7 @@ const SealedSecretsSetting = "sealed_secrets_version"
 // sealedColumns is every sealed row secret: table, ciphertext column, row identity, purpose, filter.
 var sealedColumns = []struct{ table, column, row, purpose, where string }{
 	{"mfa_methods", "encrypted_secret", "user_id", SealTOTP, "method_type = 'totp'"},
-	{"paired_systems", "hmac_secret_encrypted", "id", SealConnector, "1"},
+	{"paired_systems", "hmac_secret_encrypted", "id", SealConnector, "TRUE"},
 	{"system_settings", "value", "key", SealMail, "key = '" + MailSettingKey + "'"},
 }
 

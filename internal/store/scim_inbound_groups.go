@@ -113,7 +113,7 @@ func (s *Store) CreateUpstreamGroup(g *Group, members []string, audit *AuditEven
 	}
 	members = uniqueStrings(members)
 	g.ID = uuid.NewString()
-	now := time.Now().UTC()
+	now := rowTime()
 	g.CreatedAt, g.UpdatedAt = now, now
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
 		if err := externalGroupFreeTx(tx, g.SourceConnectorID, g.ExternalID, g.ID); err != nil {
@@ -188,7 +188,7 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 	switch attribute {
 	case "":
 	case "displayName":
-		where += ` AND g.name=? COLLATE NOCASE`
+		where += ` AND g.name=?`
 		args = append(args, value)
 	case "externalId":
 		where += ` AND g.external_id=?`
@@ -253,7 +253,7 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 // a group carrying a required MFA policy fails closed like any other change to such a
 // group, since no local administrator is behind an upstream write.
 func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, edit func(g *UpstreamGroup) error) error {
-	now := time.Now().UTC()
+	now := rowTime()
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
 		current, err := scanUpstreamGroup(tx.QueryRow(`SELECT `+upstreamGroupColumns+` FROM directory_groups g WHERE g.id=? AND g.source_connector_id=?`, id, connectorID))
 		if err != nil {

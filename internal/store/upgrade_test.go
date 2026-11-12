@@ -95,6 +95,9 @@ func legacyDatabase(t *testing.T) string {
 // fresh install and one built by ALTER, so order is deliberately not compared.
 func schemaFingerprint(t *testing.T, path string) map[string][]string {
 	t.Helper()
+	if OnPostgresTest() {
+		return pgSchemaFingerprint(t, path)
+	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +164,7 @@ func sameFingerprint(t *testing.T, what string, a, b map[string][]string) {
 // predate it, and lands on the same schema as a fresh install. Running the upgrade
 // again changes nothing.
 func TestUpgradeFromPreFeatureDatabase(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := legacyDatabase(t)
 	s, err := New(path)
 	if err != nil {
@@ -268,4 +272,45 @@ func TestUpgradeFromPreFeatureDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	sameFingerprint(t, "upgraded against fresh", schemaFingerprint(t, freshPath), first)
+}
+
+// pgSchemaFingerprint is schemaFingerprint for a Postgres test schema: its tables, views,
+// indexes and triggers, and each table's columns as a set.
+func pgSchemaFingerprint(t *testing.T, path string) map[string][]string {
+	t.Helper()
+	s, err := OpenInstallerStore(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	out := map[string][]string{}
+	rows, err := s.db.Query(`SELECT CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' ELSE 'index' END, c.relname
+ FROM pg_class c WHERE c.relnamespace=current_schema()::regnamespace AND c.relkind IN ('r','v','i')
+ UNION ALL SELECT 'trigger', tgname FROM pg_trigger g JOIN pg_class c ON c.oid=g.tgrelid WHERE c.relnamespace=current_schema()::regnamespace AND NOT g.tgisinternal
+ ORDER BY 1, 2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, name string
+		if err := rows.Scan(&kind, &name); err != nil {
+			t.Fatal(err)
+		}
+		out["objects"] = append(out["objects"], kind+" "+name)
+	}
+	cols, err := s.db.Query(`SELECT table_name, column_name FROM information_schema.columns c JOIN information_schema.tables t USING (table_schema, table_name)
+ WHERE table_schema=current_schema() AND t.table_type='BASE TABLE' ORDER BY 1, 2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cols.Close()
+	for cols.Next() {
+		var table, name string
+		if err := cols.Scan(&table, &name); err != nil {
+			t.Fatal(err)
+		}
+		out["table "+table] = append(out["table "+table], name)
+	}
+	return out
 }

@@ -72,7 +72,7 @@ func enrollmentStatus(row interface{ Scan(...any) error }) (EnrollmentStatus, er
 	return s, err
 }
 
-const enrollmentStatusSQL = `SELECT r.required,r.allowed_mask,r.due_at,EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=r.user_id AND (f.bit&r.allowed_mask)<>0),NOT COALESCE((SELECT allowed FROM mfa_session_access WHERE id=? AND user_id=r.user_id),0) FROM enrollment_requirements r WHERE r.user_id=?`
+const enrollmentStatusSQL = `SELECT r.required,r.allowed_mask,r.due_at,EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=r.user_id AND (f.bit&r.allowed_mask)<>0),NOT COALESCE((SELECT allowed FROM mfa_session_access WHERE id=? AND user_id=r.user_id),FALSE) FROM enrollment_requirements r WHERE r.user_id=?`
 
 func (s *Store) SessionEnrollmentStatus(userID, sessionID string) (EnrollmentStatus, error) {
 	return enrollmentStatus(s.db.QueryRow(enrollmentStatusSQL, sessionID, userID))
@@ -121,7 +121,7 @@ func applyEnrollmentPolicyTx(tx *sql.Tx, p EnrollmentPolicy) error {
 		return ErrEnrollmentPolicy
 	}
 	// ponytail: policy edits scan applicable users; scope this query if the directory grows large.
-	_, err = tx.Exec(`INSERT INTO enrollment_deadlines SELECT p.user_id,p.scope,unixepoch()+p.grace_seconds FROM applicable_enrollment_policies p WHERE true ON CONFLICT(user_id,scope) DO UPDATE SET due_at=MIN(enrollment_deadlines.due_at,excluded.due_at)`)
+	_, err = tx.Exec(`INSERT INTO enrollment_deadlines SELECT p.user_id,p.scope,unixepoch()+p.grace_seconds FROM applicable_enrollment_policies p WHERE true ON CONFLICT(user_id,scope) DO UPDATE SET due_at=CASE WHEN enrollment_deadlines.due_at<excluded.due_at THEN enrollment_deadlines.due_at ELSE excluded.due_at END`)
 	return err
 }
 

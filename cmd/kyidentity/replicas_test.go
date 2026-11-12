@@ -111,6 +111,7 @@ func TestReplicaRefusesToGenerateTheFirstPassword(t *testing.T) {
 
 // Every replica's scheduler sees the same backup come due. One runs it.
 func TestScheduledBackupRunsOnOneReplica(t *testing.T) {
+	store.SkipOnPostgres(t, "backup is not supported on Postgres yet")
 	cfg, _ := commandInstance(t, true)
 	cfg.BackupDir = t.TempDir()
 	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {

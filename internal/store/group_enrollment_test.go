@@ -228,6 +228,7 @@ func TestGroupEnrollmentConcurrentConflictingMembership(t *testing.T) {
 }
 
 func TestGroupEnrollmentUpgradePreservesLegacyPolicy(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, u, _ := enrollmentFixture(t)
 	testEnrollmentGroup(t, s, "existing-group")
 	if err := s.SetEnrollmentPolicy(enrollmentPolicy("organization", 3600), "admin-session", nil); err != nil {
@@ -276,7 +277,7 @@ func TestGroupEnrollmentMembershipAuditRollback(t *testing.T) {
 	if err := s.SetEnrollmentPolicy(p, "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`CREATE TRIGGER reject_group_enrollment_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit failed'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER reject_group_enrollment_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit failed'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	err := s.SetGroupMembershipForSession("a", u.ID, true, "admin-session", &AuditEvent{ID: "failed", Action: "test", Outcome: "success", CreatedAt: time.Now().UTC()})
@@ -378,6 +379,7 @@ func TestGroupEnrollmentDeletionRequiresLogin(t *testing.T) {
 }
 
 func TestGroupEnrollmentSessionQueryPlan(t *testing.T) {
+	SkipOnPostgres(t, "checks SQLite's EXPLAIN QUERY PLAN")
 	s, _, _ := enrollmentFixture(t)
 	if _, err := s.db.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000) INSERT INTO users(id,username,email,password_hash,role,status,display_name) SELECT 'plan-'||i,'plan-'||i,'plan-'||i||'@example.com','test','user','active','Plan user' FROM n`); err != nil {
 		t.Fatal(err)

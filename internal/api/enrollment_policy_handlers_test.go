@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/url"
 	"strings"
@@ -173,6 +172,7 @@ func TestEnrollmentRestrictedHTTPAndTOTPCompletion(t *testing.T) {
 }
 
 func TestEnrollmentPolicyDenialAuditAndPreviewFailure(t *testing.T) {
+	store.SkipOnPostgres(t, "injects an audit failure with a SQLite trigger")
 	srv, db, _, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
 	u := newUser(t, db, "admin")
@@ -203,7 +203,7 @@ func TestEnrollmentPolicyDenialAuditAndPreviewFailure(t *testing.T) {
 			t.Fatal("missing denial audit", tc.reason)
 		}
 	}
-	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

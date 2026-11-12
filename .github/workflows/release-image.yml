@@ -114,6 +114,7 @@ jobs:
             web
             relay
             docker
+            postgres
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD)"

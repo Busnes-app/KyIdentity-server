@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -731,7 +730,7 @@ func TestExchangeDeviceAssertionIssuesWhenPolicyUnchanged(t *testing.T) {
 // refusal must leave no row behind.
 func (f *signOnFixture) issuedTokenCount(t *testing.T) int {
 	t.Helper()
-	raw, err := sql.Open("sqlite", f.dbPath)
+	raw, err := store.OpenRawForTest(f.dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

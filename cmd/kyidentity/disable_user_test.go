@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -45,7 +44,7 @@ func TestDisableUser(t *testing.T) {
 	if err := os.WriteFile(pass, []byte("User: kyq-bootstrap\nPassword: generated-password\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", dbPath)
+	raw, err := store.OpenRawForTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +165,7 @@ func TestDisableUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	upstream := user("upstream", "user")
-	exec(`UPDATE users SET source_connector_id=?, external_id='ext-1', source_active=1 WHERE id=?`, c.ID, upstream.ID)
+	exec(`UPDATE users SET source_connector_id=?, external_id='ext-1', source_active=TRUE WHERE id=?`, c.ID, upstream.ID)
 	if _, err := run("--username", "upstream", "--require-active-admin", "owner-admin"); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +177,7 @@ func TestDisableUser(t *testing.T) {
 	// Already disabled upstream is not "unchanged": the override is still recorded, so a
 	// later upstream activation cannot bring the account back.
 	paused := user("paused", "user")
-	exec(`UPDATE users SET source_connector_id=?, external_id='ext-2', source_active=0, status='disabled' WHERE id=?`, c.ID, paused.ID)
+	exec(`UPDATE users SET source_connector_id=?, external_id='ext-2', source_active=FALSE, status='disabled' WHERE id=?`, c.ID, paused.ID)
 	result, err = run("--username", "paused", "--require-active-admin", "owner-admin")
 	if err != nil || result["status"] != "disabled" {
 		t.Fatalf("upstream-disabled account: %v %v", result, err)

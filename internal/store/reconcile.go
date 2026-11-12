@@ -160,7 +160,9 @@ func (s *Store) ScheduleReconcileJobs(now time.Time) error {
 }
 
 // ClaimReconcileJob takes the oldest queued job, or a running one whose lease expired.
-// A job interrupted repeatedly is failed rather than retried forever.
+// A job interrupted repeatedly is failed rather than retried forever. The UPDATE's own
+// WHERE repeats the subquery's test, so a row is only taken while it is still claimable,
+// whatever serialises the writers.
 func (s *Store) ClaimReconcileJob(lease time.Duration) (*ReconcileJob, error) {
 	now := time.Now().UTC()
 	tx, err := s.db.Begin()
@@ -175,7 +177,8 @@ func (s *Store) ClaimReconcileJob(lease time.Duration) (*ReconcileJob, error) {
 	token := uuid.NewString()
 	job, err := scanReconcileJob(tx.QueryRow(`UPDATE sync_reconcile_jobs SET status='running',claim_token=?,lease_until=?,started_at=COALESCE(started_at,?),attempts=attempts+1
  WHERE id=(SELECT id FROM sync_reconcile_jobs WHERE (status='queued' OR (status='running' AND lease_until<=?)) AND attempts<? ORDER BY created_at LIMIT 1)
- RETURNING `+reconcileJobColumns, token, now.Add(lease), now, now, reconcileAttempts))
+ AND (status='queued' OR (status='running' AND lease_until<=?)) AND attempts<?
+ RETURNING `+reconcileJobColumns, token, now.Add(lease), now, now, reconcileAttempts, now, reconcileAttempts))
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +459,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 			return false, err
 		}
 		r, err := tx.Exec(`INSERT INTO scim_user_links(system_id,local_id,kind,remote_id) VALUES(?,?,?,?)
- ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE kind=excluded.kind AND remote_id IN ('',?)`, systemID, localID, kind, remoteID, stored)
+ ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE scim_user_links.kind=excluded.kind AND scim_user_links.remote_id IN ('',?)`, systemID, localID, kind, remoteID, stored)
 		if err != nil {
 			return false, err
 		}
@@ -470,7 +473,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 	// A managed account with no desired-state row (pre-upgrade delivery, or a resource
 	// found only at the target) is recorded as held so a disable can be queued for it.
 	hold := func(kind, id string) error {
-		_, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,1,1,0) ON CONFLICT(system_id,resource_id) DO UPDATE SET provisioned=1`, systemID, id, kind)
+		_, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,TRUE,TRUE,0) ON CONFLICT(system_id,resource_id) DO UPDATE SET provisioned=TRUE`, systemID, id, kind)
 		return err
 	}
 	seen := map[string]bool{}
@@ -559,7 +562,7 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 				}
 				// Absent at the target, so not provisioned there: the confirmed re-create
 				// then re-queues the groups that hold this user (provisionedTx).
-				if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=0 WHERE system_id=? AND resource_id=? AND kind='user'`, systemID, id); err != nil {
+				if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=FALSE WHERE system_id=? AND resource_id=? AND kind='user'`, systemID, id); err != nil {
 					return nil, err
 				}
 				payload, err := scimUserPayloadTx(tx, u, true, systemID)
@@ -674,10 +677,10 @@ func (s *Store) ListProvisioningState(systemID, query string, limit, offset int)
 	}
 	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,
  EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=? AND e.user_id=u.id),
- COALESCE(st.active,0),COALESCE(st.provisioned,0),COALESCE(st.observed,''),st.observed_at,COALESCE(st.revision,0),
+ COALESCE(st.active,FALSE),COALESCE(st.provisioned,FALSE),COALESCE(st.observed,''),st.observed_at,COALESCE(st.revision,0),
  EXISTS(SELECT 1 FROM sync_delivery_attempts d WHERE d.system_id=? AND d.user_id=u.id),
  ev.event_type,ev.status,ev.last_error,ev.attempts,ev.next_attempt_at,ev.updated_at`+from+
-		` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, systemID, systemID, systemID, systemID, systemID, query, query, limit, offset)
+		` ORDER BY u.username,u.id LIMIT ? OFFSET ?`, systemID, systemID, systemID, systemID, systemID, query, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

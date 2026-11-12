@@ -106,7 +106,7 @@ func TestInstallerAmendmentRefusals(t *testing.T) {
 			case "parent-client":
 				a.Clients[0].ID = parent.Clients[0].ID
 			case "foreign-client":
-				mustExec(t, s, `INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,enabled,created_at,post_logout_redirect_uris_json) VALUES('kyrecovery','Foreign','confidential','x','[]','["openid"]',1,CURRENT_TIMESTAMP,'[]')`)
+				mustExec(t, s, `INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,enabled,created_at,post_logout_redirect_uris_json) VALUES('kyrecovery','Foreign','confidential','x','[]','["openid"]',TRUE,CURRENT_TIMESTAMP,'[]')`)
 			case "foreign-group":
 				mustExec(t, s, `INSERT INTO directory_groups(id,name,description,created_at,updated_at) VALUES('g','Foreign','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
 				a.Clients[0].Groups = []string{"Foreign"}
@@ -140,7 +140,7 @@ func TestInstallerAmendmentRefusals(t *testing.T) {
 
 func mustExec(t *testing.T, s *Store, q string, args ...any) {
 	t.Helper()
-	if _, err := s.db.Exec(q, args...); err != nil {
+	if _, err := s.db.Exec(dialect(s, q), args...); err != nil {
 		t.Fatal(err)
 	}
 }

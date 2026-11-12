@@ -67,6 +67,7 @@ func TestAuditPagingIsStableUnderTiedTimestamps(t *testing.T) {
 // Filters narrow by actor, target, type, action prefix, outcome and time range, and
 // the filtered queries use the indexes at a representative volume.
 func TestAuditFiltersAndIndexes(t *testing.T) {
+	SkipOnPostgres(t, "checks SQLite's EXPLAIN QUERY PLAN")
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	base := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second)

@@ -93,9 +93,12 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	dbStore, err := store.New(cfg.DBPath)
+	dbStore, err := openStore(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize database store: %v", err)
+	}
+	if dbStore.Postgres() {
+		log.Printf("WARNING: backup, Back up now, the restore drill and restore are not supported on Postgres yet; they fail with an error. Do not use this deployment in production yet.")
 	}
 	defer dbStore.Close()
 	// The environment seeds session limits until an administrator stores their own.
@@ -426,7 +429,7 @@ func runBootstrap(args []string) {
 	if err != nil {
 		log.Fatalf("Config load error: %v", err)
 	}
-	dbStore, err := store.New(cfg.DBPath)
+	dbStore, err := openStore(cfg)
 	if err != nil {
 		log.Fatalf("Store error: %v", err)
 	}
@@ -542,6 +545,14 @@ func clearFirstRunPasswordFile(dbStore *store.Store, dataDir string) error {
 	return nil
 }
 
+// openStore opens the shared Postgres database when one is configured, else the SQLite file.
+func openStore(cfg *config.Config) (*store.Store, error) {
+	if cfg.DatabaseURL != "" {
+		return store.NewPostgres(cfg.DatabaseURL)
+	}
+	return store.New(cfg.DBPath)
+}
+
 // openStoreForBackup opens the live database so backups can take a consistent snapshot
 // through it rather than copying the file out from under WAL.
 //
@@ -550,6 +561,9 @@ func clearFirstRunPasswordFile(dbStore *store.Store, dataDir string) error {
 // fail on a missing file — and a capsule without the signing key cannot restore a working
 // service, which is why its absence is fatal rather than skipped.
 func openStoreForBackup(cfg *config.Config) *store.Store {
+	if cfg.DatabaseURL != "" {
+		log.Fatalf("Backups (backup-drill, export-capsule, deposit) are not supported on Postgres yet")
+	}
 	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
 		log.Fatalf("Failed to load the RSA signing key at %s: %v", cfg.RSAKeyPath, err)
 	}
@@ -910,6 +924,11 @@ func restoreCommand(args []string, stdin io.Reader, stdout, stderr io.Writer, pr
 }
 
 func runRestore(args []string) {
+	if u, err := config.LoadDatabaseURL(); err != nil {
+		log.Fatalf("Restore: %v", err)
+	} else if u != "" {
+		log.Fatalf("Restore: restoring into Postgres is not supported yet")
+	}
 	if err := restoreCommand(args, os.Stdin, os.Stdout, os.Stderr, stdinIsTerminal()); err != nil {
 		log.Fatalf("Restore: %v", err)
 	}

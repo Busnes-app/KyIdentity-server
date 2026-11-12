@@ -95,7 +95,7 @@ func TestInstallerGroupsRollbackForeignConflictsAndAuditFailure(t *testing.T) {
 				if cause == "assignment audit" {
 					action = "installer.group_assignment_created"
 				}
-				if _, err := s.db.Exec(`CREATE TRIGGER refuse_installer_group_audit BEFORE INSERT ON audit_events WHEN NEW.action='` + action + `' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+				if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER refuse_installer_group_audit BEFORE INSERT ON audit_events WHEN NEW.action='`+action+`' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -139,7 +139,7 @@ func TestInstallerGroupAssignmentAndDefinitionDriftAreNotRepaired(t *testing.T) 
 			case "assignment":
 				err = s.SetAppAssignment(appID, "groups", groupID, false, nil)
 			case "claim":
-				_, err = s.db.Exec(`UPDATE app_registry SET groups_claim=0 WHERE id=?`, appID)
+				_, err = s.db.Exec(`UPDATE app_registry SET groups_claim=FALSE WHERE id=?`, appID)
 			case "definition":
 				err = s.UpdateGroup(&Group{ID: groupID, Name: "Suite users", Description: "retain operator change"}, nil)
 			}

@@ -127,8 +127,52 @@ The files must be readable by the container's non-root user (`kyidentity`).
 
 ## Running more than one replica
 
-> Not supported yet. The database is still one SQLite file on one volume, so run exactly
-> one replica until a release says otherwise. What follows is already in place for it.
+> Not for production yet. Replicas share one Postgres database, and backup, Back up now,
+> the restore drill and `restore` are not supported on Postgres yet: they fail with an
+> error naming the limitation. A deployment you cannot back up or restore must not hold
+> real accounts. Run exactly one replica on SQLite until a release says otherwise.
+
+### The shared database
+
+Replicas cannot share a SQLite file, so `KYIDENTITY_REPLICATED=true` is refused at startup
+unless the database is Postgres. Set one of:
+
+| Variable | Contents |
+|---|---|
+| `KYIDENTITY_DATABASE_URL` | a `postgres://` URL |
+| `KYIDENTITY_DATABASE_URL_FILE` | the path of a file (a mounted Secret) holding that URL |
+
+Setting both is refused. Unset means the SQLite file, exactly as before. The URL carries
+the password: the server logs only the host and the database name, and never repeats the
+URL in an error.
+
+The server must be Postgres 16 or newer. The database must be UTF8 with the C locale, so
+that names compare exactly as on SQLite (case-insensitive for ASCII letters only). Create
+it with:
+
+```sql
+CREATE DATABASE kyidentity ENCODING 'UTF8' LOCALE 'C' TEMPLATE template0;
+```
+
+At startup the server checks this and refuses to start, before writing anything, when the
+check fails. It creates the `citext` extension, a trusted extension since Postgres 13, so
+the database owner needs no superuser for it. The first replica to start creates the schema
+while the others wait.
+
+Every connection requires a writable primary (`target_session_attrs=read-write` unless the
+URL sets another value), connects within 5 s and is replaced after 5 min, so the pool
+follows a failover. `/readyz` fails while the database is unreachable or read-only and
+recovers without a restart. Statements wait at most 5 s for a lock, and a transaction left
+idle for 30 s is ended by the server.
+
+All writes are serialised: every write transaction takes one advisory lock, as SQLite lets
+one writer in at a time. Write throughput is therefore that of one connection, however many
+replicas run; reads are not affected.
+
+`apply-setup`, `disable-user` and `resync-system` act on the Postgres database when the
+variable is set. `backup-drill`, `export-capsule`, `deposit` and `restore` refuse.
+
+### Keys
 
 Several replicas behind one load balancer must be one identity: the same four keys in each.
 A replica that generated its own would reject the others' tokens, cookies and sealed secrets.

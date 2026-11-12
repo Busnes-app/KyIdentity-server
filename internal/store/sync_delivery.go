@@ -41,13 +41,20 @@ func (s *Store) reconcileSyncEvents() error {
 		return err
 	}
 	// Older versions left some exhausted work pending; pending now always means deliverable.
-	_, err := s.db.Exec(`UPDATE account_sync_events SET status='failed' WHERE status='pending' AND attempts>=? AND event_type<>'user.mfa_reset' AND NOT `+removalSQL, SyncAttemptBudget)
+	_, err := s.db.Exec(`UPDATE account_sync_events SET status='failed' WHERE status='pending' AND attempts>=? AND event_type<>'user.mfa_reset' AND NOT `+s.removalSQL(), SyncAttemptBudget)
 	return err
 }
 
-// removalSQL is AccountSyncEvent.Removal for an account_sync_events row.
-const removalSQL = `(event_type IN ('user.deleted','group.deleted') OR (event_type='user.updated'
+// removalSQL is AccountSyncEvent.Removal for an account_sync_events row: a deletion, or
+// an update whose payload says "active": false (or 0).
+func (s *Store) removalSQL() string {
+	if s.postgres {
+		return `(event_type IN ('user.deleted','group.deleted') OR (event_type='user.updated'
+ AND CASE WHEN payload_json IS JSON THEN payload_json::jsonb->'active' END IN ('false'::jsonb,'0'::jsonb)))`
+	}
+	return `(event_type IN ('user.deleted','group.deleted') OR (event_type='user.updated'
  AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.active') END IS 0))`
+}
 
 // BeginSyncDelivery turns a valid unsent claim into a durable resource fence.
 // Expiration is a diagnostic/recovery threshold, never permission to send again.
@@ -236,14 +243,14 @@ func (s *Store) ResumeSyncDeliveries(systemID string, audit *AuditEvent) (int, e
 // releaseFencesForRemovalsTx releases a removal's own fence past its recovery time, so
 // a removal never waits on an operator for itself. A fence on any other write stays:
 // an expired deadline does not prove that write cannot still land after the removal.
-func releaseFencesForRemovalsTx(tx *sql.Tx, now time.Time) error {
+func (s *Store) releaseFencesForRemovalsTx(tx *sql.Tx, now time.Time) error {
 	expired := `SELECT event_id FROM sync_delivery_attempts WHERE recover_after<=?`
 	if _, err := tx.Exec(`UPDATE account_sync_events SET status='pending',next_attempt_at=NULL,lease_until=NULL,claim_token='',updated_at=?
- WHERE id IN (`+expired+`) AND `+removalSQL, now, now); err != nil {
+ WHERE id IN (`+expired+`) AND `+s.removalSQL(), now, now); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`DELETE FROM sync_delivery_attempts WHERE recover_after<=?
- AND event_id IN (SELECT id FROM account_sync_events WHERE `+removalSQL+`)`, now)
+ AND event_id IN (SELECT id FROM account_sync_events WHERE `+s.removalSQL()+`)`, now)
 	return err
 }
 
@@ -329,7 +336,7 @@ func (s *Store) SyncBacklog(systemID string) (SyncBacklog, error) {
    OR (e.last_error<>'' AND EXISTS(SELECT 1 FROM sync_delivery_attempts a WHERE a.event_id=e.id))
    OR (e.status='pending' AND EXISTS(SELECT 1 FROM sync_delivery_attempts a
      WHERE a.system_id=e.system_id AND a.user_id=e.user_id AND a.recover_after<=?
-     AND a.event_id NOT IN (SELECT id FROM account_sync_events WHERE `+removalSQL+`))))),
+     AND a.event_id NOT IN (SELECT id FROM account_sync_events WHERE `+s.removalSQL()+`))))),
  CASE WHEN p.status='disabled' THEN 'disabled' WHEN p.provisioning_hold THEN 'held'
   WHEN p.system_type NOT IN `+deliverableTypes+` THEN 'unsupported' ELSE '' END
  FROM paired_systems p WHERE p.id=?`, time.Now().UTC(), systemID).Scan(&b.Pending, &b.Failed, &b.Blocked)
@@ -380,10 +387,10 @@ func prepareSyncDeliveryTx(tx *sql.Tx, ev *AccountSyncEvent) error {
 	}
 	// Some historical/manual outbox rows have no desired-state record. Their event
 	// revision still supplies the floor, without inventing active/provisioned state.
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,revision) VALUES(?,?,'user',0,0)`, ev.SystemID, ev.UserID); err != nil {
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,revision) VALUES(?,?,'user',FALSE,0)`, ev.SystemID, ev.UserID); err != nil {
 		return err
 	}
-	if err := tx.QueryRow(`UPDATE sync_resource_state SET delivery_revision=MAX(delivery_revision+1,revision+1,?) WHERE system_id=? AND resource_id=? RETURNING delivery_revision`, ev.Revision, ev.SystemID, ev.UserID).Scan(&ev.DeliveryRevision); err != nil {
+	if err := tx.QueryRow(`UPDATE sync_resource_state SET delivery_revision=CASE WHEN delivery_revision>=revision AND delivery_revision+1>=? THEN delivery_revision+1 WHEN revision+1>=? THEN revision+1 ELSE ? END WHERE system_id=? AND resource_id=? RETURNING delivery_revision`, ev.Revision, ev.Revision, ev.Revision, ev.SystemID, ev.UserID).Scan(&ev.DeliveryRevision); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`UPDATE account_sync_events SET delivery_revision=?,payload_json=? WHERE id=?`, ev.DeliveryRevision, ev.PayloadJSON, ev.ID)

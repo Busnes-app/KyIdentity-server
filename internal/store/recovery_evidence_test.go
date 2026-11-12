@@ -137,7 +137,7 @@ func TestRecoveryEvidenceProjectsLiveRolesAndExpiry(t *testing.T) {
 		`UPDATE group_memberships SET expires_at=unixepoch()-1`,
 		`UPDATE group_memberships SET expires_at=NULL; UPDATE users SET ends_at=unixepoch()-1`,
 		`UPDATE users SET ends_at=NULL,status='disabled'`,
-		`UPDATE users SET status='active'; UPDATE app_registry SET enabled=0`,
+		`UPDATE users SET status='active'; UPDATE app_registry SET enabled=FALSE`,
 	} {
 		if _, err := s.db.Exec(change); err != nil {
 			t.Fatal(err)
@@ -158,14 +158,14 @@ func TestRecoveryEvidenceFailsClosedWithoutPartialOutput(t *testing.T) {
 		return s.ExportRecoveryEvidence("mail", "https://identity.test", strings.Repeat("a", 64), []string{u.ID}, audit, sign)
 	}
 	noop := func(*PairedSystem, []byte, time.Time) error { return nil }
-	for _, change := range []string{`status='disabled'`, `status='failing'`, `provisioning_hold=1`, `system_type='scim'`, `system_type='suite_webhook'`, `hmac_secret_encrypted=''`} {
+	for _, change := range []string{`status='disabled'`, `status='failing'`, `provisioning_hold=TRUE`, `system_type='scim'`, `system_type='suite_webhook'`, `hmac_secret_encrypted=''`} {
 		if _, err := s.db.Exec(`UPDATE paired_systems SET ` + change + ` WHERE id='mail'`); err != nil {
 			t.Fatal(err)
 		}
 		if b, err := export(nil, noop); b != nil || !errors.Is(err, ErrRecoveryEvidenceUnavailable) {
 			t.Fatalf("%s: %s %v", change, b, err)
 		}
-		if _, err := s.db.Exec(`UPDATE paired_systems SET status='active',provisioning_hold=0,system_type='kypost',hmac_secret_encrypted='encrypted-test-credential' WHERE id='mail'`); err != nil {
+		if _, err := s.db.Exec(`UPDATE paired_systems SET status='active',provisioning_hold=FALSE,system_type='kypost',hmac_secret_encrypted='encrypted-test-credential' WHERE id='mail'`); err != nil {
 			t.Fatal(err)
 		}
 	}

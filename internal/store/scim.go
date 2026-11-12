@@ -46,7 +46,7 @@ func (s *Store) SaveSCIMLink(systemID, kind, localID, remoteID string) error {
 		return errors.New("invalid remote ID")
 	}
 	r, err := s.db.Exec(`INSERT INTO scim_user_links(system_id,local_id,kind,remote_id) VALUES(?,?,?,?)
- ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE kind=excluded.kind AND (remote_id='' OR remote_id=excluded.remote_id)`, systemID, localID, kind, remoteID)
+ ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE scim_user_links.kind=excluded.kind AND (scim_user_links.remote_id='' OR scim_user_links.remote_id=excluded.remote_id)`, systemID, localID, kind, remoteID)
 	if err != nil {
 		return err
 	}

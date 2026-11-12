@@ -93,7 +93,7 @@ func (s *Store) ExplainAccess(userID, appID string) (*AccessExplanation, error) 
 	case !errors.Is(err, sql.ErrNoRows):
 		return nil, err
 	}
-	rows, err := tx.Query(`SELECT g.id,g.name,COALESCE(g.source_connector_id,''),m.expires_at FROM app_group_assignments ga JOIN directory_groups g ON g.id=ga.group_id JOIN group_memberships m ON m.group_id=g.id AND m.user_id=? WHERE ga.app_id=? ORDER BY g.name COLLATE NOCASE`, userID, appID)
+	rows, err := tx.Query(`SELECT g.id,g.name,COALESCE(g.source_connector_id,''),m.expires_at FROM app_group_assignments ga JOIN directory_groups g ON g.id=ga.group_id JOIN group_memberships m ON m.group_id=g.id AND m.user_id=? WHERE ga.app_id=? ORDER BY g.name`, userID, appID)
 	if err != nil {
 		return nil, err
 	}

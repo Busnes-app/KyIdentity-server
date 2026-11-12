@@ -107,9 +107,9 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 		}
 		// Activation derives status from the source state, never a bare 'active': an owned
 		// account stays disabled while the upstream says inactive or a local override holds.
-		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=0, password_change_required=0,
+		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=FALSE, password_change_required=FALSE,
  status=CASE WHEN ?='activation' THEN CASE WHEN source_connector_id IS NULL OR (source_active AND NOT locally_disabled) THEN 'active' ELSE 'disabled' END ELSE status END,
- email_verified_at=COALESCE(email_verified_at, CASE WHEN ?='email' THEN ? END), updated_at=?
+ email_verified_at=CASE WHEN email_verified_at IS NOT NULL THEN email_verified_at WHEN ?='email' THEN ? END, updated_at=?
  WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending))`, passwordHash, kind, delivery, now, now, userID, kind, kind)
 		if err != nil {
 			return err
@@ -148,7 +148,7 @@ func (s *Store) ChangePassword(userID, keepSessionID, passwordHash string, audit
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
 		// The session that proved itself must still be live under the write lock: a request
 		// held open past a reset or revocation must not overwrite the recovered password.
-		res, err := tx.Exec(`UPDATE users SET password_hash=?, password_change_required=0, updated_at=? WHERE id=? AND status='active' AND NOT pending
+		res, err := tx.Exec(`UPDATE users SET password_hash=?, password_change_required=FALSE, updated_at=? WHERE id=? AND status='active' AND NOT pending
  AND EXISTS(SELECT 1 FROM sessions WHERE id=? AND user_id=? AND expires_at>?)`, passwordHash, now, userID, keepSessionID, userID, now)
 		if err != nil {
 			return err

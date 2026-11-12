@@ -11,6 +11,7 @@ import (
 // An upgraded database flags only a bootstrap administrator still on its first password,
 // once, and never re-evaluates: a later start changes nothing and writes no audit row.
 func TestPasswordChangeMigrationFlagsUnchangedBootstrapAdminOnce(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "upgrade.db")
 	s, err := New(path)
 	if err != nil {

@@ -82,15 +82,11 @@ func (u *User) ApplySourceState() {
 	u.Status = "disabled"
 }
 
-func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
-}
-
 // rejectCrossIdentityTx refuses a username or email that any other account already uses
 // as either its username or its email: an upstream must not shadow a local identifier.
 func rejectCrossIdentityTx(tx *sql.Tx, excludeID, username, email string) error {
 	var clash bool
-	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id<>? AND (username=? COLLATE NOCASE OR email=? COLLATE NOCASE OR username=? COLLATE NOCASE OR email=? COLLATE NOCASE))`,
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id<>? AND (username=? OR email=? OR username=? OR email=?))`,
 		excludeID, username, username, email, email).Scan(&clash); err != nil {
 		return err
 	}
@@ -101,7 +97,7 @@ func rejectCrossIdentityTx(tx *sql.Tx, excludeID, username, email string) error 
 }
 
 func (s *Store) CreateSCIMConnector(name string, audit *AuditEvent) (*SCIMConnector, error) {
-	now := time.Now().UTC()
+	now := rowTime()
 	c := &SCIMConnector{ID: uuid.NewString(), Name: strings.TrimSpace(name), Status: "active", CreatedAt: now, UpdatedAt: now}
 	if c.Name == "" {
 		return nil, InputError("name is required")
@@ -149,7 +145,7 @@ func (s *Store) GetSCIMConnector(id string) (*SCIMConnector, error) {
 }
 
 func (s *Store) ListSCIMConnectors() ([]SCIMConnector, error) {
-	rows, err := s.db.Query(`SELECT id, name, status, created_at, updated_at FROM scim_connectors ORDER BY name COLLATE NOCASE, id`)
+	rows, err := s.db.Query(`SELECT id, name, status, created_at, updated_at FROM scim_connectors ORDER BY lower(name), id`)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +257,7 @@ func (s *Store) AuthenticateSCIMToken(raw string) (*SCIMConnector, string, error
 	if err != nil {
 		return nil, "", err
 	}
-	now := time.Now().UTC()
+	now := rowTime()
 	if !used.Valid || now.Sub(used.Time) > time.Minute {
 		if _, err := s.db.Exec(`UPDATE scim_connector_tokens SET last_used_at=? WHERE id=?`, now, id); err != nil {
 			return nil, "", err
@@ -280,7 +276,7 @@ func (s *Store) CreateUpstreamUser(u *User, audit *AuditEvent) error {
 	}
 	u.ID, u.Role, u.Pending, u.PasswordHash, u.LocallyDisabled = uuid.NewString(), "user", true, "", false
 	u.ApplySourceState()
-	now := time.Now().UTC()
+	now := rowTime()
 	u.CreatedAt, u.UpdatedAt = now, now
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
 		if err := rejectCrossIdentityTx(tx, u.ID, u.Username, u.Email); err != nil {
@@ -315,13 +311,13 @@ func (s *Store) ListUpstreamUsers(connectorID, attribute, value string, startInd
 	switch attribute {
 	case "":
 	case "userName":
-		where += ` AND username=? COLLATE NOCASE`
+		where += ` AND username=?`
 		args = append(args, value)
 	case "externalId":
 		where += ` AND external_id=?`
 		args = append(args, value)
 	case "emails.value", "emails":
-		where += ` AND email=? COLLATE NOCASE`
+		where += ` AND email=?`
 		args = append(args, value)
 	case "id":
 		where += ` AND id=?`
@@ -405,7 +401,7 @@ func (s *Store) UpdateUpstreamUser(connectorID, id string, audit *AuditEvent, ed
 // kept as they are, or disabled first when the operator chose deactivation. Either way
 // the upstream can no longer touch them.
 func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEvent) (int, error) {
-	now := time.Now().UTC()
+	now := rowTime()
 	affected := 0
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
 		rows, err := tx.Query(`SELECT `+userColumns+` FROM users WHERE source_connector_id=?`, id)
@@ -431,7 +427,7 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 				return err
 			}
 			if ownedAdmins {
-				if err := requirePermanentAdminTx(tx, `source_connector_id IS NOT ?`, id); err != nil {
+				if err := requirePermanentAdminTx(tx, `source_connector_id IS DISTINCT FROM ?`, id); err != nil {
 					return err
 				}
 			}
@@ -446,7 +442,7 @@ func (s *Store) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEv
 			if disableUsers {
 				status = "disabled"
 			}
-			if _, err := tx.Exec(`UPDATE users SET source_connector_id=NULL, external_id=NULL, source_active=1, locally_disabled=0, status=?, updated_at=? WHERE id=?`, status, now, u.ID); err != nil {
+			if _, err := tx.Exec(`UPDATE users SET source_connector_id=NULL, external_id=NULL, source_active=TRUE, locally_disabled=FALSE, status=?, updated_at=? WHERE id=?`, status, now, u.ID); err != nil {
 				return err
 			}
 			// Once local, a pending account's link would activate it outright, so one

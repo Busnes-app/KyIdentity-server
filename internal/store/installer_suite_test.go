@@ -45,7 +45,11 @@ func TestInstallerSuiteConnectorExtensionAndReadonlyResume(t *testing.T) {
 	if err != nil || kind != "suite_webhook" || bound != appID || string(plain) != connector.SigningSecret || strings.Contains(encrypted, connector.SigningSecret) {
 		t.Fatal("suite identity/credential mismatch", err)
 	}
-	if err := s.db.QueryRow(`SELECT json_extract(details_json,'$.systemType') FROM audit_events WHERE action='admin.system_created' AND target_id=?`, id).Scan(&auditKind); err != nil || auditKind != "suite_webhook" {
+	auditKindSQL := `SELECT json_extract(details_json,'$.systemType') FROM audit_events WHERE action='admin.system_created' AND target_id=?`
+	if s.postgres {
+		auditKindSQL = `SELECT details_json::jsonb->>'systemType' FROM audit_events WHERE action='admin.system_created' AND target_id=?`
+	}
+	if err := s.db.QueryRow(auditKindSQL, id).Scan(&auditKind); err != nil || auditKind != "suite_webhook" {
 		t.Fatal("incorrect native connector audit", err, auditKind)
 	}
 	var before, after int
@@ -82,7 +86,7 @@ func TestInstallerSuiteConnectorRefusesDriftAndRollsBack(t *testing.T) {
 			defer close()
 			p := installerSuiteFixture()
 			if cause == "audit" {
-				if _, err := s.db.Exec(`CREATE TRIGGER refuse_suite_audit BEFORE INSERT ON audit_events WHEN NEW.action='admin.system_created' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+				if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER refuse_suite_audit BEFORE INSERT ON audit_events WHEN NEW.action='admin.system_created' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -96,11 +100,11 @@ func TestInstallerSuiteConnectorRefusesDriftAndRollsBack(t *testing.T) {
 				case "protocol":
 					query = `UPDATE paired_systems SET system_type='scim'`
 				case "hold":
-					query = `UPDATE paired_systems SET provisioning_hold=1`
+					query = `UPDATE paired_systems SET provisioning_hold=TRUE`
 				case "endpoint":
 					query = `UPDATE paired_systems SET callback_url='https://foreign.test/sync/events'`
 				case "groups":
-					query = `UPDATE paired_systems SET groups_enabled=1`
+					query = `UPDATE paired_systems SET groups_enabled=TRUE`
 				case "foreign":
 					query = `DELETE FROM installer_setup_resources WHERE kind='connector'`
 				case "intent":

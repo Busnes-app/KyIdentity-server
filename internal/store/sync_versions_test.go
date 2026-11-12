@@ -72,6 +72,7 @@ func TestDeliveryVersionsPreserveDesiredStateAndUncertainEvidence(t *testing.T) 
 }
 
 func TestLegacyDeliveryVersionMigration(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")

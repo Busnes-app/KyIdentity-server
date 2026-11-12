@@ -298,7 +298,7 @@ func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE app_user_assignments SET expires_at=unixepoch()-1; UPDATE group_memberships SET expires_at=unixepoch()-1; UPDATE users SET ends_at=unixepoch()-1 WHERE id=?`, ending.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`CREATE TRIGGER stuck_row BEFORE DELETE ON app_user_assignments WHEN OLD.user_id='` + stuck.ID + `' BEGIN SELECT RAISE(ABORT,'row is stuck'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER stuck_row BEFORE DELETE ON app_user_assignments WHEN OLD.user_id='`+stuck.ID+`' BEGIN SELECT RAISE(ABORT,'row is stuck'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	run, err := s.RunDueExpiries(time.Now().UTC())
@@ -325,7 +325,7 @@ func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
 	if run, err = s.RunDueExpiries(time.Now().UTC()); err == nil || run.Assignments+run.Memberships+run.Accounts != 0 {
 		t.Fatalf("second pass: %+v %v", run, err)
 	}
-	if _, err := s.db.Exec(`DROP TRIGGER stuck_row`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `DROP TRIGGER stuck_row`)); err != nil {
 		t.Fatal(err)
 	}
 	if run, err = s.RunDueExpiries(time.Now().UTC()); err != nil || run.Assignments != 1 {
@@ -417,7 +417,7 @@ func TestEndDatedAdministratorIsNoCoverForTheLast(t *testing.T) {
 	defer cleanup()
 	c, _ := s.CreateSCIMConnector("A", nil)
 	permanent := upstream(t, s, c.ID, "ext-1", "permanent")
-	if _, err := s.db.Exec(`UPDATE users SET role='admin', status='active', pending=0, password_hash='x' WHERE id=?`, permanent.ID); err != nil {
+	if _, err := s.db.Exec(`UPDATE users SET role='admin', status='active', pending=FALSE, password_hash='x' WHERE id=?`, permanent.ID); err != nil {
 		t.Fatal(err)
 	}
 	ending := createTestUserNamed(t, s, "ending")

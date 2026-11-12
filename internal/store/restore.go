@@ -136,7 +136,7 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 		// A removal (an inactive update, a deletion) keeps its revision: reconciliation
 		// re-derives only what is still active, so a closed-out removal would never be sent
 		// again. It still waits behind the hold, and the safety net re-pends it.
-		res, err = tx.Exec(`UPDATE account_sync_events SET status='failed', revision=CASE WHEN event_type='user.mfa_reset' OR `+removalSQL+` THEN revision ELSE ? END, last_error=?, updated_at=?, lease_until=NULL, claim_token='',delivery_revision=CASE WHEN event_type='user.mfa_reset' THEN 0 ELSE delivery_revision END WHERE status IN ('pending','failed') AND revision<>? AND COALESCE(last_error,'')<>?`,
+		res, err = tx.Exec(`UPDATE account_sync_events SET status='failed', revision=CASE WHEN event_type='user.mfa_reset' OR `+s.removalSQL()+` THEN revision ELSE ? END, last_error=?, updated_at=?, lease_until=NULL, claim_token='',delivery_revision=CASE WHEN event_type='user.mfa_reset' THEN 0 ELSE delivery_revision END WHERE status IN ('pending','failed') AND revision<>? AND COALESCE(last_error,'')<>?`,
 			restoredRevision, restoredReason, now, restoredRevision, restoredReason)
 		if err != nil {
 			return err
@@ -169,7 +169,7 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 		// taken: its queue survived too, and re-enabling it must not deliver capsule-era
 		// work without a reconciliation. Only the connectors an operator must act on now
 		// are reported.
-		if _, err = tx.Exec(`UPDATE paired_systems SET provisioning_hold=1`); err != nil {
+		if _, err = tx.Exec(`UPDATE paired_systems SET provisioning_hold=TRUE`); err != nil {
 			return err
 		}
 		// A restored copy does not deposit on its own (owner decision): it may be a test
@@ -206,7 +206,7 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 // connector with what is really there. A preview proves nothing was repaired and a
 // failed run proves nothing at all, so neither releases it.
 func releaseProvisioningHoldTx(tx *sql.Tx, systemID string) error {
-	_, err := tx.Exec(`UPDATE paired_systems SET provisioning_hold=0 WHERE id=? AND provisioning_hold=1`, systemID)
+	_, err := tx.Exec(`UPDATE paired_systems SET provisioning_hold=FALSE WHERE id=? AND provisioning_hold=TRUE`, systemID)
 	return err
 }
 
@@ -231,7 +231,7 @@ func (s *Store) ResumeProvisioning(systemID string, audit *AuditEvent) error {
 // HeldConnectors names the connectors whose outbound provisioning is waiting on a
 // reconciliation.
 func (s *Store) HeldConnectors() ([]string, error) {
-	rows, err := s.db.Query(`SELECT name FROM paired_systems WHERE provisioning_hold=1 AND status<>'disabled' ORDER BY name`)
+	rows, err := s.db.Query(`SELECT name FROM paired_systems WHERE provisioning_hold=TRUE AND status<>'disabled' ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}

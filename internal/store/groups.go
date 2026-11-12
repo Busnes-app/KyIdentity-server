@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
-	"modernc.org/sqlite"
 )
 
 var ErrGroupNameExists = errors.New("group name already exists")
@@ -39,14 +37,11 @@ type GroupUser struct {
 }
 
 func groupWriteError(err error) error {
-	var sqliteErr *sqlite.Error
-	if errors.As(err, &sqliteErr) {
-		switch sqliteErr.Code() {
-		case 2067:
-			return ErrGroupNameExists // SQLITE_CONSTRAINT_UNIQUE
-		case 787:
-			return ErrGroupTargetMissing // SQLITE_CONSTRAINT_FOREIGNKEY
-		}
+	switch {
+	case isUniqueViolation(err):
+		return ErrGroupNameExists
+	case isForeignKeyViolation(err):
+		return ErrGroupTargetMissing
 	}
 	return err
 }
@@ -57,7 +52,7 @@ func (s *Store) CreateGroup(g *Group, audit *AuditEvent) error {
 		return err
 	}
 	defer tx.Rollback()
-	g.CreatedAt = time.Now().UTC()
+	g.CreatedAt = rowTime()
 	g.UpdatedAt = g.CreatedAt
 	if _, err = tx.Exec(`INSERT INTO directory_groups(id,name,description,created_at,updated_at) VALUES (?,?,?,?,?)`, g.ID, g.Name, g.Description, g.CreatedAt, g.UpdatedAt); err != nil {
 		return groupWriteError(err)
@@ -74,7 +69,7 @@ func (s *Store) UpdateGroup(g *Group, audit *AuditEvent) error {
 		return err
 	}
 	defer tx.Rollback()
-	g.UpdatedAt = time.Now().UTC()
+	g.UpdatedAt = rowTime()
 	var sourceOwned bool
 	if err = tx.QueryRow(`SELECT source_connector_id IS NOT NULL AND name<>? FROM directory_groups WHERE id=?`, g.Name, g.ID).Scan(&sourceOwned); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -249,7 +244,7 @@ func applyGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, exp
 	if member {
 		// A changed instant counts as a change: it re-runs the policy checks and the
 		// role follow-up like a fresh addition would.
-		result, err = tx.Exec(`INSERT INTO group_memberships(group_id,user_id,expires_at) VALUES (?,?,?) ON CONFLICT(group_id,user_id) DO UPDATE SET expires_at=excluded.expires_at WHERE expires_at IS NOT excluded.expires_at`, groupID, userID, unixOrNil(expiresAt))
+		result, err = tx.Exec(`INSERT INTO group_memberships(group_id,user_id,expires_at) VALUES (?,?,?) ON CONFLICT(group_id,user_id) DO UPDATE SET expires_at=excluded.expires_at WHERE group_memberships.expires_at IS DISTINCT FROM excluded.expires_at`, groupID, userID, unixOrNil(expiresAt))
 	} else {
 		result, err = tx.Exec(`DELETE FROM group_memberships WHERE group_id=? AND user_id=?`, groupID, userID)
 	}
@@ -364,7 +359,7 @@ func (s *Store) ListGroups(query, userID string, limit, offset int) ([]Group, in
 	rows, err := tx.Query(`SELECT g.id,g.name,g.description,g.source_connector_id,g.external_id,g.created_at,g.updated_at,
  (SELECT COUNT(*) FROM group_memberships m WHERE m.group_id=g.id),
  EXISTS(SELECT 1 FROM group_memberships m WHERE m.group_id=g.id AND m.user_id=?)
- FROM directory_groups g`+where+` ORDER BY g.name COLLATE NOCASE,g.id LIMIT ? OFFSET ?`, userID, query, limit, offset)
+ FROM directory_groups g`+where+` ORDER BY g.name,g.id LIMIT ? OFFSET ?`, userID, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -407,7 +402,7 @@ func (s *Store) ListGroupUsers(groupID, query string, includeNonMembers bool, li
 	if err = tx.QueryRow(`SELECT COUNT(*)`+from, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.email,u.status,m.user_id IS NOT NULL,m.expires_at`+from+` ORDER BY u.username COLLATE NOCASE,u.id LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.email,u.status,m.user_id IS NOT NULL,m.expires_at`+from+` ORDER BY u.username,u.id LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}

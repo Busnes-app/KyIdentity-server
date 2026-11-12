@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,7 +51,7 @@ func execRaw(t *testing.T, s *store.Store, query string, args ...any) {
 	if !ok {
 		t.Fatal("store was not built by a sync test fixture")
 	}
-	raw, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+	raw, err := store.OpenRawForTest(path + "?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,6 +357,7 @@ func mustEncrypt(t *testing.T, e *Engine, systemID, secret string) string {
 // Native signed delivery must not turn an empty app role set into a global admin
 // grant, including after the app's final role definition is deleted.
 func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
+	store.SkipOnPostgres(t, "edits a queued payload with SQLite json_set")
 	engine, s, admin, cleanup := setupTestSyncEngine(t)
 	defer cleanup()
 	var secret string

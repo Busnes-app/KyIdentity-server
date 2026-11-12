@@ -28,12 +28,30 @@ type Store struct {
 	limits     atomic.Pointer[SessionLimits]
 	limitsSeed atomic.Pointer[SessionLimits]
 	limitsAt   atomic.Int64
+	// postgres is set on the shared Postgres backend (NewPostgres); migrationKey is its
+	// migration advisory lock.
+	postgres     bool
+	migrationKey int64
+	// path is what New was given; tests open more handles on it as replicas.
+	path string
 }
 
 var ErrLastActiveAdmin = errors.New("cannot remove the last active administrator")
 
 // New opens the SQLite database and creates the schema.
 func New(dbPath string) (*Store, error) {
+	open := newSQLite
+	if u := testDatabaseURL(); u != "" {
+		open = func(path string) (*Store, error) { return newTestPostgres(u, path, true) }
+	}
+	s, err := open(dbPath)
+	if s != nil {
+		s.path = dbPath
+	}
+	return s, err
+}
+
+func newSQLite(dbPath string) (*Store, error) {
 	// Enable WAL mode, busy timeout, and foreign keys in DSN. Transactions begin
 	// IMMEDIATE: a deferred transaction that reads and then writes cannot wait out a
 	// concurrent writer and fails with SQLITE_BUSY at the upgrade instead, which the
@@ -87,6 +105,9 @@ func New(dbPath string) (*Store, error) {
 }
 
 func (s *Store) Close() error {
+	if s.postgres {
+		return errors.Join(s.rdb.Close(), s.db.Close())
+	}
 	if s.rdb != s.db {
 		_ = s.rdb.Close()
 	}
@@ -878,7 +899,7 @@ func (s *Store) CreateUser(u *User) error {
 	query := `
 	INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, password_change_required, created_at, updated_at)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	now := time.Now().UTC()
+	now := rowTime()
 	u.CreatedAt = now
 	u.UpdatedAt = now
 	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.CreatedAt, u.UpdatedAt)
@@ -892,7 +913,7 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 		return err
 	}
 	defer tx.Rollback()
-	now := time.Now().UTC()
+	now := rowTime()
 	u.CreatedAt, u.UpdatedAt = now, now
 	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, password_change_required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.CreatedAt, u.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
@@ -914,11 +935,11 @@ func (s *Store) GetUserByID(id string) (*User, error) {
 }
 
 func (s *Store) GetUserByUsername(username string) (*User, error) {
-	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE username = ? COLLATE NOCASE`, username))
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE username = ?`, username))
 }
 
 func (s *Store) GetUserByEmail(email string) (*User, error) {
-	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE email = ? COLLATE NOCASE`, email))
+	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE email = ?`, email))
 }
 
 func (s *Store) ListUsers() ([]User, error) {
@@ -985,7 +1006,7 @@ func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u
 			return nil, err
 		}
 	}
-	now := time.Now().UTC()
+	now := rowTime()
 	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, password_change_required = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
 		return nil, enrollmentMutationError(err)
 	}
@@ -1071,7 +1092,7 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 	// The bare deletion is recorded as a target too, so the completion view cannot claim
 	// every connector is done while it is still queued.
 	for _, sys := range strangers {
-		if _, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',0,0,0)`, sys, userID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',FALSE,FALSE,0)`, sys, userID); err != nil {
 			return err
 		}
 		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", scimInactivePayload(userID), 0, now); err != nil {
@@ -1144,7 +1165,7 @@ func (s *Store) CreateSessionForInteraction(sess *Session, interactionHash, brow
 	query := `INSERT INTO sessions (session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method, id, user_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ` + eligible
 	if renew {
 		// enrollment_only starts clear, as on a new session: the fresh login decides it below.
-		query = `UPDATE sessions SET session_token_hash=?, ip_address=?, user_agent=?, expires_at=?, created_at=?, last_active_at=?, primary_authenticated_at=?, factor_authenticated_at=?, factor_method=?, enrollment_only=0 WHERE id=? AND user_id=? AND ` + eligible
+		query = `UPDATE sessions SET session_token_hash=?, ip_address=?, user_agent=?, expires_at=?, created_at=?, last_active_at=?, primary_authenticated_at=?, factor_authenticated_at=?, factor_method=?, enrollment_only=FALSE WHERE id=? AND user_id=? AND ` + eligible
 	}
 	result, err := tx.Exec(query, sess.SessionTokenHash, sess.IPAddress, sess.UserAgent, sess.ExpiresAt, now, now, sess.PrimaryAuthenticatedAt, sess.FactorAuthenticatedAt, sess.FactorMethod, id, sess.UserID, sess.UserID, sess.ProvenPasswordHash, sess.ProvenPasswordHash)
 	if err != nil {
@@ -1374,7 +1395,7 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err := releaseFencesForRemovalsTx(tx, now); err != nil {
+	if err := s.releaseFencesForRemovalsTx(tx, now); err != nil {
 		return nil, err
 	}
 
@@ -1849,7 +1870,7 @@ func (s *Store) SetNativeDeviceCanSignOn(deviceID, userID string, enabled bool, 
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (? = 0 OR is_mfa_approver = 1)`, enabled, deviceID, userID, enabled)
+	res, err := tx.Exec(`UPDATE native_devices SET can_sign_on = ? WHERE id = ? AND user_id = ? AND (NOT ? OR is_mfa_approver)`, enabled, deviceID, userID, enabled)
 	if err != nil {
 		return err
 	}
@@ -2874,6 +2895,9 @@ func deleteSetting(q settingsQuerier, key string) error {
 // recently committed transactions can live only in the -wal file, so a file copy silently
 // restores an older directory. destPath must not already exist.
 func (s *Store) SnapshotTo(destPath string) error {
+	if s.postgres {
+		return notOnPostgres("database snapshot for backup")
+	}
 	if _, err := os.Stat(destPath); err == nil {
 		return fmt.Errorf("snapshot destination %s already exists", destPath)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -2911,7 +2935,7 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 	if _, err := tx.Exec(`DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = 0, can_sign_on = 0 WHERE user_id = ?`, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE native_devices SET is_mfa_approver = FALSE, can_sign_on = FALSE WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	if err := revokeUserAccessTx(tx, userID, now); err != nil {
@@ -2967,8 +2991,14 @@ func spendMFATokensTx(tx *sql.Tx, now time.Time, userID string) error {
 
 // PingContext proves the database is reachable and readable within the caller's deadline.
 // It reads the table every login touches, so a volume that has gone read-only or vanished
-// fails here rather than at the next sign-in.
+// fails here rather than at the next sign-in. On Postgres it also fails while the server
+// cannot take writes (a standby, or a primary set read-only), so readiness follows failover.
 func (s *Store) PingContext(ctx context.Context) error {
+	if s.postgres {
+		if err := s.db.PingContext(ctx); err != nil {
+			return err
+		}
+	}
 	var n int
 	return s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE status = 'active' LIMIT 1`).Scan(&n)
 }

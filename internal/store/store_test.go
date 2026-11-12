@@ -40,6 +40,7 @@ func createTestUserNamed(t *testing.T, s *Store, username string) *User {
 }
 
 func TestDeleteUserWithSyncEventsMigratesLegacyForeignKey(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	legacy, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -93,7 +94,7 @@ func TestDeleteUserWithSyncEventsMigratesLegacyForeignKey(t *testing.T) {
 	if err := s.CreatePairedSystem(&PairedSystem{ID: "system", Name: "system", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision) VALUES('system','deleted-user',1,1,1)`); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision) VALUES('system','deleted-user',TRUE,TRUE,1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteUserWithSyncEvents("deleted-user", nil); err != nil {
@@ -158,6 +159,7 @@ func TestIdleSessionIsRejectedBeforeAbsoluteExpiry(t *testing.T) {
 }
 
 func TestLegacyDevicePairingTokensAreRebuiltWithoutPlaintextPINs(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	legacy, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -192,6 +194,7 @@ func TestLegacyDevicePairingTokensAreRebuiltWithoutPlaintextPINs(t *testing.T) {
 }
 
 func TestNativeDevicePushTokenReplayStateMigrates(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "legacy-native-device.db")
 	legacy, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -282,6 +285,7 @@ func TestListAuditEventsPagination(t *testing.T) {
 }
 
 func TestOAuthClientLauncherMetadataMigrates(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "legacy-oauth-client.db")
 	legacy, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -495,6 +499,7 @@ func TestMFAWipesRemovePasskeys(t *testing.T) {
 }
 
 func TestDeviceSignOnColumnsMigrate(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	legacy, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -597,6 +602,7 @@ func TestConsumeDeviceSignOnJTIIsSingleUse(t *testing.T) {
 }
 
 func TestAttestationColumnsMigrateAndRoundTrip(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	for _, col := range []string{"attested_level", "attested_at", "boot_state", "attestation_serials"} {
@@ -755,6 +761,7 @@ func TestClearPushTokenSparesRotatedKeys(t *testing.T) {
 // A database from before linux devices has the narrow CHECKs and a view over native_devices.
 // The migration widens them and keeps every row, column and the view.
 func TestNativeDeviceCHECKsWidenForLinux(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "pre-linux.db")
 	s, err := New(path)
 	if err != nil {

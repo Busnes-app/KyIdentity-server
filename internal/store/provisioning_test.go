@@ -401,6 +401,7 @@ func TestGroupDeliveryFollowsAssignmentsAndMembers(t *testing.T) {
 }
 
 func TestProvisioningBackfillMarksExistingPairsProvisioned(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")

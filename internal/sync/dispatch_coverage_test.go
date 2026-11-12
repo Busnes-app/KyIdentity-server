@@ -27,7 +27,7 @@ type covOutboxRow struct {
 
 func covEventState(t *testing.T, s *store.Store, id string) covOutboxRow {
 	t.Helper()
-	db, err := sql.Open("sqlite", syncTestDBs[s]+"?_pragma=busy_timeout(5000)")
+	db, err := store.OpenRawForTest(syncTestDBs[s] + "?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +228,7 @@ func TestDispatchShutdownBeforeWriteSpendsNoAttempt(t *testing.T) {
 // A connector row that cannot be read stops this connector's pass with the error and
 // releases the begun fence without spending an attempt.
 func TestDispatchSystemUnreadableConnectorReleasesFence(t *testing.T) {
+	store.SkipOnPostgres(t, "stores a non-time in a DATETIME column, which only SQLite accepts")
 	e, s, sys, hits, id := covSuiteEvent(t)
 	events := covClaim(t, s)
 	execRaw(t, s, `UPDATE paired_systems SET created_at='not a time' WHERE id=?`, sys.ID)
@@ -247,6 +248,7 @@ func TestDispatchSystemUnreadableConnectorReleasesFence(t *testing.T) {
 // durable fence: the connector is not sent the user's next event until recovery, so a
 // write the target may have applied is never overtaken.
 func TestDispatchOutcomeWriteFailureKeepsFence(t *testing.T) {
+	store.SkipOnPostgres(t, "injects a store failure with a SQLite trigger")
 	for _, tc := range []struct {
 		name string
 		code int

@@ -48,6 +48,9 @@ func (s *Store) AcquireLease(name string, ttl time.Duration) (release func(), ok
 // process that is migrating the same database. A holder that died is waited out for
 // migrationLease, which is why that is short.
 func (s *Store) withMigrationLease(fn func() error) error {
+	if s.postgres {
+		return s.withPostgresMigrationLock(fn)
+	}
 	if _, err := s.db.Exec(leasesSchema); err != nil {
 		return err
 	}

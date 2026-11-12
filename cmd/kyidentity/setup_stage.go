@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"io"
 	"os"
 	"path/filepath"
@@ -72,6 +73,17 @@ func setupDataDirectory() (string, error) {
 		dir = "data"
 	}
 	return filepath.Abs(dir)
+}
+
+// sqliteFileMissing reports that the SQLite database file is absent, so a container-local
+// command never creates a database. On Postgres there is no file: OpenInstallerStore
+// itself refuses a database without a schema.
+func sqliteFileMissing(path string) bool {
+	if u, _ := config.LoadDatabaseURL(); u != "" || store.OnPostgresTest() {
+		return false
+	}
+	st, err := os.Stat(path)
+	return err != nil || !st.Mode().IsRegular()
 }
 
 func setupDatabasePath(path string) string {

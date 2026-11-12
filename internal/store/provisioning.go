@@ -146,7 +146,7 @@ type desiredState struct {
 // place and the new event queues behind it.
 func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	var provisioned, fenced bool
-	if err := tx.QueryRow(`SELECT COALESCE((SELECT provisioned FROM sync_resource_state WHERE system_id=? AND resource_id=?),0),
+	if err := tx.QueryRow(`SELECT COALESCE((SELECT provisioned FROM sync_resource_state WHERE system_id=? AND resource_id=?),FALSE),
  EXISTS(SELECT 1 FROM sync_delivery_attempts WHERE system_id=? AND user_id=?)`, d.systemID, d.resourceID, d.systemID, d.resourceID).Scan(&provisioned, &fenced); err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 	}
 	var revision int
 	if err := tx.QueryRow(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,revision,members) VALUES(?,?,?,?,1,?)
- ON CONFLICT(system_id,resource_id) DO UPDATE SET active=excluded.active,revision=revision+1,members=excluded.members,offboarded_at=NULL RETURNING revision`,
+ ON CONFLICT(system_id,resource_id) DO UPDATE SET active=excluded.active,revision=sync_resource_state.revision+1,members=excluded.members,offboarded_at=NULL RETURNING revision`,
 		d.systemID, d.resourceID, d.kind, d.active, d.members).Scan(&revision); err != nil {
 		return err
 	}
@@ -508,11 +508,11 @@ func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
 	// state row or a remote mapping, delivered or not. The replay is an inactive update,
 	// never a deletion, so a repeat supersedes it.
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision)
- SELECT l.system_id,l.local_id,'user',0,1,0 FROM scim_user_links l WHERE l.system_id=? AND l.kind='user' AND l.remote_id<>''
+ SELECT l.system_id,l.local_id,'user',FALSE,TRUE,0 FROM scim_user_links l WHERE l.system_id=? AND l.kind='user' AND l.remote_id<>''
  AND NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=l.system_id AND e.user_id=l.local_id)`, systemID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=1 WHERE system_id=? AND kind='user' AND NOT active AND NOT provisioned
+	if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=TRUE WHERE system_id=? AND kind='user' AND NOT active AND NOT provisioned
  AND EXISTS(SELECT 1 FROM scim_user_links l WHERE l.system_id=sync_resource_state.system_id AND l.local_id=sync_resource_state.resource_id AND l.kind='user' AND l.remote_id<>'')`, systemID); err != nil {
 		return err
 	}
@@ -606,7 +606,7 @@ func provisionedTx(tx *sql.Tx, ev AccountSyncEvent, now time.Time) error {
 	default:
 		return nil
 	}
-	r, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=1 WHERE system_id=? AND resource_id=? AND NOT provisioned`, ev.SystemID, ev.UserID)
+	r, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=TRUE WHERE system_id=? AND resource_id=? AND NOT provisioned`, ev.SystemID, ev.UserID)
 	if err != nil {
 		return err
 	}

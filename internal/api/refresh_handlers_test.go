@@ -2,7 +2,6 @@ package api
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -72,7 +71,7 @@ func TestRefreshGrantViaHTTP(t *testing.T) {
 	if status != 400 || replay["error"] != "invalid_grant" || replay["error_description"] != "The refresh token or client credentials are invalid" {
 		t.Fatalf("replay: %d %v", status, replay)
 	}
-	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

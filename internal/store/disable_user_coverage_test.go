@@ -122,7 +122,7 @@ func TestDisableUserByNameSetsLocalOverrideOnUpstreamAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	up := upstream(t, s, c.ID, "ext-1", "sourced")
-	mustExec(t, s, `UPDATE users SET status='disabled', source_active=0 WHERE id=?`, up.ID)
+	mustExec(t, s, `UPDATE users SET status='disabled', source_active=FALSE WHERE id=?`, up.ID)
 	if changed, err := s.DisableUserByName("sourced", "guard", nil); err != nil || !changed {
 		t.Fatalf("upstream-disabled account = %v, %v", changed, err)
 	}

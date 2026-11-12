@@ -515,7 +515,7 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`UPDATE users SET source_active=0 WHERE id=?`, flipped.ID); err != nil {
+	if _, err := s.db.Exec(`UPDATE users SET source_active=FALSE WHERE id=?`, flipped.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
@@ -529,7 +529,7 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 	// The same with a local override in force.
 	held := upstream(t, s, c.ID, "ext-h", "held")
 	raw, _ = s.IssueAccountToken(held.ID, "activation", "manual", time.Hour, nil)
-	if _, err := s.db.Exec(`UPDATE users SET locally_disabled=1 WHERE id=?`, held.ID); err != nil {
+	if _, err := s.db.Exec(`UPDATE users SET locally_disabled=TRUE WHERE id=?`, held.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {

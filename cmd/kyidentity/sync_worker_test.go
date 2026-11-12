@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -34,7 +33,7 @@ func syncTarget(t *testing.T, dbPath, callback string) (*store.Store, *sync.Engi
 	if err := s.CreateOAuthClient(&store.OAuthClient{ID: "kydrive", ClientName: "D", ClientType: "confidential", ClientSecretHash: "x", RedirectURIsJSON: `["https://d.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", dbPath)
+	raw, err := store.OpenRawForTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

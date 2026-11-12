@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"os"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/store"
@@ -40,7 +39,7 @@ func runResyncSystem(args []string, out io.Writer) error {
 	}
 	path := setupDatabasePath(*db)
 	// Never create a database: this acts on an initialized, possibly running, product.
-	if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
+	if sqliteFileMissing(path) {
 		return errors.New("resync-system requires an initialized KyIdentity database")
 	}
 	s, err := store.OpenInstallerStore(path, false)

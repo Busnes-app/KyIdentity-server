@@ -41,7 +41,7 @@ func newRefreshFixture(t *testing.T) *refreshFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", filepath.Join(dir, "test.db")+"?_pragma=busy_timeout(5000)")
+	raw, err := store.OpenRawForTest(filepath.Join(dir, "test.db") + "?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestRefreshRevokedByEveryLifecyclePath(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.exec(`UPDATE users SET source_connector_id=?, external_id='ext-1', source_active=1 WHERE id=?`, c.ID, f.user.ID)
+			f.exec(`UPDATE users SET source_connector_id=?, external_id='ext-1', source_active=TRUE WHERE id=?`, c.ID, f.user.ID)
 			if _, err := f.db.UpdateUpstreamUser(c.ID, f.user.ID, nil, func(u *store.User) error { u.SourceActive = false; return nil }); err != nil {
 				t.Fatal(err)
 			}

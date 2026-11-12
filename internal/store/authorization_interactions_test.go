@@ -114,6 +114,7 @@ func TestAuthorizationCodeMaximumAgeAtRegistration(t *testing.T) {
 }
 
 func TestAuthorizationInteractionCapacityAndMigration(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, _, _ := appAccessFixture(t)
 	now := time.Now().UTC()
 	for n := range 11 {
@@ -249,6 +250,7 @@ func TestAuthorizationInteractionCapacityRepairsLegacyAccountFlood(t *testing.T)
 }
 
 func TestAuthorizationInteractionCapacityMigrationOwnsCompletedRequests(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, u, _ := appAccessFixture(t)
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`WITH RECURSIVE seq(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM seq WHERE n<11)
@@ -275,10 +277,10 @@ func TestReauthenticationRenewsTheOriginalSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A restriction the old sign-in earned is decided afresh, as for a new session.
-	if _, err := s.db.Exec(`UPDATE sessions SET enrollment_only=1 WHERE id='session'`); err != nil {
+	if _, err := s.db.Exec(`UPDATE sessions SET enrollment_only=TRUE WHERE id='session'`); err != nil {
 		t.Fatal(err)
 	}
-	at := time.Now().UTC()
+	at := time.Now().UTC().Truncate(time.Microsecond) // Postgres keeps microseconds
 	sess := &Session{ID: "new", UserID: u.ID, SessionTokenHash: "new-hash", ExpiresAt: now.Add(time.Hour), AuthenticationEvidence: AuthenticationEvidence{PrimaryAuthenticatedAt: &at}}
 	if err := s.CreateSessionForInteraction(sess, "again", "browser"); err != nil {
 		t.Fatal(err)

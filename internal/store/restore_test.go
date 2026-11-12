@@ -222,7 +222,7 @@ func TestProvisioningHoldIsReleasedByReconciliation(t *testing.T) {
 		t.Fatalf("a completed repair must release the hold: %+v %v", sys, err)
 	}
 	// A preview does not: it reads the far side without repairing it.
-	if _, err := s.db.Exec(`UPDATE paired_systems SET provisioning_hold=1 WHERE id='hr'`); err != nil {
+	if _, err := s.db.Exec(`UPDATE paired_systems SET provisioning_hold=TRUE WHERE id='hr'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreateReconcileJob("hr", "preview", "root", nil); err != nil {

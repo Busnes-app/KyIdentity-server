@@ -12,6 +12,7 @@ func launcherEvent() *AuditEvent {
 }
 
 func TestLauncherColumnsMigrate(t *testing.T) {
+	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, close := setupTestStore(t)
 	defer close()
 	if _, err := s.db.Exec(`ALTER TABLE oauth_clients DROP COLUMN launcher_name; ALTER TABLE oauth_clients DROP COLUMN launcher_audience; ALTER TABLE app_roles DROP COLUMN administrator`); err != nil {
@@ -102,7 +103,7 @@ func TestLauncherAdminClientsFallsBackToGlobalAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`UPDATE app_roles SET administrator=1 WHERE id=?`, role.ID); err != nil {
+	if _, err := s.db.Exec(`UPDATE app_roles SET administrator=TRUE WHERE id=?`, role.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.LauncherAdminClients(admin.ID); got["client"] {

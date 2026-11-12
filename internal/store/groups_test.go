@@ -135,7 +135,7 @@ func TestGroupMutationsRollbackWithAuditFailure(t *testing.T) {
 	if err := s.CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`CREATE TRIGGER fail_group_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER fail_group_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	audit := &AuditEvent{ID: "event", Action: "admin.group_mutation", Outcome: "success", CreatedAt: time.Now().UTC()}
@@ -166,7 +166,7 @@ func TestGroupMutationsRollbackWithAuditFailure(t *testing.T) {
 	if err != nil || total != 1 {
 		t.Fatal("rollback lost membership")
 	}
-	if _, err := s.db.Exec("DROP TRIGGER fail_group_audit"); err != nil {
+	if _, err := s.db.Exec(dialect(s, "DROP TRIGGER fail_group_audit")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetGroupMembership(g.ID, u.ID, false, audit); err != nil {

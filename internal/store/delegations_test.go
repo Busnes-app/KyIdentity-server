@@ -37,14 +37,14 @@ func TestDelegationsFollowUserAndApp(t *testing.T) {
 	}
 
 	// A poisoned audit row rolls the whole change back.
-	if _, err := s.db.Exec(`CREATE TRIGGER fail_delegation_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER fail_delegation_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 		t.Fatal(err)
 	}
 	audit := &AuditEvent{ID: "audit", Action: "admin.delegations_updated", Outcome: "success", CreatedAt: time.Now().UTC()}
 	if err := s.SetDelegations(u.ID, Delegations{}, audit); err == nil {
 		t.Fatal("change committed without its audit row")
 	}
-	if _, err := s.db.Exec(`DROP TRIGGER fail_delegation_audit`); err != nil {
+	if _, err := s.db.Exec(dialect(s, `DROP TRIGGER fail_delegation_audit`)); err != nil {
 		t.Fatal(err)
 	}
 	if d, _ = s.Delegations(u.ID); !d.Helpdesk {

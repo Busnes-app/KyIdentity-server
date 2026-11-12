@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -123,7 +122,7 @@ func TestSetupAmendmentRefusals(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			parent, a, _, file, db := amendmentFixture(t)
 			exec := func(q string) {
-				w, err := sql.Open("sqlite", db)
+				w, err := store.OpenRawForTest(db)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -147,7 +146,7 @@ func TestSetupAmendmentRefusals(t *testing.T) {
 			case "parent-client":
 				a.Clients[0].ID = parent.Clients[0].ID
 			case "foreign-client":
-				exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,enabled,created_at,post_logout_redirect_uris_json) VALUES('recovery','Foreign','confidential','x','[]','["openid"]',1,CURRENT_TIMESTAMP,'[]')`)
+				exec(`INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,enabled,created_at,post_logout_redirect_uris_json) VALUES('recovery','Foreign','confidential','x','[]','["openid"]',TRUE,CURRENT_TIMESTAMP,'[]')`)
 			}
 			_, err := stageCommand(t, a, file, db, false)
 			if !staged {
@@ -168,7 +167,7 @@ func TestSetupAmendmentRefusals(t *testing.T) {
 					t.Fatalf("amendment %v accepted", args)
 				}
 			}
-			r, err := sql.Open("sqlite", db)
+			r, err := store.OpenRawForTest(db)
 			if err != nil {
 				t.Fatal(err)
 			}

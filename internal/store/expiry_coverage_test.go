@@ -62,7 +62,7 @@ func TestRunDueExpiriesMembershipUnderRequiredPolicy(t *testing.T) {
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, s, `UPDATE enrollment_policies SET required=1, grace_seconds=3600 WHERE group_id='required'`)
+	mustExec(t, s, `UPDATE enrollment_policies SET required=TRUE, grace_seconds=3600 WHERE group_id='required'`)
 	mustExec(t, s, `UPDATE group_memberships SET expires_at=? WHERE user_id=?`, time.Now().Add(-time.Minute).Unix(), u.ID)
 	mustExec(t, s, `CREATE TRIGGER block_plain BEFORE DELETE ON group_memberships WHEN OLD.group_id='plain' BEGIN SELECT RAISE(ABORT,'blocked'); END`)
 	run, err := s.RunDueExpiries(time.Now().UTC())

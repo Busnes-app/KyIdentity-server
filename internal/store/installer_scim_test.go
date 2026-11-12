@@ -90,7 +90,7 @@ func TestInstallerSCIMRefusesDriftAndRollsBackAuditFailure(t *testing.T) {
 			defer close()
 			p := installerSCIMFixture()
 			if cause == "audit" {
-				if _, err := s.db.Exec(`CREATE TRIGGER refuse_scim_audit BEFORE INSERT ON audit_events WHEN NEW.action='admin.system_created' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`); err != nil {
+				if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER refuse_scim_audit BEFORE INSERT ON audit_events WHEN NEW.action='admin.system_created' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -102,11 +102,11 @@ func TestInstallerSCIMRefusesDriftAndRollsBackAuditFailure(t *testing.T) {
 				case "token":
 					p.Clients[0].SCIM.Token = strings.Repeat("z", 48)
 				case "hold":
-					query = `UPDATE paired_systems SET provisioning_hold=1`
+					query = `UPDATE paired_systems SET provisioning_hold=TRUE`
 				case "endpoint":
 					query = `UPDATE paired_systems SET callback_url='https://foreign.test/scim/v2'`
 				case "groups":
-					query = `UPDATE paired_systems SET groups_enabled=1`
+					query = `UPDATE paired_systems SET groups_enabled=TRUE`
 				case "foreign":
 					query = `DELETE FROM installer_setup_resources WHERE kind='connector'`
 				}

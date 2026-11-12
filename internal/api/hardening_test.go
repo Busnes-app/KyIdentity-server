@@ -1,8 +1,8 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -150,6 +150,7 @@ func TestReadinessReflectsDatabaseHealth(t *testing.T) {
 // An export whose durable record vanished is an unattributed disclosure of the whole
 // directory and its keys. Refusing is the only outcome that keeps the trail meaning anything.
 func TestSecretExportIsRefusedWhenTheAuditTrailCannotBeWritten(t *testing.T) {
+	store.SkipOnPostgres(t, "exports a backup capsule; backup is not supported on Postgres yet")
 	priv, err := recoverykey.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -172,12 +173,12 @@ func TestSecretExportIsRefusedWhenTheAuditTrailCannotBeWritten(t *testing.T) {
 
 	// Break audit persistence the way a failing volume would: the write errors, everything
 	// else still works.
-	raw, err := sql.Open("sqlite", srv.cfg.DBPath)
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if _, err := raw.Exec(`DROP TABLE audit_events`); err != nil {
+	if _, err := raw.Exec(dropAuditTable); err != nil {
 		t.Fatalf("could not break the audit table: %v", err)
 	}
 

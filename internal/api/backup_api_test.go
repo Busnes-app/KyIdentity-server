@@ -53,6 +53,7 @@ func (f *fakeRecovery) Deposit(_ context.Context, _, _ string, container []byte)
 }
 
 func TestAdminBackupEndpoints(t *testing.T) {
+	store.SkipOnPostgres(t, "backup is not supported on Postgres yet")
 	priv, err := recoverykey.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -346,6 +347,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 // An instance with no KyRecovery pins the ceremony's public key by hand and backs up to a
 // local directory. Nothing is sent anywhere, and the copy opens only with the suite shares.
 func TestPinnedKeyBacksUpLocallyWithoutKyRecovery(t *testing.T) {
+	store.SkipOnPostgres(t, "backup is not supported on Postgres yet")
 	priv, err := recoverykey.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -405,6 +407,7 @@ func TestPinnedKeyBacksUpLocallyWithoutKyRecovery(t *testing.T) {
 // reveal data. The other Ky products gate it the same way. Exporting the capsule, which
 // hands the sealed bytes to the caller, still needs a fresh grant.
 func TestDepositNeedsAdminButNotStepUp(t *testing.T) {
+	store.SkipOnPostgres(t, "backup is not supported on Postgres yet")
 	priv, err := recoverykey.Generate()
 	if err != nil {
 		t.Fatal(err)

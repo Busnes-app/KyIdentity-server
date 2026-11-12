@@ -27,10 +27,10 @@ func offboardUserTx(tx *sql.Tx, u *User, deleted bool, now time.Time) error {
 		}
 		// A remote mapping proves the target holds the account even when no grant was ever
 		// tracked, so it is deactivated rather than forgotten as an undelivered ghost.
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',1,1,0)`, sys, u.ID); err != nil {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',TRUE,TRUE,0)`, sys, u.ID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=1 WHERE system_id=? AND resource_id=? AND NOT provisioned
+		if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=TRUE WHERE system_id=? AND resource_id=? AND NOT provisioned
  AND EXISTS(SELECT 1 FROM scim_user_links l WHERE l.system_id=sync_resource_state.system_id AND l.local_id=sync_resource_state.resource_id AND l.kind='user' AND l.remote_id<>'')`, sys, u.ID); err != nil {
 			return err
 		}
@@ -91,7 +91,7 @@ func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
  ev.event_type,ev.status,ev.last_error,ev.attempts,ev.next_attempt_at,ev.updated_at
  FROM sync_resource_state st JOIN paired_systems s ON s.id=st.system_id
  LEFT JOIN account_sync_events ev ON ev.id=(SELECT id FROM account_sync_events x WHERE x.system_id=st.system_id AND x.user_id=st.resource_id ORDER BY x.rowid DESC LIMIT 1)
- WHERE st.resource_id=? AND st.kind='user' ORDER BY s.name COLLATE NOCASE,s.id`, userID)
+ WHERE st.resource_id=? AND st.kind='user' ORDER BY lower(s.name),s.id`, userID)
 	if err != nil {
 		return nil, err
 	}
