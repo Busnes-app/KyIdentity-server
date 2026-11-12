@@ -77,7 +77,7 @@ func TestLeaseHasOneHolder(t *testing.T) {
 func TestLeaseExpiresAndReleaseIsTheHoldersOnly(t *testing.T) {
 	stores := replicas(t, 2)
 	a, b := stores[0], stores[1]
-	stale, ok, err := a.AcquireLease("job", 30*time.Millisecond)
+	stale, ok, err := a.AcquireLease("job", time.Minute)
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
@@ -90,7 +90,10 @@ func TestLeaseExpiresAndReleaseIsTheHoldersOnly(t *testing.T) {
 	if _, ok, _ := b.AcquireLease("other", time.Minute); !ok {
 		t.Fatal("leases with different names blocked each other")
 	}
-	time.Sleep(60 * time.Millisecond)
+	// The holder dies and its minute passes (set directly: a short real ttl races a loaded machine).
+	if _, err := a.db.Exec(`UPDATE leases SET until_ms=? WHERE name='job'`, time.Now().UnixMilli()-1); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok, err := b.AcquireLease("job", time.Minute); err != nil || !ok {
 		t.Fatal("an expired lease was not taken over:", ok, err)
 	}
