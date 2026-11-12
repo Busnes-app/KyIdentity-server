@@ -37,6 +37,18 @@ func fileHash(t *testing.T, path string) [32]byte {
 	return sha256.Sum256(b)
 }
 
+// noCredentials fails if the URL's user information (user and password) is in text.
+func noCredentials(t *testing.T, rawURL, text string) {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(text, u.User.String()+"@") {
+		t.Fatalf("the URL's credentials reached the output: %s", text)
+	}
+}
+
 func dirNames(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -87,9 +99,7 @@ func TestMigrateToPostgres(t *testing.T) {
 	if fileHash(t, cfg.DBPath) != before || strings.Join(dirNames(t, filepath.Dir(cfg.DBPath)), ",") != strings.Join(beforeDir, ",") {
 		t.Fatal("the migration changed the source file or its directory")
 	}
-	if strings.Contains(stdout.String()+stderr.String()+logged, "postgres:test@") {
-		t.Fatal("the URL's credentials reached the output")
-	}
+	noCredentials(t, dbURL, stdout.String()+stderr.String()+logged)
 
 	// The server's own open path on the result: the administrator signs in with the same hash.
 	serverCfg, err := config.Load()
@@ -125,14 +135,16 @@ func TestMigrateToPostgresNeverPrintsThePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A missing database fails to connect under any authentication method, trust included.
 	u.User = url.UserPassword("postgres", secret)
+	u.Path = "/kt_no_such_database"
 	for _, bad := range []string{u.String(), "postgres://postgres:" + secret + "@:port/x"} {
 		t.Setenv("KYIDENTITY_DATABASE_URL", bad)
 		var stdout, stderr bytes.Buffer
 		var err error
 		logged := captureLog(t, func() { err = migrateToPostgres([]string{"-from", cfg.DBPath}, &stdout, &stderr) })
 		if err == nil {
-			t.Fatal("a wrong password connected")
+			t.Fatal("a missing database connected")
 		}
 		if all := err.Error() + stdout.String() + stderr.String() + logged; strings.Contains(all, secret) {
 			t.Fatalf("the password reached the output: %s", all)
@@ -197,9 +209,7 @@ func TestRestoreIntoPostgres(t *testing.T) {
 			if err != nil {
 				t.Fatal(err, out)
 			}
-			if strings.Contains(out, "postgres:test@") {
-				t.Fatal("the URL's credentials reached the output")
-			}
+			noCredentials(t, dbURL, out)
 			for _, key := range []string{"jwt_rs256.key", "encryption.key", "secret.key"} {
 				if _, err := os.Stat(filepath.Join(target, "data", key)); err != nil {
 					t.Fatalf("key %s was not restored: %v", key, err)
