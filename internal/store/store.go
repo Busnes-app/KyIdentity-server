@@ -28,12 +28,19 @@ type Store struct {
 	limits     atomic.Pointer[SessionLimits]
 	limitsSeed atomic.Pointer[SessionLimits]
 	limitsAt   atomic.Int64
+	// postgres is set on the shared Postgres backend (NewPostgres); migrationKey is its
+	// migration advisory lock.
+	postgres     bool
+	migrationKey int64
 }
 
 var ErrLastActiveAdmin = errors.New("cannot remove the last active administrator")
 
 // New opens the SQLite database and creates the schema.
 func New(dbPath string) (*Store, error) {
+	if u := testDatabaseURL(); u != "" {
+		return newTestPostgres(u, dbPath, true)
+	}
 	// Enable WAL mode, busy timeout, and foreign keys in DSN. Transactions begin
 	// IMMEDIATE: a deferred transaction that reads and then writes cannot wait out a
 	// concurrent writer and fails with SQLITE_BUSY at the upgrade instead, which the
@@ -87,6 +94,9 @@ func New(dbPath string) (*Store, error) {
 }
 
 func (s *Store) Close() error {
+	if s.postgres {
+		return errors.Join(s.rdb.Close(), s.db.Close())
+	}
 	if s.rdb != s.db {
 		_ = s.rdb.Close()
 	}
@@ -1374,7 +1384,7 @@ func (s *Store) ClaimDueSyncEvents(limit int, lease time.Duration) ([]AccountSyn
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err := releaseFencesForRemovalsTx(tx, now); err != nil {
+	if err := s.releaseFencesForRemovalsTx(tx, now); err != nil {
 		return nil, err
 	}
 

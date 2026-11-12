@@ -82,10 +82,6 @@ func (u *User) ApplySourceState() {
 	u.Status = "disabled"
 }
 
-func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
-}
-
 // rejectCrossIdentityTx refuses a username or email that any other account already uses
 // as either its username or its email: an upstream must not shadow a local identifier.
 func rejectCrossIdentityTx(tx *sql.Tx, excludeID, username, email string) error {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"modernc.org/sqlite"
 )
 
 var ErrGroupNameExists = errors.New("group name already exists")
@@ -39,14 +38,11 @@ type GroupUser struct {
 }
 
 func groupWriteError(err error) error {
-	var sqliteErr *sqlite.Error
-	if errors.As(err, &sqliteErr) {
-		switch sqliteErr.Code() {
-		case 2067:
-			return ErrGroupNameExists // SQLITE_CONSTRAINT_UNIQUE
-		case 787:
-			return ErrGroupTargetMissing // SQLITE_CONSTRAINT_FOREIGNKEY
-		}
+	switch {
+	case isUniqueViolation(err):
+		return ErrGroupNameExists
+	case isForeignKeyViolation(err):
+		return ErrGroupTargetMissing
 	}
 	return err
 }

@@ -136,7 +136,7 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 		// A removal (an inactive update, a deletion) keeps its revision: reconciliation
 		// re-derives only what is still active, so a closed-out removal would never be sent
 		// again. It still waits behind the hold, and the safety net re-pends it.
-		res, err = tx.Exec(`UPDATE account_sync_events SET status='failed', revision=CASE WHEN event_type='user.mfa_reset' OR `+removalSQL+` THEN revision ELSE ? END, last_error=?, updated_at=?, lease_until=NULL, claim_token='',delivery_revision=CASE WHEN event_type='user.mfa_reset' THEN 0 ELSE delivery_revision END WHERE status IN ('pending','failed') AND revision<>? AND COALESCE(last_error,'')<>?`,
+		res, err = tx.Exec(`UPDATE account_sync_events SET status='failed', revision=CASE WHEN event_type='user.mfa_reset' OR `+s.removalSQL()+` THEN revision ELSE ? END, last_error=?, updated_at=?, lease_until=NULL, claim_token='',delivery_revision=CASE WHEN event_type='user.mfa_reset' THEN 0 ELSE delivery_revision END WHERE status IN ('pending','failed') AND revision<>? AND COALESCE(last_error,'')<>?`,
 			restoredRevision, restoredReason, now, restoredRevision, restoredReason)
 		if err != nil {
 			return err

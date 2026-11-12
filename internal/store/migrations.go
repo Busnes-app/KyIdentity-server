@@ -16,6 +16,8 @@ type migration struct {
 	version int
 	name    string
 	up      func(tx *sql.Tx) error
+	// pgUp, when set, replaces up on Postgres; leave it nil when up's SQL runs on both.
+	pgUp func(tx *sql.Tx) error
 }
 
 var migrations = []migration{}
@@ -29,7 +31,11 @@ const schemaMigrationsSQL = `CREATE TABLE IF NOT EXISTS schema_migrations (
 // migrate brings the database to the version this code knows, then runs the per-start
 // reconciliation. New calls it under the migration lease.
 func (s *Store) migrate() error {
-	if _, err := s.db.Exec(schemaMigrationsSQL); err != nil {
+	ddl := schemaMigrationsSQL
+	if s.postgres {
+		ddl = pgSchemaMigrationsSQL
+	}
+	if _, err := s.db.Exec(ddl); err != nil {
 		return err
 	}
 	known := 1
@@ -58,7 +64,17 @@ func (s *Store) migrate() error {
 	if top > known {
 		return fmt.Errorf("database schema is version %d but this binary knows only up to %d: run a release at least as new as the one that last migrated it", top, known)
 	}
-	if !applied[1] {
+	if !applied[1] && s.postgres {
+		if err := s.inTx(func(tx *sql.Tx) error {
+			if _, err := tx.Exec(pgSchemaV1); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(1, 'postgres', ?)`, time.Now().UTC())
+			return err
+		}); err != nil {
+			return fmt.Errorf("creating the Postgres schema: %w", err)
+		}
+	} else if !applied[1] {
 		if err := s.migrateLegacy(); err != nil {
 			return err
 		}
@@ -83,7 +99,11 @@ func (s *Store) applyMigration(m migration) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := m.up(tx); err != nil {
+	up := m.up
+	if s.postgres && m.pgUp != nil {
+		up = m.pgUp
+	}
+	if err := up(tx); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, ?)`, m.version, m.name, time.Now().UTC()); err != nil {
@@ -111,6 +131,18 @@ func (s *Store) reconcileOnStart() error {
 	}
 	// Every OAuth client, launcher card and paired system has an app record.
 	if err := backfillAppRegistryTx(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) inTx(fn func(tx *sql.Tx) error) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := fn(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
