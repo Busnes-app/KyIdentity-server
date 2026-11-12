@@ -28,6 +28,7 @@ func TestLoadFailsClosedOnMalformedValues(t *testing.T) {
 		{"deposit interval negative", map[string]string{"KYIDENTITY_BACKUP_DEPOSIT_INTERVAL": "-24h"}, "non-negative Go duration"},
 		{"deposit interval too short", map[string]string{"KYIDENTITY_BACKUP_DEPOSIT_INTERVAL": "5m"}, "below the 15m0s minimum"},
 		{"relative backup dir", map[string]string{"KYIDENTITY_BACKUP_DIR": "backups"}, "KYIDENTITY_BACKUP_DIR must be an absolute path"},
+		{"recovery key id not an id", map[string]string{"KYIDENTITY_RECOVERY_KEY_ID": "ABCD"}, "KYIDENTITY_RECOVERY_KEY_ID must be the 64 lowercase hex characters"},
 		{"backup keep zero", map[string]string{"KYIDENTITY_BACKUP_KEEP": "0"}, "KYIDENTITY_BACKUP_KEEP must be a positive integer"},
 		{"backup keep word", map[string]string{"KYIDENTITY_BACKUP_KEEP": "seven"}, "KYIDENTITY_BACKUP_KEEP must be a positive integer"},
 		{"proxy not an ip", map[string]string{"TRUSTED_PROXY_CIDRS": "proxy.local"}, "is not a valid IP or CIDR"},

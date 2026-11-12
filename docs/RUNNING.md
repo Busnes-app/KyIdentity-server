@@ -258,11 +258,23 @@ These hold with or without the flag, because they cost a single instance nothing
   first administrator is created once.
 - The pinned backup key is kept in the database as well as in `recovery.pub`, sealed under
   the encryption key. A replica whose data directory has no `recovery.pub` writes it from
-  that copy when it is the pinned key, so whichever replica the schedule falls to can seal
-  the backup, and a pod that restarts with an empty data directory keeps backing up. A
-  copy that does not open under the encryption key is never used: writing the database
-  alone does not choose the key capsules are sealed to. An install paired before this
-  copy existed gains it the first time a server that holds `recovery.pub` starts.
+  that copy, so whichever replica the schedule falls to can seal the backup, and a pod
+  that restarts with an empty data directory keeps backing up. An install paired before
+  this copy existed gains it the first time a server that holds `recovery.pub` starts.
+- **Set `KYIDENTITY_RECOVERY_KEY_ID` on every replica** to the recovery key's ID, 64 hex
+  characters. A backup carries the server's keys, so the database must not be able to
+  choose who can open one, and the database still holds, or can be given back, the copy
+  and ID of a key you replaced. A replica therefore pins, loads and seals to the key this
+  variable names and no other, and without it backs up to nothing: the backup page and
+  the audit log say so and name the variable. To set it up:
+  1. Pair with KyRecovery, or pin the key, as on a single instance.
+  2. Take the key ID from KyRecovery. The backup page shows the ID it pinned; the two
+     must be equal. Do not copy it from the server alone.
+  3. Add the variable to the deployment and roll it out. It is not a secret.
+- Replacing the recovery key means clearing the pin by hand; no screen does it. Set the
+  variable to the new ID on every replica before pinning the new key. A replica still
+  holding the old `recovery.pub` refuses to back up until that file is removed; it never
+  seals to the old key.
 - A scheduled backup that finds a pinned key it cannot load is recorded as a failed
   `admin.backup_run`; it is never skipped quietly.
 

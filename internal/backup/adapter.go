@@ -121,14 +121,37 @@ func NewKyRecoveryClient(allowPrivate bool) *Client {
 }
 
 // The recovery public key also lives in the settings, sealed under the encryption key, so
-// a replica that did not do the pairing has it. Sealed, because whoever can only write the
-// database must not be able to choose the key capsules are sealed to.
+// a replica that did not do the pairing has it. The settings alone never choose the key:
+// whoever can write the database can put back an older sealed copy and its ID, so the copy
+// is used only when KYIDENTITY_RECOVERY_KEY_ID, which they cannot write, names it.
 const (
 	settingRecoveryPublicKey = "kyrecovery_public_key"
 	recoveryPublicKeyLabel   = "kyidentity:setting:kyrecovery_public_key"
 )
 
+// ErrKeyRefused is a recovery key this server's configuration does not accept.
+var ErrKeyRefused = errors.New("recovery key refused")
+
+// accepted holds a key to KYIDENTITY_RECOVERY_KEY_ID. Replicas must set it: one of them
+// may hold a recovery.pub from before a rotation, which a rolled-back pin would match.
+func accepted(cfg *config.Config, id string) error {
+	switch {
+	case cfg.RecoveryKeyID == id:
+		return nil
+	case cfg.RecoveryKeyID != "":
+		return fmt.Errorf("%w: KYIDENTITY_RECOVERY_KEY_ID names %s, not %s", ErrKeyRefused, cfg.RecoveryKeyID, id)
+	case cfg.Replicated:
+		return fmt.Errorf("%w: set KYIDENTITY_RECOVERY_KEY_ID on every replica; this one holds key %s, check it against KyRecovery", ErrKeyRefused, id)
+	}
+	return nil
+}
+
 func StoreRecoveryKey(cfg *config.Config, s SettingsStore, k RecoveryKey) error {
+	if cfg.RecoveryKeyID != "" {
+		if err := accepted(cfg, k.Public.ID()); err != nil {
+			return err
+		}
+	}
 	if err := recoveryclient.StoreRecoveryKey(cfg.DataDir, settings{s}, k); err != nil {
 		return err
 	}
@@ -143,14 +166,22 @@ func sealRecoveryKey(cfg *config.Config, s SettingsStore, k RecoveryKey) error {
 	return s.SetSetting(settingRecoveryPublicKey, sealed)
 }
 
-// LoadRecoveryKey returns the pinned key. When recovery.pub is absent it is first written
-// from the settings copy, if that copy is the pinned key; an install paired before the
-// copy existed gains one here. The file is still what the pin is checked against.
+// LoadRecoveryKey returns the pinned key, if the configuration accepts it. When
+// recovery.pub is absent it is first written from the settings copy, if that copy is the
+// pinned key and the configured one; an install paired before the copy existed gains one
+// here. The file is still what the pin is checked against.
 func LoadRecoveryKey(cfg *config.Config, s SettingsStore) (RecoveryKey, error) {
 	if err := shareRecoveryKey(cfg, s); err != nil {
 		return RecoveryKey{}, err
 	}
-	return recoveryclient.LoadRecoveryKey(cfg.DataDir, settings{s})
+	k, err := recoveryclient.LoadRecoveryKey(cfg.DataDir, settings{s})
+	if err != nil {
+		return RecoveryKey{}, err
+	}
+	if err := accepted(cfg, k.Public.ID()); err != nil {
+		return RecoveryKey{}, err
+	}
+	return k, nil
 }
 
 func shareRecoveryKey(cfg *config.Config, s SettingsStore) error {
@@ -177,6 +208,9 @@ func shareRecoveryKey(cfg *config.Config, s SettingsStore) error {
 	if err != nil {
 		return err
 	}
+	if pub.ID() != cfg.RecoveryKeyID {
+		return nil // not the key this server is configured for
+	}
 	if pinned, err := s.GetSetting("kyrecovery_key_id"); err != nil || pinned != pub.ID() {
 		return nil // a copy of a key that is no longer pinned
 	}
@@ -199,7 +233,14 @@ func LoadPairing(cfg *config.Config, s SettingsStore) (recoveryclient.Pairing, e
 	if err := shareRecoveryKey(cfg, s); err != nil {
 		return recoveryclient.Pairing{}, err
 	}
-	return recoveryclient.LoadPairing(cfg.DataDir, settings{s}, newSealer(cfg.EncryptionKey))
+	p, err := recoveryclient.LoadPairing(cfg.DataDir, settings{s}, newSealer(cfg.EncryptionKey))
+	if err != nil {
+		return recoveryclient.Pairing{}, err
+	}
+	if err := accepted(cfg, p.Key.Public.ID()); err != nil {
+		return recoveryclient.Pairing{}, err
+	}
+	return p, nil
 }
 
 // KeyPinned reports whether the settings pin a recovery key, whether or not this server
@@ -282,6 +323,11 @@ func RunBackup(ctx context.Context, cfg *config.Config, s SettingsStore, snap Sn
 		DataDir: cfg.DataDir, AppName: cfg.AppName, AppVersion: appVersion,
 		BackupDir: cfg.BackupDir, Keep: cfg.BackupKeep, Sealer: newSealer(cfg.EncryptionKey),
 	}, settings{s}, func() (Payload, error) {
+		// The lib has loaded the key it will seal to by now; refuse here, after the
+		// attempt is stamped, so a refused key is not retried every minute.
+		if _, err := LoadRecoveryKey(cfg, s); err != nil {
+			return Payload{}, err
+		}
 		p, err := CollectSealable(cfg, snap, appVersion)
 		if err != nil {
 			return Payload{}, err

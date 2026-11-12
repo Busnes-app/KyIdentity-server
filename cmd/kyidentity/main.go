@@ -752,7 +752,7 @@ func scheduledBackup(ctx context.Context, cfg *config.Config, dbStore *store.Sto
 		if !backup.KeyPinned(dbStore) {
 			return
 		}
-		err = fmt.Errorf("a recovery key is pinned but this server cannot load it: %w", err)
+		err = fmt.Errorf("a recovery key is pinned but this server has no recovery.pub, and takes the key from the database only when KYIDENTITY_RECOVERY_KEY_ID names it: %w", err)
 	}
 	if errors.Is(err, backup.ErrNoDestination) {
 		return

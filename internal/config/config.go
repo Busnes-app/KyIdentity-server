@@ -115,6 +115,9 @@ type Config struct {
 	BackupDir string
 	// BackupKeep is how many local capsules BackupDir retains; older ones are pruned.
 	BackupKeep int
+	// RecoveryKeyID, when set, is the only recovery key this server pins or seals a backup
+	// to. Replicas need it: it is what lets one trust the key kept in the database.
+	RecoveryKeyID string
 	// BackupAllowPrivateRecovery lets the KyRecovery URL resolve to a private or carrier-grade
 	// NAT address: a KyRecovery on the operator's own LAN behind a TLS proxy with split DNS.
 	// HTTPS stays mandatory; only the address rule is relaxed. Off by default because it turns
@@ -154,6 +157,8 @@ const (
 	DefaultPushRelayURL = "https://fcm.relay.kyauth.busnes.app"
 	DefaultAPNSRelayURL = "https://apn.relay.kyauth.busnes.app"
 )
+
+var recoveryKeyIDRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 var ubuntuAppIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*_[a-z0-9][a-z0-9+.-]*$`)
 
@@ -270,6 +275,10 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	recoveryKeyID := strings.TrimSpace(os.Getenv("KYIDENTITY_RECOVERY_KEY_ID"))
+	if recoveryKeyID != "" && !recoveryKeyIDRE.MatchString(recoveryKeyID) {
+		return nil, errors.New("KYIDENTITY_RECOVERY_KEY_ID must be the 64 lowercase hex characters of a recovery key ID")
+	}
 
 	attestationExtraRoots := strings.TrimSpace(os.Getenv("KYIDENTITY_ATTESTATION_EXTRA_ROOTS"))
 	attestationStatusURL := "https://android.googleapis.com/attestation/status"
@@ -336,6 +345,7 @@ func Load() (*Config, error) {
 		BackupDepositInterval:      depositInterval,
 		BackupDir:                  backupDir,
 		BackupKeep:                 backupKeep,
+		RecoveryKeyID:              recoveryKeyID,
 		BackupAllowPrivateRecovery: strings.EqualFold(os.Getenv("KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY"), "true"),
 		AttestationExtraRoots:      attestationExtraRoots,
 		AttestationStatusURL:       attestationStatusURL,
