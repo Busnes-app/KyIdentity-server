@@ -1727,7 +1727,9 @@ dialog.modal-backdrop::backdrop {
 .launcher-group-title { font-size: 0.9rem; letter-spacing: normal; text-transform: none; margin-bottom: 0.8rem; }
 .launcher-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 600px) { .launcher-who { width: 100%; justify-content: space-between; } .launcher-search-controls { flex-wrap: wrap; } }
-.launcher-group { padding: 0; }
+/* css/styles.css (the marketing sheet, loaded by index.html) rules every bare <section>. */
+.launcher-group { padding: 0; border-bottom: 0; }
+.launcher-cols section { border-bottom: 0; }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
