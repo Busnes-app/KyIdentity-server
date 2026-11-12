@@ -77,8 +77,10 @@ func TestRelayRegistrationRefusesBadAnswers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cr := newCovRelay(t)
 			cr.register = reply
-			keyFile := filepath.Join(t.TempDir(), "relay.key")
-			sender, err := NewRelaySender(RelayConfig{URL: cr.URL, KeyFile: keyFile, Label: "kyid"}, RelayConfig{})
+			keys, keyFile := relayKeyStore(t), filepath.Join(t.TempDir(), "relay.key")
+			cfg := sharedRelay(keys, cr.URL, keyFile)
+			cfg.Label = "kyid"
+			sender, err := NewRelaySender(cfg, RelayConfig{})
 			if err == nil || sender != nil {
 				t.Fatalf("sender=%v err=%v", sender, err)
 			}
@@ -87,8 +89,8 @@ func TestRelayRegistrationRefusesBadAnswers(t *testing.T) {
 				hits[0].contentType != "application/json" || hits[0].body["label"] != "kyid" {
 				t.Fatalf("register request = %+v", hits)
 			}
-			if _, err := os.Stat(keyFile); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("a key file was written after a failed registration: %v", err)
+			if key := storedRelayKey(t, keys, keyFile); key != "" {
+				t.Fatalf("a key was stored after a failed registration: %q", key)
 			}
 		})
 	}
@@ -133,11 +135,9 @@ func TestOptionalRelayRegistrationFailureLeavesItOff(t *testing.T) {
 // new key and supersede the last.
 func TestRelayKeyPersistFailureFailsStartup(t *testing.T) {
 	cr := newCovRelay(t)
-	blocker := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocker, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	s, err := NewRelaySender(RelayConfig{URL: cr.URL, KeyFile: filepath.Join(blocker, "relay.key")}, RelayConfig{})
+	broken := &brokenRelayKeys{RelayKeys: relayKeyStore(t)}
+	broken.fail.Store(true)
+	s, err := NewRelaySender(sharedRelay(broken, cr.URL, "relay.key"), RelayConfig{})
 	if s != nil || err == nil {
 		t.Fatalf("sender=%v err=%v", s, err)
 	}
@@ -234,7 +234,8 @@ func TestRelayRenewalFailureFailsThePush(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte("old-key\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewRelaySender(RelayConfig{URL: cr.URL, KeyFile: keyFile}, RelayConfig{})
+	keys := relayKeyStore(t)
+	s, err := NewRelaySender(sharedRelay(keys, cr.URL, keyFile), RelayConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,12 +258,12 @@ func TestRelayRenewalFailureFailsThePush(t *testing.T) {
 	if strings.Join(paths, ",") != "/send,/register" {
 		t.Fatalf("requests = %v, want one send then one register", paths)
 	}
-	if got, _ := os.ReadFile(keyFile); strings.TrimSpace(string(got)) != "old-key" {
-		t.Fatalf("key file = %q", got)
+	if got := storedRelayKey(t, keys, keyFile); got != "old-key" {
+		t.Fatalf("stored key = %q", got)
 	}
 }
 
-// A renewed key is used even when it cannot be written to disk: the relay has already
+// A renewed key is used even when it cannot be stored: the relay has already
 // revoked the old one, so falling back to it would fail every push.
 func TestRelayRenewedKeyUsedWhenPersistFails(t *testing.T) {
 	var renewedSends atomic.Int32
@@ -284,16 +285,12 @@ func TestRelayRenewedKeyUsedWhenPersistFails(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte("old-key\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewRelaySender(RelayConfig{URL: srv.URL, KeyFile: keyFile}, RelayConfig{})
+	broken := &brokenRelayKeys{RelayKeys: relayKeyStore(t)}
+	s, err := NewRelaySender(sharedRelay(broken, srv.URL, keyFile), RelayConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Point persistence at a path whose parent is a file, so the write fails.
-	blocker := filepath.Join(dir, "blocker")
-	if err := os.WriteFile(blocker, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	s.fcm.keyFile = filepath.Join(blocker, "relay.key")
+	broken.fail.Store(true)
 
 	if err := s.SendPush(store.NativeDevice{ID: "d", Platform: "android", PushToken: "t"}, MFAChallengePush{ChallengeID: "c"}); err != nil {
 		t.Fatalf("send after renewal: %v", err)

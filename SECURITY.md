@@ -152,7 +152,7 @@ Everything KyIdentity needs to keep secret lives in its data volume (`/data` in 
 | `secret.key` | HMAC key for CSRF tokens and signed browser cookies (`KYIDENTITY_SECRET_KEY` or `KYIDENTITY_SECRET_KEY_FILE`) |
 | `jwt_rs256.key` | RSA signing key for ID and access tokens (`KYIDENTITY_RSA_KEY_PATH`) |
 | `push-vapid-private.key` | VAPID key for UnifiedPush (`KYIDENTITY_VAPID_KEY_PATH`); startup refuses a mode looser than `0600`, or any access by others at a path you name |
-| `push-relay-fcm.key`, `push-relay-apns.key` | Keys returned by the push relays at registration |
+| `push-relay-*.key` | Push relay keys from installs before the keys moved into the database (table `push_relay_keys`, sealed under the encryption key). Read once to seed the database, never written again |
 | `first-run-password.txt` | Generated bootstrap password, until first sign-in |
 
 - Keys not supplied through the environment are generated on first start, written `0600` in a `0700` directory, and reused.

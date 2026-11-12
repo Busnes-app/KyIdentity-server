@@ -45,6 +45,10 @@ import (
 // grows fastest and never stops.
 const auditRetention = 180 * 24 * time.Hour
 
+// attestationSweepInterval is how often revoked device attestations are swept for; the
+// lease of that length is what makes it once across replicas and restarts.
+const attestationSweepInterval = 24 * time.Hour
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -136,6 +140,8 @@ func main() {
 			URL:      cfg.PushRelayURL,
 			Key:      cfg.PushRelayKey,
 			KeyFile:  mfa.RelayKeyFile(cfg.DataDir, "fcm", cfg.PushRelayURL),
+			Keys:     dbStore,
+			SealKey:  cfg.EncryptionKey,
 			Label:    "kyidentity-" + cfg.IssuerURL,
 			Optional: cfg.PushRelayURL == config.DefaultPushRelayURL,
 		},
@@ -143,6 +149,8 @@ func main() {
 			URL:      cfg.APNSRelayURL,
 			Key:      cfg.APNSRelayKey,
 			KeyFile:  mfa.RelayKeyFile(cfg.DataDir, "apns", cfg.APNSRelayURL),
+			Keys:     dbStore,
+			SealKey:  cfg.EncryptionKey,
 			Label:    "kyidentity-" + cfg.IssuerURL,
 			Optional: cfg.APNSRelayURL == config.DefaultAPNSRelayURL,
 		},
@@ -195,7 +203,7 @@ func main() {
 	mfaEngine.SetUbuntuPushSender(mfa.NewUbuntuPushSender(cfg.UbuntuPushURL, cfg.UbuntuPushAppID))
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 
-	if err := bootstrapOnStart(dbStore, cfg.BootstrapUser, cfg.BootstrapPass, cfg.DataDir); err != nil {
+	if err := bootstrapOnStart(dbStore, cfg.BootstrapUser, cfg.BootstrapPass, cfg.DataDir, cfg.Replicated); err != nil {
 		log.Fatalf("Bootstrap failed: %v", err)
 	}
 
@@ -207,13 +215,20 @@ func main() {
 
 	// Background housekeeping.
 	go func() {
-		var lastSweep time.Time
 		housekeep := func() {
 			purgeExpired(dbStore, time.Now().UTC())
 			if err := clearFirstRunPasswordFile(dbStore, cfg.DataDir); err != nil {
 				log.Printf("Housekeeping: %v", err)
 			}
-			lastSweep = runAttestationHousekeeping(time.Now(), lastSweep, attestStatus.Stale(), func() {
+			var releaseSweep func()
+			runAttestationHousekeeping(attestStatus.Stale(), func() bool {
+				release, ok, err := dbStore.AcquireLease("attestation-sweep", attestationSweepInterval)
+				if err != nil {
+					log.Printf("attestation sweep: lease: %v", err)
+				}
+				releaseSweep = release
+				return ok
+			}, func() {
 				if err := attestRoots.Refresh(); err != nil {
 					log.Printf("attestation roots refresh failed: %v", err)
 				}
@@ -229,6 +244,7 @@ func main() {
 				log.Printf("attestation sweep: %d downgraded", n)
 				if err != nil {
 					log.Printf("attestation sweep failed: %v", err)
+					releaseSweep() // so the next tick, on any replica, tries again
 				}
 			})
 		}
@@ -309,7 +325,7 @@ func startSyncWorker(ctx context.Context, e *sync.Engine) (wait func(context.Con
 
 // bootstrapOnStart creates the first administrator when none exists, from
 // BOOTSTRAP_ADMIN_PASS or a generated password written to first-run-password.txt.
-func bootstrapOnStart(dbStore *store.Store, username, password, dataDir string) error {
+func bootstrapOnStart(dbStore *store.Store, username, password, dataDir string, replicated bool) error {
 	adminCount, err := dbStore.CountAdmins()
 	if err != nil {
 		return fmt.Errorf("failed to count administrators: %w", err)
@@ -322,6 +338,10 @@ func bootstrapOnStart(dbStore *store.Store, username, password, dataDir string) 
 		return nil
 	}
 	generated := password == ""
+	if generated && replicated {
+		// The file would land in one pod's own directory, where nobody looks for it.
+		return errors.New("KYIDENTITY_REPLICATED is set, no administrator exists and BOOTSTRAP_ADMIN_PASS is empty: a generated password cannot be handed over from a replica; set BOOTSTRAP_ADMIN_PASS from a Secret or run bootstrap-admin")
+	}
 	if generated {
 		if password, err = crypto.GenerateRandomAlphanumeric(16); err != nil {
 			return fmt.Errorf("failed to generate first-run admin password: %w", err)
@@ -469,6 +489,11 @@ func ensureBootstrapAdmin(dbStore *store.Store, username, email, password, via s
 	event := audit.NewLogger(dbStore).Prepare("admin.user_created", "", "bootstrap", admin.ID, "user", "", via, "success",
 		map[string]any{"username": admin.Username, "role": admin.Role, "pending": false, "passwordChangeRequired": true})
 	if err := dbStore.CreateUserWithSyncEvents(admin, event.Row); err != nil {
+		// Two first starts on one database both see no administrator; the name is unique,
+		// so one insert fails, and its account is the one the other just created.
+		if won, rerr := dbStore.GetUserByUsername(username); rerr == nil && won != nil && won.Role == "admin" && won.Status == "active" {
+			return false, nil
+		}
 		return false, fmt.Errorf("failed to create the bootstrap administrator: %w", err)
 	}
 	event.Committed()
@@ -543,15 +568,23 @@ func runBackupDrill() {
 	dbStore := openStoreForBackup(cfg)
 	defer dbStore.Close()
 
-	payload, err := backup.CollectSealable(cfg, dbStore, appversion.String())
-	if err != nil {
-		log.Fatalf("Failed to collect backup payload: %v", err)
+	release, ok, err := dbStore.AcquireLease(backup.DrillLease, backup.LeaseTTL)
+	if err != nil || !ok {
+		log.Fatalf("A restore drill is already running, or its lease is unreadable (%v)", err)
 	}
-	pinned, err := backup.LoadRecoveryKey(cfg.DataDir, dbStore)
-	if err != nil && !errors.Is(err, backup.ErrNotPaired) {
-		log.Fatalf("Recovery key: %v", err)
-	}
-	result, err := backup.RunRestoreDrill(context.Background(), cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
+	// log.Fatalf skips defers, and a lease left behind would refuse the next drill.
+	result, err := func() (*backup.DrillResult, error) {
+		defer release()
+		payload, err := backup.CollectSealable(cfg, dbStore, appversion.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to collect backup payload: %w", err)
+		}
+		pinned, err := backup.LoadRecoveryKey(cfg.DataDir, dbStore)
+		if err != nil && !errors.Is(err, backup.ErrNotPaired) {
+			return nil, fmt.Errorf("recovery key: %w", err)
+		}
+		return backup.RunRestoreDrill(context.Background(), cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
+	}()
 	if err != nil {
 		log.Fatalf("Drill execution failed: %v", err)
 	}
@@ -618,7 +651,16 @@ func runDeposit() {
 	defer dbStore.Close()
 	auditLogger := audit.NewLogger(dbStore)
 
-	res, err := backup.RunBackup(context.Background(), cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appversion.String())
+	var res backup.Result
+	release, ok, err := dbStore.AcquireLease(backup.Lease, backup.LeaseTTL)
+	switch {
+	case err != nil:
+	case !ok:
+		err = backup.ErrDepositInProgress
+	default:
+		res, err = backup.RunBackup(context.Background(), cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appversion.String())
+		release()
+	}
 	action, outcome, details := backup.Outcome(res, err)
 	auditLogger.Observe(action, "", "cli", res.Manifest.CapsuleID, "backup", "", "kyidentity-cli", outcome, details)
 	if err != nil {
@@ -654,26 +696,41 @@ func backupLoop(ctx context.Context, cfg *config.Config, dbStore *store.Store, a
 			return
 		case <-ticker.C:
 		}
-		next, on, err := backup.NextRun(cfg, dbStore)
-		if err != nil {
-			log.Printf("[BACKUP] schedule unreadable: %s", backup.AuditSafe(err.Error()))
-			continue
-		}
-		if !on || time.Now().Before(next) {
-			continue
-		}
-		res, err := backup.RunBackup(context.WithoutCancel(ctx), cfg, dbStore, dbStore, client, appversion.String())
-		if errors.Is(err, backup.ErrNotPaired) || errors.Is(err, backup.ErrNoDestination) {
-			continue
-		}
-		action, outcome, details := backup.Outcome(res, err)
-		auditLogger.Observe(action, "", "system", res.Manifest.CapsuleID, "backup", "", "kyidentity-scheduler", outcome, details)
-		if err != nil {
-			log.Printf("[BACKUP] scheduled backup: %s", backup.AuditSafe(err.Error()))
-			continue
-		}
-		log.Printf("[BACKUP] scheduled %s", describe(res))
+		scheduledBackup(ctx, cfg, dbStore, client, auditLogger)
 	}
+}
+
+// scheduledBackup runs one backup if the schedule says one is due. The schedule is read
+// under the lease, and the run stamps its attempt before anything else: of two replicas
+// that both tick while a run is due, the second finds the lease held or the run no longer due.
+func scheduledBackup(ctx context.Context, cfg *config.Config, dbStore *store.Store, client backup.Depositor, auditLogger *audit.Logger) {
+	release, ok, err := dbStore.AcquireLease(backup.Lease, backup.LeaseTTL)
+	if err != nil {
+		log.Printf("[BACKUP] lease: %v", err)
+	}
+	if !ok {
+		return
+	}
+	defer release()
+	next, on, err := backup.NextRun(cfg, dbStore)
+	if err != nil {
+		log.Printf("[BACKUP] schedule unreadable: %s", backup.AuditSafe(err.Error()))
+		return
+	}
+	if !on || time.Now().Before(next) {
+		return
+	}
+	res, err := backup.RunBackup(context.WithoutCancel(ctx), cfg, dbStore, dbStore, client, appversion.String())
+	if errors.Is(err, backup.ErrNotPaired) || errors.Is(err, backup.ErrNoDestination) {
+		return
+	}
+	action, outcome, details := backup.Outcome(res, err)
+	auditLogger.Observe(action, "", "system", res.Manifest.CapsuleID, "backup", "", "kyidentity-scheduler", outcome, details)
+	if err != nil {
+		log.Printf("[BACKUP] scheduled backup: %s", backup.AuditSafe(err.Error()))
+		return
+	}
+	log.Printf("[BACKUP] scheduled %s", describe(res))
 }
 
 func stdinIsTerminal() bool {
@@ -863,8 +920,6 @@ func restoreServiceHelp() string {
 	return "expected service name (default: $KYIDENTITY_APP_NAME or " + config.DefaultAppName + ")"
 }
 
-// runAttestationHousekeeping refreshes the attestation caches whenever the status list is stale
-// or the daily sweep is due, so a failed fetch is retried next tick. It returns the sweep time.
 // purgeExpired deletes rows past their use. Every table here is written by unauthenticated
 // or per-request paths, so none may grow without bound; a failed purge is retried next tick.
 func purgeExpired(s *store.Store, now time.Time) {
@@ -895,16 +950,17 @@ func purgeExpired(s *store.Store, now time.Time) {
 	}
 }
 
-func runAttestationHousekeeping(now, lastSweep time.Time, stale bool, refresh, sweep func()) time.Time {
-	due := now.Sub(lastSweep) >= 24*time.Hour
+// runAttestationHousekeeping refreshes the attestation caches whenever the status list is
+// stale or this replica claimed the daily sweep, then sweeps if it did. A sweep that fails
+// gives its claim back, so the fetch and the sweep are retried next tick.
+func runAttestationHousekeeping(stale bool, claimSweep func() bool, refresh, sweep func()) {
+	due := claimSweep()
 	if stale || due {
 		refresh()
 	}
-	if !due {
-		return lastSweep
+	if due {
+		sweep()
 	}
-	sweep()
-	return now
 }
 
 // fetchClient refuses redirects: a 3xx fails as non-2xx instead of leaving the pinned host.

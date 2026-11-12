@@ -105,6 +105,13 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 		if _, err := tx.Exec(`UPDATE logout_deliveries SET claim_token='', lease_until=NULL, attempts=0, next_attempt_at=?, updated_at=? WHERE status='queued'`, now, now); err != nil {
 			return err
 		}
+		// Claims the capsule's server held are not this server's: every capsule is taken
+		// under the backup lease, which would otherwise refuse a backup here for hours.
+		for _, q := range []string{`DELETE FROM leases`, `DELETE FROM rate_limits`, `UPDATE alert_deliveries SET lease_until_ms=0`} {
+			if _, err := tx.Exec(q); err != nil {
+				return err
+			}
+		}
 		for _, table := range restoredCleared {
 			res, err := tx.Exec(`DELETE FROM ` + table)
 			if err != nil {

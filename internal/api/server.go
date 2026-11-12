@@ -47,6 +47,7 @@ func NewServer(
 	staticFS fs.FS,
 ) *Server {
 	mm := NewMiddlewareManager(s, cfg.TrustedProxyCIDRs, cfg.ForwardedHeader, cfg.SecretKey)
+	mm.shared = cfg.Replicated
 
 	srv := &Server{
 		cfg:         cfg,

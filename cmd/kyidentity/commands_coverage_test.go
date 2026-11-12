@@ -387,7 +387,7 @@ func TestBootstrapOnStartPaths(t *testing.T) {
 			t.Fatal(err)
 		}
 		dir := t.TempDir()
-		if err := bootstrapOnStart(db, "second", "another-good-password", dir); err != nil {
+		if err := bootstrapOnStart(db, "second", "another-good-password", dir, false); err != nil {
 			t.Fatal(err)
 		}
 		if u, _ := db.GetUserByUsername("second"); u != nil {
@@ -397,7 +397,7 @@ func TestBootstrapOnStartPaths(t *testing.T) {
 	t.Run("configured password", func(t *testing.T) {
 		db := testStore(t)
 		dir := t.TempDir()
-		if err := bootstrapOnStart(db, "admin", "a-good-first-password", dir); err != nil {
+		if err := bootstrapOnStart(db, "admin", "a-good-first-password", dir, false); err != nil {
 			t.Fatal(err)
 		}
 		u, _ := db.GetUserByUsername("admin")
@@ -414,7 +414,7 @@ func TestBootstrapOnStartPaths(t *testing.T) {
 	t.Run("generated password", func(t *testing.T) {
 		db := testStore(t)
 		dir := t.TempDir()
-		if err := bootstrapOnStart(db, "admin", "", dir); err != nil {
+		if err := bootstrapOnStart(db, "admin", "", dir, false); err != nil {
 			t.Fatal(err)
 		}
 		info, err := os.Stat(filepath.Join(dir, "first-run-password.txt"))
@@ -424,7 +424,7 @@ func TestBootstrapOnStartPaths(t *testing.T) {
 	})
 	t.Run("unwritable data directory", func(t *testing.T) {
 		db := testStore(t)
-		err := bootstrapOnStart(db, "admin", "", filepath.Join(t.TempDir(), "missing"))
+		err := bootstrapOnStart(db, "admin", "", filepath.Join(t.TempDir(), "missing"), false)
 		if err == nil || !strings.Contains(err.Error(), "could not write") {
 			t.Fatalf("lost generated password was not reported: %v", err)
 		}
@@ -432,7 +432,7 @@ func TestBootstrapOnStartPaths(t *testing.T) {
 	t.Run("unreadable database", func(t *testing.T) {
 		db := testStore(t)
 		_ = db.Close()
-		if err := bootstrapOnStart(db, "admin", "", t.TempDir()); err == nil || !strings.Contains(err.Error(), "count administrators") {
+		if err := bootstrapOnStart(db, "admin", "", t.TempDir(), false); err == nil || !strings.Contains(err.Error(), "count administrators") {
 			t.Fatalf("a failed admin count was not reported: %v", err)
 		}
 		if _, err := ensureBootstrapAdmin(db, "admin", "", "a-good-first-password", "test"); err == nil {

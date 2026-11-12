@@ -34,7 +34,7 @@ Everything a fresh KyIdentity needs to be the old one:
 | `data/secret.key` | 32 bytes. Signs sessions and CSRF tokens |
 | `data/recovery.pub` | The suite recovery public key, so the restored server comes back pinned (present when the backup was paired) |
 | `data/push-vapid-private.key` | The UnifiedPush VAPID key, so the restored server keeps its push identity (present once the server has started with UnifiedPush support) |
-| `data/push-relay-<transport>-<host>.key` | The API keys this server registered with the FCM/APNs push relays. The relay ties each phone's push token to the key that first sent to it, so a server restored on another address without them reaches no paired phone (present once the server has registered; a capsule from before them restores a server that registers again) |
+| `data/push-relay-<transport>-<host>.key` | The API keys this server registered with the FCM/APNs push relays. The relay ties each phone's push token to the key that first sent to it, so a server restored on another address without them reaches no paired phone (present once the server has registered; a capsule from before them restores a server that registers again) Since the keys moved into the database the capsule carries them there, sealed under the encryption key; the file appears only for a key supplied by `PUSH_RELAY_KEY`/`APNS_RELAY_KEY` or left by an older version, and seeds a database that has none |
 | `config/kyidentity.json` | Issuer URL, port, TTLs, app name. For your reference when re-deploying; nothing reads it |
 
 The restored directory is the live directory in the clear. Treat it like the running server's

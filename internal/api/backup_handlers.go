@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/capsule"
@@ -129,16 +128,21 @@ func writeInputError(w http.ResponseWriter, code string, err error) {
 
 // RunDrill seals the live payload to a throwaway key, opens it in a sandbox and runs the
 // verification recipe. It reports, not proves, whether the suite key is pinned.
-// drillMu serialises drills: each one materialises the whole directory in the clear under
-// the data directory, and two at once is twice the exposure for no more assurance.
-var drillMu sync.Mutex
-
+// The drill lease serialises drills across replicas: each one materialises the whole
+// directory in the clear under the data directory, and two at once is twice the exposure
+// for no more assurance.
 func (h *BackupHandler) RunDrill(w http.ResponseWriter, r *http.Request) {
-	if !drillMu.TryLock() {
+	release, ok, err := h.store.AcquireLease(backup.DrillLease, backup.LeaseTTL)
+	if err != nil {
+		log.Printf("[BACKUP] drill: lease: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to execute restore drill")
+		return
+	}
+	if !ok {
 		writeError(w, http.StatusConflict, "A restore drill is already running")
 		return
 	}
-	defer drillMu.Unlock()
+	defer release()
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -317,7 +321,17 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	adminID, adminUsername := h.actor(r)
 	ctx := context.WithoutCancel(r.Context())
-	res, err := backup.RunBackup(ctx, h.cfg, h.store, h.store, h.recovery, appversion.String())
+	// One backup at a time across replicas, the scheduler's included.
+	var res backup.Result
+	release, ok, err := h.store.AcquireLease(backup.Lease, backup.LeaseTTL)
+	switch {
+	case err != nil:
+	case !ok:
+		err = backup.ErrDepositInProgress
+	default:
+		res, err = backup.RunBackup(ctx, h.cfg, h.store, h.store, h.recovery, appversion.String())
+		release()
+	}
 	action, outcome, details := backup.Outcome(res, err)
 	h.observe(r, action, adminID, adminUsername, res.Manifest.CapsuleID, outcome, details)
 	if errors.Is(err, backup.ErrReceiptUnrecorded) {

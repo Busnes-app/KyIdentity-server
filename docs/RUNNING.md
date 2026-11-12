@@ -37,7 +37,7 @@ BOOTSTRAP_ADMIN_USER=admin
 # Optional: native-push relays for KyAuth on Android (FCM) and iOS (APNs). Unset uses
 # the Busnes.app relays below; an empty value turns one off, and then push MFA on that
 # platform does not work (TOTP, passkeys and UnifiedPush still do). Without a
-# *_RELAY_KEY the server self-registers, keeps the key under the data directory, and
+# *_RELAY_KEY the server self-registers, keeps the key sealed in its database, and
 # re-registers once if the relay reports it superseded or unknown.
 # PUSH_RELAY_URL=https://fcm.relay.kyauth.busnes.app
 # APNS_RELAY_URL=https://apn.relay.kyauth.busnes.app
@@ -127,8 +127,8 @@ The files must be readable by the container's non-root user (`kyidentity`).
 
 ## Running more than one replica
 
-> Not supported yet. This section covers shared keys only, the first step. The database is
-> still one SQLite file, so run exactly one replica until a release says otherwise.
+> Not supported yet. The database is still one SQLite file on one volume, so run exactly
+> one replica until a release says otherwise. What follows is already in place for it.
 
 Several replicas behind one load balancer must be one identity: the same four keys in each.
 A replica that generated its own would reject the others' tokens, cookies and sealed secrets.
@@ -153,6 +153,30 @@ at startup, naming the variable, when one is missing. Supply the keys from a mou
   `fsGroup`.
 - Without the flag nothing changes: a single instance generates and keeps its keys in the
   data directory as before.
+
+With the flag set the server also:
+
+- keeps rate-limit buckets in the database as well as in memory, so a limit of five an hour
+  is five an hour across all replicas, not five per replica. A limiter that cannot reach
+  the database refuses the request;
+- refuses to start when no administrator exists and `BOOTSTRAP_ADMIN_PASS` is empty. A
+  generated password would be written inside one pod, where nobody looks for it. Supply
+  `BOOTSTRAP_ADMIN_PASS` from a Secret or run `bootstrap-admin`.
+
+These hold with or without the flag, because they cost a single instance nothing:
+
+- Work that must happen once takes a lease in the database first: the scheduled backup,
+  Back up now, the restore drill, the daily device-attestation sweep and push relay
+  registration. Alert mail is claimed row by row before it is sent.
+- The push relay keys live in the database, sealed under the encryption key, so every
+  replica presents the same key and one of them renews it.
+- Session limits changed on one replica reach the others within five seconds.
+- Two servers starting at once on one database migrate it one after the other, and the
+  first administrator is created once.
+
+Still one per replica, and not shared: `recovery.pub` (the pinned backup key, written at
+KyRecovery pairing), local backup copies in `KYIDENTITY_BACKUP_DIR`, and the files
+`apply-setup` writes under `<data>/installer/`.
 
 ## Health & Status Verification
 

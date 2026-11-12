@@ -329,6 +329,13 @@ func proveSecretDecryption(ctx context.Context, scratchDir string, recipe map[st
 			`SELECT key, value FROM system_settings WHERE key = '` + store.MailSettingKey + `' AND value != ''`,
 			"Mail delivery is not configured, so nothing could be checked",
 		},
+		{
+			// Without it the restored server registers afresh, which is recoverable, but a
+			// key that does not open means the encryption key is not the one that sealed it.
+			"Push Relay Key Decryption", store.SealRelayKey,
+			`SELECT name, key_sealed FROM push_relay_keys`,
+			"No push relay key is stored, so none could be checked",
+		},
 	} {
 		rows, err := db.QueryContext(ctx, target.query)
 		if err != nil {

@@ -44,24 +44,19 @@ func TestRelaySenderRegistersAndPersistsKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := filepath.Join(t.TempDir(), "relay.key")
-	sender, err := NewRelaySender(RelayConfig{
-		URL:     srv.URL,
-		KeyFile: keyFile,
-		Label:   "test",
-	}, RelayConfig{})
+	keys, keyFile := relayKeyStore(t), filepath.Join(t.TempDir(), "relay.key")
+	sender, err := NewRelaySender(sharedRelay(keys, srv.URL, keyFile), RelayConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !registered {
 		t.Fatal("relay key was not registered")
 	}
-	key, err := os.ReadFile(keyFile)
-	if err != nil {
-		t.Fatal(err)
+	if key := storedRelayKey(t, keys, keyFile); key != "relay-key" {
+		t.Fatalf("unexpected stored key: %q", key)
 	}
-	if string(key) != "relay-key\n" {
-		t.Fatalf("unexpected persisted key: %q", key)
+	if _, err := os.Stat(keyFile); !os.IsNotExist(err) {
+		t.Fatalf("a key file was written: %v", err)
 	}
 
 	expires := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
@@ -189,7 +184,8 @@ func testReRegistersOnce(t *testing.T, code string) {
 	if err := os.WriteFile(keyFile, []byte("key-0\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	sender, err := NewRelaySender(RelayConfig{URL: srv.URL, KeyFile: keyFile, Label: "test"}, RelayConfig{})
+	keys := relayKeyStore(t)
+	sender, err := NewRelaySender(sharedRelay(keys, srv.URL, keyFile), RelayConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,8 +209,11 @@ func testReRegistersOnce(t *testing.T, code string) {
 	if n := registrations.Load(); n != 1 {
 		t.Fatalf("registrations = %d, want 1: concurrent senders must share one renewal", n)
 	}
-	if key, _ := os.ReadFile(keyFile); string(key) != "key-1\n" {
-		t.Fatalf("key file = %q, want the renewed key", key)
+	if key := storedRelayKey(t, keys, keyFile); key != "key-1" {
+		t.Fatalf("stored key = %q, want the renewed key", key)
+	}
+	if key, _ := os.ReadFile(keyFile); string(key) != "key-0\n" {
+		t.Fatalf("the imported key file was rewritten: %q", key)
 	}
 }
 
@@ -228,7 +227,7 @@ func TestRelaySenderKeepsRefusedKeysRefused(t *testing.T) {
 	superseded, supersededRegs := supersedingRelay(t, "key_superseded")
 	forgetting, forgettingRegs := supersedingRelay(t, "key_unknown")
 	for name, cfg := range map[string]RelayConfig{
-		"plain 401":                  {URL: plain.URL, KeyFile: keyFile},
+		"plain 401":                  sharedRelay(relayKeyStore(t), plain.URL, keyFile),
 		"operator key, superseded":   {URL: superseded.URL, Key: "key-0"},
 		"operator key, relay forgot": {URL: forgetting.URL, Key: "key-0"},
 	} {

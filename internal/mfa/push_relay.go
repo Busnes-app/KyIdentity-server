@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -30,14 +31,37 @@ var errKeyRenewable = errors.New("push relay key superseded or unknown")
 const relayResponseLimit = 2048
 
 type RelayConfig struct {
-	URL     string
-	Key     string
+	URL string
+	Key string
+	// KeyFile names the key: its base name is the row in Keys. A file found there (an
+	// install from before the key moved to the database, or a restored capsule) is copied
+	// into Keys when Keys has none.
 	KeyFile string
+	// Keys holds the self-registered key, sealed under SealKey. Nil keeps it in memory only.
+	Keys    RelayKeys
+	SealKey []byte
 	Label   string
 	// Optional leaves this transport off when self-registration fails, instead of failing
 	// startup. For the built-in relays, whose outage must not stop the server.
 	Optional bool
 }
+
+// RelayKeys is the shared home of self-registered relay keys: the database, so every
+// replica presents the same key and exactly one of them registers a new one.
+// store.Store implements it.
+type RelayKeys interface {
+	RelayKey(name string) (sealed string, version int64, err error)
+	SetRelayKey(name, sealed string, version int64) (bool, error)
+	AcquireLease(name string, ttl time.Duration) (release func(), ok bool, err error)
+}
+
+// A registration is one HTTP call with a 10 s timeout; the lease outlives it, and a
+// replica that did not get the lease waits a little longer than that for the key.
+var (
+	relayRegisterLease = 30 * time.Second
+	relayRegisterWait  = 15 * time.Second
+	relayRegisterPoll  = 250 * time.Millisecond
+)
 
 type RelaySender struct {
 	fcm    *relayEndpoint
@@ -46,11 +70,13 @@ type RelaySender struct {
 }
 
 type relayEndpoint struct {
-	url     string
-	label   string
-	keyFile string
+	url   string
+	label string
 	// renewable is false for an operator-supplied key, which re-registering would discard.
 	renewable bool
+	keys      RelayKeys
+	name      string
+	sealKey   []byte
 
 	mu  sync.Mutex
 	key string
@@ -91,18 +117,17 @@ func prepareRelay(cfg RelayConfig) (*relayEndpoint, error) {
 	if cfg.URL == "" {
 		return nil, nil
 	}
-	e := &relayEndpoint{url: cfg.URL, label: cfg.Label, keyFile: cfg.KeyFile, key: cfg.Key, renewable: cfg.Key == ""}
+	e := &relayEndpoint{url: cfg.URL, label: cfg.Label, key: cfg.Key, renewable: cfg.Key == "", sealKey: cfg.SealKey}
 	if e.key != "" {
 		return e, nil
 	}
-	if cfg.KeyFile != "" {
-		key, err := os.ReadFile(cfg.KeyFile)
-		if err == nil && strings.TrimSpace(string(key)) != "" {
-			e.key = strings.TrimSpace(string(key))
-			return e, nil
+	if cfg.Keys != nil && cfg.KeyFile != "" {
+		e.keys, e.name = cfg.Keys, filepath.Base(cfg.KeyFile)
+		if err := e.importKeyFile(cfg.KeyFile); err != nil && !errors.Is(err, errStoredFirst) {
+			return nil, err
 		}
 	}
-	key, err := registerRelayKey(cfg.URL, cfg.Label)
+	key, err := e.register("")
 	if err != nil {
 		if cfg.Optional {
 			log.Printf("mfa push relay: %s unavailable, push over it stays off until restart: %v", cfg.URL, err)
@@ -110,18 +135,29 @@ func prepareRelay(cfg RelayConfig) (*relayEndpoint, error) {
 		}
 		return nil, err
 	}
-	if cfg.KeyFile != "" {
-		if err := writeRelayKey(cfg.KeyFile, key); err != nil {
-			return nil, err
-		}
-	}
 	e.key = key
 	return e, nil
 }
 
-// RelayKeyFile is where a self-registered key for relayURL is kept: one file per relay host,
-// so a server moved to another relay registers there instead of presenting the old relay's
-// key, which the new one refuses with the plain 401 a revocation gets (never re-registered).
+// importKeyFile copies a key file into Keys when Keys has none: an install from before the
+// key moved to the database, or a restored capsule. A stored key always wins, so the file,
+// which nothing updates any more, is left alone.
+func (e *relayEndpoint) importKeyFile(path string) error {
+	raw, err := os.ReadFile(path)
+	key := strings.TrimSpace(string(raw))
+	if err != nil || key == "" {
+		return nil // as before the database: an unreadable file means register afresh
+	}
+	if sealed, _, err := e.keys.RelayKey(e.name); err != nil || sealed != "" {
+		return err
+	}
+	return e.store(key, 0)
+}
+
+// RelayKeyFile is where a self-registered key for relayURL was kept, and whose base name
+// still names it: one per relay host, so a server moved to another relay registers there
+// instead of presenting the old relay's key, which the new one refuses with the plain 401
+// a revocation gets (never re-registered).
 func RelayKeyFile(dataDir, transport, relayURL string) string {
 	host := ""
 	if u, err := url.Parse(relayURL); err == nil {
@@ -138,28 +174,91 @@ func RelayKeyFile(dataDir, transport, relayURL string) string {
 	return filepath.Join(dataDir, "push-relay-"+transport+"-"+host+".key")
 }
 
-// writeRelayKey replaces path through a synced temp file and a rename, so a crash never
-// leaves a truncated key.
-func writeRelayKey(path, key string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+// stored is the shared key and its version; "" when there is none.
+func (e *relayEndpoint) stored() (string, int64, error) {
+	if e.keys == nil {
+		return "", 0, nil
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".push-relay-*") // mode 0600
+	sealed, version, err := e.keys.RelayKey(e.name)
+	if err != nil || sealed == "" {
+		return "", version, err
+	}
+	key, err := crypto.Open(e.sealKey, store.SealRelayKey, e.name, sealed)
+	if err != nil {
+		return "", 0, fmt.Errorf("stored push relay key %s does not open: %w", e.name, err)
+	}
+	return string(key), version, nil
+}
+
+func (e *relayEndpoint) store(key string, version int64) error {
+	if e.keys == nil {
+		return nil
+	}
+	sealed, err := crypto.Seal(e.sealKey, store.SealRelayKey, e.name, []byte(key))
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-	_, err = tmp.WriteString(key + "\n")
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
+	if ok, err := e.keys.SetRelayKey(e.name, sealed, version); err != nil {
 		return err
+	} else if !ok {
+		return errStoredFirst
 	}
-	return os.Rename(tmp.Name(), path)
+	return nil
+}
+
+var errStoredFirst = errors.New("another replica stored a push relay key first")
+
+// register returns a key to use in place of stale ("" at first start). Registering makes
+// the relay drop the previous key for this address, so replicas that each registered would
+// knock each other out for good: one registers under a lease and stores the key, the
+// others take the stored one.
+func (e *relayEndpoint) register(stale string) (string, error) {
+	deadline := time.Now().Add(relayRegisterWait)
+	for {
+		key, done, err := e.registerOnce(stale)
+		if err != nil || done {
+			return key, err
+		}
+		if time.Now().After(deadline) {
+			return "", errors.New("another replica holds the push relay registration and stored no key")
+		}
+		time.Sleep(relayRegisterPoll)
+	}
+}
+
+// registerOnce reports done=false when another replica is registering right now.
+func (e *relayEndpoint) registerOnce(stale string) (key string, done bool, err error) {
+	if key, _, err = e.stored(); err != nil || (key != "" && key != stale) {
+		return key, true, err
+	}
+	release := func() {}
+	if e.keys != nil {
+		var ok bool
+		if release, ok, err = e.keys.AcquireLease("relay-register:"+e.name, relayRegisterLease); err != nil || !ok {
+			return "", false, err
+		}
+	}
+	defer release()
+	// The previous holder may have stored its key between the read and the lease.
+	key, version, err := e.stored()
+	if err != nil || (key != "" && key != stale) {
+		return key, true, err
+	}
+	if key, err = registerRelayKey(e.url, e.label); err != nil {
+		return "", true, err
+	}
+	switch err = e.store(key, version); {
+	case errors.Is(err, errStoredFirst):
+		return "", false, nil // our lease ran out mid-registration; take the newer key
+	case err != nil && stale == "":
+		// At first start an unstored key would be registered again, and supersede this
+		// one, on every restart.
+		return "", true, err
+	case err != nil:
+		// The relay already dropped the old key, so use the new one even though it is not stored.
+		log.Printf("mfa push relay: store renewed key: %v", err)
+	}
+	return key, true, nil
 }
 
 func (e *relayEndpoint) currentKey() string {
@@ -168,25 +267,19 @@ func (e *relayEndpoint) currentKey() string {
 	return e.key
 }
 
-// renew replaces a superseded or unknown key once. Senders that saw the same stale key wait here and
-// reuse the winner's key; each registering would supersede the last.
+// renew replaces a superseded or unknown key once. Senders that saw the same stale key wait
+// here and reuse the winner's key; each registering would supersede the last.
 func (e *relayEndpoint) renew(stale string) (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.key != stale {
 		return e.key, nil
 	}
-	key, err := registerRelayKey(e.url, e.label)
+	key, err := e.register(stale)
 	if err != nil {
 		return "", err
 	}
-	// The relay already revoked the old key, so keep the new one even if persisting fails.
 	e.key = key
-	if e.keyFile != "" {
-		if err := writeRelayKey(e.keyFile, key); err != nil {
-			log.Printf("mfa push relay: persist renewed key: %v", err)
-		}
-	}
 	return key, nil
 }
 

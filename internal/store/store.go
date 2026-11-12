@@ -23,8 +23,11 @@ type Store struct {
 	// rdb serves read-only snapshot transactions, which must not take the
 	// IMMEDIATE write lock db's transactions begin with.
 	rdb *sql.DB
-	// limits caches the browser session limits every session lookup applies.
-	limits atomic.Pointer[SessionLimits]
+	// limits caches the browser session limits every session lookup applies; limitsSeed and
+	// limitsAt let SessionLimits re-read them, so another replica's change is picked up.
+	limits     atomic.Pointer[SessionLimits]
+	limitsSeed atomic.Pointer[SessionLimits]
+	limitsAt   atomic.Int64
 }
 
 var ErrLastActiveAdmin = errors.New("cannot remove the last active administrator")
@@ -49,7 +52,8 @@ func New(dbPath string) (*Store, error) {
 	db.SetConnMaxLifetime(time.Hour)
 
 	s := &Store{db: db, rdb: db}
-	if err := s.migrate(); err != nil {
+	// Two processes starting on one database migrate one after the other.
+	if err := s.withMigrationLease(s.migrate); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("schema creation failed: %w", err)
 	}
@@ -464,6 +468,9 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if err := s.migrateLoginFailuresBySource(); err != nil {
+		return err
+	}
+	if err := s.migrateSharedState(); err != nil {
 		return err
 	}
 	return s.migratePasswordChangeRequired()
