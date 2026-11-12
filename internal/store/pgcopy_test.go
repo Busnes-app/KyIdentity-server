@@ -786,3 +786,21 @@ func dirNames(t *testing.T, dir string) []string {
 	}
 	return out
 }
+
+// An export outlasts the pool's idle-in-transaction limit: the snapshot waits while SQLite
+// writes, here for longer than a deliberately short limit.
+func TestExportOutlastsTheIdleTimeout(t *testing.T) {
+	requirePostgres(t)
+	path := filepath.Join(t.TempDir(), "idle")
+	s, err := newTestPostgres(testDatabaseURL()+"&idle_in_transaction_session_timeout=20", path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.db.Exec(`INSERT INTO leases(name,token,until_ms) SELECT 'l'||g, repeat('x', 200), 0 FROM generate_series(1, 20000) g`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SnapshotTo(filepath.Join(t.TempDir(), "snap.db")); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -49,8 +49,8 @@ func (c catalog) table(name string) *copyTable {
 	return c[name]
 }
 
-// readPairs runs a query returning (table, value) rows.
-func readPairs(q querier, query string, each func(table, value string, rest []any) error, rest ...any) error {
+// readPairs runs a query returning (table, value) rows, scanning any further columns into rest.
+func readPairs(q querier, query string, each func(table, value string) error, rest ...any) error {
 	rows, err := q.Query(query)
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func readPairs(q querier, query string, each func(table, value string, rest []an
 		if err := rows.Scan(append([]any{&table, &value}, rest...)...); err != nil {
 			return err
 		}
-		if err := each(table, value, rest); err != nil {
+		if err := each(table, value); err != nil {
 			return err
 		}
 	}
@@ -72,7 +72,7 @@ func sqliteCatalog(q querier) (catalog, error) {
 	c := catalog{}
 	var typ string
 	if err := readPairs(q, `SELECT m.name, p.name, p.type FROM sqlite_master m, pragma_table_info(m.name) p
- WHERE m.type='table' AND m.name NOT LIKE 'sqlite\_%' ESCAPE '\' ORDER BY m.name, p.name`, func(table, col string, _ []any) error {
+ WHERE m.type='table' AND m.name NOT LIKE 'sqlite\_%' ESCAPE '\' ORDER BY m.name, p.name`, func(table, col string) error {
 		t := c.table(table)
 		t.cols = append(t.cols, copyColumn{col, typ})
 		return nil
@@ -80,7 +80,7 @@ func sqliteCatalog(q querier) (catalog, error) {
 		return nil, fmt.Errorf("reading the SQLite catalog: %w", err)
 	}
 	var wr int
-	if err := readPairs(q, `SELECT name, type, wr FROM pragma_table_list WHERE schema='main'`, func(table, kind string, _ []any) error {
+	if err := readPairs(q, `SELECT name, type, wr FROM pragma_table_list WHERE schema='main'`, func(table, kind string) error {
 		if t := c[table]; t != nil && kind == "table" && wr == 0 {
 			t.rowid = true
 		}
@@ -89,7 +89,7 @@ func sqliteCatalog(q querier) (catalog, error) {
 		return nil, fmt.Errorf("reading the SQLite catalog: %w", err)
 	}
 	if err := readPairs(q, `SELECT DISTINCT m.name, f."table" FROM sqlite_master m, pragma_foreign_key_list(m.name) f
- WHERE m.type='table' AND m.name NOT LIKE 'sqlite\_%' ESCAPE '\'`, func(table, ref string, _ []any) error {
+ WHERE m.type='table' AND m.name NOT LIKE 'sqlite\_%' ESCAPE '\'`, func(table, ref string) error {
 		c.table(table).refs = append(c.table(table).refs, ref)
 		return nil
 	}); err != nil {
@@ -104,7 +104,7 @@ func pgCatalog(q querier) (catalog, error) {
 	var identity bool
 	if err := readPairs(q, `SELECT c.relname, a.attname, t.typname, a.attidentity<>'' FROM pg_class c
  JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped JOIN pg_type t ON t.oid=a.atttypid
- WHERE c.relnamespace=current_schema()::regnamespace AND c.relkind='r' ORDER BY 1, 2`, func(table, col string, _ []any) error {
+ WHERE c.relnamespace=current_schema()::regnamespace AND c.relkind='r' ORDER BY 1, 2`, func(table, col string) error {
 		t := c.table(table)
 		t.cols = append(t.cols, copyColumn{col, typ})
 		if identity {
@@ -115,7 +115,7 @@ func pgCatalog(q querier) (catalog, error) {
 		return nil, fmt.Errorf("reading the Postgres catalog: %w", err)
 	}
 	if err := readPairs(q, `SELECT DISTINCT c.relname, r.relname FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
- JOIN pg_class r ON r.oid=k.confrelid WHERE k.contype='f' AND c.relnamespace=current_schema()::regnamespace`, func(table, ref string, _ []any) error {
+ JOIN pg_class r ON r.oid=k.confrelid WHERE k.contype='f' AND c.relnamespace=current_schema()::regnamespace`, func(table, ref string) error {
 		c.table(table).refs = append(c.table(table).refs, ref)
 		return nil
 	}); err != nil {
@@ -382,6 +382,11 @@ func (s *Store) exportToSQLite(dest string) (err error) {
 		return err
 	}
 	defer src.Rollback()
+	// The snapshot waits while SQLite writes a large table; the pool's 30 s idle limit would
+	// end it. For this transaction only.
+	if _, err := src.Exec(`SET LOCAL idle_in_transaction_session_timeout = 0`); err != nil {
+		return err
+	}
 	pg, err := pgCatalog(src)
 	if err != nil {
 		return err
@@ -403,7 +408,7 @@ func (s *Store) exportToSQLite(dest string) (err error) {
 	type trigger struct{ name, sql string }
 	var triggers []trigger
 	var body string
-	if err := readPairs(lite, `SELECT 'trigger', name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name`, func(_, name string, _ []any) error {
+	if err := readPairs(lite, `SELECT 'trigger', name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name`, func(_, name string) error {
 		triggers = append(triggers, trigger{name, body})
 		return nil
 	}, &body); err != nil {
