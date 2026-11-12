@@ -256,10 +256,18 @@ These hold with or without the flag, because they cost a single instance nothing
 - Session limits changed on one replica reach the others within five seconds.
 - Two servers starting at once on one database migrate it one after the other, and the
   first administrator is created once.
+- The pinned backup key is kept in the database as well as in `recovery.pub`, sealed under
+  the encryption key. A replica whose data directory has no `recovery.pub` writes it from
+  that copy when it is the pinned key, so whichever replica the schedule falls to can seal
+  the backup, and a pod that restarts with an empty data directory keeps backing up. A
+  copy that does not open under the encryption key is never used: writing the database
+  alone does not choose the key capsules are sealed to. An install paired before this
+  copy existed gains it the first time a server that holds `recovery.pub` starts.
+- A scheduled backup that finds a pinned key it cannot load is recorded as a failed
+  `admin.backup_run`; it is never skipped quietly.
 
-Still one per replica, and not shared: `recovery.pub` (the pinned backup key, written at
-KyRecovery pairing), local backup copies in `KYIDENTITY_BACKUP_DIR`, and the files
-`apply-setup` writes under `<data>/installer/`.
+Still one per replica, and not shared: local backup copies in `KYIDENTITY_BACKUP_DIR` and
+the files `apply-setup` writes under `<data>/installer/`.
 
 ## Health & Status Verification
 

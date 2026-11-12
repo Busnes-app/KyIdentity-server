@@ -18,7 +18,7 @@ import (
 func TestLargeDatabaseIsSplitAndJoinedBack(t *testing.T) {
 	cfg, st := instance(t)
 	priv := pair(t, cfg, st)
-	key, err := backup.LoadRecoveryKey(cfg.DataDir, st)
+	key, err := backup.LoadRecoveryKey(cfg, st)
 	if err != nil {
 		t.Fatal(err)
 	}

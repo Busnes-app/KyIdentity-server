@@ -150,17 +150,18 @@ func (h *BackupHandler) RunDrill(w http.ResponseWriter, r *http.Request) {
 	// A large database takes longer to snapshot, seal and drill than the server's 30 s.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	adminID, adminUsername := h.actor(r)
+	// Before the collect: on a replica this is what writes recovery.pub, a capsule member.
+	pinned, err := backup.LoadRecoveryKey(h.cfg, h.store)
+	if err != nil && !errors.Is(err, backup.ErrNotPaired) {
+		log.Printf("[BACKUP] drill: load recovery key failed: %s", backup.AuditSafe(err.Error()))
+		writeError(w, http.StatusInternalServerError, "Failed to load recovery key")
+		return
+	}
 	payload, err := backup.CollectSealable(h.cfg, h.store, appversion.String())
 	if err != nil {
 		log.Printf("[BACKUP] drill: collect failed: %s", backup.AuditSafe(err.Error()))
 		h.observe(r, "admin.backup_drill_run", adminID, adminUsername, "", "failure", map[string]any{"error": backup.AuditSafe(err.Error())})
 		writeError(w, http.StatusInternalServerError, "Failed to collect backup payload")
-		return
-	}
-	pinned, err := backup.LoadRecoveryKey(h.cfg.DataDir, h.store)
-	if err != nil && !errors.Is(err, backup.ErrNotPaired) {
-		log.Printf("[BACKUP] drill: load recovery key failed: %s", backup.AuditSafe(err.Error()))
-		writeError(w, http.StatusInternalServerError, "Failed to load recovery key")
 		return
 	}
 	result, err := backup.RunRestoreDrill(r.Context(), h.cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
@@ -185,7 +186,7 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 	// Sealing and downloading a large database takes longer than the server's 30 s.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	adminID, adminUsername := h.actor(r)
-	key, err := backup.LoadRecoveryKey(h.cfg.DataDir, h.store)
+	key, err := backup.LoadRecoveryKey(h.cfg, h.store)
 	if errors.Is(err, backup.ErrNotPaired) {
 		writeError(w, http.StatusPreconditionFailed, "Not paired with KyRecovery; no recovery key to seal to")
 		return
@@ -279,7 +280,7 @@ func (h *BackupHandler) PairRemote(w http.ResponseWriter, r *http.Request) {
 	})
 	keyStored := false
 	err = h.store.EditSettings(paired.Row, func(st store.Settings) error {
-		if err := backup.StoreRecoveryKey(h.cfg.DataDir, st, result.Key); err != nil {
+		if err := backup.StoreRecoveryKey(h.cfg, st, result.Key); err != nil {
 			return err
 		}
 		keyStored = true
@@ -433,7 +434,7 @@ func (h *BackupHandler) PinKey(w http.ResponseWriter, r *http.Request) {
 	pinned := h.prepare(r, "admin.backup_key_pin", adminID, adminUsername, pub.ID(), map[string]any{
 		"recovery_key_id": pub.ID(), "threshold": key.Threshold, "total_shares": key.TotalShares,
 	})
-	if err := h.store.EditSettings(pinned.Row, func(st store.Settings) error { return backup.StoreRecoveryKey(h.cfg.DataDir, st, key) }); err != nil {
+	if err := h.store.EditSettings(pinned.Row, func(st store.Settings) error { return backup.StoreRecoveryKey(h.cfg, st, key) }); err != nil {
 		switch {
 		case errors.Is(err, fs.ErrExist):
 			fail(http.StatusConflict, "Already pinned to a different recovery key")
@@ -500,12 +501,11 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		"key_pinned":  false,
 		"app_name":    h.cfg.AppName,
 		"app_version": appversion.String(),
-		"members":     backup.Members(h.cfg),
 	}
 	if u, err := h.store.GetSetting("kyrecovery_url"); err == nil {
 		out["recovery_url"] = u
 	}
-	if key, err := backup.LoadRecoveryKey(h.cfg.DataDir, h.store); err == nil {
+	if key, err := backup.LoadRecoveryKey(h.cfg, h.store); err == nil {
 		out["key_pinned"] = true
 		out["paired"] = backup.HasPairing(h.store)
 		out["recovery_key_id"] = key.Public.ID()
@@ -515,7 +515,10 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		out["recovery_key_error"] = "recovery.pub does not match the pinned key ID"
 	} else if backup.HasPairing(h.store) {
 		out["recovery_key_error"] = "paired, but recovery.pub is missing; restore it or re-pair"
+	} else if backup.KeyPinned(h.store) {
+		out["recovery_key_error"] = "a recovery key is pinned, but recovery.pub is missing; restore it or pin the key again"
 	}
+	out["members"] = backup.Members(h.cfg)
 	if last, ok, err := backup.LastDeposit(h.store); err == nil && ok {
 		out["last_deposit"] = last
 	}

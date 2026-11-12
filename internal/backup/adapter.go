@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,7 +12,9 @@ import (
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/capsule"
+	"github.com/Busnes-app/ky-primitives/keyfile"
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
+	"github.com/Busnes-app/ky-primitives/recoverykey"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
@@ -117,12 +120,70 @@ func NewKyRecoveryClient(allowPrivate bool) *Client {
 	return recoveryclient.NewClient(recoveryclient.Options{AllowPrivate: allowPrivate})
 }
 
-func StoreRecoveryKey(dataDir string, s SettingsStore, k RecoveryKey) error {
-	return recoveryclient.StoreRecoveryKey(dataDir, settings{s}, k)
+// The recovery public key also lives in the settings, sealed under the encryption key, so
+// a replica that did not do the pairing has it. Sealed, because whoever can only write the
+// database must not be able to choose the key capsules are sealed to.
+const (
+	settingRecoveryPublicKey = "kyrecovery_public_key"
+	recoveryPublicKeyLabel   = "kyidentity:setting:kyrecovery_public_key"
+)
+
+func StoreRecoveryKey(cfg *config.Config, s SettingsStore, k RecoveryKey) error {
+	if err := recoveryclient.StoreRecoveryKey(cfg.DataDir, settings{s}, k); err != nil {
+		return err
+	}
+	return sealRecoveryKey(cfg, s, k)
 }
 
-func LoadRecoveryKey(dataDir string, s SettingsStore) (RecoveryKey, error) {
-	return recoveryclient.LoadRecoveryKey(dataDir, settings{s})
+func sealRecoveryKey(cfg *config.Config, s SettingsStore, k RecoveryKey) error {
+	sealed, err := crypto.EncryptAESGCM(crypto.DeriveKey(cfg.EncryptionKey, recoveryPublicKeyLabel), k.Public.Bytes())
+	if err != nil {
+		return err
+	}
+	return s.SetSetting(settingRecoveryPublicKey, sealed)
+}
+
+// LoadRecoveryKey returns the pinned key. When recovery.pub is absent it is first written
+// from the settings copy, if that copy is the pinned key; an install paired before the
+// copy existed gains one here. The file is still what the pin is checked against.
+func LoadRecoveryKey(cfg *config.Config, s SettingsStore) (RecoveryKey, error) {
+	if err := shareRecoveryKey(cfg, s); err != nil {
+		return RecoveryKey{}, err
+	}
+	return recoveryclient.LoadRecoveryKey(cfg.DataDir, settings{s})
+}
+
+func shareRecoveryKey(cfg *config.Config, s SettingsStore) error {
+	path := RecoveryKeyPath(cfg.DataDir)
+	sealed, err := s.GetSetting(settingRecoveryPublicKey)
+	if errors.Is(err, store.ErrNotFound) {
+		k, err := recoveryclient.LoadRecoveryKey(cfg.DataDir, settings{s})
+		if err != nil {
+			return nil // not paired, or a file the pin rejects: the caller's load reports it
+		}
+		return sealRecoveryKey(cfg, s, k)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	raw, err := crypto.DecryptAESGCM(crypto.DeriveKey(cfg.EncryptionKey, recoveryPublicKeyLabel), sealed)
+	if err != nil {
+		return errors.New("the stored recovery public key does not open under this encryption key")
+	}
+	pub, err := recoverykey.ParsePublicKey(raw)
+	if err != nil {
+		return err
+	}
+	if pinned, err := s.GetSetting("kyrecovery_key_id"); err != nil || pinned != pub.ID() {
+		return nil // a copy of a key that is no longer pinned
+	}
+	if err := keyfile.Store(path, raw, keyfile.Raw); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	return nil
 }
 
 // ParsePinRequest turns the pasted public key and its k-of-n into a RecoveryKey.
@@ -134,8 +195,18 @@ func StorePairing(s SettingsStore, encryptionKey []byte, serverURL, token string
 	return recoveryclient.StorePairing(settings{s}, newSealer(encryptionKey), serverURL, token)
 }
 
-func LoadPairing(dataDir string, s SettingsStore, encryptionKey []byte) (recoveryclient.Pairing, error) {
-	return recoveryclient.LoadPairing(dataDir, settings{s}, newSealer(encryptionKey))
+func LoadPairing(cfg *config.Config, s SettingsStore) (recoveryclient.Pairing, error) {
+	if err := shareRecoveryKey(cfg, s); err != nil {
+		return recoveryclient.Pairing{}, err
+	}
+	return recoveryclient.LoadPairing(cfg.DataDir, settings{s}, newSealer(cfg.EncryptionKey))
+}
+
+// KeyPinned reports whether the settings pin a recovery key, whether or not this server
+// holds its recovery.pub.
+func KeyPinned(s SettingsStore) bool {
+	_, err := s.GetSetting("kyrecovery_key_id")
+	return err == nil
 }
 
 func HasPairing(s SettingsStore) bool    { return recoveryclient.HasPairing(settings{s}) }
@@ -202,6 +273,9 @@ func NextRun(cfg *config.Config, s SettingsStore) (time.Time, bool, error) {
 // RunBackup seals the instance once and delivers to every configured destination.
 func RunBackup(ctx context.Context, cfg *config.Config, s SettingsStore, snap Snapshotter, client Depositor, appVersion string) (Result, error) {
 	if err := migrateLegacyLocalCopies(cfg.BackupDir, cfg.AppName); err != nil {
+		return Result{}, err
+	}
+	if err := shareRecoveryKey(cfg, s); err != nil {
 		return Result{}, err
 	}
 	return recoveryclient.Run(ctx, recoveryclient.RunConfig{
