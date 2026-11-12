@@ -61,9 +61,12 @@ type Config struct {
 	IssuerURL  string
 	// RPID and Origin are the WebAuthn relying party identity, derived from IssuerURL at
 	// load so a malformed issuer fails startup rather than the first passkey ceremony.
-	RPID          string
-	Origin        string
-	DBPath        string
+	RPID   string
+	Origin string
+	DBPath string
+	// DatabaseURL is the postgres:// URL of a shared database. Empty means the SQLite file
+	// at DBPath. It holds a password: never log it or put it in an error.
+	DatabaseURL   string
 	DataDir       string
 	SecretKey     []byte
 	EncryptionKey []byte
@@ -292,6 +295,13 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	databaseURL, err := LoadDatabaseURL()
+	if err != nil {
+		return nil, err
+	}
+	if replicated && databaseURL == "" {
+		return nil, errors.New("KYIDENTITY_REPLICATED is set but the database is a local SQLite file: replicas must share one database, so set KYIDENTITY_DATABASE_URL or KYIDENTITY_DATABASE_URL_FILE")
+	}
 
 	return &Config{
 		Port:                       port,
@@ -300,6 +310,7 @@ func Load() (*Config, error) {
 		RPID:                       rpID,
 		Origin:                     rpOrigin,
 		DBPath:                     dbPath,
+		DatabaseURL:                databaseURL,
 		DataDir:                    dataDir,
 		SecretKey:                  secretKey,
 		EncryptionKey:              encKey,
@@ -332,6 +343,31 @@ func Load() (*Config, error) {
 		AppAttestAppIDs:            appAttestAppIDs,
 		AppAttestAllowDevelopment:  appAttestAllowDevelopment,
 	}, nil
+}
+
+// LoadDatabaseURL reads KYIDENTITY_DATABASE_URL, or the file KYIDENTITY_DATABASE_URL_FILE
+// names; "" means SQLite. The URL carries a password, so no error here repeats it.
+func LoadDatabaseURL() (string, error) {
+	raw, file := strings.TrimSpace(os.Getenv("KYIDENTITY_DATABASE_URL")), strings.TrimSpace(os.Getenv("KYIDENTITY_DATABASE_URL_FILE"))
+	if raw != "" && file != "" {
+		return "", errors.New("KYIDENTITY_DATABASE_URL and KYIDENTITY_DATABASE_URL_FILE are both set; keep one")
+	}
+	if file != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("KYIDENTITY_DATABASE_URL_FILE: %w", err)
+		}
+		if raw = strings.TrimSpace(string(data)); raw == "" {
+			return "", errors.New("KYIDENTITY_DATABASE_URL_FILE: the file is empty")
+		}
+	}
+	if raw == "" {
+		return "", nil
+	}
+	if u, err := url.Parse(raw); err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
+		return "", errors.New("KYIDENTITY_DATABASE_URL must be a postgres:// URL")
+	}
+	return raw, nil
 }
 
 func loadAppAttest() ([]string, bool, error) {

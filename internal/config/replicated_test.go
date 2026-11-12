@@ -24,6 +24,7 @@ func TestReplicatedRefusesToGenerateKeys(t *testing.T) {
 	absent := filepath.Join(t.TempDir(), "absent.key")
 	all := map[string]string{
 		"KYIDENTITY_REPLICATED":          "true",
+		"KYIDENTITY_DATABASE_URL":        "postgres:///kyidentity",
 		"KYIDENTITY_SECRET_KEY_FILE":     keyFile,
 		"KYIDENTITY_ENCRYPTION_KEY_FILE": keyFile,
 		"KYIDENTITY_RSA_KEY_PATH":        present,
@@ -79,7 +80,7 @@ func TestReplicatedRefusesToGenerateKeys(t *testing.T) {
 			}
 		}
 		t.Setenv("KYIDENTITY_DATA_DIR", dataDir)
-		withEnv(t, map[string]string{"KYIDENTITY_REPLICATED": "true", "KYIDENTITY_RSA_KEY_PATH": present, "KYIDENTITY_VAPID_KEY_PATH": present})
+		withEnv(t, map[string]string{"KYIDENTITY_REPLICATED": "true", "KYIDENTITY_DATABASE_URL": "postgres:///kyidentity", "KYIDENTITY_RSA_KEY_PATH": present, "KYIDENTITY_VAPID_KEY_PATH": present})
 		if _, err := Load(); err != nil {
 			t.Fatal(err)
 		}
