@@ -115,6 +115,35 @@ jobs:
     steps:
       - run: test "${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}" = true
 
+  # The store, api, oauth, mfa, sync and cmd suites again, with every store.New opening a
+  # schema in a real Postgres (KYIDENTITY_TEST_DATABASE_URL; see AGENTS.md, Database
+  # backends). The database must be UTF8 with the C locale, which the store checks at start.
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: test on Postgres
+        env:
+          KYIDENTITY_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres?sslmode=disable
+        run: go test -race -count=1 -timeout 60m -p 2 ./internal/store/... ./internal/api/... ./internal/oauth/... ./internal/mfa/... ./internal/sync/... ./cmd/...
+
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -201,7 +230,7 @@ jobs:
   # the pushed bytes are the tested bytes. A pull request from a fork must
   # never reach this job or write a package.
   publish:
-    needs: [go, web, relay, docker]
+    needs: [go, web, relay, docker, postgres]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     # No concurrency group here on purpose: GitHub cancels a *pending* job when a
