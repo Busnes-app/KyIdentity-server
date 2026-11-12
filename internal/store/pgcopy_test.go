@@ -755,3 +755,34 @@ func TestImportNamesAValueThatDoesNotConvert(t *testing.T) {
 		t.Fatalf("the failed import left %d relations", n)
 	}
 }
+
+// A failed export leaves no file: the snapshot holds every secret.
+func TestExportRemovesItsFileOnFailure(t *testing.T) {
+	requirePostgres(t)
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	if _, err := s.db.Exec(`ALTER TABLE leases ADD COLUMN extra TEXT`); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	err := s.SnapshotTo(filepath.Join(dir, "snap.db"))
+	if err == nil || !strings.Contains(err.Error(), "table leases has columns") {
+		t.Fatalf("an export across different schemas: %v", err)
+	}
+	if left := dirNames(t, dir); len(left) != 0 {
+		t.Fatalf("the failed export left %v", left)
+	}
+}
+
+func dirNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
