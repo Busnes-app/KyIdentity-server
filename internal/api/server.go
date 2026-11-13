@@ -48,6 +48,8 @@ func NewServer(
 ) *Server {
 	mm := NewMiddlewareManager(s, cfg.TrustedProxyCIDRs, cfg.ForwardedHeader, cfg.SecretKey)
 	mm.shared = cfg.Replicated
+	mm.exemptEnv = cfg.RateLimitExemptCIDRs
+	mm.reloadExemptNetworks(true)
 
 	srv := &Server{
 		cfg:         cfg,
@@ -103,6 +105,7 @@ func (s *Server) routes() *http.ServeMux {
 	alertH := NewAlertHandler(s.store, s.audit, s.middleware)
 	attestationH := NewAttestationHandler(s.store, s.audit, s.middleware)
 	sessionSettingsH := &SessionSettingsHandler{store: s.store, audit: s.audit, middleware: s.middleware}
+	networksH := &RateLimitNetworksHandler{store: s.store, audit: s.audit, middleware: s.middleware}
 	scimH := NewSCIMHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
 	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
@@ -133,7 +136,7 @@ func (s *Server) routes() *http.ServeMux {
 
 	// Auth Endpoints
 	mux.HandleFunc("GET /api/auth/csrf", authH.GetCSRFToken)
-	mux.Handle("POST /api/auth/login", s.middleware.RateLimit("login", 10, 0.2)(http.HandlerFunc(authH.Login)))
+	mux.Handle("POST /api/auth/login", s.middleware.RateLimitExemptible("login", 10, 0.2)(http.HandlerFunc(authH.Login)))
 	mux.Handle("POST /api/auth/activate", s.middleware.RateLimit("account_link", 10, 0.2)(onboardH.Redeem("activation")))
 	mux.Handle("POST /api/auth/password/reset", s.middleware.RateLimit("account_link", 10, 0.2)(onboardH.Redeem("reset")))
 	mux.Handle("POST /api/auth/password/forgot", s.middleware.RateLimit("password_forgot", 5, 0.05)(http.HandlerFunc(onboardH.Forgot)))
@@ -305,6 +308,8 @@ func (s *Server) routes() *http.ServeMux {
 		{"DELETE", "/api/admin/branding/logo", permAdmin, false, http.HandlerFunc(brandingH.DeleteLogo)},
 		{"GET", "/api/admin/session-settings", permRead, false, http.HandlerFunc(sessionSettingsH.Get)},
 		{"PUT", "/api/admin/session-settings", permAdmin, true, http.HandlerFunc(sessionSettingsH.Put)},
+		{"GET", "/api/admin/rate-limit-networks", permAdmin, false, http.HandlerFunc(networksH.Get)},
+		{"PUT", "/api/admin/rate-limit-networks", permAdmin, true, http.HandlerFunc(networksH.Put)},
 		{"POST", "/api/admin/backup/drill", permAdmin, false, http.HandlerFunc(backupH.RunDrill)},
 		{"GET", "/api/admin/backup/export-capsule", permAdmin, true, http.HandlerFunc(backupH.ExportCapsule)},
 		{"POST", "/api/admin/backup/pair-remote", permAdmin, true, http.HandlerFunc(backupH.PairRemote)},

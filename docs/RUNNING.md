@@ -30,6 +30,9 @@ TRUSTED_PROXY_CIDRS=<proxy-ip>/32
 # Startup refuses wider-than-private ranges with X-Forwarded-For / Forwarded.
 # A Cloudflare-only tunnel may use CF-Connecting-IP with proxy-only port access.
 
+# Optional: office networks that skip the per-address sign-in limit (SECURITY.md).
+# RATE_LIMIT_EXEMPT_CIDRS=203.0.113.0/24
+
 # Optional: Pre-seed administrator credentials
 BOOTSTRAP_ADMIN_USER=admin
 # BOOTSTRAP_ADMIN_PASS=<a privately generated unique password; never use this placeholder>

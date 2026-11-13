@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiJson, apiRequest, errorMessage } from '../api';
 import { AdminSessionSettings } from './AdminSessionSettings';
+import { AdminOfficeNetworks } from './AdminOfficeNetworks';
 import { parseAttestationSettings, parseEnrollmentPolicies, parseEnrollmentPreview } from '../parsers';
 import type { DirectoryGroup, EnrollmentPolicy, EnrollmentPreview } from '../types';
 import { isCancelled, useStepUp } from './StepUpPrompt';
@@ -60,6 +61,7 @@ export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup;
    <p>Off: the bootloader state is recorded but not enforced. On: new pairings and the daily sweep refuse MFA grade for unlocked bootloaders.</p>
   </div></div>}
   {!group&&<AdminSessionSettings/>}
+  {!group&&<AdminOfficeNetworks/>}
   {stepUpPrompt}
  </div>;
 }

@@ -364,3 +364,4 @@ export interface AppRole { id: string; appId: string; name: string; description:
 export interface AttestationSettings { requireLockedBootloader: boolean }
 // Browser session lifetime and idle limit, in seconds.
 export interface SessionLimits { absolute: number; idle: number }
+export interface RateLimitNetworks { networks: string; environment: string; exempted: number }
