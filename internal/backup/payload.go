@@ -96,7 +96,7 @@ func dbMembers(db []byte) []recoveryclient.File {
 // JoinDatabaseParts rebuilds data/kyidentity.db from a split snapshot opened into dir (a
 // restore target or a drill sandbox) and removes the parts. A capsule with the single
 // member needs nothing.
-func JoinDatabaseParts(dir string) error {
+func JoinDatabaseParts(dir string) (err error) {
 	part := func(i int) string { return filepath.Join(dir, fmt.Sprintf("%s%03d", dbPartPrefix, i)) }
 	if _, err := os.Stat(part(0)); errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -105,7 +105,11 @@ func JoinDatabaseParts(dir string) error {
 	if err != nil {
 		return fmt.Errorf("joining the database parts: %w", err)
 	}
-	defer out.Close()
+	defer func() {
+		if cerr := out.Close(); err == nil {
+			err = cerr
+		}
+	}()
 	for i := 0; ; i++ {
 		data, err := os.ReadFile(part(i))
 		if errors.Is(err, os.ErrNotExist) {
@@ -124,10 +128,7 @@ func JoinDatabaseParts(dir string) error {
 	if left, _ := filepath.Glob(filepath.Join(dir, dbPartPrefix+"*")); len(left) > 0 {
 		return fmt.Errorf("database parts are not consecutive: %s is left over", filepath.Base(left[0]))
 	}
-	if err := out.Sync(); err != nil {
-		return err
-	}
-	return out.Close()
+	return out.Sync()
 }
 
 // relayKeys names the self-registered push relay keys (mfa.RelayKeyFile) in dataDir. The
