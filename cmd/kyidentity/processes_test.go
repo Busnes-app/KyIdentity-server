@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -259,6 +260,65 @@ func (b *browser) stepUp(grantFrom, method, path string) map[string]string {
 	return map[string]string{"X-KyIdentity-StepUp": token}
 }
 
+// chooseFirstPassword replaces the bootstrap password: grantFrom re-authenticates, changeAt
+// makes the change.
+func (b *browser) chooseFirstPassword(grantFrom, changeAt string) {
+	b.t.Helper()
+	change := map[string]string{"currentPassword": firstPassword, "newPassword": processPassword}
+	grant := b.do(grantFrom, "POST", "/api/auth/step-up", map[string]string{"password": firstPassword, "operation": "POST /api/user/password"}, nil, "")
+	token, _ := grant.body["stepUpToken"].(string)
+	if res := b.do(changeAt, "POST", "/api/user/password", change, map[string]string{"X-KyIdentity-StepUp": token}, grantFrom); res.status/100 != 2 {
+		b.t.Fatalf("changing the first password: %v (grant %v)", res, grant)
+	}
+	if me := b.get(grantFrom, "/api/auth/me"); me.status != 200 {
+		b.signIn(grantFrom, changeAt)
+	}
+}
+
+// leaked reports whether out holds a password, a key or the database credentials.
+func (c *cluster) leaked(out string) bool {
+	u, _ := url.Parse(c.databaseURL)
+	secrets := []string{firstPassword, processPassword, u.User.String() + "@"}
+	if pw, _ := u.User.Password(); len(pw) >= 8 {
+		secrets = append(secrets, pw)
+	}
+	for _, name := range []string{"secret.key", "encryption.key"} {
+		raw, _ := os.ReadFile(filepath.Join(c.secrets, name))
+		secrets = append(secrets, string(raw), hex.EncodeToString(raw))
+	}
+	return slices.ContainsFunc(secrets, func(s string) bool { return strings.Contains(out, s) })
+}
+
+// checkLogs fails if a process raced with itself or wrote a secret to its log.
+func (c *cluster) checkLogs() {
+	c.t.Helper()
+	for _, p := range c.procs {
+		out := p.log(c.t)
+		if strings.Contains(out, "DATA RACE") {
+			c.t.Fatalf("%s reported a data race:\n%s", p.name, out)
+		}
+		if c.leaked(out) {
+			c.t.Fatalf("%s logged a secret", p.name)
+		}
+	}
+}
+
+// command runs the server binary as an operator would, against the shared database.
+func (c *cluster) command(stdin string, args ...string) string {
+	c.t.Helper()
+	cmd := exec.Command(c.bin, args...)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "KYIDENTITY_DATABASE_URL_FILE=" + filepath.Join(c.secrets, "database-url")}
+	cmd.Stdin = strings.NewReader(stdin)
+	out, err := cmd.CombinedOutput()
+	if c.leaked(string(out)) {
+		c.t.Fatalf("kyidentity %s printed a secret", args[0])
+	}
+	if err != nil || strings.Contains(string(out), "DATA RACE") {
+		c.t.Fatalf("kyidentity %s: %v\n%s", args[0], err, out)
+	}
+	return string(out)
+}
+
 // together runs the calls at the same instant and returns their replies in order.
 func together(calls ...func() reply) []reply {
 	out := make([]reply, len(calls))
@@ -312,7 +372,17 @@ func newCluster(t *testing.T) *cluster {
 	if os.Getenv("KYIDENTITY_TEST_DATABASE_URL") == "" {
 		t.Skip("needs KYIDENTITY_TEST_DATABASE_URL")
 	}
-	c := &cluster{t: t, dir: t.TempDir()}
+	dir := t.TempDir()
+	databaseURL, err := store.PostgresURLForTest(filepath.Join(dir, "cluster.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newClusterOn(t, dir, databaseURL)
+}
+
+func newClusterOn(t *testing.T, dir, databaseURL string) *cluster {
+	t.Helper()
+	c := &cluster{t: t, dir: dir, databaseURL: databaseURL}
 	c.bin = filepath.Join(c.dir, "kyidentity")
 	build := exec.Command("go", append(append([]string{"build"}, serverBuildFlags...), "-o", c.bin, ".")...)
 	if out, err := build.CombinedOutput(); err != nil {
@@ -322,10 +392,6 @@ func newCluster(t *testing.T) *cluster {
 	// The Secret every replica mounts: the database URL and the four keys.
 	c.secrets = filepath.Join(c.dir, "secret")
 	if err := os.Mkdir(c.secrets, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	var err error
-	if c.databaseURL, err = store.PostgresURLForTest(filepath.Join(c.dir, "cluster.db")); err != nil {
 		t.Fatal(err)
 	}
 	files := map[string]string{"database-url": c.databaseURL}
@@ -409,19 +475,7 @@ func TestTwoServerProcessesAreOneIdentity(t *testing.T) {
 		}
 	}
 	// The first password must be replaced: A is asked, B makes the change.
-	change := map[string]string{"currentPassword": firstPassword, "newPassword": processPassword}
-	if res := admin.do(b.url, "POST", "/api/user/password", change, nil, a.url); res.status == 403 {
-		grant := admin.do(a.url, "POST", "/api/auth/step-up", map[string]string{"password": firstPassword, "operation": "POST /api/user/password"}, nil, "")
-		token, _ := grant.body["stepUpToken"].(string)
-		if res = admin.do(b.url, "POST", "/api/user/password", change, map[string]string{"X-KyIdentity-StepUp": token}, a.url); res.status/100 != 2 {
-			t.Fatalf("changing the first password: %v (grant %v)", res, grant)
-		}
-	} else if res.status/100 != 2 {
-		t.Fatalf("changing the first password: %v", res)
-	}
-	if me := admin.get(a.url, "/api/auth/me"); me.status != 200 {
-		admin.signIn(a.url, b.url)
-	}
+	admin.chooseFirstPassword(a.url, b.url)
 	users := admin.get(b.url, "/api/admin/users")
 	if list, _ := users.body["users"].([]any); users.status != 200 || len(list) != 1 {
 		t.Fatalf("two first starts did not leave exactly one account: %v", users)
@@ -665,27 +719,434 @@ func TestTwoServerProcessesAreOneIdentity(t *testing.T) {
 			t.Fatalf("%s exited %d on SIGTERM", p.name, code)
 		}
 	}
-	// No process raced with itself, and none wrote a secret to its log.
-	u, _ := url.Parse(c.databaseURL)
-	secrets := []string{firstPassword, processPassword, u.User.String() + "@"}
-	if pw, _ := u.User.Password(); len(pw) >= 8 {
-		secrets = append(secrets, pw)
+	c.checkLogs()
+}
+
+// What an operator does to an install: move it from SQLite onto Postgres and replicas,
+// change the session limits, replace the recovery key one replica at a time, and restore a
+// capsule. Each is done here to real processes, the last three while they serve.
+func TestServerProcessesThroughOperatorChanges(t *testing.T) {
+	c := newCluster(t)
+	var live []*process
+	var liveMu sync.Mutex
+	setLive := func(p ...*process) { liveMu.Lock(); live = p; liveMu.Unlock() }
+	c.loadBalancer(func() []*process { liveMu.Lock(); defer liveMu.Unlock(); return live })
+	oldKey, err := recoverykey.Generate()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, name := range []string{"secret.key", "encryption.key"} {
-		raw, _ := os.ReadFile(filepath.Join(c.secrets, name))
-		secrets = append(secrets, string(raw))
+	newKey, err := recoverykey.Generate()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, p := range c.procs {
-		out := p.log(t)
-		if strings.Contains(out, "DATA RACE") {
-			t.Fatalf("%s reported a data race:\n%s", p.name, out)
+	oldID, newID := oldKey.Public().ID(), newKey.Public().ID()
+	pin := func(key recoverykey.PrivateKey) map[string]any {
+		return map[string]any{"public_key": base64.StdEncoding.EncodeToString(key.Public().Bytes()), "threshold": 2, "total_shares": 3}
+	}
+	const pinPath, export = "/api/admin/backup/pin-key", "/api/admin/backup/export-capsule"
+
+	// A single instance on SQLite, with keys it generated itself, gains an administrator, an
+	// app and a session.
+	single := c.spawn("single", "KYIDENTITY_REPLICATED=", "KYIDENTITY_DATABASE_URL_FILE=", "KYIDENTITY_SECRET_KEY_FILE=",
+		"KYIDENTITY_ENCRYPTION_KEY_FILE=", "KYIDENTITY_RSA_KEY_PATH=", "KYIDENTITY_VAPID_KEY_PATH=")
+	c.waitReady(single)
+	setLive(single)
+	admin := newBrowser(t, "198.51.100.10")
+	admin.signIn(single.url, "", firstPassword)
+	admin.chooseFirstPassword(single.url, single.url)
+	newClient := func(base, name string) string {
+		t.Helper()
+		res := admin.do(base, "POST", "/api/admin/clients", map[string]any{"clientName": name, "clientType": "public", "redirectUris": []string{"https://app.example/cb"}}, admin.stepUp(base, "POST", "/api/admin/clients"), "")
+		made, _ := res.body["client"].(map[string]any)
+		id, _ := made["id"].(string)
+		if id == "" {
+			t.Fatalf("creating client %s at %s: %v", name, base, res)
 		}
-		for _, s := range secrets {
-			if strings.Contains(out, s) {
-				t.Fatalf("%s logged a secret", p.name)
+		return id
+	}
+	hasClient := func(base, id string) bool {
+		t.Helper()
+		res := admin.get(base, "/api/admin/clients")
+		if res.status != 200 {
+			t.Fatalf("clients at %s: %v", base, res)
+		}
+		return strings.Contains(string(res.raw), id)
+	}
+	firstApp := newClient(single.url, "From the SQLite days")
+	jwks := admin.get(single.url, "/.well-known/jwks.json")
+	if code := single.stop(t, syscall.SIGTERM); code != 0 {
+		t.Fatalf("single exited %d on SIGTERM", code)
+	}
+
+	// The move in docs/RUNNING.md: the four key files into the Secret unchanged, the rows
+	// into Postgres, then two replicas. The session, the app and the signing key carry over.
+	for _, name := range []string{"secret.key", "encryption.key", "jwt_rs256.key", "push-vapid-private.key"} {
+		raw, err := os.ReadFile(filepath.Join(single.dataDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(c.secrets, name), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out := c.command("", "migrate-to-postgres", "-from", filepath.Join(single.dataDir, "kyidentity.db")); !strings.Contains(out, "row count matches") {
+		t.Fatalf("migrate-to-postgres: %s", out)
+	}
+	a := c.spawn("a", "KYIDENTITY_RECOVERY_KEY_ID="+oldID)
+	b := c.spawn("b", "KYIDENTITY_RECOVERY_KEY_ID="+oldID)
+	c.waitReady(a)
+	c.waitReady(b)
+	setLive(a, b)
+	both := []*process{a, b}
+	for _, p := range both {
+		if me := admin.get(p.url, "/api/auth/me"); me.status != 200 {
+			t.Fatalf("%s refuses the session from before the move: %v", p.name, me)
+		}
+		if !hasClient(p.url, firstApp) {
+			t.Fatalf("%s lost the app in the move", p.name)
+		}
+		if got := admin.get(p.url, "/.well-known/jwks.json"); got.status != 200 || !bytes.Equal(got.raw, jwks.raw) {
+			t.Fatalf("%s signs with another key after the move:\n%s\n%s", p.name, jwks.raw, got.raw)
+		}
+	}
+	newBrowser(t, "198.51.100.11").signIn(c.issuer, "")
+
+	// Session limits changed on A are the limits on B within five seconds, with no restart.
+	const limitsPath = "/api/admin/session-settings"
+	limits := map[string]any{"absolute": 7200, "idle": 600}
+	if was := admin.get(b.url, limitsPath); was.status != 200 || was.body["idle"] == float64(600) {
+		t.Fatalf("limits on b before the change: %v", was)
+	}
+	if res := admin.do(a.url, "PUT", limitsPath, limits, admin.stepUp(b.url, "PUT", limitsPath), ""); res.status != 200 {
+		t.Fatalf("changing the session limits: %v", res)
+	}
+	changed := time.Now()
+	for admin.get(b.url, limitsPath).body["idle"] != float64(600) {
+		if time.Since(changed) > 7*time.Second {
+			t.Fatalf("b still applies the old session limits %v after the change on a", time.Since(changed))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// The recovery key, pinned and in use.
+	status := func(p *process) map[string]any { return admin.get(p.url, "/api/admin/backup/status").body }
+	deposit := func(p *process) reply { return admin.do(p.url, "POST", "/api/admin/backup/deposit", nil, nil, "") }
+	sealsTo := func(p *process, id string) {
+		t.Helper()
+		if st := status(p); st["key_pinned"] != true || st["recovery_key_id"] != id {
+			t.Fatalf("%s does not hold key %s: %v", p.name, id, st)
+		}
+		// Another backup may be running (the schedule, or the other server): ask again.
+		res := deposit(p)
+		for wait := time.Now(); res.status == 409 && time.Since(wait) < 30*time.Second; res = deposit(p) {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if res.status != 200 || !strings.Contains(string(res.raw), id) {
+			t.Fatalf("Back up now on %s, want a capsule sealed to %s: %v", p.name, id, res)
+		}
+	}
+	// refuses: p reports no usable key, Back up now and export seal nothing, and no capsule
+	// is written there, by a request or by the schedule.
+	refuses := func(p *process, why string) {
+		t.Helper()
+		had := capsules(t, p)
+		if st := status(p); st["key_pinned"] == true || st["recovery_key_error"] == nil {
+			t.Fatalf("%s: %s reports a usable key: %v", why, p.name, st)
+		}
+		if res := deposit(p); res.status/100 == 2 {
+			t.Fatalf("%s: Back up now on %s: %v", why, p.name, res)
+		}
+		other := a
+		if p == a {
+			other = b
+		}
+		if res := admin.do(p.url, "GET", export, nil, admin.stepUp(other.url, "GET", export), ""); res.status/100 == 2 {
+			t.Fatalf("%s: %s exported a capsule sealed to %q", why, p.name, res.header.Get("X-Recovery-Key-ID"))
+		}
+		if n := capsules(t, p); n != had {
+			t.Fatalf("%s: %s wrote %d capsules", why, p.name, n-had)
+		}
+	}
+	if res := admin.do(a.url, "POST", pinPath, pin(oldKey), admin.stepUp(b.url, "POST", pinPath), ""); res.status != 200 {
+		t.Fatalf("pin: %v", res)
+	}
+	sealsTo(a, oldID)
+	sealsTo(b, oldID)
+
+	// Replacing it. The new ID is rolled out first, one replica at a time, each keeping its
+	// data directory and so the old recovery.pub. A replica that names the new key seals
+	// nothing until that key is pinned; one that still names the old key goes on as before.
+	roll := func(p *process) {
+		t.Helper()
+		if code := p.stop(t, syscall.SIGTERM); code != 0 {
+			t.Fatalf("%s exited %d on SIGTERM", p.name, code)
+		}
+		p.env = append(p.env, "KYIDENTITY_RECOVERY_KEY_ID="+newID)
+		c.start(p)
+		c.waitReady(p)
+	}
+	setLive(b)
+	roll(a)
+	setLive(a, b)
+	refuses(a, "new ID, old key still pinned")
+	sealsTo(b, oldID)
+	if me := admin.get(a.url, "/api/auth/me"); me.status != 200 {
+		t.Fatalf("the roll ended the administrator's session: %v", me)
+	}
+	setLive(a)
+	roll(b)
+	setLive(a, b)
+	refuses(b, "new ID, old key still pinned")
+
+	// The new key cannot be pinned over the old pin.
+	if res := admin.do(a.url, "POST", pinPath, pin(newKey), admin.stepUp(b.url, "POST", pinPath), ""); res.status != 409 {
+		t.Fatalf("pinning a second key over the first: %v", res)
+	}
+	// Clear the pin by hand, as the documentation says: the four settings, and recovery.pub
+	// on the server that will pin. B keeps its old recovery.pub.
+	db, err := store.NewPostgres(c.databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, key := range []string{"kyrecovery_key_id", "kyrecovery_threshold", "kyrecovery_total_shares", "kyrecovery_public_key"} {
+		if err := db.DeleteSetting(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Even with the pin gone, the old key cannot come back: both replicas name the new one.
+	if res := admin.do(b.url, "POST", pinPath, pin(oldKey), admin.stepUp(a.url, "POST", pinPath), ""); res.status != 409 {
+		t.Fatalf("a replica that names the new key pinned the old one: %v", res)
+	}
+	if res := admin.do(a.url, "POST", pinPath, pin(newKey), admin.stepUp(b.url, "POST", pinPath), ""); res.status != 409 {
+		t.Fatalf("a pinned over the old recovery.pub it still holds: %v", res)
+	}
+	if err := os.Remove(filepath.Join(a.dataDir, "recovery.pub")); err != nil {
+		t.Fatal(err)
+	}
+	if res := admin.do(a.url, "POST", pinPath, pin(newKey), admin.stepUp(b.url, "POST", pinPath), ""); res.status != 200 {
+		t.Fatalf("pinning the new key: %v", res)
+	}
+	sealsTo(a, newID)
+	refuses(b, "old recovery.pub, new key pinned")
+	if err := os.Remove(filepath.Join(b.dataDir, "recovery.pub")); err != nil {
+		t.Fatal(err)
+	}
+	sealsTo(b, newID)
+
+	// A capsule is taken, and then the install changes: a second app, and a new sign-in.
+	capsule := admin.do(b.url, "GET", export, nil, admin.stepUp(a.url, "GET", export), "")
+	if capsule.status != 200 || capsule.header.Get("X-Recovery-Key-ID") != newID {
+		t.Fatalf("export: %d, sealed to %q", capsule.status, capsule.header.Get("X-Recovery-Key-ID"))
+	}
+	capsulePath := filepath.Join(c.dir, "restore.kycap")
+	if err := os.WriteFile(capsulePath, capsule.raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	laterApp := newClient(a.url, "After the capsule")
+	later := newBrowser(t, "198.51.100.12")
+	later.signIn(b.url, "")
+
+	// The capsule is restored over the database while both replicas serve. They keep
+	// serving; what the capsule held is back, what came later is gone, and no session from
+	// before the restore, in the capsule or not, is a session any more.
+	split, err := recoverykey.Split(newKey, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.command(split[0].String()+"\n"+split[2].String()+"\n", "restore", "-capsule", capsulePath, "-to", filepath.Join(c.dir, "restored"),
+		"-expect-digest", sha256Hex(capsule.raw), "-replace-database")
+	for _, p := range both {
+		if res, err := http.Get(p.url + "/readyz"); err != nil || res.StatusCode != 200 {
+			t.Fatalf("%s is not ready after the restore: %v %v", p.name, res, err)
+		}
+		for who, session := range map[string]*browser{"from the capsule": admin, "made after the capsule": later} {
+			if me := session.get(p.url, "/api/auth/me"); me.status != 401 {
+				t.Fatalf("%s still honours a session %s: %v", p.name, who, me)
 			}
 		}
 	}
+	admin.signIn(a.url, b.url)
+	for _, p := range both {
+		if !hasClient(p.url, firstApp) || hasClient(p.url, laterApp) {
+			t.Fatalf("%s after the restore: first app %v, later app %v", p.name, hasClient(p.url, firstApp), hasClient(p.url, laterApp))
+		}
+		if st := status(p); st["interval_sec"] != float64(0) || st["recovery_key_id"] != newID {
+			t.Fatalf("%s after the restore, want the schedule off and the new key: %v", p.name, st)
+		}
+		if got := admin.get(p.url, limitsPath); got.body["idle"] != float64(600) {
+			t.Fatalf("%s lost the session limits the capsule held: %v", p.name, got)
+		}
+	}
+	restored := admin.get(b.url, "/api/admin/audit-events?action=system.restored")
+	if events, _ := restored.body["auditEvents"].([]any); restored.status != 200 || len(events) != 1 {
+		t.Fatalf("restores recorded: %v", restored)
+	}
+
+	for _, p := range both {
+		if code := p.stop(t, syscall.SIGTERM); code != 0 {
+			t.Fatalf("%s exited %d on SIGTERM", p.name, code)
+		}
+	}
+	c.checkLogs()
+}
+
+// The database fails over between two real Postgres servers: the primary is killed and its
+// synchronous standby promoted. Both server processes notice, refuse to be ready meanwhile,
+// and carry on against the new primary with no restart and nothing lost. It starts its own
+// two Postgres containers from the image KYIDENTITY_TEST_FAILOVER_IMAGE names.
+func TestServerProcessesFollowAPostgresFailover(t *testing.T) {
+	image := os.Getenv("KYIDENTITY_TEST_FAILOVER_IMAGE")
+	if image == "" {
+		t.Skip("needs docker and KYIDENTITY_TEST_FAILOVER_IMAGE, a Postgres image")
+	}
+	docker := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("docker", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	raw := make([]byte, 4)
+	_, _ = rand.Read(raw)
+	network := "kyidentity-failover-" + hex.EncodeToString(raw)
+	primary, standby := network+"-primary", network+"-standby"
+	docker("network", "create", network)
+	t.Cleanup(func() {
+		for _, server := range []string{primary, standby} {
+			if out, _ := exec.Command("docker", "logs", "--tail", "40", server).CombinedOutput(); t.Failed() {
+				t.Logf("---- %s ----\n%s", server, out)
+			}
+		}
+		_ = exec.Command("docker", "rm", "-f", "-v", primary, standby).Run()
+		_ = exec.Command("docker", "network", "rm", network).Run()
+	})
+	const password = "failover-test-password"
+	sql := func(server, statement string) string {
+		t.Helper()
+		return docker("exec", "-u", "postgres", server, "psql", "-qAtX", "-v", "ON_ERROR_STOP=1", "-c", statement)
+	}
+	until := func(what string, limit time.Duration, ok func() bool) time.Duration {
+		t.Helper()
+		start := time.Now()
+		for !ok() {
+			if time.Since(start) > limit {
+				t.Fatalf("%s: not within %v", what, limit)
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		return time.Since(start)
+	}
+	accepts := func(server string) func() bool {
+		return func() bool {
+			return exec.Command("docker", "exec", "-u", "postgres", server, "psql", "-qAtX", "-c", "SELECT 1").Run() == nil
+		}
+	}
+	port := func(server string) string {
+		t.Helper()
+		_, p, err := net.SplitHostPort(docker("port", server, "5432/tcp"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	docker("run", "-d", "--name", primary, "--network", network, "-p", "127.0.0.1::5432", "-e", "POSTGRES_PASSWORD="+password, image)
+	// The image starts a temporary server to initialise, then the real one: wait for TCP.
+	until("the primary starts", time.Minute, func() bool {
+		return exec.Command("docker", "exec", primary, "pg_isready", "-h", "127.0.0.1", "-U", "postgres").Run() == nil
+	})
+	docker("exec", "-u", "postgres", primary, "sh", "-c", `echo "host replication all all scram-sha-256" >> "$PGDATA/pg_hba.conf"`)
+	sql(primary, "SELECT pg_reload_conf()")
+	sql(primary, "CREATE DATABASE kyidentity ENCODING 'UTF8' LOCALE 'C' TEMPLATE template0")
+	docker("run", "-d", "--name", standby, "--network", network, "-p", "127.0.0.1::5432", "--user", "postgres", "-e", "PGPASSWORD="+password,
+		"--entrypoint", "sh", image, "-c", `pg_basebackup -h `+primary+` -U postgres -D "$PGDATA" -R -X stream -c fast && chmod 700 "$PGDATA" && exec postgres`)
+	until("the standby streams", time.Minute, func() bool {
+		out, err := exec.Command("docker", "exec", "-u", "postgres", primary, "psql", "-qAtX", "-c", "SELECT count(*) FROM pg_stat_replication WHERE state='streaming'").Output()
+		return err == nil && strings.TrimSpace(string(out)) == "1"
+	})
+	// Synchronous: a commit the server acknowledged is on the standby, so the failover
+	// loses nothing. An asynchronous standby may be missing the last sign-out.
+	sql(primary, "ALTER SYSTEM SET synchronous_standby_names = '*'")
+	sql(primary, "SELECT pg_reload_conf()")
+	until("the standby is synchronous", time.Minute, func() bool {
+		return sql(primary, "SELECT count(*) FROM pg_stat_replication WHERE sync_state='sync'") == "1"
+	})
+
+	// One URL naming both servers.
+	c := newClusterOn(t, t.TempDir(), "postgres://postgres:"+password+"@127.0.0.1:"+port(primary)+",127.0.0.1:"+port(standby)+"/kyidentity?sslmode=disable")
+	var live []*process
+	var liveMu sync.Mutex
+	c.loadBalancer(func() []*process { liveMu.Lock(); defer liveMu.Unlock(); return live })
+	a, b := c.spawn("a"), c.spawn("b")
+	c.waitReady(a)
+	c.waitReady(b)
+	both := []*process{a, b}
+	liveMu.Lock()
+	live = both
+	liveMu.Unlock()
+	admin := newBrowser(t, "198.51.100.10")
+	admin.signIn(a.url, b.url, firstPassword)
+	admin.chooseFirstPassword(a.url, b.url)
+	gone := newBrowser(t, "198.51.100.11")
+	gone.signIn(b.url, "")
+	if res := gone.do(a.url, "POST", "/api/auth/logout", nil, nil, ""); res.status/100 != 2 {
+		t.Fatalf("sign-out: %v", res)
+	}
+	ready := func(p *process) bool {
+		res, err := http.Get(p.url + "/readyz")
+		if err != nil {
+			return false
+		}
+		_ = res.Body.Close()
+		return res.StatusCode == 200
+	}
+
+	// The primary dies. Neither server may say it is ready, and neither may exit.
+	docker("kill", primary)
+	for _, p := range both {
+		t.Logf("%s not ready %v after the primary died", p.name, until(p.name+" stops being ready", 30*time.Second, func() bool { return !ready(p) }))
+	}
+	if res := newBrowser(t, "198.51.100.12").do(a.url, "POST", "/api/auth/login", map[string]string{"username": "admin", "password": processPassword}, nil, ""); res.status/100 == 2 {
+		t.Fatalf("a sign-in succeeded with no database: %v", res)
+	}
+
+	// The standby is promoted. Both servers find it without a restart.
+	docker("exec", "-u", "postgres", standby, "sh", "-c", `pg_ctl promote -w -D "$PGDATA"`)
+	until("the standby accepts connections", time.Minute, accepts(standby))
+	for _, p := range both {
+		t.Logf("%s ready %v after the promotion", p.name, until(p.name+" is ready again", 60*time.Second, func() bool { return ready(p) }))
+		select {
+		case <-p.exited:
+			t.Fatalf("%s exited during the failover:\n%s", p.name, p.log(t))
+		default:
+		}
+	}
+	// What was committed before is there: the session, and the sign-out. New writes land.
+	for _, p := range both {
+		if me := admin.get(p.url, "/api/auth/me"); me.status != 200 {
+			t.Fatalf("%s lost the administrator's session in the failover: %v", p.name, me)
+		}
+		if me := gone.get(p.url, "/api/auth/me"); me.status != 401 {
+			t.Fatalf("%s honours a session that was signed out before the failover: %v", p.name, me)
+		}
+	}
+	client := map[string]any{"clientName": "After the failover", "clientType": "public", "redirectUris": []string{"https://app.example/cb"}}
+	if res := admin.do(b.url, "POST", "/api/admin/clients", client, admin.stepUp(a.url, "POST", "/api/admin/clients"), ""); res.status/100 != 2 {
+		t.Fatalf("a write after the failover: %v", res)
+	}
+	newBrowser(t, "198.51.100.13").signIn(c.issuer, "")
+	if sql(standby, "SELECT pg_is_in_recovery()") != "f" {
+		t.Fatal("the servers are being served by a standby")
+	}
+
+	for _, p := range both {
+		if code := p.stop(t, syscall.SIGTERM); code != 0 {
+			t.Fatalf("%s exited %d on SIGTERM", p.name, code)
+		}
+	}
+	c.checkLogs()
 }
 
 // A server that cannot reach its database says so and stops, without repeating the
