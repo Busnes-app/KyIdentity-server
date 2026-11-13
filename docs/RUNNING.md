@@ -163,6 +163,17 @@ follows a failover. `/readyz` fails while the database is unreachable or read-on
 recovers without a restart. Statements wait at most 5 s for a lock, and a transaction left
 idle for 30 s is ended by the server.
 
+For a primary with a standby, name both in the URL (`postgres://user:pw@db1:5432,db2:5432/kyidentity`)
+or use one address that always reaches the primary. Two rules keep a failover safe:
+
+- **Replicate synchronously** (`synchronous_standby_names` on the primary). A standby that
+  lags is missing the last writes when it is promoted, and here those writes include
+  sign-outs, password changes, disabled accounts and spent authorization codes: a session
+  that was ended would work again.
+- **A failed primary must not come back writable.** The server takes the first writable
+  host in the URL, so an old primary that restarts on its own would be used again, with
+  stale data. Whatever promotes the standby must also fence or rebuild the old primary.
+
 All writes are serialised: every write transaction takes one advisory lock, as SQLite lets
 one writer in at a time. Write throughput is therefore that of one connection, however many
 replicas run; reads are not affected.
@@ -271,10 +282,19 @@ These hold with or without the flag, because they cost a single instance nothing
   2. Take the key ID from KyRecovery. The backup page shows the ID it pinned; the two
      must be equal. Do not copy it from the server alone.
   3. Add the variable to the deployment and roll it out. It is not a secret.
-- Replacing the recovery key means clearing the pin by hand; no screen does it. Set the
-  variable to the new ID on every replica before pinning the new key. A replica still
-  holding the old `recovery.pub` refuses to back up until that file is removed; it never
-  seals to the old key.
+- Replacing the recovery key means clearing the pin by hand; no screen does it. The
+  replicas can keep serving:
+  1. Set the variable to the new ID on every replica and roll them. A replica that names
+     the new ID backs up to nothing until step 3; one not yet rolled still seals to the
+     old key.
+  2. Clear the old pin in the database:
+     ```sql
+     DELETE FROM system_settings WHERE key IN
+       ('kyrecovery_key_id', 'kyrecovery_threshold', 'kyrecovery_total_shares', 'kyrecovery_public_key');
+     ```
+  3. Remove `recovery.pub` from every replica's data directory that has one, then pin the
+     new key. A replica still holding the old `recovery.pub` refuses to pin and to back up
+     until that file is removed; it never seals to the old key.
 - A scheduled backup that finds a pinned key it cannot load is recorded as a failed
   `admin.backup_run`; it is never skipped quietly.
 
