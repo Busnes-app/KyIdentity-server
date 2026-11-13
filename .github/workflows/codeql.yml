@@ -3,8 +3,10 @@ name: CodeQL
 on:
   push:
     branches: [master]
+  # Every pull request, whatever its base: a stacked PR opened against another branch and
+  # then retargeted to master gets no new pull_request run, so a master-only filter let it
+  # merge without a CodeQL check on its head (#224). Matches ci.yml.
   pull_request:
-    branches: [master]
   schedule:
     - cron: "23 6 * * 1"
 

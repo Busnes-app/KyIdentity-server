@@ -26,6 +26,9 @@
 - Admin tables fit the content area at desktop widths (1280–1920 px) with no horizontal scroll. **OAuth clients** shows each client's first redirect URI on one truncated line, with "+N more" and every URI in its tooltip (the full list stays under Manage), and a long monospace client ID such as a UUID breaks at its hyphens. **Suite sync** has fixed Name, Type, Destination URL (truncated, full value in the tooltip), Sync status and Last synced (date over time) columns. All its row actions, including Connection settings, sit in one ⋯ menu per row, as on OAuth clients, Groups and Users. On phones both tables become labelled blocks. No API change.
 - **Inbound SCIM**: the new-connector form has card padding, the label above, and the field and **Connect** aligned on one row. The setup disclosure is padded the same way. A disabled primary button keeps its outline and a neutral fill (ky-ui's disabled page action), so it still reads as a button.
 
+- Dependencies: `golang.org/x/crypto` 0.59.0, clearing OSV report GO-2026-5932 (the unmaintained `x/crypto/openpgp` package, which KyIdentity never imports; it uses only `argon2`). This raises `golang.org/x/sync` to 0.25.0, `golang.org/x/sys` to 0.50.0 and `golang.org/x/text` to 0.44.0.
+- CodeQL runs on every pull request, including one opened against another branch and later retargeted to `master`.
+
 ## 0.6.0 — 2026-11-02
 
 ### Changes
