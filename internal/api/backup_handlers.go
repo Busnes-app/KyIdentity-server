@@ -188,7 +188,7 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 	adminID, adminUsername := h.actor(r)
 	key, err := backup.LoadRecoveryKey(h.cfg, h.store)
 	if errors.Is(err, backup.ErrNotPaired) {
-		writeError(w, http.StatusPreconditionFailed, "Not paired with KyRecovery; no recovery key to seal to")
+		writeError(w, http.StatusPreconditionFailed, h.noKey("Not paired with KyRecovery; no recovery key to seal to"))
 		return
 	}
 	if errors.Is(err, backup.ErrRecoveryKeyMismatch) {
@@ -232,6 +232,15 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Capsule-Digest", digest)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
+}
+
+// noKey is what to say when no key loads: unpaired, unless a key is pinned and only this
+// server lacks it, as a replica whose configuration does not name the key does.
+func (h *BackupHandler) noKey(unpaired string) string {
+	if backup.KeyPinned(h.store) {
+		return keyFileMissing
+	}
+	return unpaired
 }
 
 type RemotePairRequest struct {
@@ -351,7 +360,7 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, backup.ErrKeyPinMissing):
 			writeError(w, http.StatusPreconditionFailed, "Paired with KyRecovery but the recovery public key is missing or does not match the pin; restore recovery.pub or re-pair")
 		case errors.Is(err, backup.ErrNotPaired):
-			writeError(w, http.StatusPreconditionFailed, "No recovery key: pair with KyRecovery or pin the suite recovery key first")
+			writeError(w, http.StatusPreconditionFailed, h.noKey("No recovery key: pair with KyRecovery or pin the suite recovery key first"))
 		case errors.Is(err, backup.ErrNoDestination):
 			writeError(w, http.StatusPreconditionFailed, "Nowhere to put a capsule: pair with KyRecovery or set KYIDENTITY_BACKUP_DIR")
 		case errors.Is(err, backup.ErrRecoveryKeyMismatch):
@@ -404,6 +413,8 @@ func (h *BackupHandler) Unpair(w http.ResponseWriter, r *http.Request) {
 	unpaired.Committed()
 	writeJSON(w, http.StatusOK, map[string]any{"paired": false})
 }
+
+const keyFileMissing = "a recovery key is pinned, but recovery.pub is missing; restore it, pin the key again, or name the key in KYIDENTITY_RECOVERY_KEY_ID"
 
 type PinKeyRequest struct {
 	PublicKey   string `json:"public_key"`
@@ -529,7 +540,7 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	} else if backup.HasPairing(h.store) {
 		out["recovery_key_error"] = "paired, but recovery.pub is missing; restore it or re-pair"
 	} else if backup.KeyPinned(h.store) {
-		out["recovery_key_error"] = "a recovery key is pinned, but recovery.pub is missing; restore it, pin the key again, or name the key in KYIDENTITY_RECOVERY_KEY_ID"
+		out["recovery_key_error"] = keyFileMissing
 	}
 	out["members"] = backup.Members(h.cfg)
 	if last, ok, err := backup.LastDeposit(h.store); err == nil && ok {
