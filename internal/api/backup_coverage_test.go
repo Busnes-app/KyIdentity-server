@@ -121,7 +121,7 @@ func TestBackupPairedButKeyFileMissing(t *testing.T) {
 		t.Fatalf("status: %v", st)
 	}
 	covBackupError(t, adminRequest(t, srv, "POST", "/api/admin/backup/deposit", cookie, ""), http.StatusPreconditionFailed, "recovery public key is missing")
-	covBackupError(t, adminRequest(t, srv, "GET", "/api/admin/backup/export-capsule", cookie, ""), http.StatusPreconditionFailed, "Not paired")
+	covBackupError(t, adminRequest(t, srv, "GET", "/api/admin/backup/export-capsule", cookie, ""), http.StatusPreconditionFailed, "name the key in KYIDENTITY_RECOVERY_KEY_ID")
 	if fake.got != nil {
 		t.Fatal("a capsule reached KyRecovery without its pinned key file")
 	}
