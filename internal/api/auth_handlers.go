@@ -99,11 +99,24 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Unknown, inactive and locked accounts answer exactly as a wrong password does, after
 	// the same Argon2 cost; anything else enumerates accounts or reveals a lockout. Audit
-	// records keep the real reason.
-	reason, err := h.loginRefusal(user, h.middleware.rateLimitIP(r))
+	// records keep the real reason. The attempt is reserved against the account's counter
+	// before the password is checked, so concurrent guesses cannot all pass a lockout none
+	// of them has filled yet; a correct password or an unchecked one hands it back.
+	source := h.middleware.rateLimitIP(r)
+	reason, err := h.loginRefusal(user, source)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
+	}
+	attempts := 0
+	if reason == "" {
+		if attempts, err = h.store.ReserveFailedLogin(user.ID, source); err != nil {
+			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+			return
+		}
+		if attempts == 0 {
+			reason = "account_locked"
+		}
 	}
 	if reason != "" {
 		if argonBusy(w, auth.DummyVerify(req.Password)) {
@@ -119,11 +132,15 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	validPass, err := auth.VerifyPassword(req.Password, user.PasswordHash)
+	if errors.Is(err, auth.ErrBusy) || (err == nil && validPass) {
+		if rerr := h.store.ReleaseFailedLogin(user.ID, source); rerr != nil {
+			log.Printf("releasing a sign-in attempt for %s: %v", user.ID, rerr)
+		}
+	}
 	if argonBusy(w, err) {
 		return
 	}
 	if err != nil || !validPass {
-		attempts, _ := h.store.RecordFailedLogin(user.ID, h.middleware.rateLimitIP(r))
 		h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure",
 			map[string]any{"reason": "invalid_password", "consecutiveFailures": attempts})
 		http.Error(w, invalidCredentials, http.StatusUnauthorized)
@@ -414,25 +431,59 @@ func (h *AuthHandler) resolveMFAToken(w http.ResponseWriter, r *http.Request, ra
 	return token, user, true
 }
 
-// reserveMFAAttempt spends one of the token's attempts before its proof is checked.
-func (h *AuthHandler) reserveMFAAttempt(w http.ResponseWriter, token *store.MFAToken) (int, bool) {
+// factorAttempt is one second-factor proof reserved against its token and its account.
+type factorAttempt struct {
+	h        *AuthHandler
+	userID   string
+	attempts int // the token's, including this one
+	failures int // the account's second-factor failures, including this one
+	failed   bool
+	settled  bool
+}
+
+// settle hands the account reservation back unless the proof failed. Call it as soon as a
+// proof succeeds, and defer it so an internal error never counts as a guess.
+func (a *factorAttempt) settle() {
+	if a.failed || a.settled {
+		return
+	}
+	a.settled = true
+	if err := a.h.store.ReleaseFailedLogin(a.userID, ""); err != nil {
+		log.Printf("releasing a second-factor attempt for %s: %v", a.userID, err)
+	}
+}
+
+// reserveMFAAttempt spends one of the token's attempts, and reserves one of the account's
+// second-factor failures, before the proof is checked. Both are single statements, so
+// concurrent proofs over many tokens cannot outrun the account lockout.
+func (h *AuthHandler) reserveMFAAttempt(w http.ResponseWriter, token *store.MFAToken, user *store.User) (*factorAttempt, bool) {
 	attempts, err := h.mfaEngine.ReserveMFAAttempt(token.ID)
 	if errors.Is(err, mfa.ErrMFAAttemptsExhausted) {
 		http.Error(w, `{"error":"invalid_mfa_token","error_description":"Second-factor token is invalid or expired"}`, http.StatusUnauthorized)
-		return 0, false
+		return nil, false
 	}
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return 0, false
+		return nil, false
 	}
-	return attempts, true
+	failures, err := h.store.ReserveFailedLogin(user.ID, "")
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return nil, false
+	}
+	if failures == 0 {
+		http.Error(w, `{"error":"account_locked","error_description":"Too many failed attempts. Try again later."}`, http.StatusTooManyRequests)
+		return nil, false
+	}
+	return &factorAttempt{h: h, userID: user.ID, attempts: attempts, failures: failures}, true
 }
 
-// mfaFailure also counts a rejected login second factor against the account from every
+// mfaFailure keeps a rejected login second factor counted against the account from every
 // address, so lockout sees guesses spread over fresh logins and addresses made with a
 // known password.
-func (h *AuthHandler) mfaFailure(w http.ResponseWriter, r *http.Request, user *store.User, action string, details map[string]any, status int, body string) {
-	details["consecutiveFailures"], _ = h.store.RecordFailedLogin(user.ID, "")
+func (h *AuthHandler) mfaFailure(w http.ResponseWriter, r *http.Request, user *store.User, att *factorAttempt, action string, details map[string]any, status int, body string) {
+	att.failed = true
+	details["attempts"], details["consecutiveFailures"] = att.attempts, att.failures
 	h.audit.Observe(action, user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", details)
 	http.Error(w, body, status)
 }
@@ -515,16 +566,18 @@ func (h *AuthHandler) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attempts, ok := h.reserveMFAAttempt(w, token)
+	att, ok := h.reserveMFAAttempt(w, token, user)
 	if !ok {
 		return
 	}
+	defer att.settle()
 	valid, err := h.mfaEngine.VerifyUserTOTP(user.ID, req.Code)
 	if err != nil || !valid {
-		h.mfaFailure(w, r, user, "auth.mfa_totp", map[string]any{"attempts": attempts},
+		h.mfaFailure(w, r, user, att, "auth.mfa_totp", map[string]any{},
 			http.StatusUnauthorized, `{"error":"invalid_totp_code","error_description":"Invalid 6-digit TOTP code"}`)
 		return
 	}
+	att.settle()
 
 	factorAt := time.Now().UTC()
 	if !h.spendMFAToken(w, token) {
@@ -547,10 +600,11 @@ func (h *AuthHandler) VerifyRecoveryCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	attempts, ok := h.reserveMFAAttempt(w, token)
+	att, ok := h.reserveMFAAttempt(w, token, user)
 	if !ok {
 		return
 	}
+	defer att.settle()
 	consumed := h.audit.Prepare("auth.mfa_recovery_consumed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
 	valid, err := h.mfaEngine.VerifyAndConsumeRecoveryCode(user.ID, req.Code, consumed.Row)
 	if err != nil {
@@ -559,11 +613,12 @@ func (h *AuthHandler) VerifyRecoveryCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !valid {
-		h.mfaFailure(w, r, user, "auth.mfa_recovery", map[string]any{"attempts": attempts},
+		h.mfaFailure(w, r, user, att, "auth.mfa_recovery", map[string]any{},
 			http.StatusUnauthorized, `{"error":"invalid_recovery_code","error_description":"Invalid or already used recovery code"}`)
 		return
 	}
 	consumed.Committed()
+	att.settle()
 
 	factorAt := time.Now().UTC()
 	if !h.spendMFAToken(w, token) {

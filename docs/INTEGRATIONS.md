@@ -365,7 +365,8 @@ IPv6 clients share one rate-limit bucket per /64, since one subscriber usually h
 whole prefix; the audit log keeps the full address.
 
 **`RATE_LIMIT_EXEMPT_CIDRS` and Sign-in policies → Office networks list office networks**
-whose sign-ins skip the per-address sign-in and authorize limits; per-account lockouts,
+whose sign-in, authorize and second-factor requests share one 300-a-minute allowance per
+limit instead of the per-address limits, then meet those again; per-account lockouts,
 MFA and every other limit still apply. Empty by default; ranges broader than /16 or /48,
 loopback and invalid entries are refused. `GET`/`PUT /api/admin/rate-limit-networks`
 (administrators only, PUT step-up, body `{"networks":"203.0.113.0/24,2001:db8:1::/48"}`,

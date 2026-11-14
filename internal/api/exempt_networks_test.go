@@ -3,14 +3,17 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/config"
+	"github.com/Busnes-app/kyidentity-server/internal/mfa"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
@@ -329,4 +332,177 @@ func TestExemptNetworksAreAdminOnly(t *testing.T) {
 	if n, _ := db.RateLimitExemptNetworks(); n != "" {
 		t.Fatalf("a non-admin changed the list: %q", n)
 	}
+}
+
+// officeExempted is how many requests skipped a per-IP limit on srv's current list.
+func officeExempted(srv *Server) uint64 { return srv.middleware.exempt.Load().list.Exempted() }
+
+// A listed network spends one shared budget, then meets the per-IP limit again; a second
+// office address still has its own per-IP allowance after the first has spent its own.
+func TestOfficeBudgetIsSharedThenFallsBackToThePerIPLimit(t *testing.T) {
+	srv, _, _, _, _, cleanup := setupTestServerWith(t, withOffice)
+	defer cleanup()
+	freeze(srv)
+	malformed := func(peer string) int { // the limiter runs before the body is read
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader("{"))
+		req.RemoteAddr = peer + ":41000"
+		req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: "test-csrf"})
+		req.Header.Set("X-CSRF-Token", "test-csrf")
+		w := httptest.NewRecorder()
+		srv.httpServer.Handler.ServeHTTP(w, req)
+		if w.Code != http.StatusTooManyRequests && w.Code != http.StatusBadRequest {
+			t.Fatalf("malformed sign-in answered %d %s", w.Code, w.Body.String())
+		}
+		return w.Code
+	}
+	const first, second = "203.0.113.5", "203.0.113.6"
+	for n := range officeBudget {
+		peer := first
+		if n%2 == 1 {
+			peer = second
+		}
+		if code := malformed(peer); code == http.StatusTooManyRequests {
+			t.Fatalf("office request %d was throttled inside the office budget", n+1)
+		}
+	}
+	if got := officeExempted(srv); got != officeBudget {
+		t.Fatalf("exempted count %d, want %d", got, officeBudget)
+	}
+	for n := range 10 {
+		if code := malformed(first); code == http.StatusTooManyRequests {
+			t.Fatalf("first office address throttled at per-IP attempt %d", n+1)
+		}
+	}
+	if code := malformed(first); code != http.StatusTooManyRequests {
+		t.Fatalf("first office address past its budget and per-IP limit answered %d, want 429", code)
+	}
+	for n := range 10 {
+		if code := malformed(second); code == http.StatusTooManyRequests {
+			t.Fatalf("second office address throttled by the first one's per-IP window at %d", n+1)
+		}
+	}
+	if code := malformed(second); code != http.StatusTooManyRequests {
+		t.Fatalf("second office address answered %d past its per-IP limit, want 429", code)
+	}
+	if got := officeExempted(srv); got != officeBudget {
+		t.Fatalf("requests that met the per-IP limit were counted as exempted: %d", got)
+	}
+}
+
+// Replicas spend one office budget between them, as they do every shared bucket.
+func TestOfficeBudgetHoldsAcrossReplicas(t *testing.T) {
+	limiters := replicaLimiters(t, 3)
+	now := time.Now()
+	for _, m := range limiters {
+		m.now = func() time.Time { return now }
+		m.exemptEnv = officeRange
+		m.reloadExemptNetworks(true)
+	}
+	var wg sync.WaitGroup
+	for i, m := range limiters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h := m.RateLimitExemptible("login", 10, 0.2)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			for n := range officeBudget {
+				r := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+				r.RemoteAddr = fmt.Sprintf("203.0.113.%d:41000", 1+(i*officeBudget+n)%250)
+				h.ServeHTTP(httptest.NewRecorder(), r)
+			}
+		}()
+	}
+	wg.Wait()
+	var total uint64
+	for _, m := range limiters {
+		total += m.exempt.Load().list.Exempted()
+	}
+	if total != officeBudget {
+		t.Fatalf("%d replicas exempted %d requests between them, want one budget of %d", len(limiters), total, officeBudget)
+	}
+}
+
+// Concurrent wrong passwords at one account from an office address reach the password
+// check no more often than the account lockout allows: the attempt is reserved first.
+func TestConcurrentOfficeGuessesStayWithinTheAccountLockout(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServerWith(t, withOffice)
+	defer cleanup()
+	freeze(srv)
+	victim := newUser(t, db, "user")
+	for range 4 { // waves no wider than the Argon2 slots, so none is refused as busy
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if code := loginFrom(t, srv, officeIP, "", victim.Username, "wrong-password"); code != http.StatusUnauthorized {
+					t.Errorf("wrong password answered %d", code)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+	}
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var checked int
+	if err := raw.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action='auth.login' AND target_id='` + victim.ID + `' AND details_json LIKE '%invalid_password%'`).Scan(&checked); err != nil {
+		t.Fatal(err)
+	}
+	if checked != store.MaxFailedLogins {
+		t.Fatalf("%d concurrent guesses reached the password check, want exactly %d", checked, store.MaxFailedLogins)
+	}
+	if code := loginFrom(t, srv, officeIP, "", victim.Username, "correct-horse-battery"); code != http.StatusUnauthorized {
+		t.Fatalf("locked account signed in: %d", code)
+	}
+}
+
+// The second-factor step goes through the office budget too, and its per-account lockout is
+// reserved before each code is checked, so concurrent guesses over many tokens from an
+// office address check no more codes than the lockout allows.
+func TestConcurrentOfficeTOTPGuessesStayWithinTheAccountLockout(t *testing.T) {
+	f, cleanup := newStepUpFixture(t)
+	defer cleanup()
+	f.srv.middleware.exemptEnv = officeRange
+	f.srv.middleware.exempt.Store(nil) // reload skips an unchanged stored list
+	f.srv.middleware.reloadExemptNetworks(true)
+	enrolTOTP(t, f)
+	var tokens []string
+	for range 6 {
+		tokens = append(tokens, passwordLogin(t, f.srv, f.user.Username, f.pass))
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	start := make(chan struct{})
+	checked, throttled := 0, 0
+	for i := range len(tokens) * mfa.MaxMFAAttempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := anonPostFrom(t, f.srv, officeIP, "/api/auth/mfa/totp/verify", map[string]string{"mfaToken": tokens[i%len(tokens)], "code": "invalid"})
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case strings.Contains(rec.Body.String(), "invalid_totp_code"):
+				checked++
+			case strings.Contains(rec.Body.String(), "rate_limit_exceeded"):
+				throttled++
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if throttled != 0 {
+		t.Fatalf("%d second-factor requests from the office met the per-IP limit", throttled)
+	}
+	if checked != store.MaxFailedLogins {
+		t.Fatalf("%d concurrent codes were checked, want exactly the lockout's %d", checked, store.MaxFailedLogins)
+	}
+	assertLocked(t, f, true)
 }

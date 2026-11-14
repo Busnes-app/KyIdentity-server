@@ -1257,6 +1257,37 @@ func (s *Store) RecordFailedLogin(userID, source string) (int, error) {
 	return failures, err
 }
 
+// ReserveFailedLogin counts an attempt for userID from source before its proof is checked,
+// as RecordFailedLogin does, but only while that counter is under MaxFailedLogins; it
+// returns the new count, or 0 when the counter is already full. Check and count are one
+// statement, so concurrent attempts cannot all pass a limit none of them has filled yet.
+// An attempt that turns out not to be a failure hands its reservation back with
+// ReleaseFailedLogin.
+func (s *Store) ReserveFailedLogin(userID, source string) (int, error) {
+	now := time.Now().UTC()
+	cutoff := now.Add(-LockoutDuration)
+	var failures int
+	err := s.db.QueryRow(`
+		INSERT INTO login_failures (user_id, source, failures, last_failure_at)
+		VALUES (?, ?, 1, ?)
+		ON CONFLICT(user_id, source) DO UPDATE SET
+			failures = CASE WHEN login_failures.last_failure_at <= ? THEN 1 ELSE login_failures.failures + 1 END,
+			last_failure_at = excluded.last_failure_at
+		WHERE login_failures.last_failure_at <= ? OR login_failures.failures < ?
+		RETURNING failures`, userID, source, now, cutoff, cutoff, MaxFailedLogins).Scan(&failures)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return failures, err
+}
+
+// ReleaseFailedLogin hands back one attempt ReserveFailedLogin counted, for a proof that
+// succeeded or could not be checked.
+func (s *Store) ReleaseFailedLogin(userID, source string) error {
+	_, err := s.db.Exec(`UPDATE login_failures SET failures = failures - 1 WHERE user_id = ? AND source = ? AND failures > 0`, userID, source)
+	return err
+}
+
 // IsAccountLocked reports whether the account is locked for source: its failures from
 // that address, or its second-factor failures, have reached the limit inside the window.
 func (s *Store) IsAccountLocked(userID, source string) (bool, error) {
