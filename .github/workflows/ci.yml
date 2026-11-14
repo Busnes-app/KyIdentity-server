@@ -61,6 +61,7 @@ jobs:
           bad=$(printf '%s\n' "$certs" | grep -vxF -e "$ident" -e "$rident" || true); [ -z "$bad" ] || { echo "--cert-identity outside $ident and $rident:"; echo "$bad"; exit 1; }
           # README may only point at docs that exist
           (grep -ohE 'docs/[A-Za-z0-9._/-]+\.md' README.md || true) | sort -u | xargs -r -I{} test -f {}
+      - run: scripts/check-no-binaries.sh
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
