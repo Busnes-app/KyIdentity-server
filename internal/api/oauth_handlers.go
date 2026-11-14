@@ -134,7 +134,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	// Validate the callback before rate-limit errors enter the OIDC error channel.
 	// Keep shared limiter keys address-derived: rotating browser identities must
 	// neither reset the source allowance nor allocate additional buckets.
-	if !h.middleware.perIPExempt(r) && !h.middleware.allowRateLimit("authorize:ip:"+h.middleware.rateLimitIP(r), 300, 5) {
+	if !h.middleware.allowPerIP(r, "authorize:ip", 300, 5) {
 		redirectError(w, r, redirectURI, state, "temporarily_unavailable", "Too many authorization requests; try again shortly")
 		return
 	}

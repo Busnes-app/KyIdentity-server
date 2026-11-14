@@ -31,7 +31,7 @@ export function AdminOfficeNetworks() {
   finally { setBusy(false); }
  };
  return <div className="settings-section"><form className="modal-body" onSubmit={save}><h2>Office networks</h2>
-  <p>Sign-in is limited per network address. Staff in one office usually share one address and can trip that limit together. Networks listed here skip it; per-account lockouts and the second factor still apply.</p>
+  <p>Sign-in is limited per network address. Staff in one office usually share one address and can trip that limit together. Networks listed here share one allowance of 300 a minute instead, for sign-in and the second factor, and meet the per-address limit again once it is spent. Per-account lockouts and the second factor still apply.</p>
   {error && <div className="alert-box error" role="alert">{error}</div>}
   {message && <div className="alert-box success" role="status">{message}</div>}
   <div className="form-group"><label className="form-label" htmlFor="office-networks">Networks that skip the per-address limit, one per line</label>

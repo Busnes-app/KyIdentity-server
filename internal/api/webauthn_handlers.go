@@ -301,12 +301,13 @@ func (h *WebAuthnHandler) FinishLogin(w http.ResponseWriter, r *http.Request, au
 
 	// Every request past a resolved token spends one of its attempts, and every rejection
 	// counts against the account: this handler mints a session, so nothing gets free tries.
-	attempts, ok := auth.reserveMFAAttempt(w, token)
+	att, ok := auth.reserveMFAAttempt(w, token, user)
 	if !ok {
 		return
 	}
+	defer att.settle()
 	failed := func(status int, body, reason string) {
-		auth.mfaFailure(w, r, user, "auth.mfa_passkey", map[string]any{"reason": reason, "attempts": attempts}, status, body)
+		auth.mfaFailure(w, r, user, att, "auth.mfa_passkey", map[string]any{"reason": reason}, status, body)
 	}
 
 	authData, err1 := base64.RawURLEncoding.DecodeString(req.AuthenticatorData)
@@ -371,6 +372,7 @@ func (h *WebAuthnHandler) FinishLogin(w http.ResponseWriter, r *http.Request, au
 		failed(http.StatusUnauthorized, `{"error":"invalid_assertion","error_description":"Passkey verification failed"}`, "assertion_invalid")
 		return
 	}
+	att.settle()
 
 	factorAt := time.Now().UTC()
 	if !auth.spendMFAToken(w, token) {
