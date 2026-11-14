@@ -206,6 +206,7 @@ func (s *Server) routes() *http.ServeMux {
 	suiteH := &SuiteHandler{store: s.store, oauthEngine: s.oauthEngine, audit: s.audit, middleware: s.middleware, encryptionKey: s.cfg.EncryptionKey}
 	mux.Handle("GET /api/suite/apps", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Apps)))
 	mux.Handle("GET /api/suite/peer", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Peer)))
+	mux.Handle("GET /api/suite/people", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.People)))
 
 	// Organisation branding: public, because the sign-in page shows it (issue #145).
 	brandingH := &BrandingHandler{store: s.store, audit: s.audit, middleware: s.middleware}

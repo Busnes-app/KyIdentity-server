@@ -123,7 +123,7 @@ func suiteFixture(t *testing.T) (*Server, *store.Store, func()) {
 func TestSuiteAuthFailuresAreUniform(t *testing.T) {
 	srv, _, cleanup := suiteFixture(t)
 	defer cleanup()
-	for _, path := range []string{"/api/suite/apps", "/api/suite/peer?client=kypost"} {
+	for _, path := range []string{"/api/suite/apps", "/api/suite/peer?client=kypost", "/api/suite/people?sub=x&q=ab"} {
 		for name, cred := range map[string][2]string{
 			"none":            {"", ""},
 			"wrong secret":    {"kycalendar", "post-secret"},
@@ -291,7 +291,7 @@ func TestSuitePeerRefusals(t *testing.T) {
 	if code, body := suitePeer(t, srv, "KyCalendar", "case-secret", "kypost"); code != http.StatusNotFound || body["secret"] != "" {
 		t.Errorf("case-distinct caller: %d %v, want 404 without a secret", code, body)
 	}
-	for _, peer := range []string{"", "pub", "kycalendar", "devapp", "nobody", "KyPost"} {
+	for _, peer := range []string{"", "pub", "kycalendar", "devapp", "nobody", "KyPost", "kydrive", "kymessage", "KyMessage"} {
 		if code, body := suitePeer(t, srv, "kycalendar", "cal-secret", peer); code != http.StatusNotFound || body["error"] != "no_peer" {
 			t.Errorf("peer %q: %d %v, want 404 no_peer", peer, code, body)
 		}
@@ -458,5 +458,176 @@ func TestClientLauncherEditNameAndAudience(t *testing.T) {
 	}
 	if n := covAuditOutcomes(t, db, "admin.client_launcher_updated")["success"]; n != 3 {
 		t.Fatalf("launcher edits audited %d times, want 3", n)
+	}
+}
+
+func TestSuitePeerNewPairs(t *testing.T) {
+	srv, db, cleanup := suiteFixture(t)
+	defer cleanup()
+	createClient(t, db, "kydrive", "confidential", crypto.HashSHA256("drive-secret"), "", "https://drive.example.test/cb")
+	createClient(t, db, "kymessage", "confidential", crypto.HashSHA256("msg-secret"), "", "https://console.example.test/cb")
+	creds := map[string]string{"kycalendar": "cal-secret", "kypost": "post-secret", "kydrive": "drive-secret", "kymessage": "msg-secret"}
+	origin := map[string]string{"kycalendar": "https://cal.example.test", "kypost": "https://mail.example.test",
+		"kydrive": "https://drive.example.test", "kymessage": "https://console.example.test"}
+	key := srv.cfg.EncryptionKey
+	for _, pair := range [][2]string{{"kycalendar", "kymessage"}, {"kydrive", "kypost"}, {"kycalendar", "kypost"}} {
+		want := suitePeerSecret(key, pair[0], pair[1])
+		for _, d := range [][2]string{pair, {pair[1], pair[0]}} {
+			code, body := suitePeer(t, srv, d[0], creds[d[0]], d[1])
+			if code != http.StatusOK || body["client"] != d[1] || body["url"] != origin[d[1]] || body["secret"] != want {
+				t.Errorf("%s->%s: %d %v", d[0], d[1], code, body)
+			}
+		}
+	}
+	// Still unknown, though every client is registered.
+	for _, d := range [][2]string{{"kycalendar", "kydrive"}, {"kydrive", "kymessage"}, {"kymessage", "kypost"}, {"kydrive", "kydrive"}} {
+		for _, dir := range [][2]string{d, {d[1], d[0]}} {
+			if code, body := suitePeer(t, srv, dir[0], creds[dir[0]], dir[1]); code != http.StatusNotFound || body["error"] != "no_peer" || body["secret"] != "" {
+				t.Errorf("%s->%s: %d %v, want 404 no_peer", dir[0], dir[1], code, body)
+			}
+		}
+	}
+}
+
+// person creates an active user with the given name, username and email.
+func person(t *testing.T, db *store.Store, role, name, username, email string) *store.User {
+	t.Helper()
+	u := newUser(t, db, role)
+	if _, err := db.EditUser(u.ID, nil, func(row *store.User) (bool, error) {
+		row.DisplayName, row.Username, row.Email = name, username, email
+		return false, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
+func suitePeople(t *testing.T, srv *Server, query string) (int, []string) {
+	t.Helper()
+	rr := suiteGet(t, srv, "/api/suite/people?"+query, "kycalendar", "cal-secret")
+	if rr.Code != http.StatusOK {
+		return rr.Code, []string{strings.TrimSpace(rr.Body.String())}
+	}
+	var resp struct {
+		People []suitePerson `json:"people"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil || resp.People == nil {
+		t.Fatalf("people?%s body %s: %v", query, rr.Body.String(), err)
+	}
+	out := []string{}
+	for _, p := range resp.People {
+		out = append(out, p.Name+" <"+p.Email+">")
+	}
+	return rr.Code, out
+}
+
+func TestSuitePeople(t *testing.T) {
+	srv, db, cleanup := suiteFixture(t)
+	defer cleanup()
+	me := person(t, db, "user", "Me Myself", "me", "me@example.test")
+	alice := person(t, db, "user", "Alice Example", "alice", "alice@example.test")
+	bob := person(t, db, "user", "Bob Stone", "bstone", "robert@example.test")
+	noName := person(t, db, "user", "", "carl", "carl@example.test")
+	postOnly := person(t, db, "user", "Alina Post", "alina", "alina@example.test")
+	gone := person(t, db, "user", "Alix Gone", "alix", "alix@example.test")
+	admin := person(t, db, "admin", "Alice Admin", "aliceadmin", "admin@example.test")
+	for _, u := range []*store.User{me, alice, bob, noName, gone, admin} {
+		assignApp(t, db, "kycalendar", u.ID)
+	}
+	assignApp(t, db, "kypost", postOnly.ID)
+	if _, err := db.EditUser(gone.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	s := "sub=" + url.QueryEscape(me.ID)
+
+	for _, c := range []struct {
+		query string
+		want  []string
+	}{
+		{s + "&q=ali", []string{"Alice Example <alice@example.test>"}},
+		{s + "&q=ALI", []string{"Alice Example <alice@example.test>"}},
+		{s + "&q=exa", []string{"Alice Example <alice@example.test>"}},
+		{s + "&q=lice", []string{}},
+		{s + "&q=bst", []string{"Bob Stone <robert@example.test>"}},
+		{s + "&q=rob", []string{"Bob Stone <robert@example.test>"}},
+		{s + "&q=carl", []string{"carl <carl@example.test>"}},
+		{s + "&q=alice%40example", []string{"Alice Example <alice@example.test>"}},
+		{s + "&q=" + url.QueryEscape("a%"), []string{}},
+		{s + "&q=" + url.QueryEscape("_l"), []string{}},
+		{s + "&q=" + url.QueryEscape("%%"), []string{}},
+		{s + "&email=ALICE%40example.test&email=nobody%40example.test&email=alina%40example.test&email=admin%40example.test&email=alix%40example.test&email=robert%40example.test",
+			[]string{"Alice Example <alice@example.test>", "Bob Stone <robert@example.test>"}},
+		{s + "&email=alice%40example", []string{}},
+		{s + "&email=" + url.QueryEscape("alice@example.tes_"), []string{}},
+		// The user the caller acts for must be an active everyday user of the caller.
+		{"sub=" + postOnly.ID + "&q=ali", []string{}},
+		{"sub=" + admin.ID + "&q=ali", []string{}},
+		{"sub=" + gone.ID + "&q=ali", []string{}},
+		{"sub=nobody&q=ali", []string{}},
+	} {
+		if code, got := suitePeople(t, srv, c.query); code != http.StatusOK || fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("%s:\n got %d %q\nwant %q", c.query, code, got, c.want)
+		}
+	}
+
+	// Result caps: default 10, at most 20.
+	for i := 0; i < 25; i++ {
+		u := person(t, db, "user", fmt.Sprintf("Zed %02d", i), fmt.Sprintf("zed%02d", i), fmt.Sprintf("zed%02d@example.test", i))
+		assignApp(t, db, "kycalendar", u.ID)
+	}
+	for limit, want := range map[string]int{"": 10, "&limit=1": 1, "&limit=20": 20} {
+		if _, got := suitePeople(t, srv, s+"&q=zed"+limit); len(got) != want || got[0] != "Zed 00 <zed00@example.test>" {
+			t.Errorf("limit %q: %d people, want %d", limit, len(got), want)
+		}
+	}
+	many := s
+	for i := 0; i < 100; i++ {
+		many += fmt.Sprintf("&email=zed%02d%%40example.test", i)
+	}
+	if _, got := suitePeople(t, srv, many); len(got) != 25 {
+		t.Errorf("100 addresses resolved %d people, want 25", len(got))
+	}
+
+	for _, bad := range []string{
+		"q=ali", "sub=&q=ali", s, s + "&q=ali&email=alice%40example.test", s + "&q=a", s + "&q=",
+		s + "&q=" + strings.Repeat("a", 65), s + "&q=%ff%fe", s + "&q=ali&limit=0", s + "&q=ali&limit=21",
+		s + "&q=ali&limit=x", s + "&q=ali&limit=", s + "&email=", s + "&email=alice%40example.test&limit=5",
+		s + "&email=" + strings.Repeat("a", 250) + "%40x.test", many + "&email=one%40more.test",
+	} {
+		if code, got := suitePeople(t, srv, bad); code != http.StatusBadRequest || got[0] != `{"error":"invalid_request"}` {
+			t.Errorf("%.80s: %d %q, want 400 invalid_request", bad, code, got)
+		}
+	}
+	if code, got := suitePeople(t, srv, s+"&q="+url.QueryEscape(strings.Repeat("é", 64))); code != http.StatusOK || len(got) != 0 {
+		t.Errorf("64 two-byte characters: %d %q", code, got)
+	}
+
+	for name, cred := range map[string][2]string{"none": {"", ""}, "wrong": {"kycalendar", "post-secret"}, "public": {"pub", ""}, "disabled": {"off", "off-secret"}} {
+		rr := suiteGet(t, srv, "/api/suite/people?"+s+"&q=ali", cred[0], cred[1])
+		if rr.Code != http.StatusUnauthorized || strings.TrimSpace(rr.Body.String()) != `{"error":"invalid_client"}` {
+			t.Errorf("%s credentials: %d %s", name, rr.Code, rr.Body.String())
+		}
+	}
+	// Another caller sees only its own users.
+	rr := suiteGet(t, srv, "/api/suite/people?sub="+postOnly.ID+"&q=ali", "kypost", "post-secret")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "alina@example.test") || strings.Contains(rr.Body.String(), "alice@") {
+		t.Errorf("kypost caller: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSuitePeopleRateLimitedPerClient(t *testing.T) {
+	srv, _, cleanup := suiteFixture(t)
+	defer cleanup()
+	limited := false
+	for i := 0; i < 200 && !limited; i++ {
+		req := httptest.NewRequest("GET", "/api/suite/people?sub=x&q=ab", nil)
+		req.RemoteAddr = fmt.Sprintf("198.51.100.%d:1234", i)
+		req.SetBasicAuth("kycalendar", "cal-secret")
+		rr := httptest.NewRecorder()
+		srv.httpServer.Handler.ServeHTTP(rr, req)
+		limited = rr.Code == http.StatusTooManyRequests
+	}
+	if !limited {
+		t.Fatal("people was never rate limited per client")
 	}
 }

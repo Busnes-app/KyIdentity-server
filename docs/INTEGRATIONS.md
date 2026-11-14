@@ -21,6 +21,9 @@ injected authorization code (RFC 9700). A code stored without a challenge never 
 **Clients are confidential by default.** Registration issues a client secret unless
 `"clientType":"public"` is passed explicitly. A suite server such as KyPost, KyDNS, KyNotes or KyCalendar can hold a secret, so it
 should be confidential; `public` exists for SPAs and native apps that genuinely cannot.
+The admin API refuses to register or switch these client IDs to public: `kypost`,
+`kycalendar`, `kydrive`, `kymessage`, `kydns`, `kypasswords`, `kynotes`, `kybookmarks`
+(`suiteClientIDs`). The suite directory needs their secret.
 A confidential client with an empty `client_secret_hash` is rejected rather than
 authenticated by existing.
 
@@ -32,8 +35,10 @@ integration it is meant to secure, which guarantees nobody ever does it.
 
 **The suite directory** lets suite servers find each other with their own client
 credentials: `GET /api/suite/apps` lists the apps a user may open (for an app switcher)
-and `GET /api/suite/peer` gives a paired app (KyCalendar and KyPost) its peer's URL and a
-derived shared secret. Contract: [SUITE-DIRECTORY.md](SUITE-DIRECTORY.md).
+, `GET /api/suite/people` searches or resolves the organisation's people the calling app may
+offer (for a people picker), and `GET /api/suite/peer` gives a paired app (KyCalendar and
+KyPost, KyCalendar and KyMessages, KyDrive and KyPost) its peer's URL and a derived shared
+secret. Contract: [SUITE-DIRECTORY.md](SUITE-DIRECTORY.md).
 
 **Access tokens live 15 minutes** and carry a `jti` recorded server-side.
 `POST /oauth/revoke` (RFC 7009, client authentication required) invalidates one;
