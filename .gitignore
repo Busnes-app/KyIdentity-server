@@ -3,6 +3,7 @@
 /kyidentity.exe
 /kysignon
 /kysignon.exe
+/kyidentity-server
 *.exe
 
 # Database and Secrets

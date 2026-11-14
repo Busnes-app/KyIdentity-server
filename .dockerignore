@@ -2,6 +2,7 @@
 data/
 web/node_modules/
 /kyidentity
+/kyidentity-server
 *.key
 *.db
 *.db-wal
