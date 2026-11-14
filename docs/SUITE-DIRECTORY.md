@@ -1,8 +1,10 @@
 # Suite directory
 
 KyIdentity tells suite apps about each other, so cross-app features work without an
-operator copying URLs or secrets between servers. Two read-only service endpoints, called
-server to server by a registered app with its own OAuth client credentials.
+operator copying URLs or secrets between servers. Three read-only service endpoints, called
+server to server by a registered app with its own OAuth client credentials. The people route
+is contract A2 of the wave-1 suite integrations (`ky-redesign/integrations/suite-integrations-contracts.md`);
+this file is the durable copy.
 
 ## Authentication
 
@@ -34,12 +36,40 @@ The suite apps a person can open, for an app switcher.
 launch URL, or its redirect origin plus its SSO start path, so following it signs the user
 in through their KyIdentity session without a second login.
 
+## `GET /api/suite/people`
+
+The organisation's people the calling app may offer a signed-in user, for a people picker
+or to resolve addresses. Same authentication, rate limit and `no-store` as the app list.
+
+- `sub` (required): the signed-in user the calling app is acting for. If that user is not
+  an active everyday account that may open the calling app, the answer is an empty list.
+- Exactly one of:
+  - `q`: 2 to 64 characters. Case-insensitive (ASCII) match: a word of the display name
+    starts with `q`, or the username or email does. `limit` 1 to 20, default 10.
+  - `email`: repeated, 1 to 100 exact addresses (each at most 254 bytes), case-insensitive.
+    Unmatched addresses are simply absent. `limit` is refused here.
+- Result set: active users who may open the calling app (the same access rule as OAuth
+  issuance, `effective_app_access`), with an email address. Dedicated administrator
+  accounts (role `admin`) are never listed and get an empty list as `sub`; delegated
+  administrators are everyday accounts and are listed. Pending invitations are left out.
+  Ordered by display name. `name` is the display name, or the username when it is empty.
+
+```json
+{"people": [{"sub": "…", "name": "Alice Example", "email": "alice@example.com"}]}
+```
+
+`400 {"error":"invalid_request"}` for a missing `sub`, both or neither of `q`/`email`, or
+out-of-range values. No photo field exists yet. Lookups are not audited (like the app list);
+nothing is logged about the query.
+
 ## `GET /api/suite/peer`
 
 Connection details for a paired suite integration.
 
 - `client` (required): the peer's client ID.
-- Only for pairs KyIdentity knows: `kycalendar` and `kypost`. Any other pair, a disabled or
+- Only for pairs KyIdentity knows: `kycalendar` and `kypost` (mail and calendar),
+  `kycalendar` and `kymessage` (video meetings), `kydrive` and `kypost` (mail files). Exact,
+  case-sensitive client IDs, either side asking. Any other pair, a disabled or
   missing peer, or a peer with no HTTPS redirect origin is `404 {"error":"no_peer"}`.
 
 ```json

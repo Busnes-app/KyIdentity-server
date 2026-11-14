@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ClientName, ClientRowActions, launcherChanges } from './AdminClients';
+import { ClientName, ClientRowActions, isSuiteClient, launcherChanges } from './AdminClients';
 import type { OAuthClient } from '../types';
 
 const client: OAuthClient = {
@@ -43,5 +43,12 @@ describe('launcherChanges', () => {
     expect(launcherChanges(client, 'Console', 'everyone')).toEqual({ launcherName: 'Console' });
     expect(launcherChanges(client, '', 'admins')).toEqual({ launcherAudience: 'admins' });
     expect(launcherChanges({ ...client, launcherName: 'Chat' }, '  ', 'everyone')).toEqual({ launcherName: '' });
+  });
+});
+
+describe('isSuiteClient', () => {
+  it('locks the suite servers to confidential, as the server does', () => {
+    for (const id of ['kypost', 'KyCalendar', ' kydrive ', 'kymessage']) expect(isSuiteClient(id)).toBe(true);
+    for (const id of ['kymessage-chat', 'kymessages', 'pub']) expect(isSuiteClient(id)).toBe(false);
   });
 });

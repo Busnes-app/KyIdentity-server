@@ -147,14 +147,18 @@ func TestAdminCreateOAuthClientValidation(t *testing.T) {
 	if c, _ := db.GetOAuthClientByID("KyPost"); c != nil {
 		t.Fatal("a public suite client was registered")
 	}
+	// Suite servers that pair through the directory hold its client secret.
+	for _, id := range []string{"kycalendar", "kydrive", "kymessage"} {
+		covRefused(t, adminRequest(t, srv, "POST", "/api/admin/clients", admin, `{"clientId":"`+id+`","clientName":"x","clientType":"public","redirectUris":["https://x.example/cb"]}`), 400, "invalid_client_type")
+	}
 	denied := 0
 	for _, e := range auditRows(t, db, "admin.oauth_client_created") {
 		if e.Outcome == "denied" && strings.Contains(e.DetailsJSON, "suite_client_must_be_confidential") {
 			denied++
 		}
 	}
-	if denied != 1 {
-		t.Fatalf("public suite registration audited %d times, want 1", denied)
+	if denied != 4 {
+		t.Fatalf("public suite registration audited %d times, want 4", denied)
 	}
 
 	// Loopback http is allowed for development; an omitted id is generated; the secret

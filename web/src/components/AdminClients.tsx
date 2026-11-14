@@ -2,9 +2,9 @@ import React, { useEffect, useId, useState } from 'react';
 
 // Mirrors the server's registration policy. The server is the authority; this only keeps
 // the form from offering a choice the API will reject.
-const SUITE_CLIENT_IDS = ['kypost', 'kydns', 'kypasswords', 'kynotes', 'kybookmarks'];
+const SUITE_CLIENT_IDS = ['kypost', 'kycalendar', 'kydrive', 'kymessage', 'kydns', 'kypasswords', 'kynotes', 'kybookmarks'];
 
-const isSuiteClient = (id: string) => SUITE_CLIENT_IDS.includes(id.trim().toLowerCase());
+export const isSuiteClient = (id: string) => SUITE_CLIENT_IDS.includes(id.trim().toLowerCase());
 import { OAuthClient } from '../types';
 import { apiJson, apiRequest, errorMessage, isRecord } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';

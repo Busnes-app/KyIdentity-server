@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"unicode/utf8"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
@@ -22,7 +24,11 @@ type SuiteHandler struct {
 }
 
 // suitePeers are the pairs KyIdentity introduces, each as {a, b} with a < b.
-var suitePeers = map[[2]string]bool{{"kycalendar", "kypost"}: true}
+var suitePeers = map[[2]string]bool{
+	{"kycalendar", "kypost"}:    true,
+	{"kycalendar", "kymessage"}: true,
+	{"kydrive", "kypost"}:       true,
+}
 
 func suiteJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -93,6 +99,57 @@ func (h *SuiteHandler) Apps(w http.ResponseWriter, r *http.Request, caller *stor
 		}
 	}
 	suiteJSON(w, http.StatusOK, map[string]any{"apps": out})
+}
+
+type suitePerson struct {
+	Sub   string `json:"sub"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// People searches (q) or resolves (email) the people the calling app may offer the user
+// sub: active everyday users who may open the caller. Empty unless sub is such a user too.
+func (h *SuiteHandler) People(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
+	query := r.URL.Query()
+	sub, text, emails, limit := query.Get("sub"), query.Get("q"), query["email"], 10
+	ok := sub != "" && query.Has("q") != (emails != nil)
+	if ok && emails == nil {
+		n := utf8.RuneCountInString(text)
+		ok = utf8.ValidString(text) && n >= 2 && n <= 64
+		if query.Has("limit") {
+			var err error
+			limit, err = strconv.Atoi(query.Get("limit"))
+			ok = ok && err == nil && limit >= 1 && limit <= 20
+		}
+	} else if ok {
+		limit = len(emails)
+		ok = limit <= 100 && !query.Has("limit")
+		for _, e := range emails {
+			ok = ok && e != "" && len(e) <= 254 && utf8.ValidString(e)
+		}
+	}
+	if !ok {
+		suiteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+		return
+	}
+	out := []suitePerson{}
+	user, err := h.store.GetUserByID(sub)
+	allowed := false
+	if err == nil && user != nil && user.Role == "user" {
+		allowed, err = h.store.ClientAccessAllowed(sub, caller.ID)
+	}
+	var people []store.SuitePerson
+	if err == nil && allowed {
+		people, err = h.store.SuitePeople(caller.ID, text, emails, limit)
+	}
+	if err != nil {
+		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	for _, p := range people {
+		out = append(out, suitePerson{Sub: p.ID, Name: p.Name, Email: p.Email})
+	}
+	suiteJSON(w, http.StatusOK, map[string]any{"people": out})
 }
 
 // suitePeerSecret is the shared secret of the pair a < b.

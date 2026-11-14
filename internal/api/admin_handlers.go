@@ -498,6 +498,9 @@ type CreateClientRequest struct {
 // keeps that from happening again.
 var suiteClientIDs = map[string]bool{
 	"kypost":      true,
+	"kycalendar":  true,
+	"kydrive":     true,
+	"kymessage":   true,
 	"kydns":       true,
 	"kypasswords": true,
 	"kynotes":     true,
