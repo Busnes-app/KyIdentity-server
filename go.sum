@@ -1,5 +1,5 @@
-github.com/Busnes-app/ky-primitives v0.10.2-0.20261026050236-bae5c14dba4c h1:0UinS4BAYgN4vhZXmksdf8CkHncONw8VhillN1cNewI=
-github.com/Busnes-app/ky-primitives v0.10.2-0.20261026050236-bae5c14dba4c/go.mod h1:LCDCdz9jpoNNehLQRytkI4qZ/a9J33DeJAnr5BalcgU=
+github.com/Busnes-app/ky-primitives v0.10.2-0.20261113220457-9f4bc5875e04 h1:jGeCJGwoaSAJLnkNJkLOWa4MYnSlEdc7O85xJnnWpZg=
+github.com/Busnes-app/ky-primitives v0.10.2-0.20261113220457-9f4bc5875e04/go.mod h1:LCDCdz9jpoNNehLQRytkI4qZ/a9J33DeJAnr5BalcgU=
 github.com/SherClockHolmes/webpush-go v1.4.0 h1:ocnzNKWN23T9nvHi6IfyrQjkIc0oJWv1B1pULsf9i3s=
 github.com/SherClockHolmes/webpush-go v1.4.0/go.mod h1:XSq8pKX11vNV8MJEMwjrlTkxhAj1zKfxmyhdV7Pd6UA=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

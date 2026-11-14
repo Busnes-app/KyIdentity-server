@@ -89,6 +89,9 @@ services:
       KYIDENTITY_DATA_DIR: /data
       # Empty by default: no peer may forge its client IP. Set to your proxy's address only.
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      # Office networks (e.g. 203.0.113.0/24) that skip the per-address sign-in limit.
+      # Only networks you control; never the proxy's address, which would exempt everyone.
+      RATE_LIMIT_EXEMPT_CIDRS: ${RATE_LIMIT_EXEMPT_CIDRS:-}
       # The one header a trusted proxy is believed on. Set to CF-Connecting-IP behind
       # Cloudflare. Only one is honoured, so the header your edge does not overwrite can
       # never become an attacker-chosen client identity.

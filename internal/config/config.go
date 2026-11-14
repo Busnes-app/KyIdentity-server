@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/netallow"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/webauthn"
 )
@@ -83,8 +84,11 @@ type Config struct {
 	// address. Exactly one header is honoured per deployment: trying several in turn means
 	// the one the edge does not overwrite is the one an attacker gets to choose.
 	ForwardedHeader string
-	BootstrapUser   string
-	BootstrapPass   string
+	// RateLimitExemptCIDRs is RATE_LIMIT_EXEMPT_CIDRS in netallow's canonical form: office
+	// networks whose requests skip per-IP limits. The admin setting adds to it.
+	RateLimitExemptCIDRs string
+	BootstrapUser        string
+	BootstrapPass        string
 	// SecureCookies forces the Secure flag on session cookies. Needed when TLS terminates
 	// at a proxy that does not forward X-Forwarded-Proto.
 	SecureCookies bool
@@ -237,6 +241,10 @@ func Load() (*Config, error) {
 	if err := validateProxyTrust(trustedCIDRs, forwardedHeader); err != nil {
 		return nil, err
 	}
+	exemptCIDRs, err := netallow.Parse(os.Getenv("RATE_LIMIT_EXEMPT_CIDRS"))
+	if err != nil {
+		return nil, fmt.Errorf("RATE_LIMIT_EXEMPT_CIDRS: %w", err)
+	}
 	sessionTTL, err := loadPositiveDuration("KYIDENTITY_SESSION_TTL", DefaultSessionTTL)
 	if err != nil {
 		return nil, err
@@ -329,6 +337,7 @@ func Load() (*Config, error) {
 		Replicated:                 replicated,
 		TrustedProxyCIDRs:          trustedCIDRs,
 		ForwardedHeader:            forwardedHeader,
+		RateLimitExemptCIDRs:       exemptCIDRs.String(),
 		BootstrapUser:              getEnv("BOOTSTRAP_ADMIN_USER", "admin"),
 		BootstrapPass:              os.Getenv("BOOTSTRAP_ADMIN_PASS"),
 		SecureCookies:              issuer.Scheme == "https" || strings.EqualFold(os.Getenv("KYIDENTITY_SECURE_COOKIES"), "true"),

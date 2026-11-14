@@ -43,6 +43,11 @@ type MiddlewareManager struct {
 	shared     bool
 	sharedFull atomic.Bool
 	csrfKey    []byte
+	// exempt is the office-network allowlist (environment plus admin setting) whose
+	// requests skip per-IP limits; exemptEnv is the environment's half.
+	exempt    atomic.Pointer[exemptNetworks]
+	exemptEnv string
+	exemptMu  sync.Mutex
 	// now is injectable so eviction behaviour can be tested without waiting real minutes.
 	now func() time.Time
 }
@@ -220,6 +225,9 @@ func (m *MiddlewareManager) sweepLimitersEvery(ctx context.Context, every time.D
 			return
 		case <-ticker.C:
 			m.sweepLimiters()
+			if m.shared {
+				m.reloadExemptNetworks(false) // another replica may have changed the list
+			}
 		}
 	}
 }

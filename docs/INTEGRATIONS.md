@@ -364,6 +364,15 @@ audit log.
 IPv6 clients share one rate-limit bucket per /64, since one subscriber usually holds the
 whole prefix; the audit log keeps the full address.
 
+**`RATE_LIMIT_EXEMPT_CIDRS` and Sign-in policies → Office networks list office networks**
+whose sign-ins skip the per-address sign-in and authorize limits; per-account lockouts,
+MFA and every other limit still apply. Empty by default; ranges broader than /16 or /48,
+loopback and invalid entries are refused. `GET`/`PUT /api/admin/rate-limit-networks`
+(administrators only, PUT step-up, body `{"networks":"203.0.113.0/24,2001:db8:1::/48"}`,
+reply `{networks, environment, exempted}`, audited `admin.rate_limit_networks_configured`).
+List only networks you control, never guest Wi-Fi, a VPN exit or your proxy; see
+[SECURITY.md](../SECURITY.md#rate_limit_exempt_cidrs-office-networks).
+
 **`KYIDENTITY_FORWARDED_HEADER` names the one header that is believed, defaulting to
 `X-Forwarded-For`.** Behind Cloudflare, set it to `CF-Connecting-IP`. Exactly one header is
 honoured per deployment because trying several in turn means whichever one your edge does

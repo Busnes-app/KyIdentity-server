@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, OwnAccessRequests, AccessExplanation } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, RateLimitNetworks, OwnAccessRequests, AccessExplanation } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -677,6 +677,10 @@ export function parseSessionLimits(value: unknown): SessionLimits {
   const o = obj(value, 'session limits');
   const limits = { absolute: directoryCount(o, 'absolute'), idle: directoryCount(o, 'idle') };
   return validSessionLimits(limits) ? limits : fail('valid session limits');
+}
+export function parseRateLimitNetworks(value: unknown): RateLimitNetworks {
+  const o = obj(value, 'office networks');
+  return { networks: str(o, 'networks'), environment: str(o, 'environment'), exempted: directoryCount(o, 'exempted') };
 }
 export function parseAttestationSettings(value: unknown): AttestationSettings {
   return { requireLockedBootloader: requiredBool(obj(value, 'attestation settings'), 'requireLockedBootloader') };

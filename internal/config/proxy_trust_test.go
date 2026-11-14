@@ -48,3 +48,21 @@ func TestLoadPreservesNarrowAndSingleIPProxyTrust(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadValidatesRateLimitExemptCIDRs(t *testing.T) {
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+	t.Setenv("RATE_LIMIT_EXEMPT_CIDRS", " 203.0.113.9/24, 2001:db8:1::/48 ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RateLimitExemptCIDRs != "203.0.113.0/24,2001:db8:1::/48" {
+		t.Fatalf("RateLimitExemptCIDRs = %q", cfg.RateLimitExemptCIDRs)
+	}
+	for _, bad := range []string{"0.0.0.0/0", "::/0", "10.0.0.0/8", "2001:db8::/32", "127.0.0.1", "office", "203.0.113.0/24,nope"} {
+		t.Setenv("RATE_LIMIT_EXEMPT_CIDRS", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RATE_LIMIT_EXEMPT_CIDRS") {
+			t.Errorf("%q: err = %v, want a startup failure naming the variable", bad, err)
+		}
+	}
+}
