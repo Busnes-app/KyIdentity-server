@@ -88,7 +88,11 @@ func (s *Store) RevokeSession(userID, sessionID string, audit *AuditEvent) error
 // RevokeOtherSessions signs out every session of userID except keepSessionID.
 func (s *Store) RevokeOtherSessions(userID, keepSessionID string, audit *AuditEvent) error {
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		_, err := revokeSessionsTx(tx, time.Now().UTC(), `user_id=? AND id<>?`, userID, keepSessionID)
+		if _, err := revokeSessionsTx(tx, time.Now().UTC(), `user_id=? AND id<>?`, userID, keepSessionID); err != nil {
+			return err
+		}
+		// Forward sessions outlive their login row; end those whose login is already gone.
+		_, err := tx.Exec(`DELETE FROM forward_sessions WHERE user_id=? AND session_id<>?`, userID, keepSessionID)
 		return err
 	})
 }
@@ -126,8 +130,8 @@ func revokeSessionsTx(tx *sql.Tx, now time.Time, sessionWhere string, args ...an
 	return res.RowsAffected()
 }
 
-// revokeSessionGrantsTx invalidates the codes, tokens, step-up grants and pending
-// authorization interactions selected by a session predicate. Pending step-up challenges
+// revokeSessionGrantsTx invalidates the codes, tokens, step-up grants, pending
+// authorization interactions and forward-auth sessions selected by a session predicate. Pending step-up challenges
 // cascade with the session row.
 func revokeSessionGrantsTx(tx *sql.Tx, where string, now time.Time, args ...any) error {
 	statements := []struct {
@@ -139,6 +143,8 @@ func revokeSessionGrantsTx(tx *sql.Tx, where string, now time.Time, args ...any)
 		{`UPDATE step_up_tokens SET used_at=? WHERE used_at IS NULL AND ` + where, append([]any{now}, args...)},
 		{`UPDATE step_up_challenges SET used_at=? WHERE used_at IS NULL AND ` + where, append([]any{now}, args...)},
 		{`DELETE FROM authorization_interactions WHERE ` + where, args},
+		{`DELETE FROM forward_codes WHERE ` + where, args},
+		{`DELETE FROM forward_sessions WHERE ` + where, args},
 	}
 	for _, st := range statements {
 		if _, err := tx.Exec(st.sql, st.args...); err != nil {

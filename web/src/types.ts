@@ -311,6 +311,13 @@ export interface AppRecord {
   launcherName: string;
   systemId: string;
   systemName: string;
+  /** Set when the launcher card is a forward-auth proxy app. */
+  proxyHost: string;
+}
+
+/** A forward-auth proxy app (docs/FORWARD-AUTH.md); the edge secret is never listed. */
+export interface ProxyApp {
+  id: string; appId: string; name: string; host: string; loginHeader: string; bypass: string[]; sessionSeconds: number;
 }
 
 export interface AppAccessUser {

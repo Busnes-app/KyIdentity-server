@@ -38,6 +38,10 @@ func seedEphemeral(t *testing.T, s *Store, userID, clientID string) {
 		{`INSERT INTO account_tokens(id,user_id,kind,token_hash,delivery,expires_at,created_at) VALUES('at-1',?,'activation','ath-1','email',?,?)`, []any{userID, soon, now}},
 		{`INSERT INTO device_pairing_tokens(id,user_id,token_hash,pin_hash,expires_at) VALUES('dpt-1',?,'dpth-1','pin',?)`, []any{userID, soon}},
 		{`INSERT INTO login_failures(user_id,failures,last_failure_at) VALUES(?,4,?)`, []any{userID, now}},
+		{`INSERT INTO applications(id,name,url,icon_name,enabled,created_at) VALUES('fwd-app','Proxied','https://proxied.test/','favicon',TRUE,?)`, []any{now}},
+		{`INSERT INTO proxy_apps(application_id,host,secret_hash,login_header,session_seconds,created_at) VALUES('fwd-app','proxied.test','sh','X-Ky-User',43200,1)`, nil},
+		{`INSERT INTO forward_codes(hash,application_id,host,session_id,user_id,nonce_hash,path,expires_at) VALUES('fc-1','fwd-app','proxied.test','sess-1',?,'nh','/',?)`, []any{userID, soon.Unix()}},
+		{`INSERT INTO forward_sessions(hash,application_id,host,user_id,session_id,created_at,expires_at) VALUES('fs-1','fwd-app','proxied.test',?,'sess-1',1,?)`, []any{userID, soon.Unix()}},
 		{`INSERT INTO logout_deliveries(id,client_id,user_id,sid,status,next_attempt_at,created_at,updated_at) VALUES('ld-1',?,?,'sid-1','queued',?,?,?)`, []any{clientID, userID, now, now, now}},
 	} {
 		if _, err := s.db.Exec(seed.query, seed.args...); err != nil {
@@ -90,12 +94,12 @@ func TestRestoreInvalidatesEphemeralCredentialsAndHoldsProvisioning(t *testing.T
 			t.Errorf("%s survived the restore with %d row(s)", table, n)
 		}
 	}
-	// Fourteen credential rows are deleted directly, the refresh family and its token
+	// Sixteen credential rows (a forward-auth code and session among them) are deleted directly, the refresh family and its token
 	// included; the client sessions and the step-up challenge hang off the sessions and
 	// go with them by cascade. Two
 	// deliveries are queued: the assignment's own and the one standing in for the
 	// capsule's.
-	if report.Credentials != 14 || report.QueuedDeliveries != 2 || report.HeldConnectors != 1 {
+	if report.Credentials != 16 || report.QueuedDeliveries != 2 || report.HeldConnectors != 1 {
 		t.Fatalf("report: %+v", report)
 	}
 	if len(report.Connectors) != 1 || report.Connectors[0] != "hr" {

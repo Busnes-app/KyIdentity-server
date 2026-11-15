@@ -187,7 +187,7 @@ func (s *Store) SetEnrollmentPolicy(p EnrollmentPolicy, sessionID string, audit 
 	if !preview.CanActivate {
 		return ErrEmergencyAdministrator
 	}
-	if _, err = tx.Exec(`DELETE FROM authorization_codes; DELETE FROM authorization_interactions; UPDATE issued_tokens SET revoked_at=? WHERE revoked_at IS NULL`, time.Now().UTC()); err != nil {
+	if _, err = tx.Exec(`DELETE FROM authorization_codes; DELETE FROM authorization_interactions; DELETE FROM forward_codes; DELETE FROM forward_sessions; UPDATE issued_tokens SET revoked_at=? WHERE revoked_at IS NULL`, time.Now().UTC()); err != nil {
 		return err
 	}
 	details := map[string]any{"policy": p, "impact": preview}

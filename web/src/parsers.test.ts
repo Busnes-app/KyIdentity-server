@@ -1,4 +1,4 @@
-import { parseSessionLimits, parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseDevice, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage, parseFailingDeliveries } from './parsers';
+import { parseSessionLimits, parseSessionInventory, parseAppRecordPage, parseAppAccessPage, parsePairingToken, parseDevice, parseEnrollmentPolicies, parseProvisioningPage, parseReconcileJobs, parseOffboarding, parseAccountLink, parseMailSettings, parseUser, parseSCIMConnectors, parseSCIMToken, parseAppRolesPage, parseFailingDeliveries, parseProxyApps, parseEdgeSecret } from './parsers';
 import { describe, expect, it } from 'vitest';
 import {
   parseAccessExplanation,
@@ -405,7 +405,7 @@ describe('group directory pages', () => {
 });
 
 it('validates app registry references and revisions', () => {
-  const record = { id: 'app', revision: 1, authenticationRevision: 1, roleRevision: 0, legacyRoleClaim: true, requestable: false, groupsClaim: false, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0, refreshIdle: 0, refreshLifetime: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '' };
+  const record = { id: 'app', revision: 1, authenticationRevision: 1, roleRevision: 0, legacyRoleClaim: true, requestable: false, groupsClaim: false, authentication: { mode: 'reuse', primaryMaxAge: 0, factor: 'password', factorMaxAge: 0, refreshIdle: 0, refreshLifetime: 0 }, accessMode: 'assigned_only', enabled: true, clientId: 'client', clientName: 'Example', launcherId: '', launcherName: '', systemId: '', systemName: '', proxyHost: '' };
   const page = { records: [record], total: 1, limit: 25, offset: 0 };
   expect(parseAppRecordPage(page).items[0]).toEqual(record);
   expect(() => parseAppRecordPage({ ...page, records: [{ ...record, revision: 0 }] })).toThrow();
@@ -736,4 +736,12 @@ describe('parseFailingDeliveries', () => {
     expect(() => parseFailingDeliveries([{ userId: 'u', eventType: 'e', status: 'delivered', attempts: 1, lastError: '' }])).toThrow();
     expect(() => parseFailingDeliveries({})).toThrow();
   });
+});
+
+it('parses proxy apps and refuses a malformed edge secret', () => {
+  const app = { id: 'card', appId: 'app', name: 'Grafana', host: 'grafana.example.com', loginHeader: 'X-WEBAUTH-USER', bypass: ['/public'], sessionSeconds: 43200 };
+  expect(parseProxyApps({ proxyApps: [app] })).toEqual([app]);
+  expect(() => parseProxyApps({})).toThrow();
+  expect(parseEdgeSecret({ edgeSecret: 'a'.repeat(64) })).toBe('a'.repeat(64));
+  expect(() => parseEdgeSecret({ edgeSecret: '<script>' })).toThrow();
 });

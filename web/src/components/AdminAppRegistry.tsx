@@ -6,13 +6,14 @@ import { pageSize, Pager, useDirectoryPage } from './DirectoryPage';
 import { AdminAppAuthentication } from './AdminAppAuthentication';
 import { AdminAppAccess } from './AdminAppAccess';
 import { AdminAppRoles } from './AdminAppRoles';
+import { AdminProxyApps } from './AdminProxyApps';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 
 function recordName(a: AppRecord) { return a.launcherName || a.clientName || a.systemName || a.id; }
 function Connections({ app }: { app: AppRecord }) {
   return <div style={{ overflowWrap: 'anywhere' }}>
     {app.clientId && <p>OAuth: {app.clientName}<br /><code>{app.clientId}</code></p>}
-    {app.launcherId && <p>Launcher: {app.launcherName}<br /><code>{app.launcherId}</code></p>}
+    {app.launcherId && <p>{app.proxyHost ? 'Proxy app' : 'Launcher'}: {app.launcherName}<br /><code>{app.proxyHost || app.launcherId}</code></p>}
     {app.systemId && <p>Provisioning: {app.systemName}<br /><code>{app.systemId}</code></p>}
   </div>;
 }
@@ -24,6 +25,7 @@ export function AdminAppRegistry({ onManageLaunchers }: { onManageLaunchers: () 
   const [authenticationApp, setAuthenticationApp] = useState<AppRecord | null>(null);
   const [accessApp, setAccessApp] = useState<AppRecord | null>(null);
   const [rolesApp, setRolesApp] = useState<AppRecord | null>(null);
+  const [proxyApps, setProxyApps] = useState(false);
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
   const [target, setTarget] = useState<AppRecord | null>(null);
@@ -49,9 +51,10 @@ export function AdminAppRegistry({ onManageLaunchers }: { onManageLaunchers: () 
   };
   if (authenticationApp) return <AdminAppAuthentication app={authenticationApp} onClose={() => { setAuthenticationApp(null); reload(); }} />;
   if (accessApp) return <AdminAppAccess app={accessApp} onClose={() => { setAccessApp(null); reload(); }} onChanged={reload} />;
+  if (proxyApps) return <AdminProxyApps onClose={() => { setProxyApps(false); reload(); }} />;
   if (rolesApp) return <AdminAppRoles app={rolesApp} onClose={() => { setRolesApp(null); reload(); }} />;
   return <div className="admin-page">
-    <div className="page-header"><h1 className="page-title">App connections</h1><button className="primary-btn" onClick={onManageLaunchers}>Manage launcher cards</button></div><div className="page-intro">
+    <div className="page-header"><h1 className="page-title">App connections</h1><div className="action-buttons-wrap"><button className="secondary-btn" onClick={() => setProxyApps(true)}>Proxy apps</button><button className="primary-btn" onClick={onManageLaunchers}>Manage launcher cards</button></div></div><div className="page-intro">
       <p>Link the OAuth client, launcher card, and provisioning connection that belong to the same app.</p>
       <p className="text-muted">Manage app access here. New apps require assignments; existing apps retain all-active-user access until you change it. Provisioning keeps its current scope.</p>
     </div>
@@ -72,7 +75,7 @@ export function AdminAppRegistry({ onManageLaunchers }: { onManageLaunchers: () 
         <input id="app-record-search" className="form-input" maxLength={200} value={query} disabled={busy} onChange={e => { setQuery(e.target.value); setOffset(0); }} /></div>
       {Boolean(page?.items.length) && <div className="table-card"><table className="admin-table app-records-table"><thead><tr><th>App ID</th><th>Connections</th><th>Access</th><th>Actions</th></tr></thead>
         <tbody>{page?.items.map(app => <tr key={app.id}>
-          <td data-label="App ID" style={{ maxWidth: '14rem', overflowWrap: 'anywhere' }}><code>{app.id}</code></td><td data-label="Connections"><Connections app={app} /></td><td data-label="Access">{app.enabled ? (app.accessMode === 'all_active_users' ? 'All active users' : 'Assigned users only') : 'Disabled'}<button className="secondary-btn sm" disabled={busy} onClick={() => setAccessApp(app)}>Manage access</button>{app.clientId && <button className="secondary-btn sm" disabled={busy} onClick={() => setAuthenticationApp(app)}>Authentication</button>}<button className="secondary-btn sm" disabled={busy} onClick={() => setRolesApp(app)}>Roles</button></td>
+          <td data-label="App ID" style={{ maxWidth: '14rem', overflowWrap: 'anywhere' }}><code>{app.id}</code></td><td data-label="Connections"><Connections app={app} /></td><td data-label="Access">{app.enabled ? (app.accessMode === 'all_active_users' ? 'All active users' : 'Assigned users only') : 'Disabled'}<button className="secondary-btn sm" disabled={busy} onClick={() => setAccessApp(app)}>Manage access</button>{(app.clientId || app.proxyHost) && <button className="secondary-btn sm" disabled={busy} onClick={() => setAuthenticationApp(app)}>Authentication</button>}<button className="secondary-btn sm" disabled={busy} onClick={() => setRolesApp(app)}>Roles</button></td>
           <td data-label="Actions">{target ? <button className="secondary-btn sm" disabled={busy || !compatible(target, app)} onClick={() => setSource(app)}>{app.id === target.id ? 'Selected app' : compatible(target, app) ? 'Select connections' : 'Overlapping types'}</button>
             : <div className="action-buttons-wrap"><button className="secondary-btn sm" disabled={busy} onClick={() => { setTarget(app); setMutationError(null); }}>Link another connection</button>
               {[app.clientId, app.launcherId, app.systemId].filter(Boolean).length > 1 && (['client', 'launcher', 'system'] satisfies Array<'client' | 'launcher' | 'system'>).map(kind => {

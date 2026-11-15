@@ -154,7 +154,14 @@ func (s *Store) SetAppAuthenticationPolicy(id string, p AppAuthenticationPolicy,
 	if err != nil {
 		return err
 	}
-	if a.ClientID == "" {
+	proxy := false
+	if a.LauncherID != "" {
+		if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM proxy_apps WHERE application_id=?)`, a.LauncherID).Scan(&proxy); err != nil {
+			return err
+		}
+	}
+	// A proxy app has no per-request interaction (fresh) and no tokens to refresh.
+	if a.ClientID == "" && !proxy || proxy && (p.Mode == "fresh" || p.RefreshEnabled()) {
 		return ErrAppAuthentication
 	}
 	if p.RefreshEnabled() {
@@ -177,6 +184,11 @@ func (s *Store) SetAppAuthenticationPolicy(id string, p AppAuthenticationPolicy,
 	}
 	if _, err = tx.Exec(`UPDATE app_registry SET auth_mode=?,auth_primary_max_age=?,auth_factor=?,auth_factor_max_age=?,auth_refresh_idle=?,auth_refresh_lifetime=?,auth_revision=auth_revision+1,revision=revision+1 WHERE id=?`, p.Mode, p.PrimaryMaxAge, p.Factor, p.FactorMaxAge, p.RefreshIdle, p.RefreshLifetime, id); err != nil {
 		return err
+	}
+	if proxy {
+		if err = endForwardSessionsTx(tx, a.LauncherID); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.Exec(`DELETE FROM authorization_interactions WHERE client_id=?`, a.ClientID); err != nil {
 		return err

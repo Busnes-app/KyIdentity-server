@@ -28,7 +28,7 @@ func (h *AdminHandler) SetAppAuthenticationPolicy(w http.ResponseWriter, r *http
 			return
 		}
 		if errors.Is(err, store.ErrAppAuthentication) {
-			http.Error(w, `{"error":"invalid_request","error_description":"Authentication policy requires an OAuth client"}`, 400)
+			http.Error(w, `{"error":"invalid_request","error_description":"Authentication policy requires an OAuth client or a proxy app; proxy apps cannot use fresh mode or refresh tokens"}`, 400)
 			return
 		}
 		writeAppRegistryError(w, err)

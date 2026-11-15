@@ -111,7 +111,8 @@ func (s *Store) GroupEnrollmentPolicy(groupID string) (EnrollmentPolicy, error) 
 // Policy membership changes invalidate old grants even on relaxation. Otherwise a
 // remove/re-add could revive an old code or online token before it expires.
 func invalidateUserEnrollmentTx(tx *sql.Tx, userID string) error {
-	for _, query := range []string{`DELETE FROM authorization_codes WHERE user_id=?`, `DELETE FROM authorization_interactions WHERE user_id=?`} {
+	for _, query := range []string{`DELETE FROM authorization_codes WHERE user_id=?`, `DELETE FROM authorization_interactions WHERE user_id=?`,
+		`DELETE FROM forward_codes WHERE user_id=?`, `DELETE FROM forward_sessions WHERE user_id=?`} {
 		if _, err := tx.Exec(query, userID); err != nil {
 			return err
 		}

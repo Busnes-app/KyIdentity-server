@@ -35,6 +35,8 @@ type AppRecord struct {
 	LauncherName string `json:"launcherName"`
 	SystemID     string `json:"systemId"`
 	SystemName   string `json:"systemName"`
+	// ProxyHost is set when the launcher card is a forward-auth proxy app.
+	ProxyHost string `json:"proxyHost"`
 }
 
 var appRegistrySources = []struct{ table, column string }{{"oauth_clients", "client_id"}, {"applications", "launcher_id"}, {"paired_systems", "system_id"}}
@@ -96,12 +98,13 @@ func (s *Store) migrateAppRegistry() error {
 const appRecordFrom = ` FROM app_registry a
  LEFT JOIN oauth_clients c ON c.id=a.client_id
  LEFT JOIN applications l ON l.id=a.launcher_id
- LEFT JOIN paired_systems s ON s.id=a.system_id`
-const appRecordSelect = `SELECT a.id,a.revision,COALESCE(a.client_id,''),COALESCE(c.client_name,''),COALESCE(a.launcher_id,''),COALESCE(l.name,''),COALESCE(a.system_id,''),COALESCE(s.name,''),a.access_mode,a.enabled,a.auth_mode,a.auth_primary_max_age,a.auth_factor,a.auth_factor_max_age,a.auth_refresh_idle,a.auth_refresh_lifetime,a.auth_revision,a.role_revision,a.legacy_role_claim,a.groups_claim,a.requestable`
+ LEFT JOIN paired_systems s ON s.id=a.system_id
+ LEFT JOIN proxy_apps px ON px.application_id=a.launcher_id`
+const appRecordSelect = `SELECT a.id,a.revision,COALESCE(a.client_id,''),COALESCE(c.client_name,''),COALESCE(a.launcher_id,''),COALESCE(l.name,''),COALESCE(a.system_id,''),COALESCE(s.name,''),a.access_mode,a.enabled,a.auth_mode,a.auth_primary_max_age,a.auth_factor,a.auth_factor_max_age,a.auth_refresh_idle,a.auth_refresh_lifetime,a.auth_revision,a.role_revision,a.legacy_role_claim,a.groups_claim,a.requestable,COALESCE(px.host,'')`
 
 func scanAppRecord(row interface{ Scan(...any) error }) (AppRecord, error) {
 	var a AppRecord
-	err := row.Scan(&a.ID, &a.Revision, &a.ClientID, &a.ClientName, &a.LauncherID, &a.LauncherName, &a.SystemID, &a.SystemName, &a.AccessMode, &a.Enabled, &a.Authentication.Mode, &a.Authentication.PrimaryMaxAge, &a.Authentication.Factor, &a.Authentication.FactorMaxAge, &a.Authentication.RefreshIdle, &a.Authentication.RefreshLifetime, &a.AuthenticationRevision, &a.RoleRevision, &a.LegacyRoleClaim, &a.GroupsClaim, &a.Requestable)
+	err := row.Scan(&a.ID, &a.Revision, &a.ClientID, &a.ClientName, &a.LauncherID, &a.LauncherName, &a.SystemID, &a.SystemName, &a.AccessMode, &a.Enabled, &a.Authentication.Mode, &a.Authentication.PrimaryMaxAge, &a.Authentication.Factor, &a.Authentication.FactorMaxAge, &a.Authentication.RefreshIdle, &a.Authentication.RefreshLifetime, &a.AuthenticationRevision, &a.RoleRevision, &a.LegacyRoleClaim, &a.GroupsClaim, &a.Requestable, &a.ProxyHost)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrAppRecordMissing
 	}
