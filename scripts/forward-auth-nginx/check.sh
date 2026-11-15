@@ -45,8 +45,9 @@ expect() { if [[ "$2" == *"$3"* ]]; then echo "ok   $1"; else echo "FAIL $1: got
 expect "bypass strips client identity" "$(edge "${spoof[@]}" "http://127.0.0.1:$EDGE_PORT/public/x")" "user= webauth= underscore= email= groups= secret="
 expect "signed-in request gets the check's identity, not the client's" \
   "$(edge "${spoof[@]}" -b "__Host-ky_fwd=$cookie" "http://127.0.0.1:$EDGE_PORT/dash")" "user=admin webauth=admin underscore= email="
-expect "signed-in request carries no edge secret" "$(edge -b "__Host-ky_fwd=$cookie" "http://127.0.0.1:$EDGE_PORT/dash")" "secret=
-"
+got=$(edge -b "__Host-ky_fwd=$cookie" "http://127.0.0.1:$EDGE_PORT/dash")
+expect "signed-in request carries no edge secret" "${got##* }" "secret="
+[[ "$got" == *"secret=" ]] || { echo "FAIL the app received an edge secret"; fail=1; }
 loc=$(edge "${spoof[@]}" -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1:$EDGE_PORT/dash?a=1&b=2")
 expect "no cookie redirects to KyIdentity start with the original URI" "$loc" "302 http://127.0.0.1:$KYID_PORT/forward/start?n="
 expect "start keeps the full original URI" "$loc" "rd=https%3A%2F%2Fapp.e2e.test%2Fdash%3Fa%3D1%26b%3D2"

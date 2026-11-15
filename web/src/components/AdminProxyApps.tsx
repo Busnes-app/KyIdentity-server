@@ -86,7 +86,7 @@ export function AdminProxyApps({ onClose }: { onClose: () => void }) {
           <button className="secondary-btn sm" disabled={busy} onClick={() => remove(a)}>Delete</button></div></td>
       </tr>)}</tbody></table></div>}
     {draft && <Modal title={draft.id ? `Edit ${draft.host}` : 'Add proxy app'} onClose={() => setDraft(null)}>
-      <form onSubmit={save}><div className="modal-body">
+      <form className="modal-body" onSubmit={save}>
         {!draft.id && <div className="form-group"><label className="form-label" htmlFor="proxy-name">Name on the launcher</label>
           <input id="proxy-name" className="form-input" maxLength={100} required value={draft.name} disabled={busy} onChange={e => set({ name: e.target.value })} /></div>}
         <div className="form-group"><label className="form-label" htmlFor="proxy-host">Exact host</label>
@@ -100,7 +100,6 @@ export function AdminProxyApps({ onClose }: { onClose: () => void }) {
           <div className="alert-box warn sm" role="note">KyIdentity does not check these paths. Anyone can open them, signed in or not, and they carry no user headers.</div></div>
         <div className="form-group"><label className="form-label" htmlFor="proxy-hours">Session length (hours)</label>
           <input id="proxy-hours" className="form-input" type="number" min={0.25} max={168} step={0.25} required value={draft.hours} disabled={busy} onChange={e => set({ hours: e.target.valueAsNumber })} /></div>
-      </div>
       <div className="modal-footer"><button type="button" className="secondary-btn" disabled={busy} onClick={() => setDraft(null)}>Cancel</button><button type="submit" className="primary-btn" disabled={busy}>{draft.id ? 'Save' : 'Add proxy app'}</button></div></form>
     </Modal>}
     {secret && <Modal title={`Edge secret for ${secret.host}`} onClose={() => setSecret(null)}>
