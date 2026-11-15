@@ -284,15 +284,37 @@ func (s *Store) CreateForwardCode(c *ForwardCode, audit *AuditEvent) error {
 
 // ForwardAccess is what the check needs about a user and a proxy app.
 type ForwardAccess struct {
-	Active  bool // account active, not ended, no forced password change
-	Allowed bool // assigned (effective_app_access)
-	Policy  AppAuthenticationPolicy
+	Active     bool // account active, not ended, no forced password change
+	Allowed    bool // assigned (effective_app_access)
+	Policy     AppAuthenticationPolicy
+	Enrollment forwardEnrollment
 }
 
-// Permits applies the app policy to evidence. Fresh mode needs a per-request interaction
-// the edge cannot have, so it is refused.
+// forwardEnrollment is the user's MFA enrollment requirement (enrollment_requirements)
+// and the factor bits they hold (enrolled_factors).
+type forwardEnrollment struct {
+	Required          bool
+	Allowed, Enrolled int
+	Due               int64
+}
+
+// permits mirrors the mfa_session_access view for evidence that may outlive its login row.
+func (r forwardEnrollment) permits(e AuthenticationEvidence, now time.Time) bool {
+	if !r.Required {
+		return true
+	}
+	if r.Enrolled&r.Allowed == 0 {
+		return e.FactorMethod != "recovery" && r.Due > now.Unix()
+	}
+	bit := factorBit(e.FactorMethod)
+	return e.PrimaryAuthenticatedAt != nil && e.FactorAuthenticatedAt != nil && bit&r.Allowed != 0 && bit&r.Enrolled != 0
+}
+
+// Permits applies the app policy and the enrollment requirement to evidence. Fresh mode
+// needs a per-request interaction the edge cannot have, so it is refused.
 func (a ForwardAccess) Permits(e AuthenticationEvidence, now time.Time) bool {
-	return a.Active && a.Allowed && a.Policy.Valid() && a.Policy.Mode != "fresh" && a.Policy.EvidenceReason(e, now) == ""
+	return a.Active && a.Allowed && a.Policy.Valid() && a.Policy.Mode != "fresh" && a.Policy.EvidenceReason(e, now) == "" &&
+		a.Enrollment.permits(e, now)
 }
 
 func forwardAccess(q interface {
@@ -301,9 +323,11 @@ func forwardAccess(q interface {
 	var a ForwardAccess
 	err := q.QueryRow(`SELECT (u.status='active' AND NOT u.password_change_required AND (u.ends_at IS NULL OR u.ends_at>unixepoch())),
  EXISTS(SELECT 1 FROM effective_app_access e WHERE e.app_id=r.id AND e.user_id=u.id),
- r.auth_mode,r.auth_primary_max_age,r.auth_factor,r.auth_factor_max_age
- FROM users u CROSS JOIN app_registry r WHERE u.id=? AND r.launcher_id=?`, userID, appID).Scan(&a.Active, &a.Allowed,
-		&a.Policy.Mode, &a.Policy.PrimaryMaxAge, &a.Policy.Factor, &a.Policy.FactorMaxAge)
+ r.auth_mode,r.auth_primary_max_age,r.auth_factor,r.auth_factor_max_age,
+ er.required,er.allowed_mask,er.due_at,COALESCE((SELECT SUM(f.bit) FROM enrolled_factors f WHERE f.user_id=u.id),0)
+ FROM users u JOIN enrollment_requirements er ON er.user_id=u.id CROSS JOIN app_registry r WHERE u.id=? AND r.launcher_id=?`, userID, appID).Scan(&a.Active, &a.Allowed,
+		&a.Policy.Mode, &a.Policy.PrimaryMaxAge, &a.Policy.Factor, &a.Policy.FactorMaxAge,
+		&a.Enrollment.Required, &a.Enrollment.Allowed, &a.Enrollment.Due, &a.Enrollment.Enrolled)
 	return a, err
 }
 
@@ -343,7 +367,7 @@ func (s *Store) RedeemForwardCode(codeHash, host, nonceHash, sessionHash string,
 		return "", nil, err
 	}
 	var e AuthenticationEvidence
-	err = tx.QueryRow(`SELECT primary_authenticated_at,factor_authenticated_at,COALESCE(factor_method,'') FROM sessions WHERE id=? AND user_id=? AND expires_at>?`, c.SessionID, c.UserID, now).
+	err = tx.QueryRow(`SELECT primary_authenticated_at,factor_authenticated_at,COALESCE(factor_method,'') FROM sessions WHERE id=? AND user_id=? AND expires_at>? AND NOT enrollment_only`, c.SessionID, c.UserID, now).
 		Scan(&e.PrimaryAuthenticatedAt, &e.FactorAuthenticatedAt, &e.FactorMethod)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil, errors.Join(ErrForwardDenied, tx.Commit())

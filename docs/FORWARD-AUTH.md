@@ -97,8 +97,9 @@ It answers as follows:
 | 403 | A signed-in user who is not assigned. | None. |
 
 An answer for a session is cached in KyIdentity for at most 30 seconds. Disabling a user,
-removing their assignment, signing them out everywhere or changing the policy therefore takes
-effect within 30 seconds. Changing the host ends every session for the app at once.
+removing their assignment, signing them out everywhere, changing the app's policy, or an MFA
+enrollment policy the sign-in no longer meets (including a passed grace deadline) therefore
+takes effect within 30 seconds. Changing the host ends every session for the app at once.
 
 A bypass applies only when the raw path is the prefix or starts with the prefix followed by
 `/`. A path that contains `%`, `;`, `..`, `//` or a backslash is never bypassed; it gets the

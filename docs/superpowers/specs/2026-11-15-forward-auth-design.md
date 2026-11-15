@@ -55,8 +55,14 @@ seconds.
   - `session_id` has no FK, so the hourly sweep of idle-expired login sessions does not end a
     12-hour forward session.
   - `revokeSessionGrantsTx` deletes the forward sessions of every login session it revokes.
-    That function is the single path for sign out everywhere, disable, password change, MFA
-    reset, session limits and single-session revocation.
+    That function is the path for sign out everywhere, disable, password change, MFA
+    reset, session limits and single-session revocation. "Sign out other sessions" also deletes
+    the user's other forward sessions by user ID, so one whose login row was swept still ends.
+  - An MFA enrollment-policy edit deletes every forward session and code; a change to a user's
+    enrollment requirements (group membership, delegation) deletes that user's. The check and
+    code redemption also evaluate the user's current enrollment requirement against the
+    session's evidence snapshot, as `mfa_session_access` does for login sessions, so a grace
+    deadline that passes ends the session too.
   - An authentication-policy edit deletes every forward session and code of that app in the
     policy transaction, as it revokes an OAuth app's tokens.
 

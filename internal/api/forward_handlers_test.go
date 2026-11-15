@@ -526,3 +526,83 @@ func hasLauncherURL(apps []store.Application, u string) bool {
 	}
 	return false
 }
+
+// enrollmentAdmin enrols a passkey for an administrator and gives them the recent login
+// that activating a passkey-only policy requires.
+func (f *fwdFixture) enrollmentAdmin() string {
+	f.t.Helper()
+	admin := newUser(f.t, f.db, "admin")
+	enrolPasskey(f.t, f.db, admin.ID, newTestAuthenticator(f.t, "admin-key-"+admin.ID))
+	now := time.Now().UTC()
+	id := uuid.NewString()
+	if err := f.db.CreateSession(&store.Session{ID: id, UserID: admin.ID, SessionTokenHash: id, ExpiresAt: now.Add(time.Hour), AuthenticationEvidence: store.AuthenticationEvidence{PrimaryAuthenticatedAt: &now, FactorAuthenticatedAt: &now, FactorMethod: "webauthn"}}); err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
+func TestForwardEnrollmentPolicyEndsTOTPSession(t *testing.T) {
+	f := newFwdFixture(t)
+	secret := f.apps[appHost].secret
+	if err := f.srv.mfaEngine.SaveUserTOTP(f.user.ID, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", nil); err != nil {
+		t.Fatal(err)
+	}
+	cookie := f.signIn(appHost, f.userSS)
+	if rr := f.check(appHost, secret, "/", cookie); rr.Code != http.StatusOK {
+		t.Fatalf("before: %d", rr.Code)
+	}
+	if err := f.db.SetEnrollmentPolicy(store.EnrollmentPolicy{Scope: "organization", Required: true, AllowedMethods: []string{"webauthn"}, Revision: 1}, f.enrollmentAdmin(), nil); err != nil {
+		t.Fatal(err)
+	}
+	f.skew += 31 * time.Second
+	if rr := f.check(appHost, secret, "/", cookie); rr.Code != http.StatusUnauthorized || rr.Header().Get("X-Ky-User") != "" {
+		t.Fatalf("TOTP forward session after passkey-only policy: %d", rr.Code)
+	}
+}
+
+func TestForwardEnrollmentGraceDeadline(t *testing.T) {
+	f := newFwdFixture(t)
+	secret := f.apps[appHost].secret
+	if err := f.srv.mfaEngine.SaveUserTOTP(f.user.ID, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.SetEnrollmentPolicy(store.EnrollmentPolicy{Scope: "organization", Required: true, AllowedMethods: []string{"webauthn"}, GraceSeconds: 120, Revision: 1}, f.enrollmentAdmin(), nil); err != nil {
+		t.Fatal(err)
+	}
+	// Inside the grace period the TOTP login is still unrestricted.
+	cookie := f.signIn(appHost, f.loginSession(f.user, "totp", time.Now().UTC()))
+	if rr := f.check(appHost, secret, "/", cookie); rr.Code != http.StatusOK {
+		t.Fatalf("within grace: %d", rr.Code)
+	}
+	f.skew += 121 * time.Second
+	if rr := f.check(appHost, secret, "/", cookie); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("after grace deadline: %d", rr.Code)
+	}
+}
+
+func TestForwardRevokeOtherSessionsAfterLoginPurged(t *testing.T) {
+	f := newFwdFixture(t)
+	secret := f.apps[appHost].secret
+	cookie := f.signIn(appHost, f.userSS)
+	old, err := f.db.GetSessionByTokenHash(crypto.HashSHA256(f.userSS), time.Hour)
+	if err != nil || old == nil {
+		t.Fatalf("login session: %v", err)
+	}
+	if err := f.db.DeleteSession(old.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rr := f.check(appHost, secret, "/", cookie); rr.Code != http.StatusOK {
+		t.Fatalf("forward session should outlive its login row: %d", rr.Code)
+	}
+	current, err := f.db.GetSessionByTokenHash(crypto.HashSHA256(f.loginSession(f.user, "totp", time.Now().UTC())), time.Hour)
+	if err != nil || current == nil {
+		t.Fatalf("current session: %v", err)
+	}
+	if err := f.db.RevokeOtherSessions(f.user.ID, current.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.skew += 31 * time.Second
+	if rr := f.check(appHost, secret, "/", cookie); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("after sign out other sessions: %d", rr.Code)
+	}
+}

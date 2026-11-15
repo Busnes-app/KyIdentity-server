@@ -88,7 +88,11 @@ func (s *Store) RevokeSession(userID, sessionID string, audit *AuditEvent) error
 // RevokeOtherSessions signs out every session of userID except keepSessionID.
 func (s *Store) RevokeOtherSessions(userID, keepSessionID string, audit *AuditEvent) error {
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		_, err := revokeSessionsTx(tx, time.Now().UTC(), `user_id=? AND id<>?`, userID, keepSessionID)
+		if _, err := revokeSessionsTx(tx, time.Now().UTC(), `user_id=? AND id<>?`, userID, keepSessionID); err != nil {
+			return err
+		}
+		// Forward sessions outlive their login row; end those whose login is already gone.
+		_, err := tx.Exec(`DELETE FROM forward_sessions WHERE user_id=? AND session_id<>?`, userID, keepSessionID)
 		return err
 	})
 }
