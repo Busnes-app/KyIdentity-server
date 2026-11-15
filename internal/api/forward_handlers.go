@@ -25,7 +25,6 @@ const (
 	edgeSecretHeader   = "X-Ky-Edge-Secret"
 	forwardCacheTTL    = 30 * time.Second
 	forwardCacheMax    = 10000
-	maxForwardPath     = 2048
 )
 
 type forwardDecision struct {
@@ -111,19 +110,6 @@ func (h *ForwardHandler) edge(w http.ResponseWriter, r *http.Request) (*store.Pr
 	return app, true
 }
 
-// forwardPath accepts an origin-relative path (and query) the browser may be sent back to.
-func forwardPath(p string) bool {
-	if p == "" || len(p) > maxForwardPath || p[0] != '/' || strings.HasPrefix(p, "//") || strings.ContainsRune(p, '\\') {
-		return false
-	}
-	for i := 0; i < len(p); i++ {
-		if p[i] <= 0x20 || p[i] >= 0x7f {
-			return false
-		}
-	}
-	return true
-}
-
 // bypassed reports whether the raw request path falls under a bypass prefix. Anything
 // that a backend might normalise differently (encodings, dot segments, doubled slashes,
 // backslashes, path parameters) is never bypassed and gets the full check.
@@ -132,7 +118,7 @@ func bypassed(rawURI string, prefixes []string) bool {
 		return false
 	}
 	path, _, _ := strings.Cut(rawURI, "?")
-	if !forwardPath(path) || strings.ContainsAny(path, "%;") || strings.Contains(path, "..") {
+	if !store.ForwardPath(path) || strings.ContainsAny(path, "%;") || strings.Contains(path, "..") {
 		return false
 	}
 	for _, p := range prefixes {
@@ -240,7 +226,7 @@ func (h *ForwardHandler) Begin(w http.ResponseWriter, r *http.Request) {
 	if path == "" {
 		path = r.Header.Get("X-Original-URI")
 	}
-	if !forwardPath(path) || strings.HasPrefix(path, "/.ky/") {
+	if !store.ForwardPath(path) || strings.HasPrefix(path, "/.ky/") {
 		path = "/"
 	}
 	nonce, err := crypto.GenerateRandomHex(32)
@@ -256,7 +242,7 @@ func (h *ForwardHandler) Begin(w http.ResponseWriter, r *http.Request) {
 // forwardTarget validates rd: an absolute https URL, no userinfo, port or fragment, whose
 // host is exactly a registered proxy app. It returns the app and the path to return to.
 func (h *ForwardHandler) forwardTarget(rd string) (*store.ProxyApp, string) {
-	if rd == "" || len(rd) > maxForwardPath+300 || strings.ContainsAny(rd, "\\") {
+	if rd == "" || len(rd) > store.MaxForwardPath+300 || strings.ContainsAny(rd, "\\") {
 		return nil, ""
 	}
 	for i := 0; i < len(rd); i++ {
@@ -276,7 +262,7 @@ func (h *ForwardHandler) forwardTarget(rd string) (*store.ProxyApp, string) {
 	if u.RawQuery != "" || u.ForceQuery {
 		path += "?" + u.RawQuery
 	}
-	if !forwardPath(path) {
+	if !store.ForwardPath(path) {
 		return nil, ""
 	}
 	app, err := h.store.ProxyAppByHost(u.Host)

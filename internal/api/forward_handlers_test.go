@@ -23,7 +23,7 @@ type fwdFixture struct {
 	user   *store.User
 	userSS string // KyIdentity login cookie with MFA evidence
 	apps   map[string]fwdApp
-	clock  time.Time
+	skew   time.Duration // added to the real clock the handler sees
 }
 
 type fwdApp struct {
@@ -34,8 +34,8 @@ func newFwdFixture(t *testing.T) *fwdFixture {
 	t.Helper()
 	srv, db, _, _, _, cleanup := setupTestServer(t)
 	t.Cleanup(cleanup)
-	f := &fwdFixture{t: t, srv: srv, db: db, apps: map[string]fwdApp{}, clock: time.Now()}
-	srv.forward.now = func() time.Time { return f.clock }
+	f := &fwdFixture{t: t, srv: srv, db: db, apps: map[string]fwdApp{}}
+	srv.forward.now = func() time.Time { return time.Now().Add(f.skew) }
 	f.admin = newSession(t, db, newUser(t, db, "admin"), time.Now().UTC().Add(time.Hour))
 	f.user = newUser(t, db, "user")
 	f.userSS = f.loginSession(f.user, "totp", time.Now().UTC())
@@ -232,7 +232,7 @@ func TestForwardLoginHeaderAndGroups(t *testing.T) {
 			}
 		}
 	}
-	f.clock = f.clock.Add(31 * time.Second) // past the app cache
+	f.skew += 31 * time.Second // past the app cache
 	cookie := f.signIn(appHost, f.userSS)
 	rr = f.check(appHost, f.apps[appHost].secret, "/", cookie)
 	if rr.Code != http.StatusOK || rr.Header().Get("X-Webauth-User") != f.user.Username || rr.Header().Get("X-Ky-User") != f.user.Username || rr.Header().Get("X-Ky-Groups") != "ops" {
@@ -261,7 +261,7 @@ func TestForwardEdgeSecret(t *testing.T) {
 	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.EdgeSecret) != 64 {
 		t.Fatalf("rotate: %d %s", rr.Code, rr.Body.String())
 	}
-	f.clock = f.clock.Add(31 * time.Second)
+	f.skew += 31 * time.Second
 	if rr := f.check(appHost, f.apps[appHost].secret, "/", cookie); rr.Code != http.StatusUnauthorized {
 		t.Errorf("old secret after rotation: %d", rr.Code)
 	}
@@ -428,11 +428,11 @@ func TestForwardRevocationWithin30Seconds(t *testing.T) {
 			t.Fatalf("%s: before: %d", c.name, rr.Code)
 		}
 		c.revoke(u)
-		f.clock = f.clock.Add(29 * time.Second)
+		f.skew += 29 * time.Second
 		if rr := f.check(appHost, secret, "/", cookie); rr.Code != http.StatusOK {
 			t.Fatalf("%s: cached answer: %d", c.name, rr.Code)
 		}
-		f.clock = f.clock.Add(2 * time.Second)
+		f.skew += 2 * time.Second
 		if rr := f.check(appHost, secret, "/", cookie); rr.Code != c.want || rr.Header().Get("X-Ky-User") != "" {
 			t.Fatalf("%s: after 31 s: %d, want %d", c.name, rr.Code, c.want)
 		}

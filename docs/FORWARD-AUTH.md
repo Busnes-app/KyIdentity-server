@@ -32,6 +32,29 @@ Design and threat model: [superpowers/specs/2026-11-15-forward-auth-design.md](s
 The app appears on the launcher for its assigned users. Access reviews (**Manage access**), the
 access explanation and the audit log treat it like any other app.
 
+### From an installer
+
+An installer such as KyQuickStart registers a proxy app from inside the container, with no
+administrator session:
+
+```sh
+kyidentity proxy-app --owner <installation ID> --host grafana.example.com --name Grafana \
+  --login-header X-WEBAUTH-USER [--bypass /api/health]... [--session-hours 12] [--rotate-secret]
+```
+
+It prints one JSON line, `{"schema":"kyidentity.proxy-app/1","host":…,"id":…,"status":…}`,
+where `status` is `created`, `updated` or `unchanged`:
+
+- The first run creates the app and adds `edgeSecret`.
+- A rerun updates the login header, bypass paths and session length. It never creates a second
+  app or secret.
+- `--rotate-secret` replaces the secret and prints the new one.
+- The command refuses a host whose proxy app an administrator or another owner created.
+
+`apply-setup --capabilities` lists `proxy-apps` when the command exists. The installer must
+keep the secret out of its logs and output. Assignments and the policy are still set in
+KyIdentity.
+
 ## How the app takes the sign-in
 
 - **Header login.** The app trusts a header that the edge sets. Set the proxy app's login header

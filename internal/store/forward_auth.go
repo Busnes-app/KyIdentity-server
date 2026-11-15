@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Forward-auth (docs/FORWARD-AUTH.md): a proxy app is a launcher card plus a proxy_apps
@@ -113,58 +116,135 @@ func hostTaken(err error) bool {
 
 // CreateProxyApp adds the launcher card and its proxy row. The app requires MFA by default.
 func (s *Store) CreateProxyApp(card *Application, p *ProxyApp, audit *AuditEvent) error {
+	return s.auditedTx(audit, func(tx *sql.Tx) error { return createProxyAppTx(tx, card, p) })
+}
+
+func createProxyAppTx(tx *sql.Tx, card *Application, p *ProxyApp) error {
 	bypass, err := json.Marshal(p.Bypass)
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	card.CreatedAt = now
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`INSERT INTO applications (id, name, url, icon_name, description, sort_order, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			card.ID, card.Name, card.URL, card.IconName, card.Description, card.SortOrder, card.Enabled, card.CreatedAt); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`INSERT INTO proxy_apps(application_id,host,secret_hash,login_header,bypass_json,session_seconds,created_at) VALUES(?,?,?,?,?,?,?)`,
-			card.ID, p.Host, p.SecretHash, p.LoginHeader, string(bypass), p.SessionSeconds, now.Unix()); err != nil {
-			if hostTaken(err) {
-				return ErrProxyHostUsed
-			}
-			return err
-		}
-		_, err := tx.Exec(`UPDATE app_registry SET auth_factor='mfa' WHERE launcher_id=?`, card.ID)
+	card.CreatedAt = time.Now().UTC()
+	if _, err := tx.Exec(`INSERT INTO applications (id, name, url, icon_name, description, sort_order, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		card.ID, card.Name, card.URL, card.IconName, card.Description, card.SortOrder, card.Enabled, card.CreatedAt); err != nil {
 		return err
-	})
+	}
+	if _, err := tx.Exec(`INSERT INTO proxy_apps(application_id,host,secret_hash,login_header,bypass_json,session_seconds,created_at) VALUES(?,?,?,?,?,?,?)`,
+		card.ID, p.Host, p.SecretHash, p.LoginHeader, string(bypass), p.SessionSeconds, card.CreatedAt.Unix()); err != nil {
+		if hostTaken(err) {
+			return ErrProxyHostUsed
+		}
+		return err
+	}
+	_, err = tx.Exec(`UPDATE app_registry SET auth_factor='mfa' WHERE launcher_id=?`, card.ID)
+	return err
 }
 
 // UpdateProxyApp edits the edge settings. A host change ends the app's forward sessions;
 // a shorter session length shortens live ones.
 func (s *Store) UpdateProxyApp(p *ProxyApp, audit *AuditEvent) error {
+	return s.auditedTx(audit, func(tx *sql.Tx) error { return updateProxyAppTx(tx, p) })
+}
+
+func updateProxyAppTx(tx *sql.Tx, p *ProxyApp) error {
 	bypass, err := json.Marshal(p.Bypass)
 	if err != nil {
 		return err
 	}
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		var oldHost string
-		if err := tx.QueryRow(`SELECT host FROM proxy_apps WHERE application_id=?`, p.ID).Scan(&oldHost); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrAppRecordMissing
-			}
-			return err
+	var oldHost string
+	if err := tx.QueryRow(`SELECT host FROM proxy_apps WHERE application_id=?`, p.ID).Scan(&oldHost); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAppRecordMissing
 		}
-		if _, err := tx.Exec(`UPDATE proxy_apps SET host=?,login_header=?,bypass_json=?,session_seconds=? WHERE application_id=?`,
-			p.Host, p.LoginHeader, string(bypass), p.SessionSeconds, p.ID); err != nil {
-			if hostTaken(err) {
-				return ErrProxyHostUsed
-			}
-			return err
-		}
-		if oldHost != p.Host {
-			return endForwardSessionsTx(tx, p.ID)
-		}
-		_, err := tx.Exec(`UPDATE forward_sessions SET expires_at=CASE WHEN expires_at>created_at+? THEN created_at+? ELSE expires_at END WHERE application_id=?`,
-			p.SessionSeconds, p.SessionSeconds, p.ID)
 		return err
+	}
+	if _, err := tx.Exec(`UPDATE proxy_apps SET host=?,login_header=?,bypass_json=?,session_seconds=? WHERE application_id=?`,
+		p.Host, p.LoginHeader, string(bypass), p.SessionSeconds, p.ID); err != nil {
+		if hostTaken(err) {
+			return ErrProxyHostUsed
+		}
+		return err
+	}
+	if oldHost != p.Host {
+		return endForwardSessionsTx(tx, p.ID)
+	}
+	_, err = tx.Exec(`UPDATE forward_sessions SET expires_at=CASE WHEN expires_at>created_at+? THEN created_at+? ELSE expires_at END WHERE application_id=?`,
+		p.SessionSeconds, p.SessionSeconds, p.ID)
+	return err
+}
+
+// ErrProxyAppForeign refuses an installer write to a proxy app it does not own.
+var ErrProxyAppForeign = errors.New("proxy app for this host is not owned by this installer")
+
+// EnsureInstallerProxyApp makes the installer-owned proxy app for p.Host match p. It
+// creates the app, with secretHash, only when none exists, and replaces the secret only
+// when rotate is set; a rerun otherwise keeps the one secret. It reports "created",
+// "updated" or "unchanged", the card ID, and whether secretHash was stored.
+func (s *Store) EnsureInstallerProxyApp(owner, name string, p *ProxyApp, secretHash string, rotate bool, audit *AuditEvent) (string, string, bool, error) {
+	setupID := "proxy-app:" + owner
+	status, id, stored := "", "", false
+	err := s.inTx(func(tx *sql.Tx) error {
+		var ownedBy, ownedID string
+		err := tx.QueryRow(`SELECT setup_id,object_id FROM installer_setup_resources WHERE kind='proxy_app' AND name=?`, p.Host).Scan(&ownedBy, &ownedID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if ownedBy != "" && ownedBy != setupID {
+			return ErrProxyAppForeign
+		}
+		current, err := scanProxyApp(tx.QueryRow(proxyAppSelect+` WHERE p.host=?`, p.Host))
+		if errors.Is(err, sql.ErrNoRows) {
+			card := &Application{ID: uuid.NewString(), Name: name, URL: "https://" + p.Host + "/", IconName: "favicon", Enabled: true}
+			p.ID, p.SecretHash = card.ID, secretHash
+			if err := createProxyAppTx(tx, card, p); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`DELETE FROM installer_setup_resources WHERE kind='proxy_app' AND name=?`, p.Host); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`INSERT INTO installer_setup_resources(kind,name,setup_id,object_id,contract) VALUES('proxy_app',?,?,?,'')`, p.Host, setupID, card.ID); err != nil {
+				return err
+			}
+			status, id, stored = "created", card.ID, true
+			return installerProxyAuditTx(tx, audit, p.Host, id, status, stored)
+		}
+		if err != nil {
+			return err
+		}
+		if ownedID != current.ID {
+			return ErrProxyAppForeign
+		}
+		p.ID, id, status = current.ID, current.ID, "unchanged"
+		if current.LoginHeader != p.LoginHeader || current.SessionSeconds != p.SessionSeconds || !slices.Equal(current.Bypass, p.Bypass) {
+			if err := updateProxyAppTx(tx, p); err != nil {
+				return err
+			}
+			status = "updated"
+		}
+		if rotate {
+			if _, err := tx.Exec(`UPDATE proxy_apps SET secret_hash=? WHERE application_id=?`, secretHash, current.ID); err != nil {
+				return err
+			}
+			status, stored = "updated", true
+		}
+		if status == "unchanged" {
+			return nil
+		}
+		return installerProxyAuditTx(tx, audit, p.Host, id, status, stored)
 	})
+	return status, id, stored, err
+}
+
+func installerProxyAuditTx(tx *sql.Tx, audit *AuditEvent, host, id, status string, secret bool) error {
+	if audit == nil {
+		return nil
+	}
+	details, err := json.Marshal(map[string]any{"host": host, "status": status, "secretIssued": secret})
+	if err != nil {
+		return err
+	}
+	audit.TargetID, audit.DetailsJSON = id, string(details)
+	return recordAuditTx(tx, audit)
 }
 
 // RotateProxySecret replaces the edge secret hash.

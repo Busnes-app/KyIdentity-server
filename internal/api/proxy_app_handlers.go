@@ -21,56 +21,6 @@ type proxyAppRequest struct {
 	SessionSeconds int64    `json:"sessionSeconds"`
 }
 
-// validProxyHost accepts an exact lowercase DNS name with at least two labels.
-func validProxyHost(h string) bool {
-	if len(h) > 253 || !strings.Contains(h, ".") {
-		return false
-	}
-	for _, label := range strings.Split(h, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, c := range label {
-			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// validLoginHeader refuses names nginx or the app treat as transport or routing headers,
-// and the other Ky headers.
-func validLoginHeader(name string) bool {
-	if name == "" || len(name) > 64 {
-		return false
-	}
-	for _, c := range name {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
-			return false
-		}
-	}
-	n := strings.ToLower(name)
-	if n == "x-ky-user" {
-		return true
-	}
-	for _, p := range []string{"x-ky-", "x-forwarded-", "content-", "proxy-", "sec-"} {
-		if strings.HasPrefix(n, p) {
-			return false
-		}
-	}
-	switch n {
-	case "host", "cookie", "set-cookie", "authorization", "connection", "keep-alive", "te", "trailer", "transfer-encoding",
-		"upgrade", "x-real-ip", "forwarded", "x-original-uri", "origin", "referer", "user-agent", "accept", "range", "expect":
-		return false
-	}
-	return true
-}
-
-func validBypass(p string) bool {
-	return len(p) > 1 && len(p) <= 128 && forwardPath(p) && !strings.ContainsAny(p, "%?#;") && !strings.Contains(p, "..") && !strings.HasSuffix(p, "/")
-}
-
 // proxyAppInput reads a create (named) or edit (name ignored; rename the launcher card) body.
 func (h *AdminHandler) proxyAppInput(w http.ResponseWriter, r *http.Request, create bool) (*proxyAppRequest, bool) {
 	var req proxyAppRequest
@@ -97,11 +47,11 @@ func (h *AdminHandler) proxyAppInput(w http.ResponseWriter, r *http.Request, cre
 	switch {
 	case create && (req.Name == "" || len(req.Name) > 100):
 		return fail("Name is required (at most 100 characters)")
-	case !validProxyHost(req.Host):
+	case !store.ValidProxyHost(req.Host):
 		return fail("Host must be an exact lowercase host name such as app.example.com, with no scheme, port, path or wildcard")
 	case issuer != nil && strings.EqualFold(issuer.Hostname(), req.Host):
 		return fail("Host must not be KyIdentity's own host")
-	case !validLoginHeader(req.LoginHeader):
+	case !store.ValidLoginHeader(req.LoginHeader):
 		return fail("Login header must be a plain header name (letters, digits, hyphens) that is not a transport, forwarding or Ky header")
 	case req.SessionSeconds < store.MinForwardSession || req.SessionSeconds > store.MaxForwardSession:
 		return fail("Session length must be between 5 minutes and 7 days")
@@ -109,7 +59,7 @@ func (h *AdminHandler) proxyAppInput(w http.ResponseWriter, r *http.Request, cre
 		return fail("At most 20 bypass paths")
 	}
 	for _, p := range req.Bypass {
-		if !validBypass(p) {
+		if !store.ValidBypassPrefix(p) {
 			return fail("Each bypass path must start with /, must not be /, end in / or contain .., //, %, ?, #, ; or spaces")
 		}
 	}

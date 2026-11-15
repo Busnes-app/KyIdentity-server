@@ -152,10 +152,13 @@ and with none registered every forward route answers 401 or an error page.
 - Stripping `__Host-ky_fwd` from the `Cookie` header sent to the app.
 - Back-channel notification to the app when a forward session ends (header apps have no
   receiver).
-- An HTTP API for KyQuickStart. Deliverable 2 adds a container-local CLI command in its own
-  KyIdentity PR. The root AGENTS.md makes the container-local commands (`apply-setup`,
-  `disable-user`) the installer channel, and a CLI needs no network listener, administrator
-  session or step-up token held by the installer.
+- An HTTP API for KyQuickStart. Installers use the container-local command
+  `kyidentity proxy-app` instead (capability `proxy-apps`), like `apply-setup` and
+  `disable-user`, which the root AGENTS.md makes the installer channel: it needs no network
+  listener, administrator session or step-up token held by the installer. It creates the app
+  once per host and prints the edge secret only then or on `--rotate-secret`. It records
+  ownership in `installer_setup_resources` (`kind=proxy_app`) and never adopts an
+  administrator's proxy app or another owner's.
 - A second app type in `app_registry`. A proxy app is a launcher card plus a `proxy_apps` row,
   so the launcher, access reviews, explanations and access requests need no change.
 - Re-authentication from `/forward/start` when a signed-in session is too weak. The user signs

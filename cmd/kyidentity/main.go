@@ -65,6 +65,11 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "proxy-app":
+			if err := runProxyApp(os.Args[2:], os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "resync-system":
 			if err := runResyncSystem(os.Args[2:], os.Stdout); err != nil {
 				log.Fatal(err)
