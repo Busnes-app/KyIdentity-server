@@ -505,6 +505,7 @@ var suiteClientIDs = map[string]bool{
 	"kypasswords": true,
 	"kynotes":     true,
 	"kybookmarks": true,
+	"kypulse":     true,
 }
 
 // requireConfidential reports whether a client ID names a suite service.
