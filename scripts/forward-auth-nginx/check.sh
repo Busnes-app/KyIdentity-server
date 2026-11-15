@@ -25,6 +25,8 @@ db = sqlite3.connect(sys.argv[1]); now = int(time.time())
 uid = db.execute("SELECT id FROM users WHERE username='admin'").fetchone()[0]
 card = db.execute("SELECT application_id FROM proxy_apps WHERE host='app.e2e.test'").fetchone()[0]
 app = db.execute("SELECT id FROM app_registry WHERE launcher_id=?", (card,)).fetchone()[0]
+# The bootstrap administrator must change its password first, which KyIdentity enforces here too.
+db.execute("UPDATE users SET password_change_required=0 WHERE id=?", (uid,))
 db.execute("INSERT INTO app_user_assignments(app_id,user_id) VALUES(?,?)", (app, uid))
 db.execute("INSERT INTO forward_sessions(hash,application_id,host,user_id,session_id,primary_at,factor_at,factor_method,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
   (hashlib.sha256(sys.argv[2].encode()).hexdigest(), card, 'app.e2e.test', uid, 'seeded', now, now, 'totp', now, now + 3600))
