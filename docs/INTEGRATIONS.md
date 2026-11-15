@@ -37,7 +37,7 @@ integration it is meant to secure, which guarantees nobody ever does it.
 credentials: `GET /api/suite/apps` lists the apps a user may open (for an app switcher)
 , `GET /api/suite/people` searches or resolves the organisation's people the calling app may
 offer (for a people picker), and `GET /api/suite/peer` gives a paired app (KyCalendar and
-KyPost, KyCalendar and KyMessages, KyDrive and KyPost) its peer's URL and a derived shared
+KyPost, KyCalendar and KyMessages, KyDrive and KyPost, KyMessages and KyPost) its peer's URL and a derived shared
 secret. Contract: [SUITE-DIRECTORY.md](SUITE-DIRECTORY.md).
 
 **Access tokens live 15 minutes** and carry a `jti` recorded server-side.

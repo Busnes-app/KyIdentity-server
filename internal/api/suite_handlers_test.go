@@ -470,7 +470,7 @@ func TestSuitePeerNewPairs(t *testing.T) {
 	origin := map[string]string{"kycalendar": "https://cal.example.test", "kypost": "https://mail.example.test",
 		"kydrive": "https://drive.example.test", "kymessage": "https://console.example.test"}
 	key := srv.cfg.EncryptionKey
-	for _, pair := range [][2]string{{"kycalendar", "kymessage"}, {"kydrive", "kypost"}, {"kycalendar", "kypost"}} {
+	for _, pair := range [][2]string{{"kycalendar", "kymessage"}, {"kydrive", "kypost"}, {"kycalendar", "kypost"}, {"kymessage", "kypost"}} {
 		want := suitePeerSecret(key, pair[0], pair[1])
 		for _, d := range [][2]string{pair, {pair[1], pair[0]}} {
 			code, body := suitePeer(t, srv, d[0], creds[d[0]], d[1])
@@ -480,7 +480,7 @@ func TestSuitePeerNewPairs(t *testing.T) {
 		}
 	}
 	// Still unknown, though every client is registered.
-	for _, d := range [][2]string{{"kycalendar", "kydrive"}, {"kydrive", "kymessage"}, {"kymessage", "kypost"}, {"kydrive", "kydrive"}} {
+	for _, d := range [][2]string{{"kycalendar", "kydrive"}, {"kydrive", "kymessage"}, {"kymessage", "kymessage"}, {"kydrive", "kydrive"}} {
 		for _, dir := range [][2]string{d, {d[1], d[0]}} {
 			if code, body := suitePeer(t, srv, dir[0], creds[dir[0]], dir[1]); code != http.StatusNotFound || body["error"] != "no_peer" || body["secret"] != "" {
 				t.Errorf("%s->%s: %d %v, want 404 no_peer", dir[0], dir[1], code, body)
