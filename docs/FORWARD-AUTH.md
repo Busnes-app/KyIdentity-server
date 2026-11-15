@@ -61,6 +61,18 @@ KyIdentity.
   to the name the app reads, such as `X-WEBAUTH-USER` or `Remote-User`. This is only safe when
   the app cannot be reached except through the edge. Anyone who reaches the app directly can
   send the header and sign in as anyone. KyIdentity cannot see how the app is deployed.
+
+
+  These apps were checked against their own documentation on 2026-11-15. Where an app has a
+  trusted-proxy list, set it to the edge's address, so the app refuses the header from anyone
+  else:
+
+  | App | Login header | App setting | Source |
+  |---|---|---|---|
+  | Grafana | `X-WEBAUTH-USER` | `[auth.proxy] enabled = true`, `header_name = X-WEBAUTH-USER`, `whitelist = <edge address>` | [Grafana: auth proxy](https://grafana.com/docs/grafana/latest/setup-grafana/configure-access/configure-authentication/auth-proxy/) |
+  | Forgejo | `X-WEBAUTH-USER` | `[service] ENABLE_REVERSE_PROXY_AUTHENTICATION = true`; `[security] REVERSE_PROXY_AUTHENTICATION_USER = X-WEBAUTH-USER`, `REVERSE_PROXY_TRUSTED_PROXIES = <edge address>` | [Forgejo: configuration cheat sheet](https://forgejo.org/docs/latest/admin/config-cheat-sheet/) |
+  | Paperless-ngx | `Remote-User` | `PAPERLESS_ENABLE_HTTP_REMOTE_USER=true` | [Paperless-ngx: configuration](https://docs.paperless-ngx.com/configuration/#PAPERLESS_ENABLE_HTTP_REMOTE_USER) |
+
 - **OIDC.** If the app supports OpenID Connect, register an OAuth client for it and let it sign
   in directly. Do not put a proxy app in front of it.
 - **Gate only.** KyIdentity decides who reaches the app, and the user still signs in to the app
