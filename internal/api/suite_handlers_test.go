@@ -466,11 +466,12 @@ func TestSuitePeerNewPairs(t *testing.T) {
 	defer cleanup()
 	createClient(t, db, "kydrive", "confidential", crypto.HashSHA256("drive-secret"), "", "https://drive.example.test/cb")
 	createClient(t, db, "kymessage", "confidential", crypto.HashSHA256("msg-secret"), "", "https://console.example.test/cb")
-	creds := map[string]string{"kycalendar": "cal-secret", "kypost": "post-secret", "kydrive": "drive-secret", "kymessage": "msg-secret"}
+	createClient(t, db, "kypulse", "confidential", crypto.HashSHA256("pulse-secret"), "", "https://pulse.example.test/api/sso/kysignon/callback")
+	creds := map[string]string{"kycalendar": "cal-secret", "kypost": "post-secret", "kydrive": "drive-secret", "kymessage": "msg-secret", "kypulse": "pulse-secret"}
 	origin := map[string]string{"kycalendar": "https://cal.example.test", "kypost": "https://mail.example.test",
-		"kydrive": "https://drive.example.test", "kymessage": "https://console.example.test"}
+		"kydrive": "https://drive.example.test", "kymessage": "https://console.example.test", "kypulse": "https://pulse.example.test"}
 	key := srv.cfg.EncryptionKey
-	for _, pair := range [][2]string{{"kycalendar", "kymessage"}, {"kydrive", "kypost"}, {"kycalendar", "kypost"}, {"kymessage", "kypost"}} {
+	for _, pair := range [][2]string{{"kycalendar", "kymessage"}, {"kydrive", "kypost"}, {"kycalendar", "kypost"}, {"kymessage", "kypost"}, {"kypost", "kypulse"}} {
 		want := suitePeerSecret(key, pair[0], pair[1])
 		for _, d := range [][2]string{pair, {pair[1], pair[0]}} {
 			code, body := suitePeer(t, srv, d[0], creds[d[0]], d[1])
@@ -480,7 +481,8 @@ func TestSuitePeerNewPairs(t *testing.T) {
 		}
 	}
 	// Still unknown, though every client is registered.
-	for _, d := range [][2]string{{"kycalendar", "kydrive"}, {"kydrive", "kymessage"}, {"kymessage", "kymessage"}, {"kydrive", "kydrive"}} {
+	for _, d := range [][2]string{{"kycalendar", "kydrive"}, {"kydrive", "kymessage"}, {"kymessage", "kymessage"}, {"kydrive", "kydrive"},
+		{"kypulse", "kycalendar"}, {"kypulse", "kydrive"}, {"kypulse", "kymessage"}, {"kypulse", "kypulse"}} {
 		for _, dir := range [][2]string{d, {d[1], d[0]}} {
 			if code, body := suitePeer(t, srv, dir[0], creds[dir[0]], dir[1]); code != http.StatusNotFound || body["error"] != "no_peer" || body["secret"] != "" {
 				t.Errorf("%s->%s: %d %v, want 404 no_peer", dir[0], dir[1], code, body)

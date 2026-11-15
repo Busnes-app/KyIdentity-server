@@ -29,6 +29,7 @@ var suitePeers = map[[2]string]bool{
 	{"kycalendar", "kymessage"}: true,
 	{"kydrive", "kypost"}:       true,
 	{"kymessage", "kypost"}:     true,
+	{"kypost", "kypulse"}:       true,
 }
 
 func suiteJSON(w http.ResponseWriter, status int, body any) {

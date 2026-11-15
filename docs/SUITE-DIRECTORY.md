@@ -69,7 +69,8 @@ Connection details for a paired suite integration.
 - `client` (required): the peer's client ID.
 - Only for pairs KyIdentity knows: `kycalendar` and `kypost` (mail and calendar),
   `kycalendar` and `kymessage` (video meetings), `kydrive` and `kypost` (mail files),
-  `kymessage` and `kypost` (chat from mail). Exact,
+  `kymessage` and `kypost` (chat from mail), `kypost` and `kypulse` (alert mail from
+  a member's mailbox, KyPost `docs/KYPULSE.md`). Exact,
   case-sensitive client IDs, either side asking. Any other pair, a disabled or
   missing peer, or a peer with no HTTPS redirect origin is `404 {"error":"no_peer"}`.
 
