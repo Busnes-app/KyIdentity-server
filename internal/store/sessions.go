@@ -126,8 +126,8 @@ func revokeSessionsTx(tx *sql.Tx, now time.Time, sessionWhere string, args ...an
 	return res.RowsAffected()
 }
 
-// revokeSessionGrantsTx invalidates the codes, tokens, step-up grants and pending
-// authorization interactions selected by a session predicate. Pending step-up challenges
+// revokeSessionGrantsTx invalidates the codes, tokens, step-up grants, pending
+// authorization interactions and forward-auth sessions selected by a session predicate. Pending step-up challenges
 // cascade with the session row.
 func revokeSessionGrantsTx(tx *sql.Tx, where string, now time.Time, args ...any) error {
 	statements := []struct {
@@ -139,6 +139,8 @@ func revokeSessionGrantsTx(tx *sql.Tx, where string, now time.Time, args ...any)
 		{`UPDATE step_up_tokens SET used_at=? WHERE used_at IS NULL AND ` + where, append([]any{now}, args...)},
 		{`UPDATE step_up_challenges SET used_at=? WHERE used_at IS NULL AND ` + where, append([]any{now}, args...)},
 		{`DELETE FROM authorization_interactions WHERE ` + where, args},
+		{`DELETE FROM forward_codes WHERE ` + where, args},
+		{`DELETE FROM forward_sessions WHERE ` + where, args},
 	}
 	for _, st := range statements {
 		if _, err := tx.Exec(st.sql, st.args...); err != nil {

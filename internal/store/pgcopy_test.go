@@ -468,7 +468,7 @@ func TestExportedFileIsAWorkingSQLiteInstall(t *testing.T) {
 		t.Fatalf("user by a case-different name: %+v %v", got, err)
 	}
 	var versions string
-	if err := lite.db.QueryRow(`SELECT group_concat(version||':'||name) FROM schema_migrations`).Scan(&versions); err != nil || versions != "1:legacy" {
+	if err := lite.db.QueryRow(`SELECT group_concat(version||':'||name) FROM schema_migrations`).Scan(&versions); err != nil || versions != "1:legacy"+shipped() {
 		t.Fatalf("schema_migrations %q %v", versions, err)
 	}
 	fresh, err := newSQLite(filepath.Join(dir, "fresh.db"))
@@ -673,7 +673,11 @@ func TestImportNeverWritesTheFile(t *testing.T) {
 
 	rawSQLite(t, src, `INSERT INTO schema_migrations(version,name,applied_at) VALUES(99,'future','2030-01-01 00:00:00')`)
 	_, err = ImportSQLite(testURL(t, filepath.Join(t.TempDir(), "pg")), src, ImportOptions{})
-	if err == nil || !strings.Contains(err.Error(), "[1 99]") || !strings.Contains(err.Error(), "knows [1]") {
+	known := "1"
+	for _, m := range migrations {
+		known += fmt.Sprintf(" %d", m.version)
+	}
+	if err == nil || !strings.Contains(err.Error(), "["+known+" 99]") || !strings.Contains(err.Error(), "knows ["+known+"]") {
 		t.Fatalf("a file at a newer schema version: %v", err)
 	}
 }
@@ -685,7 +689,7 @@ func TestImportBringsAnOlderFileUpToDate(t *testing.T) {
 	srcDir := t.TempDir()
 	src := liteFixture(t, filepath.Join(srcDir, "kyidentity.db"))
 	before := dirState(t, srcDir)
-	withTestMigration(t, migration{version: 2, name: "test", up: func(tx *sql.Tx) error {
+	withTestMigration(t, migration{version: nextVersion(), name: "test", up: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE users SET display_name = 'migrated'`)
 		return err
 	}})
@@ -705,7 +709,11 @@ func TestImportBringsAnOlderFileUpToDate(t *testing.T) {
 	if users == 0 || users != migrated || users != res.Rows["users"] {
 		t.Fatalf("%d of %d users carry the migration (file had %d)", migrated, users, res.Rows["users"])
 	}
-	if got := fmt.Sprint(mustVersions(t, pg.db)); got != "[1 2]" {
+	want := []int{1}
+	for _, m := range migrations {
+		want = append(want, m.version)
+	}
+	if got := fmt.Sprint(mustVersions(t, pg.db)); got != fmt.Sprint(want) {
 		t.Fatalf("Postgres schema versions %s", got)
 	}
 }

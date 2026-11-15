@@ -25,6 +25,8 @@ const restoredRevision = -1
 // are absent for a different reason: they are work this server owes a relying party,
 // and nothing would re-derive them.
 var restoredCleared = []string{
+	"forward_codes",
+	"forward_sessions",
 	"sessions", // cascades oidc_client_sessions
 	"refresh_tokens",
 	"refresh_families",

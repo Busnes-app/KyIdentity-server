@@ -34,6 +34,7 @@ type Server struct {
 	middleware  *MiddlewareManager
 	httpServer  *http.Server
 	staticFS    fs.FS
+	forward     *ForwardHandler
 }
 
 func NewServer(
@@ -209,6 +210,15 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/suite/people", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.People)))
 
 	// Organisation branding: public, because the sign-in page shows it (issue #145).
+	// Forward-auth (docs/FORWARD-AUTH.md): edge routes authenticate the per-app secret.
+	forwardH := NewForwardHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
+	s.forward = forwardH
+	mux.HandleFunc("GET /api/forward/check", forwardH.Check)
+	mux.Handle("GET /forward/begin", s.middleware.RateLimit("forward_begin", 30, 1)(http.HandlerFunc(forwardH.Begin)))
+	mux.Handle("GET /forward/start", s.middleware.OptionalAuth(s.middleware.RateLimit("forward_start", 30, 1)(http.HandlerFunc(forwardH.Start))))
+	mux.Handle("GET /forward/callback", s.middleware.RateLimit("forward_callback", 30, 1)(http.HandlerFunc(forwardH.Callback)))
+	mux.Handle("GET /forward/logout", s.middleware.RateLimit("forward_logout", 30, 1)(http.HandlerFunc(forwardH.Logout)))
+
 	brandingH := &BrandingHandler{store: s.store, audit: s.audit, middleware: s.middleware}
 	mux.Handle("GET /api/branding", s.middleware.RateLimit("branding", 120, 2)(http.HandlerFunc(brandingH.Get)))
 	mux.Handle("GET /api/branding/logo", s.middleware.RateLimit("branding", 120, 2)(http.HandlerFunc(brandingH.Logo)))
@@ -291,6 +301,10 @@ func (s *Server) routes() *http.ServeMux {
 		{"GET", "/api/admin/app-registry", permDirectory, false, http.HandlerFunc(adminH.ListAppRecords)},
 		{"POST", "/api/admin/app-registry/{id}/link", permAdmin, true, http.HandlerFunc(adminH.LinkAppRecords)},
 		{"POST", "/api/admin/app-registry/{id}/unlink", permAdmin, true, http.HandlerFunc(adminH.UnlinkAppRecord)},
+		{"GET", "/api/admin/proxy-apps", permRead, false, http.HandlerFunc(adminH.ListProxyApps)},
+		{"POST", "/api/admin/proxy-apps", permAdmin, true, http.HandlerFunc(adminH.CreateProxyApp)},
+		{"PUT", "/api/admin/proxy-apps/{id}", permAdmin, true, http.HandlerFunc(adminH.UpdateProxyApp)},
+		{"POST", "/api/admin/proxy-apps/{id}/secret", permAdmin, true, http.HandlerFunc(adminH.RotateProxySecret)},
 		{"GET", "/api/admin/applications", permRead, false, http.HandlerFunc(adminH.ListApplications)},
 		{"POST", "/api/admin/applications", permAdmin, false, http.HandlerFunc(adminH.CreateApplication)},
 		{"PUT", "/api/admin/applications/{id}", permAdmin, false, http.HandlerFunc(adminH.UpdateApplication)},

@@ -73,6 +73,16 @@ requires `mode`, `enabled`, and `revision`. `PUT`/`DELETE
 /api/admin/app-registry/{id}/assignments/{kind}/{principal}` adds/removes an individual
 assignment (`kind` is `users` or `groups`). Duplicate assignments are idempotent.
 
+## Proxy apps (forward-auth)
+
+A **proxy app** protects a web app behind your nginx edge, including one with no single
+sign-on of its own: nginx asks KyIdentity on every request. Open **App connections**, then
+**Proxy apps**. Each proxy app is a launcher card for one exact host, with its own edge secret
+(shown once), login header, bypass paths and session length. Assign users and set the MFA
+policy with **Manage access** and **Authentication** as for any app. New proxy apps require
+MFA. Setup, the nginx configuration and the three ways an app can take the sign-in are in
+[FORWARD-AUTH.md](FORWARD-AUTH.md).
+
 ## App roles and token claims
 
 **Roles.** App connections → Roles defines the fixed role names an app understands

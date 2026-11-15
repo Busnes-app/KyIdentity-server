@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, RateLimitNetworks, OwnAccessRequests, AccessExplanation } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, RateLimitNetworks, OwnAccessRequests, AccessExplanation, ProxyApp } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -622,6 +622,7 @@ export function parseAppRecord(value: unknown): AppRecord {
     clientId: str(a, 'clientId'), clientName: str(a, 'clientName'),
     launcherId: str(a, 'launcherId'), launcherName: str(a, 'launcherName'),
     systemId: str(a, 'systemId'), systemName: str(a, 'systemName'),
+    proxyHost: optStr(a, 'proxyHost') ?? '',
   };
   if (!record.id || (!record.clientId && !record.launcherId && !record.systemId)) return fail('an app with a connection');
   return record;
@@ -699,6 +700,19 @@ export function parseAccessExplanation(value: unknown): AccessExplanation {
     revision: directoryCount(e, 'revision'), authenticationRevision: directoryCount(e, 'authenticationRevision'), roleRevision: directoryCount(e, 'roleRevision'),
     requestable: requiredBool(e, 'requestable'),
   };
+}
+function parseProxyApp(value: unknown): ProxyApp {
+  const p = obj(value, 'a proxy app');
+  return { id: str(p, 'id'), appId: str(p, 'appId'), name: str(p, 'name'), host: str(p, 'host'), loginHeader: str(p, 'loginHeader'),
+    bypass: strArray(p.bypass), sessionSeconds: directoryCount(p, 'sessionSeconds') };
+}
+export function parseProxyApps(value: unknown): ProxyApp[] {
+  const o = obj(value, 'a proxy app list');
+  return Array.isArray(o.proxyApps) ? o.proxyApps.map(parseProxyApp) : fail('array field "proxyApps"');
+}
+export function parseEdgeSecret(value: unknown): string {
+  const s = str(obj(value, 'an edge secret'), 'edgeSecret');
+  return /^[0-9a-f]{64}$/.test(s) ? s : fail('a 64-character edge secret');
 }
 export function parseAppRecordPage(value: unknown): DirectoryPage<AppRecord> {
  return directoryPage(value, 'records', parseAppRecord);

@@ -20,7 +20,9 @@ type migration struct {
 	pgUp func(tx *sql.Tx) error
 }
 
-var migrations = []migration{}
+var migrations = []migration{
+	{version: 2, name: "forward_auth", up: migrateForwardAuth, pgUp: migrateForwardAuthPostgres},
+}
 
 // legacyRuns counts migrateLegacy calls, so tests can prove a versioned start skips it.
 var legacyRuns atomic.Int64
