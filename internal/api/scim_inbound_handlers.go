@@ -96,6 +96,17 @@ func (h *SCIMHandler) Authenticate(write bool, next http.HandlerFunc) http.Handl
 			scimError(w, http.StatusForbidden, "", "This token is read-only")
 			return
 		}
+		if write && strings.HasPrefix(r.URL.Path, "/scim/v2/") {
+			owned, err := h.store.IsHRConnector(c.ID)
+			if err != nil {
+				scimError(w, http.StatusInternalServerError, "", "Internal error")
+				return
+			}
+			if owned {
+				scimError(w, http.StatusForbidden, "", "Use versioned HR imports for this connector")
+				return
+			}
+		}
 		ctx := context.WithValue(r.Context(), scimConnectorKey, c)
 		next(w, r.WithContext(context.WithValue(ctx, scimTokenScopeKey, scope)))
 	})

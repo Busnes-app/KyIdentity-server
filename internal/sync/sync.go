@@ -652,6 +652,7 @@ func (e *Engine) StartWorker(ctx context.Context) {
 	defer reconcile.Stop()
 	go e.reconcileWorker(ctx)
 	go e.alertWorker(ctx)
+	go e.hrWorker(ctx)
 	// Overdue expiries are applied at start, so a restart drains them before anything else.
 	if _, err := e.store.RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
 		log.Printf("expiry follow-up failed: %v", err)

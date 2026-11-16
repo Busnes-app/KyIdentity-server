@@ -15,6 +15,8 @@ KyIdentity Server is the single-organization SSO provider and central identity a
 
 ## Security Invariants
 
+- Generic HR provisioning is owned by `internal/store/hr.go`, `internal/sync/hr.go` and `internal/api/hr_handlers.go`; operator/API contract: `docs/HR-PROVISIONING.md`. Stage immutable source UID/version facts, reserve the KyPost address before creating the pending SSO identity, then perform idempotent HTTPS email writeback. Source tokens use existing connector scope/rate limits; HR connectors refuse SCIM writes. Worker leases and stage commits persist, identity creation and audit are atomic, writeback secrets are sealed to their connector row and checked by restore drills, and restore holds HR connections for deliberate review. Tests named `TestHR*` cover ordering, lifecycle, source isolation, versions, redirects, audit rollback and restore refusal.
+
 - Container-local installer setup is owned by `cmd/kyidentity/setup.go`,
   `cmd/kyidentity/setup_stage.go`, `cmd/kyidentity/setup_export.go` and `internal/store/installer_setup.go`; its bundle and limits are in
   `docs/INSTALLER-SETUP.md`. Use this interface for installer account/client creation.

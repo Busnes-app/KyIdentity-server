@@ -317,6 +317,7 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 				"app_registry", "app_user_assignments", "app_group_assignments", "app_roles",
 				"admin_delegations", "access_requests",
 				"scim_connectors", "scim_user_links", "sync_resource_state", "sync_reconcile_jobs",
+				"hr_connections", "hr_workers",
 				"audit_events", "alerts", "system_settings",
 			},
 			"require_any_admin": true,
