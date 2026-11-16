@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { GroupName, GroupRowActions } from './AdminGroups';
 import type { DirectoryGroup } from '../types';
 
-const group: DirectoryGroup = { id: 'g1', name: 'Family', description: '', memberCount: 2, member: false, createdAt: '', updatedAt: '' };
+const group: DirectoryGroup = { id: 'g1', name: 'Family', description: '', memberCount: 2, member: false, suite: false, createdAt: '', updatedAt: '' };
 const none = () => {};
 const actions = (html: string) => [...html.matchAll(/class="row-action[^"]*"[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)/g)].map((m) => m[1]);
 

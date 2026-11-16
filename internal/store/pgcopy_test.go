@@ -50,6 +50,9 @@ func copyFixture(t *testing.T, s *Store) {
 	if err := s.SetGroupMembership(g.ID, user.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.SetSuiteGroup(g.ID, true, map[string]bool{"kypost": true}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}

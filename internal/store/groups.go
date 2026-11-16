@@ -17,12 +17,14 @@ type Group struct {
 	Description string `json:"description"`
 	// SourceConnectorID names the inbound SCIM connector that owns the group's name and
 	// member set; empty for local groups. ExternalID is the upstream's key, when it sent one.
-	SourceConnectorID string    `json:"sourceConnectorId,omitempty"`
-	ExternalID        string    `json:"externalId,omitempty"`
-	MemberCount       int       `json:"memberCount"`
-	Member            bool      `json:"member"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	SourceConnectorID string `json:"sourceConnectorId,omitempty"`
+	ExternalID        string `json:"externalId,omitempty"`
+	MemberCount       int    `json:"memberCount"`
+	Member            bool   `json:"member"`
+	// Suite is on when the group creates shared resources in suite apps.
+	Suite     bool      `json:"suite"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type GroupUser struct {
@@ -168,6 +170,9 @@ func deleteGroupTx(tx *sql.Tx, id, sessionID string) (string, error) {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrGroupTargetMissing
 		}
+		return "", err
+	}
+	if err = tombstoneSuiteGroupTx(tx, id, name); err != nil {
 		return "", err
 	}
 	if err = roleChangeForAppsTx(tx, apps, members); err != nil {
@@ -358,7 +363,8 @@ func (s *Store) ListGroups(query, userID string, limit, offset int) ([]Group, in
 	}
 	rows, err := tx.Query(`SELECT g.id,g.name,g.description,g.source_connector_id,g.external_id,g.created_at,g.updated_at,
  (SELECT COUNT(*) FROM group_memberships m WHERE m.group_id=g.id),
- EXISTS(SELECT 1 FROM group_memberships m WHERE m.group_id=g.id AND m.user_id=?)
+ EXISTS(SELECT 1 FROM group_memberships m WHERE m.group_id=g.id AND m.user_id=?),
+ EXISTS(SELECT 1 FROM suite_groups s WHERE s.group_id=g.id AND s.enabled)
  FROM directory_groups g`+where+` ORDER BY g.name,g.id LIMIT ? OFFSET ?`, userID, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -367,7 +373,7 @@ func (s *Store) ListGroups(query, userID string, limit, offset int) ([]Group, in
 	for rows.Next() {
 		var g Group
 		var source, external sql.NullString
-		if err = rows.Scan(&g.ID, &g.Name, &g.Description, &source, &external, &g.CreatedAt, &g.UpdatedAt, &g.MemberCount, &g.Member); err != nil {
+		if err = rows.Scan(&g.ID, &g.Name, &g.Description, &source, &external, &g.CreatedAt, &g.UpdatedAt, &g.MemberCount, &g.Member, &g.Suite); err != nil {
 			rows.Close()
 			return nil, 0, err
 		}

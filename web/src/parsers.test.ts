@@ -389,7 +389,7 @@ describe('parseSuccess', () => {
 
 
 describe('group directory pages', () => {
-  const group = { id: 'g1', name: 'Operations', description: '', member: true, memberCount: 3, createdAt: '2026-09-05T00:00:00Z', updatedAt: '2026-09-05T00:00:00Z' };
+  const group = { id: 'g1', name: 'Operations', description: '', member: true, memberCount: 3, suite: true, createdAt: '2026-09-05T00:00:00Z', updatedAt: '2026-09-05T00:00:00Z' };
   const page = { groups: [group], total: 4, limit: 25, offset: 0 };
   it('preserves membership and pagination without interpreting names as roles', () => {
     expect(parseGroupPage(page)).toEqual({ items: [group], total: 4, limit: 25, offset: 0 });

@@ -191,3 +191,41 @@ func (h *AdminHandler) SetGroupMembership(w http.ResponseWriter, r *http.Request
 	event.Committed()
 	writeGroupJSON(w, map[string]bool{"success": true})
 }
+
+func (h *AdminHandler) GetSuiteGroup(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.store.GetSuiteGroup(r.PathValue("id"))
+	if err != nil {
+		writeGroupError(w, err)
+		return
+	}
+	writeGroupJSON(w, settings)
+}
+
+// SetSuiteGroup turns a group's shared resources on or off, and per app.
+func (h *AdminHandler) SetSuiteGroup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled *bool           `json:"enabled"`
+		Apps    map[string]bool `json:"apps"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil || req.Enabled == nil {
+		http.Error(w, `{"error":"invalid_request","error_description":"Send enabled and optional apps"}`, 400)
+		return
+	}
+	actor := GetUserFromContext(r.Context())
+	id := r.PathValue("id")
+	event := h.audit.Prepare("admin.group_suite_updated", actor.ID, actor.Username, id, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"enabled": *req.Enabled, "apps": req.Apps})
+	settings, err := h.store.SetSuiteGroup(id, *req.Enabled, req.Apps, event.Row)
+	if err != nil {
+		var input store.InputError
+		if errors.As(err, &input) {
+			writeInputError(w, "invalid_request", err)
+			return
+		}
+		writeGroupError(w, err)
+		return
+	}
+	event.Committed()
+	writeGroupJSON(w, settings)
+}

@@ -124,6 +124,19 @@ each accepted request is audited. Deleting a group or user removes its membershi
 | `GET /api/admin/groups/{id}/members` | List members; `includeNonMembers=true` includes candidates to add. |
 | `PUT /api/admin/groups/{id}/members/{userId}` | Ensure the user is a member. |
 | `DELETE /api/admin/groups/{id}/members/{userId}` | Ensure the user is not a member. |
+| `GET /api/admin/groups/{id}/suite` | Suite group settings: `enabled`, `slug`, and each app's `enabled`. |
+| `PUT /api/admin/groups/{id}/suite` | `{enabled, apps?}`: create shared resources for the group in suite apps; omitted apps keep their setting. |
+
+**Suite groups.** "Create shared resources for this group" (off by default) makes every
+suite app that supports it give the group one shared resource: a KyDrive workspace, a
+KyCalendar group calendar, a KyMessages room and, opt-in per group, a KyPost distribution
+list. Members are the group's active everyday members who also have access to that app;
+dedicated administrator accounts never are. Turning the group or one app off, or deleting
+the group, archives the resource in the app (read-only, kept, no members); nothing is ever
+deleted. A deleted group's slug is never reused. Apps read the state from
+`GET /api/suite/groups` ([SUITE-DIRECTORY.md](SUITE-DIRECTORY.md)) about once a minute, so a
+removed member loses access within a minute or so. Design:
+[2026-11-15-suite-groups-design.md](superpowers/specs/2026-11-15-suite-groups-design.md).
 
 Both list endpoints accept `limit` (1–100, default 25), `offset` (0–1,000,000, default 0),
 and `q` (up to 200 characters). Group search matches names; member search matches username,

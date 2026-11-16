@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, RateLimitNetworks, OwnAccessRequests, AccessExplanation, ProxyApp } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, RateLimitNetworks, OwnAccessRequests, AccessExplanation, ProxyApp, SuiteGroupSettings } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -567,9 +567,16 @@ export function parseGroupPage(value: unknown): DirectoryPage<DirectoryGroup> {
     const o = obj(item, 'a group');
     return { id: str(o, 'id'), name: str(o, 'name'), description: str(o, 'description'),
       sourceConnectorId: optStr(o, 'sourceConnectorId'), externalId: optStr(o, 'externalId'),
-      memberCount: directoryCount(o, 'memberCount'), member: directoryMember(o),
+      memberCount: directoryCount(o, 'memberCount'), member: directoryMember(o), suite: bool(o, 'suite'),
       createdAt: str(o, 'createdAt'), updatedAt: str(o, 'updatedAt') };
   });
+}
+export function parseSuiteGroupSettings(value: unknown): SuiteGroupSettings {
+  const o = obj(value, 'suite group settings');
+  return { enabled: bool(o, 'enabled'), slug: optStr(o, 'slug'), apps: arr(o.apps, 'suite group apps').map(item => {
+    const a = obj(item, 'a suite group app');
+    return { id: str(a, 'id'), enabled: bool(a, 'enabled') };
+  }) };
 }
 export function parseGroupUserPage(value: unknown): DirectoryPage<GroupUser> {
   return directoryPage(value, 'users', item => {

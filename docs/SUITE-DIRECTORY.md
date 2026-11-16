@@ -1,7 +1,7 @@
 # Suite directory
 
 KyIdentity tells suite apps about each other, so cross-app features work without an
-operator copying URLs or secrets between servers. Three read-only service endpoints, called
+operator copying URLs or secrets between servers. Four read-only service endpoints, called
 server to server by a registered app with its own OAuth client credentials. The people route
 is contract A2 of the wave-1 suite integrations (`ky-redesign/integrations/suite-integrations-contracts.md`);
 this file is the durable copy.
@@ -87,3 +87,35 @@ Connection details for a paired suite integration.
   secret gives it no power it lacks. Each app's own explicit configuration (its `*_URL` and
   `*_SECRET_FILE` variables) still wins when set.
 - Each issue is audited (`suite.peer.issue`, caller and peer, never the secret).
+
+## `GET /api/suite/groups`
+
+The suite groups the calling app creates shared resources for. Same authentication, rate
+limit and `no-store`. No parameters. Design and threat model:
+`docs/superpowers/specs/2026-11-15-suite-groups-design.md`.
+
+```json
+{"groups": [
+  {"id": "…", "name": "Sales", "slug": "sales", "state": "active", "members": ["<sub>"]},
+  {"id": "…", "name": "Old team", "slug": "old-team", "state": "archived", "members": []}
+]}
+```
+
+- Only the suite group apps get entries: `kycalendar`, `kydrive`, `kymessage` and `kypost`.
+  Any other client gets `{"groups": []}`.
+- Every group that was ever a suite group is listed, deleted ones included (a tombstone).
+  `active` when the group is on and on for the caller (Drive, Calendar and Messages default
+  on; KyPost's distribution list defaults off); otherwise `archived` with no members.
+- `members`: subjects of live members who are active everyday accounts (`role = 'user'`)
+  with access to the caller (`effective_app_access`). Dedicated administrators never.
+  Sorted. The list carries no role: apps grant the ordinary member role only.
+- `slug` is lowercase ASCII words joined by single hyphens, fixed when the group is first
+  turned on and never reused, so a recreated namesake gets `sales-2`. `name` follows renames.
+- At most 200 groups can be on at once. Ordered by `id`. Not audited.
+
+Apps reconcile, keyed on `id` only: poll about every 60 s; on an error change nothing; for
+an `active` group ensure one resource (create, or un-archive), set its name, and set its
+members to exactly the listed subjects that have a local SSO account; for an `archived`
+group with a resource, archive it (read-only, no members, kept for administrators). Never
+delete, and never archive because a group is absent from a response. Client:
+`ky-primitives/suitedir` `Groups`.
