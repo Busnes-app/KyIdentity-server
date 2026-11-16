@@ -1112,3 +1112,66 @@ func TestDowngradeDuringExchangeRefuses(t *testing.T) {
 		t.Fatalf("sessions %d -> %d", sessions, n)
 	}
 }
+
+const testCnfThumb = "Wnp4zKSg9CDZvGK7Zpw8J1njn3I9OuENy-DwgVoH7NQ"
+
+func TestParseDeviceAssertionCnf(t *testing.T) {
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	parse := func(cnf any) (*deviceAssertion, error) {
+		c := testClaims()
+		c["cnf"] = cnf
+		return parseForTest(signDeviceAssertionForTest(t, priv, testHeader("dev-1"), c), &priv.PublicKey)
+	}
+	if a, err := parse(map[string]any{"spki#S256": testCnfThumb}); err != nil || a.CnfThumb != testCnfThumb {
+		t.Fatalf("valid cnf: %+v %v", a, err)
+	}
+	refused := map[string]any{
+		"extra member":   map[string]any{"spki#S256": testCnfThumb, "jkt": testCnfThumb},
+		"other member":   map[string]any{"jkt": testCnfThumb},
+		"empty object":   map[string]any{},
+		"short":          map[string]any{"spki#S256": testCnfThumb[:42]},
+		"long":           map[string]any{"spki#S256": testCnfThumb + "A"},
+		"padded":         map[string]any{"spki#S256": testCnfThumb[:42] + "="},
+		"std base64":     map[string]any{"spki#S256": "+" + testCnfThumb[1:]},
+		"non-string":     map[string]any{"spki#S256": 42},
+		"string":         testCnfThumb,
+		"array":          []any{testCnfThumb},
+		"null":           nil,
+		"number":         1,
+		"trailing space": map[string]any{"spki#S256": testCnfThumb[:42] + " "},
+	}
+	for name, cnf := range refused {
+		if _, err := parse(cnf); !errors.Is(err, errAssertionCnf) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestExchangeDeviceAssertionCnfPassThrough(t *testing.T) {
+	f := newSignOnFixture(t)
+	idClaims := func(mutate func(map[string]any)) map[string]any {
+		t.Helper()
+		resp, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(mutate)), f.client.ID, "127.0.0.1", "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims, err := f.engine.keyManager.VerifyJWT(resp.IDToken, f.engine.issuerURL, "id_token")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return claims
+	}
+	cnf, _ := idClaims(func(c map[string]any) { c["cnf"] = map[string]any{"spki#S256": testCnfThumb} })["cnf"].(map[string]any)
+	if len(cnf) != 1 || cnf["spki#S256"] != testCnfThumb {
+		t.Fatalf("cnf %v", cnf)
+	}
+	if c, ok := idClaims(nil)["cnf"]; ok {
+		t.Fatalf("cnf without one in the assertion: %v", c)
+	}
+	_, _, err := f.engine.ExchangeDeviceAssertion(signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(func(c map[string]any) {
+		c["cnf"] = map[string]any{"spki#S256": testCnfThumb, "x": "y"}
+	})), f.client.ID, "127.0.0.1", "test")
+	if !errors.Is(err, errAssertionCnf) {
+		t.Fatalf("malformed cnf: %v", err)
+	}
+}

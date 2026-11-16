@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ type deviceAssertion struct {
 	Audience  string
 	ClientID  string
 	Origin    string // canonical
+	CnfThumb  string // optional spki#S256 the consumer's sign-on key; "" when absent
 	JTI       string
 	IssuedAt  int64
 	ExpiresAt int64
@@ -93,8 +95,24 @@ func registeredOrigin(redirectURIsJSON, origin string) bool {
 
 type assertionClaims struct {
 	jwt.RegisteredClaims
-	ClientID string `json:"client_id"`
-	Origin   string `json:"origin"`
+	ClientID string          `json:"client_id"`
+	Origin   string          `json:"origin"`
+	Cnf      json.RawMessage `json:"cnf"`
+}
+
+var spkiThumb = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+
+// cnfThumb returns the spki#S256 of an optional cnf claim: absent is "", anything
+// but exactly {"spki#S256": <43-char base64url>} is refused.
+func cnfThumb(raw json.RawMessage) (string, error) {
+	if raw == nil {
+		return "", nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil || len(m) != 1 || !spkiThumb.MatchString(m["spki#S256"]) {
+		return "", errAssertionCnf
+	}
+	return m["spki#S256"], nil
 }
 
 // parseDeviceAssertion verifies a compact JWS against the key that key returns for its
@@ -145,7 +163,11 @@ func parseDeviceAssertion(compact, audience string, now time.Time, key func(kid,
 	default:
 		return nil, err
 	}
-	return &deviceAssertion{DeviceID: kid, Subject: c.Subject, Audience: c.Audience[0], ClientID: c.ClientID, Origin: origin, JTI: c.ID, IssuedAt: c.IssuedAt.Unix(), ExpiresAt: c.ExpiresAt.Unix()}, nil
+	thumb, err := cnfThumb(c.Cnf)
+	if err != nil {
+		return nil, err
+	}
+	return &deviceAssertion{DeviceID: kid, Subject: c.Subject, Audience: c.Audience[0], ClientID: c.ClientID, Origin: origin, CnfThumb: thumb, JTI: c.ID, IssuedAt: c.IssuedAt.Unix(), ExpiresAt: c.ExpiresAt.Unix()}, nil
 }
 
 const (
@@ -183,6 +205,7 @@ var (
 	errUserInactive       = errors.New("user not found or inactive")
 	errAppPolicy          = fmt.Errorf("%w: app sign-in policy not satisfied", ErrDeviceSignOnNotPermitted)
 	errNoOpenIDScope      = errors.New("client may not be granted the openid scope")
+	errAssertionCnf       = errors.New(`assertion cnf is not exactly {"spki#S256": thumbprint}`)
 )
 
 // beforeDeviceTokenRecord is a test seam between policy evaluation and token registration.
@@ -358,6 +381,10 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	claims["signon_method"] = "device"
 	claims["device_id"] = dev.ID
 	claims["origin"] = a.Origin
+	// Sign-on token binding: the consumer proves this key; KyIdentity only passes it on.
+	if a.CnfThumb != "" {
+		claims["cnf"] = map[string]string{"spki#S256": a.CnfThumb}
+	}
 	idToken, err := e.keyManager.SignJWT(claims)
 	if err != nil {
 		return nil, who, fmt.Errorf("failed to sign ID token: %w", err)
