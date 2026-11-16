@@ -208,6 +208,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/suite/apps", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Apps)))
 	mux.Handle("GET /api/suite/peer", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Peer)))
 	mux.Handle("GET /api/suite/people", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.People)))
+	mux.Handle("GET /api/suite/groups", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Groups)))
 
 	// Organisation branding: public, because the sign-in page shows it (issue #145).
 	// Forward-auth (docs/FORWARD-AUTH.md): edge routes authenticate the per-app secret.
@@ -239,6 +240,8 @@ func (s *Server) routes() *http.ServeMux {
 		{"PUT", "/api/admin/groups/{id}", permAdmin, true, http.HandlerFunc(adminH.UpdateGroup)},
 		{"DELETE", "/api/admin/groups/{id}", permAdmin, true, http.HandlerFunc(adminH.DeleteGroup)},
 		{"GET", "/api/admin/groups/{id}/members", permDirectory, false, http.HandlerFunc(adminH.ListGroupUsers)},
+		{"GET", "/api/admin/groups/{id}/suite", permDirectory, false, http.HandlerFunc(adminH.GetSuiteGroup)},
+		{"PUT", "/api/admin/groups/{id}/suite", permAdmin, true, http.HandlerFunc(adminH.SetSuiteGroup)},
 		{"PUT", "/api/admin/groups/{id}/members/{userId}", permAdmin, true, http.HandlerFunc(adminH.SetGroupMembership)},
 		{"DELETE", "/api/admin/groups/{id}/members/{userId}", permAdmin, true, http.HandlerFunc(adminH.SetGroupMembership)},
 		{"GET", "/api/admin/users", permDirectory, false, http.HandlerFunc(adminH.ListUsers)},

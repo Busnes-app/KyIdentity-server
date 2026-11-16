@@ -186,3 +186,13 @@ func (h *SuiteHandler) Peer(w http.ResponseWriter, r *http.Request, caller *stor
 	h.audit.Observe("suite.peer.issue", "", "", caller.ID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"client": caller.ID, "peer": peer.ID})
 	suiteJSON(w, http.StatusOK, map[string]string{"client": peer.ID, "url": origin, "secret": suitePeerSecret(h.encryptionKey, a, b)})
 }
+
+// Groups lists the suite groups for the calling app (docs/SUITE-DIRECTORY.md).
+func (h *SuiteHandler) Groups(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
+	groups, err := h.store.SuiteGroupsFor(caller.ID)
+	if err != nil {
+		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	suiteJSON(w, http.StatusOK, map[string]any{"groups": groups})
+}

@@ -8,6 +8,7 @@ import { AdminEnrollmentPolicies } from './AdminEnrollmentPolicies';
 import { pageSize, Pager, useDirectoryPage } from './DirectoryPage';
 import { Edit, MoreHorizontal, Plus, Search, ShieldCheck, Trash2, UsersRound } from 'lucide-react';
 import { Modal } from './Modal';
+import { GroupSharedResources } from './SuiteGroupSettings';
 
 type Mutate = (reason: string, method: 'POST' | 'PUT' | 'DELETE', path: string, body?: object) => Promise<boolean>;
 
@@ -29,6 +30,7 @@ function GroupMembers({ group, busy, mutate, onClose }: {
       <h2 id="group-members-title" ref={heading} tabIndex={-1}>Members of {group.name}</h2>
       <button className="secondary-btn" disabled={busy} onClick={onClose}>Back to groups</button>
     </div>
+    <GroupSharedResources group={group} busy={busy} mutate={mutate} />
     <div className="form-group">
       <label className="form-label" htmlFor="group-member-search">Search users by name or email</label>
       <input id="group-member-search" className="form-input" maxLength={200} value={query} disabled={busy}
@@ -137,7 +139,7 @@ export function AdminGroups({ user, onClearUser }: { user: User | null; onClearU
     {Boolean(page?.items.length) && <div className="table-card"><table className="admin-table groups-table">
       <thead><tr><th>Name</th><th>Description</th><th>Members</th><th className="text-right">{user ? 'Membership' : <span className="sr-only">Actions</span>}</th></tr></thead>
       <tbody>{page?.items.map(group => <tr key={group.id}>
-        <td style={{ overflowWrap: 'anywhere' }}><span className="cell-title"><GroupName group={group} busy={busy} onManage={user ? undefined : manage} />{group.sourceConnectorId && <span className="badge-type" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}</span></td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
+        <td style={{ overflowWrap: 'anywhere' }}><span className="cell-title"><GroupName group={group} busy={busy} onManage={user ? undefined : manage} />{group.sourceConnectorId && <span className="badge-type" title="Name and members are managed by an inbound SCIM connector"> SCIM</span>}{group.suite && <span className="badge-type" title="Creates shared resources in suite apps"> Shared</span>}</span></td><td style={{ maxWidth: '24rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{group.description}</td><td>{group.memberCount}</td>
         <td className="text-right"><div className="action-buttons-wrap">
           {user ? <button className="secondary-btn sm" disabled={busy} onClick={() => mutate(
             `${group.member ? 'Remove' : 'Add'} '${user.username}' ${group.member ? 'from' : 'to'} '${group.name}'.`,

@@ -23,6 +23,7 @@ type migration struct {
 var migrations = []migration{
 	{version: 2, name: "forward_auth", up: migrateForwardAuth, pgUp: migrateForwardAuthPostgres},
 	{version: 3, name: "hr_provisioning", up: migrateHR, pgUp: migrateHRPostgres},
+	{version: 4, name: "suite_groups", up: migrateSuiteGroups, pgUp: migrateSuiteGroupsPostgres},
 }
 
 // legacyRuns counts migrateLegacy calls, so tests can prove a versioned start skips it.

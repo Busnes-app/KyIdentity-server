@@ -236,8 +236,17 @@ export interface DirectoryGroup {
   externalId?: string;
   memberCount: number;
   member: boolean;
+  /** On when the group creates shared resources in suite apps. */
+  suite: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A group's suite (shared resources) settings. */
+export interface SuiteGroupSettings {
+  enabled: boolean;
+  slug?: string;
+  apps: { id: string; enabled: boolean }[];
 }
 
 export interface GroupUser {

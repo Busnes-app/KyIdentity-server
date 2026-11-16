@@ -66,7 +66,7 @@ interval plus the app's reconcile time**; each app's PR measures and states its 
 
 ## Data
 
-Migration 3 (`suite_groups`), same SQL on SQLite and Postgres:
+Migration 4 (`suite_groups`), same SQL on SQLite and Postgres:
 
 ```sql
 CREATE TABLE suite_groups (
