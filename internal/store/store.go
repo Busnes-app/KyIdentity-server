@@ -976,6 +976,14 @@ func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u
 		return nil, err
 	}
 	defer tx.Rollback()
+	stored, err := updateUserTx(tx, id, audit, edit)
+	if err != nil {
+		return nil, err
+	}
+	return stored, tx.Commit()
+}
+
+func updateUserTx(tx *sql.Tx, id string, audit *AuditEvent, edit func(*sql.Tx, *User) (bool, error)) (*User, error) {
 	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 	if err != nil {
 		return nil, err
@@ -1049,7 +1057,7 @@ func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u
 	if err := recordAuditTx(tx, audit); err != nil {
 		return nil, err
 	}
-	return stored, tx.Commit()
+	return stored, nil
 }
 
 func (s *Store) CountAdmins() (int, error) {

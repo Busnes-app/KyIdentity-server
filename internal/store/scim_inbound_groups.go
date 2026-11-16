@@ -116,6 +116,9 @@ func (s *Store) CreateUpstreamGroup(g *Group, members []string, audit *AuditEven
 	now := rowTime()
 	g.CreatedAt, g.UpdatedAt = now, now
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := requireSCIMSourceTx(tx, g.SourceConnectorID); err != nil {
+			return err
+		}
 		if err := externalGroupFreeTx(tx, g.SourceConnectorID, g.ExternalID, g.ID); err != nil {
 			return err
 		}
@@ -255,6 +258,9 @@ func (s *Store) ListUpstreamGroups(connectorID, attribute, value string, startIn
 func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, edit func(g *UpstreamGroup) error) error {
 	now := rowTime()
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := requireSCIMSourceTx(tx, connectorID); err != nil {
+			return err
+		}
 		current, err := scanUpstreamGroup(tx.QueryRow(`SELECT `+upstreamGroupColumns+` FROM directory_groups g WHERE g.id=? AND g.source_connector_id=?`, id, connectorID))
 		if err != nil {
 			return err
@@ -341,6 +347,9 @@ func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, 
 // expect, when set, is the version the caller read.
 func (s *Store) DeleteUpstreamGroup(connectorID, id string, expect *time.Time, audit *AuditEvent) error {
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := requireSCIMSourceTx(tx, connectorID); err != nil {
+			return err
+		}
 		var updated time.Time
 		err := tx.QueryRow(`SELECT updated_at FROM directory_groups WHERE id=? AND source_connector_id=?`, id, connectorID).Scan(&updated)
 		if errors.Is(err, sql.ErrNoRows) {

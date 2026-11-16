@@ -20,6 +20,8 @@ const (
 	SealMail = "mail_settings"
 	// push_relay_keys name. Never legacy ciphertext, so it is not in sealedColumns.
 	SealRelayKey = "push_relay_key"
+	// HR connector ID. New credentials are always row-bound; never legacy ciphertext.
+	SealHRWriteback = "hr_writeback"
 )
 
 // MailSettingKey is the system_settings row holding the sealed relay configuration.

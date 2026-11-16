@@ -40,6 +40,8 @@ startup without being overwritten; read the [signing-key upgrade guidance](docs/
 
 ## Documentation
 
+- [HR provisioning](docs/HR-PROVISIONING.md) — import source UIDs, reserve KyPost email before SSO account creation, and write the confirmed address back to HR.
+
 - [Architecture](docs/ARCHITECTURE.md) — Architecture & Standard Library Philosophy. <a id="architecture--standard-library-philosophy"></a><a id="standard-library-implementations"></a><a id="direct-dependencies"></a>
 - [Running](docs/RUNNING.md) — Quickstart with Docker Compose, shared keys for replicas, Health & Status Verification, Command Line Utilities. <a id="quickstart-with-docker-compose"></a><a id="1-configure-environment"></a><a id="2-start-the-server"></a><a id="3-retrieve-credentials--log-in"></a><a id="4-private-certificate-authority-lan-installs"></a><a id="health--status-verification"></a><a id="command-line-utilities"></a>
 - [Accounts and access](docs/ACCOUNTS-AND-ACCESS.md) — Onboarding and passwords, Directory groups, Delegated administration, Expiring access and account end dates, and related procedures. <a id="onboarding-and-passwords"></a><a id="directory-groups"></a><a id="delegated-administration"></a><a id="expiring-access-and-account-end-dates"></a><a id="access-requests-and-approvals"></a><a id="explaining-access-decisions"></a>

@@ -260,6 +260,8 @@ func (s *Server) routes() *http.ServeMux {
 		{"DELETE", "/api/admin/app-registry/{id}/roles/{roleId}/assignments/{kind}/{principal}", permAppGrants, true, http.HandlerFunc(adminH.SetAppRoleAssignment)},
 		{"PUT", "/api/admin/app-registry/{id}/claims", permAdmin, true, http.HandlerFunc(adminH.SetAppClaimSettings)},
 		{"GET", "/api/admin/scim-connectors", permRead, false, http.HandlerFunc(scimH.AdminList)},
+		{"PUT", "/api/admin/scim-connectors/{id}/hr", permAdmin, true, http.HandlerFunc(s.configureHR)},
+		{"GET", "/api/admin/scim-connectors/{id}/hr", permRead, false, http.HandlerFunc(s.hrStatus)},
 		{"POST", "/api/admin/scim-connectors", permAdmin, true, http.HandlerFunc(scimH.AdminCreate)},
 		{"PUT", "/api/admin/scim-connectors/{id}", permAdmin, true, http.HandlerFunc(scimH.AdminUpdate)},
 		{"POST", "/api/admin/scim-connectors/{id}/tokens", permAdmin, true, http.HandlerFunc(scimH.AdminIssueToken)},
@@ -349,6 +351,8 @@ func (s *Server) routes() *http.ServeMux {
 	// Inbound SCIM: Bearer connector tokens only, never cookies. Discovery is readable
 	// with any live token; Users need write scope to change anything.
 	mux.Handle("GET /scim/v2/ServiceProviderConfig", scimH.Authenticate(false, scimH.ServiceProviderConfig))
+	mux.Handle("POST /hr/v1/workers", scimH.Authenticate(true, s.importHR))
+	mux.Handle("GET /hr/v1/workers", scimH.Authenticate(false, s.readHR))
 	mux.Handle("GET /scim/v2/ResourceTypes", scimH.Authenticate(false, scimH.ResourceTypes))
 	mux.Handle("GET /scim/v2/ResourceTypes/{id}", scimH.Authenticate(false, scimH.ResourceTypes))
 	mux.Handle("GET /scim/v2/Schemas", scimH.Authenticate(false, scimH.Schemas))

@@ -279,6 +279,9 @@ func (s *Store) CreateUpstreamUser(u *User, audit *AuditEvent) error {
 	now := rowTime()
 	u.CreatedAt, u.UpdatedAt = now, now
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := requireSCIMSourceTx(tx, u.SourceConnectorID); err != nil {
+			return err
+		}
 		if err := rejectCrossIdentityTx(tx, u.ID, u.Username, u.Email); err != nil {
 			return err
 		}
@@ -361,6 +364,9 @@ func (s *Store) ListUpstreamUsers(connectorID, attribute, value string, startInd
 // changes, and status is re-derived.
 func (s *Store) UpdateUpstreamUser(connectorID, id string, audit *AuditEvent, edit func(u *User) error) (*User, error) {
 	stored, err := s.updateUser(id, audit, func(tx *sql.Tx, u *User) (bool, error) {
+		if err := requireSCIMSourceTx(tx, connectorID); err != nil {
+			return false, err
+		}
 		current := *u
 		if current.SourceConnectorID == "" || current.SourceConnectorID != connectorID {
 			return false, ErrNotFound

@@ -93,6 +93,14 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEvent) (RestoreReport, error) {
 	report := RestoreReport{}
 	err := func() error {
+		// Restored HR jobs and credentials require deliberate review.
+		if _, err := tx.Exec(`UPDATE hr_connections SET held=TRUE`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE hr_workers SET lease='',lease_until=NULL`); err != nil {
+			return err
+		}
+
 		// Before the sessions go: every login this restore ends is announced to the
 		// relying parties that saw it, because a receiver told nothing keeps its own
 		// session until its own timeout. The sid mapping cascades away with the

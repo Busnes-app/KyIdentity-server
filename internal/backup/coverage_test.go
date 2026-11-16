@@ -30,6 +30,34 @@ func drillChecks(t *testing.T, dataDir string, payload *backup.Payload, files []
 	return checks
 }
 
+func TestDrillChecksHRWritebackTokenBinding(t *testing.T) {
+	cfg, st := instance(t)
+	c, err := st.CreateSCIMConnector("HR", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreatePairedSystem(&store.PairedSystem{ID: "hr-post", Name: "Post", SystemType: "kypost", CallbackURL: "https://post.example/api/sync/webhook", Status: "active"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []string{c.ID, "another-connector"} {
+		sealed, err := crypto.Seal(cfg.EncryptionKey, store.SealHRWriteback, row, []byte("hr-writeback-token"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.ConfigureHR(store.HRConnection{ConnectorID: c.ID, SystemID: "hr-post", Domain: "example.test", WritebackURL: "https://hr.example/writeback", WritebackSecret: sealed}, nil); err != nil {
+			t.Fatal(err)
+		}
+		payload, err := backup.CollectSealable(cfg, st, "1.0.0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		check := drillChecks(t, cfg.DataDir, payload, payload.Files)["HR Writeback Token Decryption"]
+		if check.Passed != (row == c.ID) {
+			t.Fatalf("connector binding %q: %+v", row, check)
+		}
+	}
+}
+
 // A restore that can authenticate but has lost policy, group membership, app linkage,
 // remote identity mappings, job state or the encrypted relay configuration is not a
 // restore of this directory. The drill has to say so.
@@ -73,7 +101,7 @@ func TestDrillCoversLifecycleStateAndEncryptedConfiguration(t *testing.T) {
 
 	// Losing one lifecycle table must fail the drill by name, not pass quietly because
 	// the users table happens to be intact.
-	for _, table := range []string{"app_user_assignments", "enrollment_policies", "scim_user_links", "sync_resource_state"} {
+	for _, table := range []string{"app_user_assignments", "enrollment_policies", "scim_user_links", "sync_resource_state", "hr_connections", "hr_workers"} {
 		files := withoutTable(t, payload.Files, table)
 		checks := drillChecks(t, cfg.DataDir, payload, files)
 		c, ok := checks["Table Present: "+table]

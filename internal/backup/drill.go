@@ -335,6 +335,12 @@ func proveSecretDecryption(ctx context.Context, scratchDir string, recipe map[st
 			"",
 		},
 		{
+			"HR Writeback Token Decryption", store.SealHRWriteback,
+			`SELECT connector_id, writeback_secret FROM hr_connections`,
+			"No HR writeback token is stored, so none could be checked",
+			"hr_connections",
+		},
+		{
 			// Without it the restored server registers afresh, which is recoverable, but a
 			// key that does not open means the encryption key is not the one that sealed it.
 			"Push Relay Key Decryption", store.SealRelayKey,
