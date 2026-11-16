@@ -19,17 +19,17 @@ export function SuiteGroupForm({ settings, busy, onSave }: {
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
   const changed = JSON.stringify(draft) !== JSON.stringify(settings);
-  return <form className="settings-section" aria-labelledby="suite-group-title" onSubmit={e => { e.preventDefault(); onSave(draft); }}>
-    <h2 id="suite-group-title">Shared resources</h2>
-    <div className="form-group"><label><input type="checkbox" checked={draft.enabled} disabled={busy}
-      onChange={e => setDraft({ ...draft, enabled: e.target.checked })} /> Create shared resources for this group</label>
+  return <>
+    <div className="form-group"><span className="form-label">Shared resources</span>
+      <label><input type="checkbox" checked={draft.enabled} disabled={busy}
+        onChange={e => setDraft({ ...draft, enabled: e.target.checked })} /> Create shared resources for this group</label>
       <p className="text-muted text-sm">Each app below gives the group one shared space. Members also need access to that app; administrator accounts are never added. Turning this off or deleting the group archives the spaces: nothing is deleted.{draft.slug ? ` Address name: ${draft.slug}.` : ''}</p></div>
-    {draft.enabled && <fieldset className="form-group"><legend className="form-label">Apps</legend>
+    {draft.enabled && <div className="form-group" role="group" aria-labelledby="suite-group-apps"><span id="suite-group-apps" className="form-label">Apps</span>
       {draft.apps.map(app => <div key={app.id}><label><input type="checkbox" checked={app.enabled} disabled={busy}
         onChange={e => setDraft({ ...draft, apps: draft.apps.map(a => a.id === app.id ? { ...a, enabled: e.target.checked } : a) })} /> {suiteGroupAppLabels[app.id] ?? app.id}</label></div>)}
-    </fieldset>}
-    <button className="primary-btn" disabled={busy || !changed}>Save shared resources</button>
-  </form>;
+    </div>}
+    <div className="form-group"><button type="button" className="secondary-btn sm" disabled={busy || !changed} onClick={() => onSave(draft)}>Save shared resources</button></div>
+  </>;
 }
 
 export function GroupSharedResources({ group, busy, mutate }: { group: DirectoryGroup; busy: boolean; mutate: Mutate }) {
