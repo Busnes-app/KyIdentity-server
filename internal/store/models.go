@@ -136,6 +136,7 @@ type DevicePairingToken struct {
 	UserID    string     `json:"userId"`
 	TokenHash string     `json:"-"`
 	PINHash   string     `json:"-"`
+	ProofKey  string     `json:"-"` // pairing proof key, sealed (SealPairingProof)
 	SignOn    bool       `json:"signOn"`
 	ExpiresAt time.Time  `json:"expiresAt"`
 	UsedAt    *time.Time `json:"usedAt,omitempty"`

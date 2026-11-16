@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"cmp"
 	"database/sql"
 	"encoding/json"
@@ -97,9 +98,13 @@ func (h *DeviceHandler) GenerateDevicePairingToken(w http.ResponseWriter, r *htt
 // RegisterNativeDevice allows native mobile client to exchange 90s pairing token or PIN for registration.
 func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Request) {
 	var req mfa.NativeDeviceRegisterRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
+	if err != nil || json.Unmarshal(body, &req) != nil {
 		http.Error(w, `{"error":"invalid_request","error_description":"Malformed JSON body"}`, http.StatusBadRequest)
 		return
+	}
+	if proof := r.Header.Get(mfa.PairingProofHeader); proof != "" {
+		req.Proof = &mfa.PairingProof{Header: proof, Body: body}
 	}
 
 	var registered *audit.Pending
@@ -110,6 +115,7 @@ func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Requ
 			"bootState":         dev.BootState,
 			"attestationReason": dev.AttestationReason,
 			"pushTransport":     dev.PushTransport,
+			"pairingProof":      req.Proof != nil,
 		})
 		return registered.Row
 	})
@@ -119,12 +125,17 @@ func (h *DeviceHandler) RegisterNativeDevice(w http.ResponseWriter, r *http.Requ
 	}
 	registered.Committed()
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	var resp bytes.Buffer
+	_ = json.NewEncoder(&resp).Encode(map[string]any{
 		"success":  true,
 		"deviceId": dev.ID,
 		"device":   dev,
 	})
+	if req.Proof != nil {
+		w.Header().Set(mfa.PairingProofHeader, h.mfaEngine.ReplyProof(req.Proof, resp.Bytes()))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(resp.Bytes())
 }
 
 const pushTokenClockSkew = 5 * time.Minute

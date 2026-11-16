@@ -27,11 +27,7 @@ func (e *Engine) SetAppAttestor(a AppAttestor) { e.appAttestor = a }
 // AppAttestClientData is the clientData KyAuth iOS hashes into its attestation: it binds the
 // pairing credential and the exact publicKey string the request carries.
 func AppAttestClientData(req *NativeDeviceRegisterRequest) []byte {
-	cred := req.PairingToken
-	if cred == "" {
-		cred = req.UserID + "|" + req.PINCode
-	}
-	return []byte("kyidentity-appattest-v1|" + cred + "|" + req.PublicKey)
+	return []byte("kyidentity-appattest-v1|" + attestCred(req) + "|" + req.PublicKey)
 }
 
 // gradeAppAttest grades an iOS registration. App Attest proves a genuine KyAuth build, not

@@ -1533,19 +1533,19 @@ func (s *Store) DeleteDeliveredSyncEvents(olderThan time.Time) error {
 
 // Native Device & MFA Methods
 func (s *Store) CreateDevicePairingToken(token *DevicePairingToken, audit *AuditEvent) error {
-	query := `INSERT INTO device_pairing_tokens (id, user_id, token_hash, pin_hash, sign_on, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO device_pairing_tokens (id, user_id, token_hash, pin_hash, proof_key, sign_on, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	token.CreatedAt = time.Now().UTC()
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		_, err := tx.Exec(query, token.ID, token.UserID, token.TokenHash, token.PINHash, token.SignOn, token.ExpiresAt, token.CreatedAt)
+		_, err := tx.Exec(query, token.ID, token.UserID, token.TokenHash, token.PINHash, token.ProofKey, token.SignOn, token.ExpiresAt, token.CreatedAt)
 		return err
 	})
 }
 
-const devicePairingTokenColumns = `id, user_id, token_hash, pin_hash, sign_on, expires_at, used_at, created_at`
+const devicePairingTokenColumns = `id, user_id, token_hash, pin_hash, proof_key, sign_on, expires_at, used_at, created_at`
 
-func scanDevicePairingToken(row *sql.Row) (*DevicePairingToken, error) {
+func scanDevicePairingToken(row interface{ Scan(...any) error }) (*DevicePairingToken, error) {
 	t := &DevicePairingToken{}
-	err := row.Scan(&t.ID, &t.UserID, &t.TokenHash, &t.PINHash, &t.SignOn, &t.ExpiresAt, &t.UsedAt, &t.CreatedAt)
+	err := row.Scan(&t.ID, &t.UserID, &t.TokenHash, &t.PINHash, &t.ProofKey, &t.SignOn, &t.ExpiresAt, &t.UsedAt, &t.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1557,6 +1557,27 @@ func (s *Store) GetValidDevicePairingToken(tokenHash string) (*DevicePairingToke
 		`SELECT `+devicePairingTokenColumns+` FROM device_pairing_tokens
 		 WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?`,
 		tokenHash, time.Now().UTC()))
+}
+
+// ListValidDevicePairingTokens returns a user's live, unredeemed pairing tokens that have a proof key.
+func (s *Store) ListValidDevicePairingTokens(userID string) ([]*DevicePairingToken, error) {
+	rows, err := s.db.Query(
+		`SELECT `+devicePairingTokenColumns+` FROM device_pairing_tokens
+		 WHERE user_id = ? AND proof_key != '' AND used_at IS NULL AND expires_at > ?`,
+		userID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*DevicePairingToken
+	for rows.Next() {
+		t, err := scanDevicePairingToken(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // PairingPINBudget is how many wrong PINs a user's live pairing tokens survive.
