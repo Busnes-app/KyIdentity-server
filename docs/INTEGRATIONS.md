@@ -292,6 +292,13 @@ origin (scheme, host, port): relays sharing an origin with different paths are o
 domain. Each consumer server accepts only its own configured base-URL origin, so registering
 extra aliases at KyIdentity does not widen what a consumer accepts.
 
+When the device's assertion carries `cnf: {"spki#S256": <thumbprint>}` (base64url SHA-256 of
+the consumer app's per-sign-on public key, SPKI DER), the ID token carries the same `cnf`;
+without one in the assertion it has none, and any other `cnf` shape refuses the assertion.
+This is sign-on token binding: the consumer server requires proof of that key, so an ID token
+read off the wire is useless without it. KyIdentity only passes the thumbprint on; consumers
+enforce it.
+
 An attested device's ID token also carries `attested: tee|strongbox`. At pairing,
 KyAuth Android uploads its Android Key Attestation chain; KyIdentity verifies it and grades the
 device `none`, `tee` or `strongbox`. KyAuth iOS uploads an App Attest object instead, graded
