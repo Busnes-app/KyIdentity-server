@@ -36,3 +36,6 @@ web/node_modules/
 .env
 .env.*
 !.env.example
+
+# Generated mdBook manual
+/docs/book/

@@ -1,0 +1,39 @@
+name: documentation
+
+on:
+  push:
+    branches: [main, master]
+    paths: ['docs/**', '*.md', '.github/workflows/docs.yml']
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ['docs/**', '*.md', '.github/workflows/docs.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  book:
+    name: docs-book
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install pinned mdBook
+        run: cargo install mdbook --version 0.5.4 --locked
+      - name: build book
+        run: mdbook build docs
+      - name: check local links and fragments
+        run: python3 docs/check-links.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: documentation-book
+          path: docs/book/
+          if-no-files-found: error

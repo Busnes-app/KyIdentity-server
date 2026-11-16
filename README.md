@@ -53,3 +53,12 @@ startup without being overwritten; read the [signing-key upgrade guidance](docs/
 - [Verifying releases](docs/VERIFYING-RELEASES.md) — Check a release image's signature and source commit, and rebuild its binary to the same bytes.
 - [Key strength and Go TLS profile](docs/STRONG-CRYPTO.md) — Key floors, safe migration, Compose configuration and independent Worker/edge limits.
 - [Assurance case](docs/ASSURANCE-CASE.md) — Threat model, trust boundaries, and why the security requirements are met.
+
+## User manual
+
+Read the [online manual](https://busnes.app/manuals/kyidentity-server/) or browse its
+[Markdown sources](docs/src/introduction.md).
+
+Build and check it with `mdbook build docs` and `python3 docs/check-links.py`,
+then open `docs/book/index.html`. The documentation workflow also provides a
+downloadable `documentation-book` artifact.
