@@ -4,6 +4,7 @@ on:
   push:
     branches: [master]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -15,7 +16,9 @@ concurrency:
 
 jobs:
   go-default:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: image and attestation coordinates match this repository
@@ -96,7 +99,9 @@ jobs:
 
   # The same suite under the supported strong-key profile, in parallel with go-default.
   go-strong-key:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -111,8 +116,9 @@ jobs:
   # The required check: green only when both Go legs are.
   go:
     needs: [go-default, go-strong-key]
-    if: always()
+    if: (always()) && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - run: test "${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}" = true
 
@@ -120,7 +126,9 @@ jobs:
   # schema in a real Postgres (KYIDENTITY_TEST_DATABASE_URL; see AGENTS.md, Database
   # backends). The database must be UTF8 with the C locale, which the store checks at start.
   postgres:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
@@ -148,7 +156,9 @@ jobs:
         run: go test -race -count=1 -timeout 60m -p 2 ./internal/store/... ./internal/api/... ./internal/oauth/... ./internal/mfa/... ./internal/sync/... ./internal/backup/... ./cmd/...
 
   web:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
@@ -166,7 +176,9 @@ jobs:
       - run: npm test
 
   relay:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -191,7 +203,9 @@ jobs:
       - run: node --test push-relay-shared/*.test.mts workers/apns/src/*.test.mts workers/fcn/src/*.test.mts
 
   docker:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker build -t kyidentity-ci .
@@ -236,6 +250,7 @@ jobs:
     needs: [go, web, relay, docker, postgres]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # No concurrency group here on purpose: GitHub cancels a *pending* job when a
     # newer one queues into the same group, which would leave that commit with no
     # :<sha> image and no attestation. Every commit whose run reaches this job
@@ -299,6 +314,7 @@ jobs:
     needs: publish
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency:
       group: promote-master
       cancel-in-progress: false
