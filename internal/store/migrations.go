@@ -24,6 +24,24 @@ var migrations = []migration{
 	{version: 2, name: "forward_auth", up: migrateForwardAuth, pgUp: migrateForwardAuthPostgres},
 	{version: 3, name: "hr_provisioning", up: migrateHR, pgUp: migrateHRPostgres},
 	{version: 4, name: "suite_groups", up: migrateSuiteGroups, pgUp: migrateSuiteGroupsPostgres},
+	{version: 5, name: "pairing_proof_key", up: migratePairingProofKey, pgUp: migratePairingProofKeyPostgres},
+}
+
+// migratePairingProofKey adds the sealed pairing proof key; tokens issued before it have
+// none and pair only by the legacy body or PIN. It reruns on an unversioned file that
+// already has the column, like every migration.
+func migratePairingProofKey(tx *sql.Tx) error {
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info('device_pairing_tokens') WHERE name = 'proof_key'`).Scan(&n); err != nil || n == 1 {
+		return err
+	}
+	_, err := tx.Exec(`ALTER TABLE device_pairing_tokens ADD COLUMN proof_key TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+func migratePairingProofKeyPostgres(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE device_pairing_tokens ADD COLUMN IF NOT EXISTS proof_key TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 // legacyRuns counts migrateLegacy calls, so tests can prove a versioned start skips it.

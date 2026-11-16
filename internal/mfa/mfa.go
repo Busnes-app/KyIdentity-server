@@ -55,11 +55,7 @@ func (e *Engine) SetIssuerOrigin(o string) { e.issuerOrigin = o }
 
 // ExpectedChallenge is the attestation challenge KyAuth binds to the credential it redeems.
 func ExpectedChallenge(req *NativeDeviceRegisterRequest) []byte {
-	cred := req.PairingToken
-	if cred == "" {
-		cred = req.UserID + "|" + req.PINCode
-	}
-	sum := sha256.Sum256([]byte("kyidentity-attest-v1|" + cred))
+	sum := sha256.Sum256([]byte("kyidentity-attest-v1|" + attestCred(req)))
 	return sum[:]
 }
 
@@ -249,9 +245,15 @@ func (e *Engine) GenerateDevicePairingToken(userID string, signOn bool, audit *s
 	}
 	tokenHash := crypto.HashSHA256(rawToken)
 	expiresAt = time.Now().UTC().Add(90 * time.Second)
+	id := uuid.New().String()
+	proofKey, err := crypto.Seal(e.encryptionKey, store.SealPairingProof, id, pairingProofKey(rawToken))
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
 
 	item := &store.DevicePairingToken{
-		ID:        uuid.New().String(),
+		ID:        id,
+		ProofKey:  proofKey,
 		UserID:    userID,
 		TokenHash: tokenHash,
 		PINHash:   crypto.HashSHA256(pin),
@@ -284,6 +286,8 @@ type NativeDeviceRegisterRequest struct {
 	Attestation []string `json:"attestation,omitempty"`
 	// AppAttest is KyAuth iOS's App Attest evidence, graded only for platform "ios".
 	AppAttest *AppAttestEvidence `json:"appAttest,omitempty"`
+	// Proof is set by the handler when the request carries PairingProofHeader.
+	Proof *PairingProof `json:"-"`
 }
 
 // RegisterNativeDevice registers a device presented with a valid 90s pairing token, or a
@@ -317,6 +321,11 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest, audit fu
 	var validToken *store.DevicePairingToken
 
 	switch {
+	case req.Proof != nil:
+		if req.UserID == "" || req.PairingToken != "" || req.PINCode != "" {
+			return nil, store.InputError("a pairing proof needs userId and no pairingToken or pinCode")
+		}
+		validToken, err = e.matchPairingProof(req.UserID, req.Proof)
 	case req.PairingToken != "":
 		validToken, err = e.store.GetValidDevicePairingToken(crypto.HashSHA256(req.PairingToken))
 	case req.PINCode != "" && req.UserID != "":

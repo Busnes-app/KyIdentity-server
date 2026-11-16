@@ -22,6 +22,8 @@ const (
 	SealRelayKey = "push_relay_key"
 	// HR connector ID. New credentials are always row-bound; never legacy ciphertext.
 	SealHRWriteback = "hr_writeback"
+	// Pairing token ID. The pairing proof key; never legacy ciphertext.
+	SealPairingProof = "pairing_proof"
 )
 
 // MailSettingKey is the system_settings row holding the sealed relay configuration.
