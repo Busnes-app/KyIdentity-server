@@ -124,6 +124,15 @@ func copyFixture(t *testing.T, s *Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	must(s.CreatePairedSystem(&PairedSystem{ID: "hr-mail", Name: "HR mail", SystemType: "kypost", CallbackURL: "https://post.test/api/sync/webhook", Status: "active"}, nil))
+	writeback, err := crypto.Seal(key, SealHRWriteback, inbound.ID, []byte("hr-copy-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(s.ConfigureHR(HRConnection{ConnectorID: inbound.ID, SystemID: "hr-mail", Domain: "example.test", WritebackURL: "https://hr.test/work-email", WritebackSecret: writeback}, nil))
+	if _, err := s.ImportHR(inbound.ID, HRInput{SourceUID: "employee-Ä", PreferredName: "round.trip", DisplayName: "Pending hire 🙂", Active: true, SourceVersion: 7}, nil); err != nil {
+		t.Fatal(err)
+	}
 	// The rest have no method that writes them outside a longer flow.
 	for _, q := range []struct {
 		sql  string
