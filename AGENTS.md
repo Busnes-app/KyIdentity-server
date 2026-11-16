@@ -311,6 +311,8 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## Child DOX Index
 
+- `docs/AGENTS.md` — mdBook manual, chapter ownership and documentation checks.
+
 - `docs/ui-identity-eight/AGENTS.md` — staged Ky product UI captures, Council reviews and progression decisions.
 
 - `docs/STRONG-CRYPTO.md`, `docker-compose.strong-crypto.yml` and `docs/check-strong-crypto-compose.py` — key-strength configuration, preservation proof and platform limits.
