@@ -4,9 +4,7 @@
 
 ### Changes
 
-- Prepare application version `0.6.1` (from `0.6.0`) for the compatible dependency refresh. Rebuild or install the updated application; this version bump requires no additional data, account, key or configuration migration.
-
-- Refresh compatible dependency versions and lockfiles. Rebuild or install the updated application; no database, configuration, account or key migration is required.
+- Refresh compatible dependency versions and lockfiles in application version `0.6.1` (from `0.6.0`). Rebuild or install the updated application; no database, configuration, account or key migration is required.
 
 - **Security: QR pairing no longer sends the pairing token.** An updated KyAuth proves it holds the QR's token with an HMAC over the exact request (device key, push target, attestation) in the `KyIdentity-Pairing-Proof` header, and KyIdentity signs its reply the same way. Someone able to read the phone's TLS during the 90-second window can no longer pair their own key, change the push target, or forge the reply. Older KyAuth builds keep pairing as before. Entering the 6-digit PIN by hand is unchanged and stays trust on first use. Release this before the KyAuth versions that use it: they cannot pair against an older KyIdentity. See [design.md](design.md#52-native-device-pairing--push-mfa-flow).
 
