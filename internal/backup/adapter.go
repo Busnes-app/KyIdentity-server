@@ -451,6 +451,11 @@ func RunBackup(ctx context.Context, cfg *config.Config, s SettingsStore, snap Sn
 		if err != nil {
 			return Payload{}, err
 		}
+		// A run whose lease ended during the snapshot neither seals nor writes a local copy:
+		// another replica may hold the lease, and the backup directory, by now.
+		if ctx.Err() != nil {
+			return Payload{}, context.Cause(ctx)
+		}
 		return *p, nil
 	}, client)
 }
