@@ -399,7 +399,7 @@ func TestLeaseUsesTheDatabaseClock(t *testing.T) {
 		t.Fatalf("database clock read %d ms away from this process", skew)
 	}
 	// Live by database time though an hour stale by any replica clock an hour fast.
-	if _, err := a.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES('job','someone',`+a.leaseNow()+`+60000)`); err != nil {
+	if _, err := a.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES('job','someone',` + a.leaseNow() + `+60000)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := b.AcquireLease("job", time.Minute); err != nil || ok {

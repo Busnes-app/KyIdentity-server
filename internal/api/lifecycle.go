@@ -19,14 +19,14 @@ var requestDeadline = 25 * time.Second
 // longRoutes are the mux patterns the deadline does not cover, each with the budget it keeps
 // instead. TestLongRoutesAreExactlyTheNamedExemptions pins this list.
 var longRoutes = map[string]string{
-	"POST /api/admin/backup/deposit":       "depositWriteBudget (16 min): snapshot, seal and upload a capsule",
-	"POST /api/admin/backup/drill":         "depositWriteBudget (16 min): snapshot, seal and open a capsule in a sandbox",
-	"GET /api/admin/backup/export-capsule": "depositWriteBudget (16 min): snapshot, seal and download a capsule",
-	"POST /api/admin/backup/pair-remote":   "KyRecovery claim: 10 s dial plus a 30 s client timeout",
-	"GET /api/admin/audit-events/export":   "auditExportTimeout (30 s), streamed; buffering it would hold the export in memory",
-	"POST /api/admin/mail/test":            "SMTP: 10 s dial plus a 30 s session deadline",
-	"POST /api/admin/users/{id}/activation-link":  "SMTP when the link is mailed: 10 s dial plus a 30 s session deadline",
-	"POST /api/admin/users/{id}/reset-link":       "SMTP when the link is mailed: 10 s dial plus a 30 s session deadline",
+	"POST /api/admin/backup/deposit":               "depositWriteBudget (16 min): snapshot, seal and upload a capsule",
+	"POST /api/admin/backup/drill":                 "depositWriteBudget (16 min): snapshot, seal and open a capsule in a sandbox",
+	"GET /api/admin/backup/export-capsule":         "depositWriteBudget (16 min): snapshot, seal and download a capsule",
+	"POST /api/admin/backup/pair-remote":           "KyRecovery claim: 10 s dial plus a 30 s client timeout",
+	"GET /api/admin/audit-events/export":           "auditExportTimeout (30 s), streamed; buffering it would hold the export in memory",
+	"POST /api/admin/mail/test":                    "SMTP: 10 s dial plus a 30 s session deadline",
+	"POST /api/admin/users/{id}/activation-link":   "SMTP when the link is mailed: 10 s dial plus a 30 s session deadline",
+	"POST /api/admin/users/{id}/reset-link":        "SMTP when the link is mailed: 10 s dial plus a 30 s session deadline",
 	"POST /api/admin/access-requests/{id}/approve": "SMTP notice to the requester: 10 s dial plus a 30 s session deadline",
 	"POST /api/admin/access-requests/{id}/deny":    "SMTP notice to the requester: 10 s dial plus a 30 s session deadline",
 }

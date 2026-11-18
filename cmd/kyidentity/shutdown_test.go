@@ -210,7 +210,10 @@ func TestGracefulStopDrainsCancelsAndWaits(t *testing.T) {
 		work, cancelWork := context.WithCancel(context.Background())
 		defer cancelWork()
 		loopDone := make(chan struct{})
-		go func() { defer close(loopDone); backupLoop(sched, work, cfg, s, deposits, audit.NewLogger(s), 20*time.Millisecond) }()
+		go func() {
+			defer close(loopDone)
+			backupLoop(sched, work, cfg, s, deposits, audit.NewLogger(s), 20*time.Millisecond)
+		}()
 		deposits.wait(t, "the scheduled deposit")
 		drill := admin.start("POST", "/api/admin/backup/drill")
 		drills.wait(t, "the drill")
