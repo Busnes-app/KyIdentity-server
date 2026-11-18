@@ -15,6 +15,7 @@ The links below open repository documents and need network access.
 - [HR provisioning](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/HR-PROVISIONING.md)
 - [Architecture](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/ARCHITECTURE.md)
 - [Running](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/RUNNING.md)
+- [Running more than one replica](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/RUNNING.md#running-more-than-one-replica): load balancer health checks and timeouts, the stop sequence, the request deadline, the shared-configuration check and `accept-replica-config`, backup directory layouts
 - [Accounts and access](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/ACCOUNTS-AND-ACCESS.md)
 - [Applications](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/APPLICATIONS.md)
 - [Forward-auth](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/FORWARD-AUTH.md)
