@@ -48,11 +48,20 @@ func TestADeadHolderDelaysTheScheduleByOneTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	stores := handles(t, cfg.DBPath, 2)
+	raw, err := store.OpenRawForTest(cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
 	// The dead replica took the lease and will never renew or release it.
 	if _, ok, err := stores[1].AcquireLease(backup.Lease, ttl); err != nil || !ok {
 		t.Fatal(ok, err)
 	}
 	died := time.Now()
+	var dead string
+	if err := raw.QueryRow(`SELECT token FROM leases WHERE name=?`, backup.Lease).Scan(&dead); err != nil {
+		t.Fatal(err)
+	}
 	sched, stop := context.WithCancel(context.Background())
 	defer stop()
 	done := make(chan struct{})
@@ -60,20 +69,36 @@ func TestADeadHolderDelaysTheScheduleByOneTTL(t *testing.T) {
 		defer close(done)
 		backupLoop(sched, context.Background(), cfg, stores[0], nil, audit.NewLogger(stores[0]), tick)
 	}()
-	for len(localCopies(t, cfg.BackupDir, cfg.AppName)) == 0 {
+	// The takeover is when the dead holder's row stops being the lease: the live replica took
+	// it, or took it and finished. The run itself is not part of the delay.
+	var waited time.Duration
+	for {
+		var token string
+		err := raw.QueryRow(`SELECT token FROM leases WHERE name=?`, backup.Lease).Scan(&token)
+		if err != nil || token != dead {
+			waited = time.Since(died)
+			break
+		}
 		if time.Since(died) > ttl+tick+3*time.Second {
-			t.Fatal("the due backup never ran after the dead holder's lease expired")
+			t.Fatal("no replica took the lease after the dead holder's expired")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for len(localCopies(t, cfg.BackupDir, cfg.AppName)) == 0 {
+		if time.Since(died) > 30*time.Second {
+			t.Fatal("the due backup never ran after taking the lease")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	waited := time.Since(died)
 	stop()
 	<-done
-	// The run itself (snapshot, seal, write) takes well under a second here.
-	if waited > ttl+tick+time.Second {
-		t.Fatalf("the due backup waited %v behind a dead holder, want at most %v plus the run", waited, ttl+tick)
+	if waited < ttl-100*time.Millisecond {
+		t.Fatalf("the lease was taken %v after the holder died, before its ttl %v", waited, ttl)
 	}
-	t.Logf("ran %v after the holder died (ttl %v, tick %v)", waited, ttl, tick)
+	if waited > ttl+tick+200*time.Millisecond {
+		t.Fatalf("the due backup waited %v behind a dead holder, want at most %v", waited, ttl+tick)
+	}
+	t.Logf("lease taken %v after the holder died (ttl %v, tick %v)", waited, ttl, tick)
 }
 
 // Taking the lease from a running deposit, by deleting or stealing its row, ends that
