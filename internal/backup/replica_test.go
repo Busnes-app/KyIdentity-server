@@ -43,6 +43,10 @@ func TestPairingReadsAreCoherentUnderConcurrentRepairing(t *testing.T) {
 	}
 	defer reader.Close()
 	match := map[string]string{"https://a.recovery.example": "token-a", "https://b.recovery.example": "token-b", "https://recovery.example.test": "kyrec_live_t"}
+	pause := time.Millisecond
+	if store.OnPostgresTest() {
+		pause = 10 * time.Millisecond
+	}
 	var stop atomic.Bool
 	var writes atomic.Int64
 	writerDone := make(chan error, 1)
@@ -65,7 +69,9 @@ func TestPairingReadsAreCoherentUnderConcurrentRepairing(t *testing.T) {
 				return backup.StorePairing(st, cfg.EncryptionKey, url, match[url])
 			})
 			writes.Add(1)
-			time.Sleep(time.Millisecond) // leave the readers room on SQLite's single writer
+			// Leave the readers room on the single writer, and on PostgreSQL other packages'
+			// tests too: the writer lock is one key for the whole test database.
+			time.Sleep(pause)
 		}
 		writerDone <- err
 	}()
