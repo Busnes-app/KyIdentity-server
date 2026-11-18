@@ -282,7 +282,8 @@ with the Deployment's image, `env`, `envFrom`, volumes, Secret mounts and `secur
 (including `fsGroup`). Set `args: ["accept-replica-config"]`, `restartPolicy: Never` in the
 pod spec and `backoffLimit: 0` in the Job spec; omit probes and use labels that match neither
 the Deployment's selector nor the Service's. Wait for successful completion, then scale
-the Deployment back up. Copying the whole Deployment template unchanged is not valid.
+the Deployment back up. Also allow the Job through any NetworkPolicy required to reach
+Postgres. Copying the whole Deployment template unchanged is not valid.
 
 **Never use it for the encryption key**: it refuses, because every sealed secret opens only
 under the key the servers already use.
@@ -494,8 +495,11 @@ These hold with or without the flag, because they cost a single instance nothing
   docker compose stop kyidentity-server
   docker compose run --rm --no-deps -T --user 0 --entrypoint /bin/sh kyidentity-server -es <<'REPAIR'
   apk add --no-cache sqlite
-  test -f /data/kyidentity.db
-  sqlite3 -bail /data/kyidentity.db <<'SQL'
+  db=${KYIDENTITY_DB_PATH:-/data/kyidentity.db}
+  if [ -z "${KYIDENTITY_DB_PATH:-}" ] && [ ! -f "$db" ]; then db=/data/kysignon.db; fi
+  test -f "$db" || { echo "No SQLite database at $db; check the data volume and KYIDENTITY_DB_PATH" >&2; exit 1; }
+  echo "Clearing the recovery-key pin in $db"
+  sqlite3 -bail "$db" <<'SQL'
   BEGIN IMMEDIATE;
   DELETE FROM system_settings WHERE key IN
     ('kyrecovery_key_id', 'kyrecovery_threshold', 'kyrecovery_total_shares', 'kyrecovery_public_key');
