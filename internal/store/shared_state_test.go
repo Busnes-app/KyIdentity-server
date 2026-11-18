@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -382,5 +383,135 @@ func TestRestoreDropsTheCapsulesLeases(t *testing.T) {
 	}
 	if ok, _ := s.AllowRate("reset:u", 1, 0, time.Now(), true); !ok {
 		t.Fatal("the restored server inherited the capsule's rate-limit buckets")
+	}
+}
+
+// Lease time is the database's: a row the database says is live is refused, and one it says
+// has expired is taken, whatever the asking replica's own clock reads.
+func TestLeaseUsesTheDatabaseClock(t *testing.T) {
+	stores := replicas(t, 2)
+	a, b := stores[0], stores[1]
+	var dbNow int64
+	if err := a.db.QueryRow(`SELECT ` + a.leaseNow()).Scan(&dbNow); err != nil {
+		t.Fatal(err)
+	}
+	if skew := time.Now().UnixMilli() - dbNow; skew > 5000 || skew < -5000 {
+		t.Fatalf("database clock read %d ms away from this process", skew)
+	}
+	// Live by database time though an hour stale by any replica clock an hour fast.
+	if _, err := a.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES('job','someone',`+a.leaseNow()+`+60000)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := b.AcquireLease("job", time.Minute); err != nil || ok {
+		t.Fatal("a lease the database holds live was taken:", ok, err)
+	}
+	if _, err := a.db.Exec(`UPDATE leases SET until_ms=` + a.leaseNow() + `-1 WHERE name='job'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := b.AcquireLease("job", time.Minute); err != nil || !ok {
+		t.Fatal("a lease the database holds expired was refused:", ok, err)
+	}
+}
+
+// A live holder keeps its lease through work far longer than the ttl.
+func TestHeldLeaseOutlivesItsTTL(t *testing.T) {
+	stores := replicas(t, 2)
+	ttl := 400 * time.Millisecond
+	ctx, release, ok, err := stores[0].HoldLease(context.Background(), "backup", ttl)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	deadline := time.Now().Add(4 * ttl)
+	for time.Now().Before(deadline) {
+		if _, ok, _ := stores[1].AcquireLease("backup", ttl); ok {
+			t.Fatal("another replica took a lease its holder was renewing")
+		}
+		if ctx.Err() != nil {
+			t.Fatal("the holder lost a lease nobody took:", context.Cause(ctx))
+		}
+		time.Sleep(ttl / 8)
+	}
+	release()
+	if ctx.Err() == nil {
+		t.Fatal("release left the hold's context running")
+	}
+	if _, ok, err := stores[1].AcquireLease("backup", ttl); err != nil || !ok {
+		t.Fatal("release did not give the lease back:", ok, err)
+	}
+}
+
+// Deleting or stealing the row ends the holder's context within one renewal interval, and
+// the holder's release then leaves the new holder alone.
+func TestALostLeaseEndsTheHold(t *testing.T) {
+	for _, how := range []string{"deleted", "stolen"} {
+		t.Run(how, func(t *testing.T) {
+			stores := replicas(t, 2)
+			ttl := 800 * time.Millisecond
+			ctx, release, ok, err := stores[0].HoldLease(context.Background(), "backup", ttl)
+			if err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			defer release()
+			q := `DELETE FROM leases WHERE name='backup'`
+			if how == "stolen" {
+				q = `UPDATE leases SET token='thief' WHERE name='backup'`
+			}
+			if _, err := stores[1].db.Exec(q); err != nil {
+				t.Fatal(err)
+			}
+			lost := time.Now()
+			select {
+			case <-ctx.Done():
+			case <-time.After(ttl/4 + time.Second):
+				t.Fatal("the holder kept working after its lease was gone")
+			}
+			if !errors.Is(context.Cause(ctx), ErrLeaseLost) {
+				t.Fatalf("cause %v", context.Cause(ctx))
+			}
+			t.Logf("lost after %v (interval %v)", time.Since(lost), ttl/4)
+			release()
+			if how == "stolen" {
+				var token string
+				if err := stores[1].db.QueryRow(`SELECT token FROM leases WHERE name='backup'`).Scan(&token); err != nil || token != "thief" {
+					t.Fatalf("the old holder's release freed the new holder's lease: %q %v", token, err)
+				}
+			}
+		})
+	}
+}
+
+// One failed renewal while plenty of the lease is left is retried, not treated as a loss;
+// failures that run the lease down below one interval end the hold.
+func TestRenewalErrorsEndTheHoldOnlyNearExpiry(t *testing.T) {
+	ttl := 400 * time.Millisecond
+	run := func(renew func() (bool, error)) error {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() { defer close(done); keepLease(ctx, stop, cancel, ttl, renew) }()
+		select {
+		case <-done:
+			return context.Cause(ctx)
+		case <-time.After(3 * ttl):
+			close(stop)
+			<-done
+			return nil
+		}
+	}
+	var calls atomic.Int32
+	if err := run(func() (bool, error) {
+		if calls.Add(1) == 1 {
+			return false, errors.New("lock timeout")
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatalf("one transient failure ended the hold: %v", err)
+	}
+	if calls.Load() < 3 {
+		t.Fatalf("renewal stopped after the failure: %d calls", calls.Load())
+	}
+	if err := run(func() (bool, error) { return false, errors.New("database unreachable") }); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("failures past the margin: %v", err)
 	}
 }

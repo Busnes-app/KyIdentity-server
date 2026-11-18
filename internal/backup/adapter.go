@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,19 +74,104 @@ func privateSwitch(err error) error {
 const recoveryTokenLabel = "kysignon:setting:kyrecovery_token"
 
 // Lease names the database lease one backup run holds, so replicas never run two at once;
-// DrillLease does the same for the restore drill. LeaseTTL has no renewal behind it, so it
-// is far longer than either takes; a holder that dies delays the next run by it.
+// DrillLease does the same for the restore drill. Both are held with store.HoldLease, which
+// renews every LeaseTTL/4, so a holder that dies delays the next run by at most LeaseTTL.
 const (
 	Lease      = "backup"
 	DrillLease = "restore-drill"
-	LeaseTTL   = 2 * time.Hour
 )
+
+// LeaseTTL is a variable only so tests can shorten it.
+var LeaseTTL = 2 * time.Minute
 
 // SettingsStore is the slice of the store this adapter needs; *store.Store satisfies it.
 type SettingsStore interface {
 	GetSetting(key string) (string, error)
 	SetSetting(key, value string) error
 	DeleteSetting(key string) error
+}
+
+// pairingKeys are the rows one pairing and its key pin span. They are read in one
+// statement, so a concurrent unpair and re-pair on another replica can never pair one
+// pairing's URL with another's token or one pin's key with another's topology.
+var pairingKeys = []string{"kyrecovery_url", "kyrecovery_token_enc", "kyrecovery_key_id",
+	"kyrecovery_threshold", "kyrecovery_total_shares", settingRecoveryPublicKey}
+
+// coherent serves pairingKeys from one read taken on first use, for one operation. Other
+// keys and every write pass through; a write to a pairing key updates what it serves.
+type coherent struct {
+	s      SettingsStore
+	rows   map[string]string
+	err    error
+	loaded bool
+}
+
+// Coherent wraps s for one operation's pairing reads. Inside EditSettings the transaction
+// already serialises them, and they are read key by key.
+func Coherent(s SettingsStore) SettingsStore {
+	if c, ok := s.(*coherent); ok {
+		return c
+	}
+	return &coherent{s: s}
+}
+
+func (c *coherent) load() error {
+	if !c.loaded {
+		c.loaded = true
+		if multi, ok := c.s.(interface {
+			GetSettings(keys ...string) (map[string]string, error)
+		}); ok {
+			c.rows, c.err = multi.GetSettings(pairingKeys...)
+		} else {
+			c.rows = map[string]string{}
+			for _, k := range pairingKeys {
+				v, err := c.s.GetSetting(k)
+				if errors.Is(err, store.ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					c.err = err
+					break
+				}
+				c.rows[k] = v
+			}
+		}
+	}
+	return c.err
+}
+
+func (c *coherent) GetSetting(k string) (string, error) {
+	if !slices.Contains(pairingKeys, k) {
+		return c.s.GetSetting(k)
+	}
+	if err := c.load(); err != nil {
+		return "", err
+	}
+	v, ok := c.rows[k]
+	if !ok {
+		return "", store.ErrNotFound
+	}
+	return v, nil
+}
+
+func (c *coherent) SetSetting(k, v string) error {
+	if err := c.s.SetSetting(k, v); err != nil {
+		return err
+	}
+	if c.loaded && c.err == nil && slices.Contains(pairingKeys, k) {
+		c.rows[k] = v
+	}
+	return nil
+}
+
+func (c *coherent) DeleteSetting(k string) error {
+	if err := c.s.DeleteSetting(k); err != nil {
+		return err
+	}
+	if c.loaded && c.err == nil {
+		delete(c.rows, k)
+	}
+	return nil
 }
 
 // settings maps the store onto recoveryclient.Settings, translating not-found.
@@ -146,11 +233,28 @@ func accepted(cfg *config.Config, id string) error {
 	return nil
 }
 
+// ErrTopologyChanged is the pinned key offered again with a different k-of-n. The split a
+// key was made with does not change, so a different one is a mistake or a forgery.
+var ErrTopologyChanged = fmt.Errorf("%w: this recovery key is already pinned with a different custodian topology", fs.ErrExist)
+
 func StoreRecoveryKey(cfg *config.Config, s SettingsStore, k RecoveryKey) error {
+	s = Coherent(s)
 	if cfg.RecoveryKeyID != "" {
 		if err := accepted(cfg, k.Public.ID()); err != nil {
 			return err
 		}
+	}
+	// The lib re-sets the topology for the pinned key; it is written once here.
+	if pinned, err := s.GetSetting("kyrecovery_key_id"); err == nil && pinned == k.Public.ID() {
+		for setting, want := range map[string]int{"kyrecovery_threshold": k.Threshold, "kyrecovery_total_shares": k.TotalShares} {
+			if v, err := s.GetSetting(setting); err == nil && v != strconv.Itoa(want) {
+				return ErrTopologyChanged
+			} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+		}
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
 	}
 	if err := recoveryclient.StoreRecoveryKey(cfg.DataDir, settings{s}, k); err != nil {
 		return err
@@ -171,6 +275,7 @@ func sealRecoveryKey(cfg *config.Config, s SettingsStore, k RecoveryKey) error {
 // pinned key and the configured one; an install paired before the copy existed gains one
 // here. The file is still what the pin is checked against.
 func LoadRecoveryKey(cfg *config.Config, s SettingsStore) (RecoveryKey, error) {
+	s = Coherent(s)
 	if err := shareRecoveryKey(cfg, s); err != nil {
 		return RecoveryKey{}, err
 	}
@@ -230,6 +335,7 @@ func StorePairing(s SettingsStore, encryptionKey []byte, serverURL, token string
 }
 
 func LoadPairing(cfg *config.Config, s SettingsStore) (recoveryclient.Pairing, error) {
+	s = Coherent(s)
 	if err := shareRecoveryKey(cfg, s); err != nil {
 		return recoveryclient.Pairing{}, err
 	}
@@ -244,13 +350,25 @@ func LoadPairing(cfg *config.Config, s SettingsStore) (recoveryclient.Pairing, e
 }
 
 // KeyPinned reports whether the settings pin a recovery key, whether or not this server
-// holds its recovery.pub.
-func KeyPinned(s SettingsStore) bool {
-	_, err := s.GetSetting("kyrecovery_key_id")
-	return err == nil
+// holds its recovery.pub. A read that fails is an error, never "not pinned".
+func KeyPinned(s SettingsStore) (bool, error) {
+	_, err := Coherent(s).GetSetting("kyrecovery_key_id")
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
-func HasPairing(s SettingsStore) bool    { return recoveryclient.HasPairing(settings{s}) }
+// HasPairing reports whether a KyRecovery pairing is stored. A read that fails is an error,
+// never "unpaired".
+func HasPairing(s SettingsStore) (bool, error) {
+	c := Coherent(s).(*coherent)
+	if err := c.load(); err != nil {
+		return false, err
+	}
+	return recoveryclient.HasPairing(settings{c}), nil
+}
+
 func ClearPairing(s SettingsStore) error { return recoveryclient.ClearPairing(settings{s}) }
 func LastDeposit(s SettingsStore) (Receipt, bool, error) {
 	return recoveryclient.LastDeposit(settings{s})
@@ -261,10 +379,9 @@ func Seal(serviceName, appVersion string, files []File, deps, recipe map[string]
 	return recoveryclient.Seal(Payload{ServiceName: serviceName, AppVersion: appVersion, Files: files, Dependencies: deps, VerificationRecipe: recipe}, key)
 }
 
+// ListLocalCopies only reads. Renaming legacy files and pruning happen in RunBackup, under
+// the backup lease, so a directory every replica shares has one writer at a time.
 func ListLocalCopies(dir, appName string) ([]LocalCopy, error) {
-	if err := migrateLegacyLocalCopies(dir, appName); err != nil {
-		return nil, err
-	}
 	return recoveryclient.ListLocalCopies(dir, appName)
 }
 
@@ -311,8 +428,10 @@ func NextRun(cfg *config.Config, s SettingsStore) (time.Time, bool, error) {
 	return recoveryclient.NextRun(cfg.BackupDepositInterval, settings{s})
 }
 
-// RunBackup seals the instance once and delivers to every configured destination.
+// RunBackup seals the instance once and delivers to every configured destination. The caller
+// holds Lease; ctx reaches only the upload.
 func RunBackup(ctx context.Context, cfg *config.Config, s SettingsStore, snap Snapshotter, client Depositor, appVersion string) (Result, error) {
+	s = Coherent(s)
 	if err := migrateLegacyLocalCopies(cfg.BackupDir, cfg.AppName); err != nil {
 		return Result{}, err
 	}

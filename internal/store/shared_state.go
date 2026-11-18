@@ -1,10 +1,12 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,22 +28,110 @@ func (s *Store) migrateSharedState() error {
 
 const leasesSchema = `CREATE TABLE IF NOT EXISTS leases (name TEXT PRIMARY KEY, token TEXT NOT NULL, until_ms INTEGER NOT NULL);`
 
+// leaseNow is the database's clock in milliseconds. Every replica reads the one clock, so a
+// replica whose own clock is wrong can neither take a live lease nor keep a dead one.
+func (s *Store) leaseNow() string {
+	if s.postgres {
+		return `(floor(extract(epoch from clock_timestamp())*1000))::bigint`
+	}
+	return `CAST(unixepoch('subsec')*1000 AS INTEGER)`
+}
+
 // AcquireLease takes the named lease for ttl when nobody holds it. The upsert is one
 // statement, so of any number of replicas asking at once exactly one gets ok. release
 // gives it back early; a holder that dies simply lets it expire. There is no renewal:
-// pick a ttl longer than the work.
+// pick a ttl longer than the work, or use HoldLease.
 func (s *Store) AcquireLease(name string, ttl time.Duration) (release func(), ok bool, err error) {
-	token, now := uuid.New().String(), time.Now().UnixMilli()
-	res, err := s.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES(?,?,?)
- ON CONFLICT(name) DO UPDATE SET token=excluded.token, until_ms=excluded.until_ms WHERE leases.until_ms<=?`,
-		name, token, now+ttl.Milliseconds(), now)
+	token := uuid.New().String()
+	if ok, err := s.takeLease(name, token, ttl); err != nil || !ok {
+		return nil, false, err
+	}
+	return func() { s.dropLease(name, token) }, true, nil
+}
+
+func (s *Store) takeLease(name, token string, ttl time.Duration) (bool, error) {
+	now := s.leaseNow()
+	res, err := s.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES(?,?,`+now+`+?)
+ ON CONFLICT(name) DO UPDATE SET token=excluded.token, until_ms=excluded.until_ms WHERE leases.until_ms<=`+now,
+		name, token, ttl.Milliseconds())
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return nil, false, err
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+func (s *Store) dropLease(name, token string) {
+	_, _ = s.db.Exec(`DELETE FROM leases WHERE name=? AND token=?`, name, token)
+}
+
+// ErrLeaseLost is the cause of a HoldLease context that ended because the lease did.
+var ErrLeaseLost = errors.New("the lease was lost to another holder or could not be renewed in time")
+
+// HoldLease takes the named lease like AcquireLease and keeps it for as long as the work
+// runs, renewing it every ttl/4 on the database clock with a token-checked update. The
+// returned context ends, with cause ErrLeaseLost, when renewal finds the lease is no longer
+// this holder's, or when failed renewals leave less than one renewal interval of it; parent
+// ending ends it too. release stops renewing and gives the lease back. A lease is single
+// ownership of scheduling, not exactly-once: the work keeps its own idempotency.
+func (s *Store) HoldLease(parent context.Context, name string, ttl time.Duration) (ctx context.Context, release func(), ok bool, err error) {
+	token := uuid.New().String()
+	if ok, err := s.takeLease(name, token, ttl); err != nil || !ok {
+		return nil, nil, false, err
 	}
-	return func() { _, _ = s.db.Exec(`DELETE FROM leases WHERE name=? AND token=?`, name, token) }, true, nil
+	ctx, cancel := context.WithCancelCause(parent)
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		keepLease(ctx, stop, cancel, ttl, func() (bool, error) {
+			res, err := s.db.Exec(`UPDATE leases SET until_ms=`+s.leaseNow()+`+? WHERE name=? AND token=?`, ttl.Milliseconds(), name, token)
+			if err != nil {
+				return false, err
+			}
+			n, err := res.RowsAffected()
+			return n == 1, err
+		})
+	}()
+	return ctx, sync.OnceFunc(func() {
+		close(stop)
+		<-stopped
+		cancel(context.Canceled)
+		s.dropLease(name, token)
+	}), true, nil
+}
+
+// keepLease renews every ttl/4 until stop or ctx ends. A renewal that finds the row gone or
+// another token's ends the hold at once; a failed one ends it only once what is left of the
+// ttl is under one interval, since the next try would land after the lease expired.
+func keepLease(ctx context.Context, stop <-chan struct{}, lost context.CancelCauseFunc, ttl time.Duration, renew func() (bool, error)) {
+	every := ttl / 4
+	expires := time.Now().Add(ttl)
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		start := time.Now()
+		held, err := renew()
+		switch {
+		case err == nil && held:
+			expires = start.Add(ttl)
+		case err == nil:
+			lost(ErrLeaseLost)
+			return
+		case time.Until(expires) < every:
+			log.Printf("lease: renewal failed with too little of the lease left: %v", err)
+			lost(ErrLeaseLost)
+			return
+		default:
+			log.Printf("lease: renewal failed, retrying: %v", err)
+		}
+	}
 }
 
 // withMigrationLease runs fn while holding the migration lease, waiting out another
@@ -129,6 +219,25 @@ func (s *Store) SetRelayKey(name, sealed string, version int64) (bool, error) {
 	res, err := s.db.Exec(`INSERT INTO push_relay_keys(name, key_sealed, version, updated_at) VALUES(?,?,?,?)
  ON CONFLICT(name) DO UPDATE SET key_sealed=excluded.key_sealed, version=excluded.version, updated_at=excluded.updated_at
  WHERE push_relay_keys.version=?`, name, sealed, version+1, time.Now().UTC(), version)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// RecordSetting stores value under key unless the key already holds one, and returns what
+// it holds afterwards: of replicas starting at once, one records and the rest read its value.
+func (s *Store) RecordSetting(key, value string) (string, error) {
+	if _, err := s.db.Exec(`INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`, key, value); err != nil {
+		return "", err
+	}
+	return s.GetSetting(key)
+}
+
+// SwapSetting replaces key's value only while it still holds old.
+func (s *Store) SwapSetting(key, old, value string) (bool, error) {
+	res, err := s.db.Exec(`UPDATE system_settings SET value=?, updated_at=CURRENT_TIMESTAMP WHERE key=? AND value=?`, value, key, old)
 	if err != nil {
 		return false, err
 	}

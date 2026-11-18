@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	gosync "sync"
 	"syscall"
 	"time"
 
@@ -93,6 +94,11 @@ func main() {
 		case "restore":
 			runRestore(os.Args[2:])
 			return
+		case "accept-replica-config":
+			if err := runAcceptReplicaConfig(os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "migrate-to-postgres":
 			if err := migrateToPostgres(os.Args[2:], os.Stdout, os.Stderr); err != nil {
 				log.Fatal(err)
@@ -111,6 +117,29 @@ func main() {
 		log.Fatalf("Failed to initialize database store: %v", err)
 	}
 	defer dbStore.Close()
+	keyManager, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize RSA key manager: %v", err)
+	}
+	pushOrigin, err := mfa.IssuerOrigin(cfg.IssuerURL)
+	if err != nil {
+		log.Fatalf("Invalid issuer URL for push approvals: %v", err)
+	}
+	unifiedPush, err := mfa.NewUnifiedPushSender(cfg.VAPIDKeyPath, pushOrigin, cfg.VAPIDKeyMounted)
+	if err != nil {
+		log.Fatalf("Failed to initialize UnifiedPush sender: %v", err)
+	}
+	// Before anything else reads or writes shared state: a replica configured unlike the
+	// others would split the identity.
+	keys, err := replicaKeys(keyManager, unifiedPush)
+	if err == nil {
+		err = checkReplicaConfig(cfg, dbStore, keys)
+	}
+	if err != nil {
+		log.Fatalf("Refusing to start: %v", err)
+	}
+	// A crash mid-backup leaves a plaintext snapshot under the data directory.
+	backup.SweepScratch(cfg.DataDir)
 	// The environment seeds session limits until an administrator stores their own.
 	if err := dbStore.LoadSessionLimits(store.SessionLimits{Absolute: int64(cfg.SessionTTL / time.Second), Idle: int64(cfg.SessionIdleTTL / time.Second)}); err != nil {
 		log.Fatalf("Session limits: %v", err)
@@ -118,11 +147,6 @@ func main() {
 	// Before anything reads a secret: the read path refuses legacy ciphertext.
 	if err := dbStore.SealLegacySecrets(cfg.EncryptionKey); err != nil {
 		log.Fatalf("Sealing legacy secrets failed, refusing to start: %v", err)
-	}
-
-	keyManager, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath)
-	if err != nil {
-		log.Fatalf("Failed to initialize RSA key manager: %v", err)
 	}
 
 	// Paired systems on a shared container network need private callbacks; on a public
@@ -203,15 +227,7 @@ func main() {
 		}
 		mfaEngine.SetAppAttestor(appAttest)
 	}
-	pushOrigin, err := mfa.IssuerOrigin(cfg.IssuerURL)
-	if err != nil {
-		log.Fatalf("Invalid issuer URL for push approvals: %v", err)
-	}
 	mfaEngine.SetIssuerOrigin(pushOrigin)
-	unifiedPush, err := mfa.NewUnifiedPushSender(cfg.VAPIDKeyPath, pushOrigin, cfg.VAPIDKeyMounted)
-	if err != nil {
-		log.Fatalf("Failed to initialize UnifiedPush sender: %v", err)
-	}
 	mfaEngine.SetUnifiedPushSender(unifiedPush)
 	mfaEngine.SetUbuntuPushSender(mfa.NewUbuntuPushSender(cfg.UbuntuPushURL, cfg.UbuntuPushAppID))
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
@@ -220,8 +236,12 @@ func main() {
 		log.Fatalf("Bootstrap failed: %v", err)
 	}
 
+	// ctx ends when draining starts: no worker starts anything new. work ends at the cancel
+	// phase: a backup run still going then is abandoned and records its failure.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	work, cancelWork := context.WithCancel(context.Background())
+	defer cancelWork()
 
 	waitSync := startSyncWorker(ctx, syncEngine)
 	go oauthEngine.StartLogoutWorker(ctx)
@@ -277,7 +297,11 @@ func main() {
 
 	staticFS, _ := web.FS()
 
-	go backupLoop(ctx, cfg, dbStore, auditLogger)
+	backupDone := make(chan struct{})
+	go func() {
+		defer close(backupDone)
+		backupLoop(ctx, work, cfg, dbStore, auditLogger, time.Minute)
+	}()
 
 	server := api.NewServer(
 		cfg,
@@ -292,7 +316,7 @@ func main() {
 
 	go func() {
 		log.Printf("KyIdentity Server listening on %s (Issuer: %s)", net.JoinHostPort(cfg.ListenHost, cfg.Port), cfg.IssuerURL)
-		if err := server.Start(); err != nil && err.Error() != "http: Server closed" {
+		if err := server.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
@@ -302,19 +326,84 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("Shutting down KyIdentity Server gracefully...")
-	cancel()
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Shutdown error: %v", err)
-	}
-	if !waitSync(shutdownCtx) {
-		log.Println("Sync worker still running at the shutdown deadline; an attempt it began stays fenced for operator recovery.")
-	}
+	gracefulStop(shutdownPlan(cfg.Replicated), server, cancel, cancelWork, map[string]func(context.Context) bool{
+		"the sync worker (an attempt it began stays fenced for operator recovery)": waitSync,
+		"the scheduled backup": func(done context.Context) bool {
+			select {
+			case <-backupDone:
+				return true
+			case <-done.Done():
+				return false
+			}
+		},
+	})
 	log.Println("KyIdentity Server stopped.")
+}
+
+// The shutdown budget. A replica keeps serving with /readyz at 503 for readinessDrainDelay,
+// five one-second proxy probes, so it leaves rotation before its listener closes; then the
+// listener drains for httpShutdownTimeout; then deposits, drills and the sync worker get the
+// work wait to record outcomes and give back leases. Replicated: 5+5+10 = 20 s, inside the
+// 30 s grace period the replica docs require. One server has no drain: 5+3 = 8 s, inside
+// Docker's default 10 s. TestShutdownBudgetFitsTheGracePeriods holds them there.
+const (
+	readinessDrainDelay = 5 * time.Second
+	httpShutdownTimeout = 5 * time.Second
+	replicatedWorkWait  = 10 * time.Second
+	singleWorkWait      = 3 * time.Second
+)
+
+type stopPlan struct{ drain, shutdown, wait time.Duration }
+
+func shutdownPlan(replicated bool) stopPlan {
+	if replicated {
+		return stopPlan{readinessDrainDelay, httpShutdownTimeout, replicatedWorkWait}
+	}
+	return stopPlan{0, httpShutdownTimeout, singleWorkWait}
+}
+
+// stopper is the server as gracefulStop drives it.
+type stopper interface {
+	StartDraining()
+	Shutdown(context.Context) error
+	CancelBackups()
+	WaitBackups(context.Context) bool
+}
+
+// gracefulStop is the SIGTERM order: drain (/readyz 503, no new deposits, drills or scheduled
+// runs, workers stopped), keep serving for plan.drain, close the listener and let in-flight
+// requests finish for plan.shutdown, cancel the backup work still running, then wait up to
+// plan.wait for it and for waits, all at once on one deadline, so one stuck wait cannot take
+// the others' time.
+func gracefulStop(plan stopPlan, srv stopper, stopWorkers, cancelWork func(), waits map[string]func(context.Context) bool) {
+	srv.StartDraining()
+	stopWorkers()
+	log.Printf("Shutting down KyIdentity Server: /readyz answers 503; serving %s more before closing the listener", plan.drain)
+	time.Sleep(plan.drain)
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), plan.shutdown)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Shutdown: %v", err)
+	}
+	shutdownCancel()
+
+	srv.CancelBackups()
+	cancelWork()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), plan.wait)
+	defer waitCancel()
+	all := map[string]func(context.Context) bool{"backup and drill requests": srv.WaitBackups}
+	maps.Copy(all, waits)
+	var wg gosync.WaitGroup
+	for name, wait := range all {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if !wait(waitCtx) {
+				log.Printf("Shutdown: %s still running at the deadline", name)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // startSyncWorker runs the sync dispatcher. The returned wait blocks until it has
@@ -593,7 +682,7 @@ func runBackupDrill() {
 	dbStore := openStoreForBackup(cfg)
 	defer dbStore.Close()
 
-	release, ok, err := dbStore.AcquireLease(backup.DrillLease, backup.LeaseTTL)
+	ctx, release, ok, err := dbStore.HoldLease(context.Background(), backup.DrillLease, backup.LeaseTTL)
 	if err != nil || !ok {
 		log.Fatalf("A restore drill is already running, or its lease is unreadable (%v)", err)
 	}
@@ -609,7 +698,7 @@ func runBackupDrill() {
 		if err != nil {
 			return nil, fmt.Errorf("failed to collect backup payload: %w", err)
 		}
-		return backup.RunRestoreDrill(context.Background(), cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
+		return backup.RunRestoreDrill(ctx, cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
 	}()
 	if err != nil {
 		log.Fatalf("Drill execution failed: %v", err)
@@ -678,12 +767,12 @@ func runDeposit() {
 	auditLogger := audit.NewLogger(dbStore)
 
 	var res backup.Result
-	release, ok, err := dbStore.AcquireLease(backup.Lease, backup.LeaseTTL)
+	ctx, release, ok, err := dbStore.HoldLease(context.Background(), backup.Lease, backup.LeaseTTL)
 	if err == nil && !ok {
 		err = backup.ErrDepositInProgress
 	}
 	if err == nil {
-		res, err = backup.RunBackup(context.Background(), cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appversion.String())
+		res, err = backup.RunBackup(ctx, cfg, dbStore, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), appversion.String())
 		release() // before log.Fatalf below, which skips defers
 	}
 	action, outcome, details := backup.Outcome(res, err)
@@ -707,34 +796,35 @@ func describe(res backup.Result) string {
 }
 
 // backupLoop runs the schedule the admin set (or the KYIDENTITY_BACKUP_DEPOSIT_INTERVAL
-// default). It checks once a minute whether a run is due, so a schedule changed in the UI
-// takes effect without a restart and a restart never loses its place: the last attempt is in
-// the database. The wait honours shutdown; the run itself does not, so a SIGTERM mid-upload
-// cannot end the process between KyRecovery storing a capsule and the receipt being written.
-func backupLoop(ctx context.Context, cfg *config.Config, dbStore *store.Store, auditLogger *audit.Logger) {
+// default). It checks every tick whether a run is due, so a schedule changed in the UI takes
+// effect without a restart and a restart never loses its place: the last attempt is in the
+// database. It starts nothing once sched ends; a run in progress then ends with work, at the
+// shutdown's cancel phase, and records its failure before backupLoop returns.
+func backupLoop(sched, work context.Context, cfg *config.Config, dbStore *store.Store, auditLogger *audit.Logger, tick time.Duration) {
 	client := backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery)
 	// An install paired before the key was kept in the database shares it now, before
 	// another replica's backup comes due and needs it.
 	if _, err := backup.LoadRecoveryKey(cfg, dbStore); err != nil && !errors.Is(err, backup.ErrNotPaired) {
 		log.Printf("[BACKUP] recovery key: %s", backup.AuditSafe(err.Error()))
 	}
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-sched.Done():
 			return
 		case <-ticker.C:
 		}
-		scheduledBackup(ctx, cfg, dbStore, client, auditLogger)
+		scheduledBackup(work, cfg, dbStore, client, auditLogger)
 	}
 }
 
 // scheduledBackup runs one backup if the schedule says one is due. The schedule is read
 // under the lease, and the run stamps its attempt before anything else: of two replicas
-// that both tick while a run is due, the second finds the lease held or the run no longer due.
-func scheduledBackup(ctx context.Context, cfg *config.Config, dbStore *store.Store, client backup.Depositor, auditLogger *audit.Logger) {
-	release, ok, err := dbStore.AcquireLease(backup.Lease, backup.LeaseTTL)
+// that both tick while a run is due, the second finds the lease held or the run no longer
+// due. The lease is renewed while the run lasts; losing it ends the run's context.
+func scheduledBackup(work context.Context, cfg *config.Config, dbStore *store.Store, client backup.Depositor, auditLogger *audit.Logger) {
+	ctx, release, ok, err := dbStore.HoldLease(work, backup.Lease, backup.LeaseTTL)
 	if err != nil {
 		log.Printf("[BACKUP] lease: %v", err)
 	}
@@ -742,22 +832,26 @@ func scheduledBackup(ctx context.Context, cfg *config.Config, dbStore *store.Sto
 		return
 	}
 	defer release()
+	var res backup.Result
 	next, on, err := backup.NextRun(cfg, dbStore)
 	if err != nil {
-		log.Printf("[BACKUP] schedule unreadable: %s", backup.AuditSafe(err.Error()))
+		err = fmt.Errorf("the backup schedule could not be read: %w", err)
+	} else if !on || time.Now().Before(next) {
 		return
+	} else {
+		res, err = backup.RunBackup(ctx, cfg, dbStore, dbStore, client, appversion.String())
 	}
-	if !on || time.Now().Before(next) {
-		return
-	}
-	res, err := backup.RunBackup(context.WithoutCancel(ctx), cfg, dbStore, dbStore, client, appversion.String())
 	if errors.Is(err, backup.ErrNotPaired) {
-		// Nothing to back up to is quiet. A pinned key this server cannot load is a backup
-		// that silently never runs.
-		if !backup.KeyPinned(dbStore) {
+		// Nothing to back up to is quiet. A pinned key this server cannot load, or a pin it
+		// cannot read, is a backup that silently never runs.
+		switch pinned, perr := backup.KeyPinned(dbStore); {
+		case perr != nil:
+			err = fmt.Errorf("the recovery key pin could not be read: %w", perr)
+		case !pinned:
 			return
+		default:
+			err = fmt.Errorf("a recovery key is pinned but this server has no recovery.pub, and takes the key from the database only when KYIDENTITY_RECOVERY_KEY_ID names it: %w", err)
 		}
-		err = fmt.Errorf("a recovery key is pinned but this server has no recovery.pub, and takes the key from the database only when KYIDENTITY_RECOVERY_KEY_ID names it: %w", err)
 	}
 	if errors.Is(err, backup.ErrNoDestination) {
 		return

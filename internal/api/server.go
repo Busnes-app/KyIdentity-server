@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
@@ -35,6 +36,10 @@ type Server struct {
 	httpServer  *http.Server
 	staticFS    fs.FS
 	forward     *ForwardHandler
+	// draining turns /readyz to 503 while a stopping replica leaves rotation; work is the
+	// deposits and drills in flight.
+	draining atomic.Bool
+	work     *backupWork
 }
 
 func NewServer(
@@ -62,12 +67,14 @@ func NewServer(
 		audit:       auditLogger,
 		middleware:  mm,
 		staticFS:    staticFS,
+		work:        newBackupWork(),
 	}
 
 	mux := srv.routes()
 
-	// Order matters: cap the body before any handler reads it, then headers, then CSRF.
-	handler := limitRequestBody(mm.SecurityHeaders(mm.CSRFValidate(mux)))
+	// Order matters: the deadline covers everything, then cap the body before any handler
+	// reads it, then headers, then CSRF.
+	handler := withDeadline(limitRequestBody(mm.SecurityHeaders(mm.CSRFValidate(mux))), mux, requestDeadline)
 
 	srv.httpServer = &http.Server{
 		Addr:    net.JoinHostPort(cfg.ListenHost, cfg.Port),
@@ -111,6 +118,7 @@ func (s *Server) routes() *http.ServeMux {
 	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
 	backupH := NewBackupHandler(s.cfg, s.store, s.audit, s.middleware)
+	backupH.work = s.work
 	webauthnH := NewWebAuthnHandler(s.store, s.audit, s.mfaEngine, s.middleware, s.cfg.RPID, s.cfg.Origin)
 
 	// The public suite health check is cached by its handler for five seconds.
@@ -118,6 +126,7 @@ func (s *Server) routes() *http.ServeMux {
 
 	// Liveness only proves that this process can serve a request.
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "alive"})
 	})
@@ -473,10 +482,11 @@ func revalidateEntryDocument(w http.ResponseWriter) {
 
 // Start serves until Shutdown; the limiter sweeper lives exactly as long.
 func (s *Server) Start() error {
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-	go s.middleware.sweepLimitersEvery(ctx, time.Minute)
-	return s.httpServer.ListenAndServe()
+	ln, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
@@ -593,6 +603,14 @@ func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 		checks["encryption_key"] = "ok"
 	}
 
+	// A stopping replica leaves rotation before its listener closes.
+	if s.draining.Load() {
+		checks["server"] = "draining"
+		ready = false
+	} else {
+		checks["server"] = "ok"
+	}
+
 	// A server still authenticating people while keeping no record of it is degraded, not
 	// healthy. It is reported rather than fatal: pulling an identity provider out of rotation
 	// over audit storage would trade an evidence gap for an outage.
@@ -607,6 +625,7 @@ func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 	if !ready {
 		status = http.StatusServiceUnavailable
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 )
 
 // A restored snapshot is a copy of the directory as it was, credentials included. Every
@@ -23,7 +25,9 @@ const restoredRevision = -1
 // factors, recovery codes) are deliberately absent: they are what the operator still
 // has to work with, and the runbook covers rotating them. Queued back-channel logouts
 // are absent for a different reason: they are work this server owes a relying party,
-// and nothing would re-derive them.
+// and nothing would re-derive them. Spent device assertion IDs (device_signon_jtis) are
+// absent because they only ever refuse: emptying them would let an assertion spent
+// before the capsule was taken be replayed within its lifetime, so only expired ones go.
 var restoredCleared = []string{
 	"forward_codes",
 	"forward_sessions",
@@ -40,7 +44,6 @@ var restoredCleared = []string{
 	"step_up_tokens",
 	"account_tokens",
 	"device_pairing_tokens",
-	"device_signon_jtis",
 	"login_failures",
 	"sync_delivery_attempts",
 }
@@ -142,6 +145,18 @@ func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEven
 				return err
 			}
 			report.Credentials += int(n)
+		}
+		for _, q := range []struct {
+			sql  string
+			args []any
+		}{
+			{`DELETE FROM device_signon_jtis WHERE expires_at < ?`, []any{now}},
+			// Each environment records its own replica configuration on its first start.
+			{`DELETE FROM system_settings WHERE key=?`, []any{config.ReplicaConfigSetting}},
+		} {
+			if _, err := tx.Exec(q.sql, q.args...); err != nil {
+				return err
+			}
 		}
 		// Every undelivered provisioning event is closed out rather than deleted: an
 		// operator reading the outbox after a restore should see why nothing was sent,

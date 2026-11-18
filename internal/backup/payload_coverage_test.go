@@ -255,7 +255,8 @@ func TestLegacyMigrationRefusesUnsafeStates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, legacy), []byte("old"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backup.ListLocalCopies(dir, "KySignOn"); err != nil {
+	cfg.BackupDir, cfg.BackupKeep = dir, 3
+	if _, err := backup.RunBackup(context.Background(), cfg, st, st, &fakeStore{}, "1.0.0"); !errors.Is(err, backup.ErrNotPaired) {
 		t.Fatal(err)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -268,10 +269,6 @@ func TestLegacyMigrationRefusesUnsafeStates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, legacy), []byte("old again"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backup.ListLocalCopies(dir, "KySignOn"); err == nil || !strings.Contains(err.Error(), "destination already exists") {
-		t.Fatalf("collision: %v", err)
-	}
-	cfg.BackupDir, cfg.BackupKeep = dir, 3
 	pair(t, cfg, st)
 	if _, err := backup.RunBackup(context.Background(), cfg, st, st, &fakeStore{}, "1.0.0"); err == nil || !strings.Contains(err.Error(), "destination already exists") {
 		t.Fatalf("run over a collision: %v", err)

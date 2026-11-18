@@ -2895,6 +2895,33 @@ func (e InputError) Error() string { return string(e) }
 
 func (s *Store) GetSetting(key string) (string, error) { return getSetting(s.db, key) }
 
+// GetSettings reads keys in one statement, so rows written together are read together: a
+// concurrent unpair and re-pair on another replica can never hand back one pairing's URL
+// with another's token. Absent keys are absent from the map.
+func (s *Store) GetSettings(keys ...string) (map[string]string, error) {
+	if len(keys) == 0 {
+		return map[string]string{}, nil
+	}
+	args := make([]any, len(keys))
+	for i, k := range keys {
+		args[i] = k
+	}
+	rows, err := s.db.Query(`SELECT key, value FROM system_settings WHERE key IN (?`+strings.Repeat(",?", len(keys)-1)+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
 // SetSetting upserts a key-value pair in system_settings.
 func (s *Store) SetSetting(key, value string) error { return setSetting(s.db, key, value) }
 

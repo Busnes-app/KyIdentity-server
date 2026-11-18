@@ -287,6 +287,19 @@ func TestLegacyLocalCopyIsMigratedWithoutTouchingForeignFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, foreign), []byte("foreign"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Listing only reads: the status page on any replica must not rename a shared file.
+	if copies, err := backup.ListLocalCopies(dir, "KySignOn"); err != nil || len(copies) != 0 {
+		t.Fatalf("listing migrated or failed: %+v %v", copies, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, legacy)); err != nil {
+		t.Fatalf("listing renamed the legacy file: %v", err)
+	}
+	// A run migrates, under the backup lease its caller holds; this one has no key to seal to.
+	cfg, st := instance(t)
+	cfg.AppName, cfg.BackupDir, cfg.BackupKeep = "KySignOn", dir, 3
+	if _, err := backup.RunBackup(context.Background(), cfg, st, st, &fakeStore{}, "1.0.0"); !errors.Is(err, backup.ErrNotPaired) {
+		t.Fatalf("run: %v", err)
+	}
 	copies, err := backup.ListLocalCopies(dir, "KySignOn")
 	if err != nil {
 		t.Fatal(err)
@@ -354,7 +367,7 @@ func TestClearPairingRemovesRowsAndKeepsThePin(t *testing.T) {
 	if err := backup.ClearPairing(st); err != nil {
 		t.Fatal(err)
 	}
-	if backup.HasPairing(st) {
+	if paired, err := backup.HasPairing(st); err != nil || paired {
 		t.Error("still paired")
 	}
 	if _, err := st.GetSetting("kyrecovery_token_enc"); !errors.Is(err, store.ErrNotFound) {
@@ -408,7 +421,7 @@ func TestSettingsAdapterMapsNotFound(t *testing.T) {
 	if _, err := backup.LoadRecoveryKey(cfg, st); !errors.Is(err, backup.ErrNotPaired) {
 		t.Fatalf("fresh store: %v", err)
 	}
-	if backup.HasPairing(st) {
+	if paired, err := backup.HasPairing(st); err != nil || paired {
 		t.Fatal("fresh store paired")
 	}
 	if err := backup.ClearPairing(st); !errors.Is(err, backup.ErrNotPaired) {
@@ -613,7 +626,7 @@ func TestOnlyTheConfiguredKeyIsPinned(t *testing.T) {
 	}
 	cfg.RecoveryKeyID = wanted.Public().ID()
 	err = backup.StoreRecoveryKey(cfg, st, backup.RecoveryKey{Public: other.Public(), Threshold: 2, TotalShares: 3})
-	if !errors.Is(err, backup.ErrKeyRefused) || backup.KeyPinned(st) {
+	if pinned, _ := backup.KeyPinned(st); !errors.Is(err, backup.ErrKeyRefused) || pinned {
 		t.Fatalf("pinned a key the configuration does not name: %v", err)
 	}
 	if _, err := os.Stat(backup.RecoveryKeyPath(cfg.DataDir)); err == nil {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -520,7 +521,7 @@ func ImportSQLite(rawURL, srcPath string, opt ImportOptions) (ImportResult, erro
 }
 
 func importSQLite(rawURL, searchPath, srcPath string, opt ImportOptions) (res ImportResult, err error) {
-	src, done, err := openImportSource(srcPath)
+	src, unchanged, done, err := openImportSource(srcPath)
 	if err != nil {
 		return res, err
 	}
@@ -532,21 +533,83 @@ func importSQLite(rawURL, searchPath, srcPath string, opt ImportOptions) (res Im
 	defer s.db.Close()
 	err = s.withPostgresMigrationLock(func() error {
 		var err error
-		res, err = s.importTx(src, opt)
+		res, err = s.importTx(src, opt, unchanged)
 		return err
 	})
 	return res, err
 }
 
-// openImportSource opens the file read-only after checking its schema version. An older
-// file is first opened once by the normal SQLite path, on a copy; a newer one is refused.
-func openImportSource(path string) (*sql.DB, func(), error) {
-	if _, err := os.Stat(path); err != nil {
-		return nil, nil, err
-	}
+// sourceState is what the import knows of its file at open: a server still writing it shows
+// up as a log beside it, or as a different size, time or content at commit.
+type sourceState struct {
+	size  int64
+	mtime time.Time
+	sum   [sha256.Size]byte
+}
+
+func readSourceState(path string) (sourceState, error) {
 	if _, err := os.Stat(path + "-wal"); err == nil {
-		return nil, nil, fmt.Errorf("%s has a write-ahead log beside it: stop the server that uses it (a clean stop folds the log into the file) and try again", path)
+		return sourceState{}, fmt.Errorf("%s has a write-ahead log beside it: stop the server that uses it (a clean stop folds the log into the file) and try again", path)
 	}
+	f, err := os.Open(path)
+	if err != nil {
+		return sourceState{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return sourceState{}, err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return sourceState{}, err
+	}
+	st := sourceState{size: info.Size(), mtime: info.ModTime()}
+	h.Sum(st.sum[:0])
+	return st, nil
+}
+
+// beforeImportCommit runs just before the source is checked a last time; tests change the
+// file there.
+var beforeImportCommit = func() {}
+
+// openImportSource opens the file read-only after checking its schema version, its integrity
+// and its foreign keys. An older file is first opened once by the normal SQLite path, on a
+// copy; a newer one is refused. unchanged fails if the file has changed since, or gained a
+// log: the import calls it before committing.
+func openImportSource(path string) (*sql.DB, func() error, func(), error) {
+	path, err := filepath.Abs(path) // a relative -from names the same file from any step
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	at, err := readSourceState(path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	unchanged := func() error {
+		beforeImportCommit()
+		now, err := readSourceState(path)
+		if err != nil {
+			return err
+		}
+		if now != at {
+			return fmt.Errorf("%s changed while it was being copied: stop every server and command that uses it and try again", path)
+		}
+		return nil
+	}
+	db, done, err := openCheckedSource(path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := sqliteChecks(db); err != nil {
+		done()
+		return nil, nil, nil, fmt.Errorf("%s fails its own checks, so it is not copied: %w", path, err)
+	}
+	return db, unchanged, done, nil
+}
+
+// openCheckedSource opens path read-only, or an up-to-date private copy of an older file.
+func openCheckedSource(path string) (*sql.DB, func(), error) {
 	// immutable: read the file alone and create nothing beside it (mode=ro alone leaves a
 	// -wal and -shm next to a WAL-mode file). A log beside it is refused above.
 	open := func(p string) (*sql.DB, error) {
@@ -618,7 +681,7 @@ func copyFile(from, to string) error {
 	return out.Close()
 }
 
-func (s *Store) importTx(lite *sql.DB, opt ImportOptions) (ImportResult, error) {
+func (s *Store) importTx(lite *sql.DB, opt ImportOptions, unchanged func() error) (ImportResult, error) {
 	res := ImportResult{Rows: map[string]int64{}}
 	src, err := lite.Begin()
 	if err != nil {
@@ -735,6 +798,9 @@ func (s *Store) importTx(lite *sql.DB, opt ImportOptions) (ImportResult, error) 
 		if err := recordAuditTx(tx, opt.Restored); err != nil {
 			return res, err
 		}
+	}
+	if err := unchanged(); err != nil {
+		return res, err
 	}
 	return res, tx.Commit()
 }
