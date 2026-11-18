@@ -234,8 +234,19 @@ func accepted(cfg *config.Config, id string) error {
 }
 
 // ErrTopologyChanged is the pinned key offered again with a different k-of-n. The split a
-// key was made with does not change, so a different one is a mistake or a forgery.
-var ErrTopologyChanged = fmt.Errorf("%w: this recovery key is already pinned with a different custodian topology", fs.ErrExist)
+// key was made with does not change, so a different one is a mistake or a forgery. The error
+// returned is a *TopologyError naming the pinned split; it matches this and fs.ErrExist.
+var ErrTopologyChanged = errors.New("this recovery key is already pinned with a different custodian topology")
+
+// TopologyError says which k-of-n the key is pinned with. Both are public: the ceremony page
+// shows them, and they are on the backup page.
+type TopologyError struct{ Threshold, TotalShares int }
+
+func (e *TopologyError) Error() string {
+	return fmt.Sprintf("this recovery key is already pinned as %d of %d custodian cards", e.Threshold, e.TotalShares)
+}
+func (e *TopologyError) Is(target error) bool { return target == ErrTopologyChanged }
+func (e *TopologyError) Unwrap() error        { return fs.ErrExist }
 
 func StoreRecoveryKey(cfg *config.Config, s SettingsStore, k RecoveryKey) error {
 	s = Coherent(s)
@@ -246,12 +257,19 @@ func StoreRecoveryKey(cfg *config.Config, s SettingsStore, k RecoveryKey) error 
 	}
 	// The lib re-sets the topology for the pinned key; it is written once here.
 	if pinned, err := s.GetSetting("kyrecovery_key_id"); err == nil && pinned == k.Public.ID() {
-		for setting, want := range map[string]int{"kyrecovery_threshold": k.Threshold, "kyrecovery_total_shares": k.TotalShares} {
-			if v, err := s.GetSetting(setting); err == nil && v != strconv.Itoa(want) {
-				return ErrTopologyChanged
-			} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		var have [2]string
+		for i, setting := range []string{"kyrecovery_threshold", "kyrecovery_total_shares"} {
+			if have[i], err = s.GetSetting(setting); err != nil && !errors.Is(err, store.ErrNotFound) {
 				return err
 			}
+		}
+		threshold, terr := strconv.Atoi(have[0])
+		total, nerr := strconv.Atoi(have[1])
+		if (have[0] != "" && have[0] != strconv.Itoa(k.Threshold)) || (have[1] != "" && have[1] != strconv.Itoa(k.TotalShares)) {
+			if terr != nil || nerr != nil {
+				return ErrTopologyChanged // stored but unreadable: still never rewritten
+			}
+			return &TopologyError{Threshold: threshold, TotalShares: total}
 		}
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err

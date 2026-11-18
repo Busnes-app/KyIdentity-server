@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
@@ -302,7 +304,7 @@ func TestAcceptReplicaConfig(t *testing.T) {
 	t.Run("refuses a different encryption key", func(t *testing.T) {
 		t.Setenv("KYIDENTITY_ENCRYPTION_KEY", hex.EncodeToString(other))
 		var out bytes.Buffer
-		if err := runAcceptReplicaConfig(&out); err == nil || !strings.Contains(err.Error(), "KYIDENTITY_ENCRYPTION_KEY differs") {
+		if err := runAcceptReplicaConfig(nil, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "KYIDENTITY_ENCRYPTION_KEY differs") {
 			t.Fatalf("accept with another encryption key: %v", err)
 		}
 		if after := recorded(t, s); !maps.Equal(after, before) {
@@ -316,7 +318,7 @@ func TestAcceptReplicaConfig(t *testing.T) {
 	}
 	var out bytes.Buffer
 	logged := captureLog(t, func() {
-		if err := runAcceptReplicaConfig(&out); err != nil {
+		if err := runAcceptReplicaConfig(nil, &out, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -352,5 +354,120 @@ func TestAcceptReplicaConfig(t *testing.T) {
 		if strings.Contains(events[0].DetailsJSON, v) {
 			t.Fatal("the audit row holds a fingerprint")
 		}
+	}
+}
+
+// A field the record lacks (one a later release adds) is recorded by the first start that
+// knows it. Two such starts at once with different values for it: one records, and the other
+// re-reads after losing the swap and refuses, naming the field.
+func TestARaceToRecordANewFieldHasOneWinner(t *testing.T) {
+	replicaEnv(t)
+	first, err := startCheck(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := recorded(t, first)
+	delete(base, "KYIDENTITY_APP_NAME") // as if recorded by a release before the field existed
+	older, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := loadReplicaKeys(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := *a
+	b.AppName = "AnotherService"
+	stores := []*store.Store{}
+	for range 2 {
+		s, err := openStore(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		stores = append(stores, s)
+	}
+	for round := range 20 {
+		if err := first.SetSetting(config.ReplicaConfigSetting, string(older)); err != nil {
+			t.Fatal(err)
+		}
+		errs := make([]error, 2)
+		start := make(chan struct{})
+		done := make(chan struct{}, 2)
+		for i, cfg := range []*config.Config{a, &b} {
+			go func() { <-start; errs[i] = checkReplicaConfig(cfg, stores[i], keys); done <- struct{}{} }()
+		}
+		close(start)
+		<-done
+		<-done
+		ok := 0
+		for _, err := range errs {
+			if err == nil {
+				ok++
+			} else if !errors.Is(err, errReplicaConfig) || !strings.Contains(err.Error(), "KYIDENTITY_APP_NAME") {
+				t.Fatalf("round %d: the loser failed for another reason: %v", round, err)
+			}
+		}
+		if ok != 1 {
+			t.Fatalf("round %d: %d of two starts with different values for a new field were accepted", round, ok)
+		}
+	}
+}
+
+// accept-replica-config reads its arguments before it loads anything: -h prints the usage and
+// a stray flag or argument is refused, all without touching the configuration or a database.
+// The database URL here names nothing that would answer, so any database work would fail.
+func TestAcceptReplicaConfigParsesItsArgumentsFirst(t *testing.T) {
+	commandEnv(t)
+	t.Setenv("KYIDENTITY_DATABASE_URL", "postgres://nobody@127.0.0.1:1/none?sslmode=disable&connect_timeout=1")
+	t.Setenv("KYIDENTITY_ISSUER_URL", "not a url") // config.Load would fail on this
+	for _, c := range []struct {
+		args    []string
+		wantErr string
+	}{
+		{[]string{"-h"}, ""},
+		{[]string{"--help"}, ""},
+		{[]string{"--dry-run"}, "flag provided but not defined"},
+		{[]string{"now"}, "takes no arguments"},
+	} {
+		var out, errOut bytes.Buffer
+		begun := time.Now()
+		err := runAcceptReplicaConfig(c.args, &out, &errOut)
+		if c.wantErr == "" && err != nil || c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
+			t.Fatalf("%v: err %v, want %q", c.args, err, c.wantErr)
+		}
+		if !strings.Contains(errOut.String(), "Usage: kyidentity accept-replica-config") || out.Len() != 0 {
+			t.Fatalf("%v: usage %q, output %q", c.args, errOut.String(), out.String())
+		}
+		if took := time.Since(begun); took > 500*time.Millisecond {
+			t.Fatalf("%v took %v: it reached for the database", c.args, took)
+		}
+	}
+}
+
+// With no earlier record, accept-replica-config says it recorded one rather than listing every
+// field as changed.
+func TestAcceptReplicaConfigWithNoRecordSaysRecorded(t *testing.T) {
+	replicaEnv(t)
+	s, err := startCheck(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteSetting(config.ReplicaConfigSetting); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runAcceptReplicaConfig(nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "recorded (there was no readable earlier record)") || strings.Contains(out.String(), "Changed:") {
+		t.Fatalf("output: %s", out.String())
+	}
+	if _, err := startCheck(t); err != nil {
+		t.Fatal("the recorded configuration refused to start:", err)
 	}
 }

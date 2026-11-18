@@ -95,7 +95,7 @@ func main() {
 			runRestore(os.Args[2:])
 			return
 		case "accept-replica-config":
-			if err := runAcceptReplicaConfig(os.Stdout); err != nil {
+			if err := runAcceptReplicaConfig(os.Args[2:], os.Stdout, os.Stderr); err != nil {
 				log.Fatal(err)
 			}
 			return
@@ -378,8 +378,12 @@ type stopper interface {
 func gracefulStop(plan stopPlan, srv stopper, stopWorkers, cancelWork func(), waits map[string]func(context.Context) bool) {
 	srv.StartDraining()
 	stopWorkers()
-	log.Printf("Shutting down KyIdentity Server: /readyz answers 503; serving %s more before closing the listener", plan.drain)
-	time.Sleep(plan.drain)
+	if plan.drain > 0 {
+		log.Printf("Shutting down KyIdentity Server: /readyz answers 503; serving %s more before closing the listener", plan.drain)
+		time.Sleep(plan.drain)
+	} else {
+		log.Println("Shutting down KyIdentity Server")
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), plan.shutdown)
 	if err := srv.Shutdown(shutdownCtx); err != nil {

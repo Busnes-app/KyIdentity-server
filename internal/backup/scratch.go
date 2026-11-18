@@ -65,7 +65,7 @@ func sameDir(f *os.File, path string) bool {
 // SweepScratch removes snapshot scratch directories a killed process left under dataDir. It
 // takes each one's lock without waiting, so a directory a live process holds is skipped; it
 // never follows a symlink, and removes only directories this user owns that the path still
-// names once locked.
+// names once locked. One owned by another user is reported, not removed.
 func SweepScratch(dataDir string) {
 	entries, err := os.ReadDir(dataDir)
 	if err != nil {
@@ -82,6 +82,13 @@ func SweepScratch(dataDir string) {
 			continue
 		}
 		if st, ok := info.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != os.Getuid() {
+			// Another user's, such as a deposit run as root: it may hold a plaintext database,
+			// and only its owner may remove it.
+			owner := -1
+			if ok {
+				owner = int(st.Uid)
+			}
+			log.Printf("[BACKUP] %s is a database snapshot left by another user (uid %d); it may hold the plaintext database: remove it as that user", path, owner)
 			continue
 		}
 		f, err := lockDir(path, syscall.LOCK_EX|syscall.LOCK_NB)

@@ -49,14 +49,19 @@ var newRecoveryClient = func(cfg *config.Config) recoveryClient {
 	return backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery)
 }
 
+// NewBackupHandler builds the handler with its own run tracking; Server shares its own instead.
 func NewBackupHandler(cfg *config.Config, s *store.Store, audit *audit.Logger, mm *MiddlewareManager) *BackupHandler {
+	return newBackupHandler(cfg, s, audit, mm, newBackupWork())
+}
+
+func newBackupHandler(cfg *config.Config, s *store.Store, audit *audit.Logger, mm *MiddlewareManager, work *backupWork) *BackupHandler {
 	return &BackupHandler{
 		cfg:        cfg,
 		store:      s,
 		audit:      audit,
 		middleware: mm,
 		recovery:   newRecoveryClient(cfg),
-		work:       newBackupWork(),
+		work:       work,
 	}
 }
 
@@ -287,6 +292,20 @@ func (h *BackupHandler) noKey(w http.ResponseWriter, unpaired string) {
 
 const settingsUnreadable = "The backup settings could not be read; check database health and retry"
 
+// pairingCodeSpent follows a refused pairing: KyRecovery has already redeemed the code and
+// issued a token this server did not store.
+const pairingCodeSpent = "The pairing code is now spent: ask the KyRecovery administrator to revoke the token it issued for this claim."
+
+// topologyRefusal names the pinned split and the way out. The pin is never rewritten here: a
+// wrong split is corrected only by clearing the pin by hand (docs/RUNNING.md, Keys).
+func topologyRefusal(err error) string {
+	var te *backup.TopologyError
+	if errors.As(err, &te) {
+		return fmt.Sprintf("This recovery key is pinned as %d of %d custodian cards. Offer %d of %d; if the pinned split is wrong, clear the pin by hand as docs/RUNNING.md (Keys) describes, then pin it again.", te.Threshold, te.TotalShares, te.Threshold, te.TotalShares)
+	}
+	return "This recovery key is already pinned with a different custodian topology; if the pinned split is wrong, clear the pin by hand as docs/RUNNING.md (Keys) describes, then pin it again."
+}
+
 type RemotePairRequest struct {
 	RecoveryURL string `json:"recovery_url"`
 	PairingCode string `json:"pairing_code"`
@@ -346,10 +365,10 @@ func (h *BackupHandler) PairRemote(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 	case errors.Is(err, backup.ErrTopologyChanged):
-		fail(http.StatusConflict, "This recovery key is already pinned with a different custodian topology")
+		fail(http.StatusConflict, topologyRefusal(err)+" "+pairingCodeSpent)
 		return
 	case errors.Is(err, fs.ErrExist):
-		fail(http.StatusConflict, "Already paired to a different recovery key")
+		fail(http.StatusConflict, "Already paired to a different recovery key. "+pairingCodeSpent)
 		return
 	case errors.Is(err, backup.ErrKeyRefused):
 		fail(http.StatusConflict, backup.AuditSafe(err.Error()))
@@ -505,7 +524,7 @@ func (h *BackupHandler) PinKey(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.EditSettings(pinned.Row, func(st store.Settings) error { return backup.StoreRecoveryKey(h.cfg, st, key) }); err != nil {
 		switch {
 		case errors.Is(err, backup.ErrTopologyChanged):
-			fail(http.StatusConflict, "This recovery key is already pinned with a different custodian topology")
+			fail(http.StatusConflict, topologyRefusal(err))
 		case errors.Is(err, fs.ErrExist):
 			fail(http.StatusConflict, "Already pinned to a different recovery key")
 		case errors.Is(err, backup.ErrKeyRefused):

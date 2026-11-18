@@ -255,12 +255,12 @@ func TestPinnedTopologyIsWriteOnceOverHTTP(t *testing.T) {
 		t.Fatalf("first pin: %d %s", w.Code, w.Body.String())
 	}
 	sealed, _ := s.GetSetting("kyrecovery_public_key")
-	if w := pin(3, 5); w.Code != http.StatusConflict {
+	if w := pin(3, 5); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "pinned as 2 of 3") || !strings.Contains(w.Body.String(), "RUNNING.md") {
 		t.Fatalf("same key, other topology: %d %s", w.Code, w.Body.String())
 	}
 	fake.result = backup.PairingResult{APIToken: "tok", Key: backup.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 4}}
 	body, _ := json.Marshal(map[string]string{"recovery_url": "https://recovery.example.test", "pairing_code": "123456"})
-	if w := do("POST", "/api/admin/backup/pair-remote", body, true); w.Code != http.StatusConflict {
+	if w := do("POST", "/api/admin/backup/pair-remote", body, true); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "pinned as 2 of 3") || !strings.Contains(w.Body.String(), "pairing code is now spent") {
 		t.Fatalf("pairing with another topology: %d %s", w.Code, w.Body.String())
 	}
 	if _, err := s.GetSetting("kyrecovery_token_enc"); err == nil {

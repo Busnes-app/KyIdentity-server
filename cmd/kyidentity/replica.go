@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"maps"
@@ -18,12 +19,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// errReplicaConfig is a PostgreSQL replica whose shared settings differ from the recorded ones.
-var errReplicaConfig = errors.New("this replica's configuration differs from the one the other replicas recorded")
+// errReplicaConfig is a PostgreSQL server whose shared settings differ from the recorded ones.
+// A single server records too, so the wording names no other replicas.
+var errReplicaConfig = errors.New("this server's configuration differs from the one recorded in the database by an earlier start")
 
 // keyDiffers is never accepted: every sealed secret opens only under the recorded key, so a
 // different one is the wrong file, not a rotation.
-const keyDiffers = "KYIDENTITY_ENCRYPTION_KEY differs from the key the other replicas use. Supply that key; accept-replica-config never changes it, because every sealed secret opens only under it"
+const keyDiffers = "KYIDENTITY_ENCRYPTION_KEY differs from the key recorded by an earlier start. Supply that key; accept-replica-config never changes it, because every sealed secret opens only under it"
+
+// acceptSteps is the order that works: a start with the new values refuses until the record
+// is rewritten.
+const acceptSteps = "Use the same values on every server. After a deliberate change: stop every server, run `kyidentity accept-replica-config` once with the new values, then start them"
 
 // replicaKeys reads the public halves of the signing and VAPID keys this process loaded.
 func replicaKeys(km *crypto.JWTKeyManager, vapid *mfa.UnifiedPushSender) (config.ReplicaKeys, error) {
@@ -49,37 +55,42 @@ func checkReplicaConfig(cfg *config.Config, s *store.Store, keys config.ReplicaK
 	if err != nil {
 		return err
 	}
-	stored, err := s.RecordSetting(config.ReplicaConfigSetting, string(raw))
-	if err != nil {
-		return fmt.Errorf("reading the recorded replica configuration: %w", err)
-	}
-	var recorded map[string]string
-	if err := json.Unmarshal([]byte(stored), &recorded); err != nil {
-		return fmt.Errorf("%w: the record is unreadable; after checking every replica, run accept-replica-config", errReplicaConfig)
-	}
-	switch diff := config.DiffFingerprint(recorded, current); {
-	case slices.Equal(diff, []string{config.EncryptionKeyField}):
-		return fmt.Errorf("%w: %s", errReplicaConfig, keyDiffers)
-	case len(diff) > 0:
-		return fmt.Errorf("%w: %s. Use the same values on every replica; after a deliberate change, stop every replica, start them with the new values and run accept-replica-config once", errReplicaConfig, strings.Join(diff, ", "))
-	}
-	// A field this release added is recorded by the first start that knows it. A lost swap is
-	// another replica recording the same thing.
-	added := false
-	for name, v := range current {
-		if _, ok := recorded[name]; !ok {
-			recorded[name], added = v, true
+	// A field this release added is recorded by the first start that knows it, by
+	// compare-and-swap. A lost swap means another start changed the record first, perhaps
+	// recording a different value for that field, so read and compare again.
+	for range 5 {
+		stored, err := s.RecordSetting(config.ReplicaConfigSetting, string(raw))
+		if err != nil {
+			return fmt.Errorf("reading the recorded replica configuration: %w", err)
+		}
+		var recorded map[string]string
+		if err := json.Unmarshal([]byte(stored), &recorded); err != nil {
+			return fmt.Errorf("%w: the record is unreadable; after checking every server's configuration, run accept-replica-config", errReplicaConfig)
+		}
+		switch diff := config.DiffFingerprint(recorded, current); {
+		case slices.Equal(diff, []string{config.EncryptionKeyField}):
+			return fmt.Errorf("%w: %s", errReplicaConfig, keyDiffers)
+		case len(diff) > 0:
+			return fmt.Errorf("%w: %s. %s", errReplicaConfig, strings.Join(diff, ", "), acceptSteps)
+		}
+		added := false
+		for name, v := range current {
+			if _, ok := recorded[name]; !ok {
+				recorded[name], added = v, true
+			}
+		}
+		if !added {
+			return nil
+		}
+		merged, err := json.Marshal(recorded)
+		if err != nil {
+			return err
+		}
+		if swapped, err := s.SwapSetting(config.ReplicaConfigSetting, stored, string(merged)); err != nil || swapped {
+			return err
 		}
 	}
-	if !added {
-		return nil
-	}
-	merged, err := json.Marshal(recorded)
-	if err != nil {
-		return err
-	}
-	_, err = s.SwapSetting(config.ReplicaConfigSetting, stored, string(merged))
-	return err
+	return errors.New("the recorded replica configuration kept changing while this server started; start it again")
 }
 
 // acceptReplicaConfig rewrites the record from this process's configuration after a
@@ -100,13 +111,15 @@ func acceptReplicaConfig(cfg *config.Config, s *store.Store, keys config.Replica
 		TargetID: config.ReplicaConfigSetting, TargetType: "system_setting", IPAddress: "container-local", UserAgent: "kyidentity-cli",
 		Outcome: "success", CreatedAt: time.Now().UTC()}
 	var changed []string
+	first := false // no earlier record, or one that cannot be read
 	err = s.EditSettings(event, func(st store.Settings) error {
-		changed = slices.Sorted(maps.Keys(current))
+		changed, first = slices.Sorted(maps.Keys(current)), true
 		stored, err := st.GetSetting(config.ReplicaConfigSetting)
 		switch {
 		case err == nil:
 			var recorded map[string]string
 			if json.Unmarshal([]byte(stored), &recorded) == nil {
+				first = false
 				if changed = config.DiffFingerprint(recorded, current); slices.Equal(changed, []string{config.EncryptionKeyField}) {
 					return errors.New("refusing: " + keyDiffers)
 				}
@@ -124,16 +137,39 @@ func acceptReplicaConfig(cfg *config.Config, s *store.Store, keys config.Replica
 	if err != nil {
 		return err
 	}
-	if len(changed) == 0 {
+	switch {
+	case first:
+		fmt.Fprintln(out, "Replica configuration recorded (there was no readable earlier record).")
+	case len(changed) == 0:
 		fmt.Fprintln(out, "Replica configuration unchanged; record rewritten.")
-	} else {
+	default:
 		fmt.Fprintf(out, "Replica configuration accepted. Changed: %s\n", strings.Join(changed, ", "))
 	}
 	return nil
 }
 
+const acceptUsage = "Usage: kyidentity accept-replica-config\n\n" +
+	"Records this process's configuration as the one every PostgreSQL server must share, after a\n" +
+	"deliberate change: stop every server, change the setting everywhere, run this once with the\n" +
+	"servers' full environment (keys, Secrets and variables), then start them. It writes an\n" +
+	"admin.replica_config_accepted audit row naming the changed settings, prints no values, and\n" +
+	"never accepts a different KYIDENTITY_ENCRYPTION_KEY. It takes no arguments.\n"
+
 // runAcceptReplicaConfig loads the keys as a server start would and accepts its configuration.
-func runAcceptReplicaConfig(out io.Writer) error {
+// Its arguments are parsed before anything is loaded, so -h or a stray argument changes nothing.
+func runAcceptReplicaConfig(args []string, out, errOut io.Writer) error {
+	fs := flag.NewFlagSet("accept-replica-config", flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	fs.Usage = func() { fmt.Fprint(errOut, acceptUsage) }
+	if err := fs.Parse(args); errors.Is(err, flag.ErrHelp) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return fmt.Errorf("accept-replica-config takes no arguments, got %q", fs.Args())
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)

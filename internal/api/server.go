@@ -119,8 +119,7 @@ func (s *Server) routes() *http.ServeMux {
 	scimH := NewSCIMHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
 	sessH := NewSessionHandler(s.store, s.audit, s.middleware)
 	oauthH := NewOAuthHandler(s.store, s.oauthEngine, s.audit, s.middleware)
-	backupH := NewBackupHandler(s.cfg, s.store, s.audit, s.middleware)
-	backupH.work = s.work
+	backupH := newBackupHandler(s.cfg, s.store, s.audit, s.middleware, s.work)
 	webauthnH := NewWebAuthnHandler(s.store, s.audit, s.mfaEngine, s.middleware, s.cfg.RPID, s.cfg.Origin)
 
 	// The public suite health check is cached by its handler for five seconds.
