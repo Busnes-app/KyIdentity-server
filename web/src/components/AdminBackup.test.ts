@@ -21,7 +21,8 @@ describe('backup schedule fact', () => {
   });
   it('says manual only with no schedule', () => {
     expect(scheduleFact({ ...ready, intervalSec: 0 })).toEqual({ badge: 'warning', text: 'Manual only' });
-    expect(scheduleFact(null).text).toBe('Manual only');
+    // No status read is unknown, not manual: see AdminBackupStatus.test.tsx.
+    expect(scheduleFact(null)).toEqual({ badge: 'warning', text: 'Unknown' });
   });
 });
 

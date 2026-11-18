@@ -635,3 +635,55 @@ func TestOneLoginPushPerUser(t *testing.T) {
 		t.Fatalf("housekeeping dropped unanswered pushes inside the hour: %d", n)
 	}
 }
+
+// slowPushSender takes as long as a relay key renewal can.
+type slowPushSender struct{ release, done chan struct{} }
+
+func (s *slowPushSender) SendPush(store.NativeDevice, MFAChallengePush) error {
+	<-s.release
+	close(s.done)
+	return nil
+}
+
+// A push that cannot be handed to the relay in time does not hold the sign-in: the challenge
+// is created and returned once the dispatch budget is spent, and the send finishes after.
+func TestASlowPushSendDoesNotHoldTheSignIn(t *testing.T) {
+	e, db, _, cleanup := setupTestMFAEngine(t)
+	defer cleanup()
+	u := mfaUser(t, db)
+	_, pub := signingKey(t)
+	token, _, _, err := e.GenerateDevicePairingToken(u.ID, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.RegisterNativeDevice(&NativeDeviceRegisterRequest{
+		PairingToken: token, DeviceName: "phone", DeviceIdentifier: "dev-slow", Platform: "android",
+		PublicKey: pub, PushToken: "fcm-token",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	prev := pushDispatchWait
+	pushDispatchWait = 200 * time.Millisecond
+	defer func() { pushDispatchWait = prev }()
+	sender := &slowPushSender{release: make(chan struct{}), done: make(chan struct{})}
+	e.SetPushSender(sender)
+	begun := time.Now()
+	ch, err := e.CreatePushChallenge(u.ID, "login")
+	if err != nil || ch == nil {
+		t.Fatal(ch, err)
+	}
+	if took := time.Since(begun); took < pushDispatchWait || took > pushDispatchWait+time.Second {
+		t.Fatalf("the sign-in waited %v for a stuck send, budget %v", took, pushDispatchWait)
+	}
+	select {
+	case <-sender.done:
+		t.Fatal("the send finished before it was let go")
+	default:
+	}
+	close(sender.release)
+	select {
+	case <-sender.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the send was abandoned instead of finishing after the answer")
+	}
+}

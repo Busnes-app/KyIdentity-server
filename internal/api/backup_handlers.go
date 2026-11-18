@@ -40,6 +40,7 @@ type BackupHandler struct {
 	audit      *audit.Logger
 	middleware *MiddlewareManager
 	recovery   recoveryClient
+	work       *backupWork
 }
 
 // newRecoveryClient builds the KyRecovery client; tests swap in a fake, since the real one
@@ -48,15 +49,52 @@ var newRecoveryClient = func(cfg *config.Config) recoveryClient {
 	return backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery)
 }
 
+// NewBackupHandler builds the handler with its own run tracking; Server shares its own instead.
 func NewBackupHandler(cfg *config.Config, s *store.Store, audit *audit.Logger, mm *MiddlewareManager) *BackupHandler {
+	return newBackupHandler(cfg, s, audit, mm, newBackupWork())
+}
+
+func newBackupHandler(cfg *config.Config, s *store.Store, audit *audit.Logger, mm *MiddlewareManager, work *backupWork) *BackupHandler {
 	return &BackupHandler{
 		cfg:        cfg,
 		store:      s,
 		audit:      audit,
 		middleware: mm,
 		recovery:   newRecoveryClient(cfg),
+		work:       work,
 	}
 }
+
+// runRestoreDrill is the drill; tests stand in one that blocks.
+var runRestoreDrill = backup.RunRestoreDrill
+
+// errDraining refuses a deposit or drill on a server that is stopping.
+var errDraining = errors.New("this server is shutting down")
+
+// startRun registers a deposit or drill and holds lease for it. The returned context ends on
+// the shutdown's cancel phase or when the lease is lost; done gives the lease back. A lease
+// someone else holds is busy.
+func (h *BackupHandler) startRun(parent context.Context, lease string, busy error) (ctx context.Context, done func(), err error) {
+	ctx, finish, ok := h.work.start(parent)
+	if !ok {
+		return nil, nil, errDraining
+	}
+	ctx, release, ok, err := h.store.HoldLease(ctx, lease, backup.LeaseTTL)
+	if err == nil && !ok {
+		err = busy
+	}
+	if err != nil {
+		finish()
+		return nil, nil, err
+	}
+	return ctx, func() { release(); finish() }, nil
+}
+
+func writeDraining(w http.ResponseWriter) {
+	writeError(w, http.StatusServiceUnavailable, "This server is shutting down; retry on another server")
+}
+
+var errDrillRunning = errors.New("a restore drill is already running")
 
 func (h *BackupHandler) actor(r *http.Request) (string, string) {
 	if admin := GetUserFromContext(r.Context()); admin != nil {
@@ -132,21 +170,24 @@ func writeInputError(w http.ResponseWriter, code string, err error) {
 // directory in the clear under the data directory, and two at once is twice the exposure
 // for no more assurance.
 func (h *BackupHandler) RunDrill(w http.ResponseWriter, r *http.Request) {
-	release, ok, err := h.store.AcquireLease(backup.DrillLease, backup.LeaseTTL)
-	if err != nil {
-		log.Printf("[BACKUP] drill: lease: %v", err)
-		writeError(w, http.StatusInternalServerError, "Failed to execute restore drill")
-		return
-	}
-	if !ok {
-		writeError(w, http.StatusConflict, "A restore drill is already running")
-		return
-	}
-	defer release()
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
+	ctx, done, err := h.startRun(r.Context(), backup.DrillLease, errDrillRunning)
+	switch {
+	case errors.Is(err, errDraining):
+		writeDraining(w)
+		return
+	case errors.Is(err, errDrillRunning):
+		writeError(w, http.StatusConflict, "A restore drill is already running")
+		return
+	case err != nil:
+		log.Printf("[BACKUP] drill: lease: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to execute restore drill")
+		return
+	}
+	defer done()
 	// A large database takes longer to snapshot, seal and drill than the server's 30 s.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	adminID, adminUsername := h.actor(r)
@@ -164,7 +205,7 @@ func (h *BackupHandler) RunDrill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to collect backup payload")
 		return
 	}
-	result, err := backup.RunRestoreDrill(r.Context(), h.cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
+	result, err := runRestoreDrill(ctx, h.cfg.DataDir, payload.ServiceName, payload.AppVersion, payload.Files, payload.Dependencies, payload.VerificationRecipe, pinned)
 	if err != nil {
 		log.Printf("[BACKUP] drill failed: %s", backup.AuditSafe(err.Error()))
 		h.observe(r, "admin.backup_drill_run", adminID, adminUsername, "", "failure", map[string]any{"error": backup.AuditSafe(err.Error())})
@@ -188,7 +229,7 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 	adminID, adminUsername := h.actor(r)
 	key, err := backup.LoadRecoveryKey(h.cfg, h.store)
 	if errors.Is(err, backup.ErrNotPaired) {
-		writeError(w, http.StatusPreconditionFailed, h.noKey("Not paired with KyRecovery; no recovery key to seal to"))
+		h.noKey(w, "Not paired with KyRecovery; no recovery key to seal to")
 		return
 	}
 	if errors.Is(err, backup.ErrRecoveryKeyMismatch) {
@@ -234,13 +275,35 @@ func (h *BackupHandler) ExportCapsule(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
-// noKey is what to say when no key loads: unpaired, unless a key is pinned and only this
-// server lacks it, as a replica whose configuration does not name the key does.
-func (h *BackupHandler) noKey(unpaired string) string {
-	if backup.KeyPinned(h.store) {
-		return keyFileMissing
+// noKey answers when no key loads: unpaired, unless a key is pinned and only this server
+// lacks it, as a replica whose configuration does not name the key does. A pin that cannot
+// be read is never reported as unpaired.
+func (h *BackupHandler) noKey(w http.ResponseWriter, unpaired string) {
+	switch pinned, err := backup.KeyPinned(h.store); {
+	case err != nil:
+		log.Printf("[BACKUP] key pin unreadable: %v", err)
+		writeError(w, http.StatusServiceUnavailable, settingsUnreadable)
+	case pinned:
+		writeError(w, http.StatusPreconditionFailed, keyFileMissing)
+	default:
+		writeError(w, http.StatusPreconditionFailed, unpaired)
 	}
-	return unpaired
+}
+
+const settingsUnreadable = "The backup settings could not be read; check database health and retry"
+
+// pairingCodeSpent follows a refused pairing: KyRecovery has already redeemed the code and
+// issued a token this server did not store.
+const pairingCodeSpent = "The pairing code is now spent: ask the KyRecovery administrator to revoke the token it issued for this claim."
+
+// topologyRefusal names the pinned split and the way out. The pin is never rewritten here: a
+// wrong split is corrected only by clearing the pin by hand (docs/RUNNING.md, Keys).
+func topologyRefusal(err error) string {
+	var te *backup.TopologyError
+	if errors.As(err, &te) {
+		return fmt.Sprintf("This recovery key is pinned as %d of %d custodian cards. Verify the split against the ceremony record; if the pinned split is wrong, clear the pin by hand as docs/RUNNING.md (Keys) describes, then pin or pair again.", te.Threshold, te.TotalShares)
+	}
+	return "This recovery key is already pinned with a different custodian topology; if the pinned split is wrong, clear the pin by hand as docs/RUNNING.md (Keys) describes, then pin or pair again."
 }
 
 type RemotePairRequest struct {
@@ -301,8 +364,11 @@ func (h *BackupHandler) PairRemote(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case err == nil:
+	case errors.Is(err, backup.ErrTopologyChanged):
+		fail(http.StatusConflict, topologyRefusal(err)+" "+pairingCodeSpent)
+		return
 	case errors.Is(err, fs.ErrExist):
-		fail(http.StatusConflict, "Already paired to a different recovery key")
+		fail(http.StatusConflict, "Already paired to a different recovery key. "+pairingCodeSpent)
 		return
 	case errors.Is(err, backup.ErrKeyRefused):
 		fail(http.StatusConflict, backup.AuditSafe(err.Error()))
@@ -337,15 +403,16 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	adminID, adminUsername := h.actor(r)
-	ctx := context.WithoutCancel(r.Context())
-	// One backup at a time across replicas, the scheduler's included.
-	var res backup.Result
-	release, ok, err := h.store.AcquireLease(backup.Lease, backup.LeaseTTL)
-	if err == nil && !ok {
-		err = backup.ErrDepositInProgress
+	// One backup at a time across replicas, the scheduler's included. A closed tab does not
+	// end the run; the shutdown's cancel phase and a lost lease do.
+	ctx, done, err := h.startRun(context.WithoutCancel(r.Context()), backup.Lease, backup.ErrDepositInProgress)
+	if errors.Is(err, errDraining) {
+		writeDraining(w)
+		return
 	}
+	var res backup.Result
 	if err == nil {
-		defer release()
+		defer done()
 		res, err = backup.RunBackup(ctx, h.cfg, h.store, h.store, h.recovery, appversion.String())
 	}
 	action, outcome, details := backup.Outcome(res, err)
@@ -360,7 +427,7 @@ func (h *BackupHandler) Deposit(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, backup.ErrKeyPinMissing):
 			writeError(w, http.StatusPreconditionFailed, "Paired with KyRecovery but the recovery public key is missing or does not match the pin; restore recovery.pub or re-pair")
 		case errors.Is(err, backup.ErrNotPaired):
-			writeError(w, http.StatusPreconditionFailed, h.noKey("No recovery key: pair with KyRecovery or pin the suite recovery key first"))
+			h.noKey(w, "No recovery key: pair with KyRecovery or pin the suite recovery key first")
 		case errors.Is(err, backup.ErrNoDestination):
 			writeError(w, http.StatusPreconditionFailed, "Nowhere to put a capsule: pair with KyRecovery or set KYIDENTITY_BACKUP_DIR")
 		case errors.Is(err, backup.ErrRecoveryKeyMismatch):
@@ -456,6 +523,8 @@ func (h *BackupHandler) PinKey(w http.ResponseWriter, r *http.Request) {
 	})
 	if err := h.store.EditSettings(pinned.Row, func(st store.Settings) error { return backup.StoreRecoveryKey(h.cfg, st, key) }); err != nil {
 		switch {
+		case errors.Is(err, backup.ErrTopologyChanged):
+			fail(http.StatusConflict, topologyRefusal(err))
 		case errors.Is(err, fs.ErrExist):
 			fail(http.StatusConflict, "Already pinned to a different recovery key")
 		case errors.Is(err, backup.ErrKeyRefused):
@@ -517,6 +586,8 @@ func (h *BackupHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 // Status reports pairing and the last receipt. It never decrypts or echoes the credential.
+// The pairing rows are read in one statement; if that read fails the answer is 503, never a
+// body that says unpaired.
 func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"paired":      false,
@@ -524,12 +595,23 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		"app_name":    h.cfg.AppName,
 		"app_version": appversion.String(),
 	}
-	if u, err := h.store.GetSetting("kyrecovery_url"); err == nil {
+	rows := backup.Coherent(h.store)
+	paired, err := backup.HasPairing(rows)
+	var pinned bool
+	if err == nil {
+		pinned, err = backup.KeyPinned(rows)
+	}
+	if err != nil {
+		log.Printf("[BACKUP] status: settings unreadable: %v", err)
+		writeError(w, http.StatusServiceUnavailable, settingsUnreadable)
+		return
+	}
+	if u, err := rows.GetSetting("kyrecovery_url"); err == nil {
 		out["recovery_url"] = u
 	}
-	if key, err := backup.LoadRecoveryKey(h.cfg, h.store); err == nil {
+	if key, err := backup.LoadRecoveryKey(h.cfg, rows); err == nil {
 		out["key_pinned"] = true
-		out["paired"] = backup.HasPairing(h.store)
+		out["paired"] = paired
 		out["recovery_key_id"] = key.Public.ID()
 		out["threshold"] = key.Threshold
 		out["total_shares"] = key.TotalShares
@@ -537,9 +619,9 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		out["recovery_key_error"] = backup.AuditSafe(err.Error())
 	} else if errors.Is(err, backup.ErrRecoveryKeyMismatch) {
 		out["recovery_key_error"] = "recovery.pub does not match the pinned key ID"
-	} else if backup.HasPairing(h.store) {
+	} else if paired {
 		out["recovery_key_error"] = "paired, but recovery.pub is missing; restore it or re-pair"
-	} else if backup.KeyPinned(h.store) {
+	} else if pinned {
 		out["recovery_key_error"] = keyFileMissing
 	}
 	out["members"] = backup.Members(h.cfg)

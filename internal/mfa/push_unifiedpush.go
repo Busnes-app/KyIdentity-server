@@ -138,3 +138,6 @@ func createVAPIDKey(path string) error {
 	}
 	return err
 }
+
+// VAPIDPublicKey is the public half of the VAPID key, which every replica must share.
+func (s *UnifiedPushSender) VAPIDPublicKey() []byte { return []byte(s.vapidPublic) }

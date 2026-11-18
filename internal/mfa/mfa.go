@@ -545,11 +545,28 @@ func (e *Engine) dispatchPushChallenge(challenge *store.MFAChallenge, decoys []s
 			}
 		}(dev)
 	}
-	wg.Wait()
-	if dispatched.Load() == 0 {
-		log.Printf("mfa push: no pushes sent for challenge %s user %s across %d device(s)", challenge.ID, challenge.UserID, len(devices))
+	sent := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(sent)
+		if dispatched.Load() == 0 {
+			log.Printf("mfa push: no pushes sent for challenge %s user %s across %d device(s)", challenge.ID, challenge.UserID, len(devices))
+		}
+	}()
+	// The challenge stands either way; the sign-in page polls it. A relay key being replaced
+	// can take a send, a 15 s wait for another replica's key, a registration and a second
+	// send, longer than a request's 25 s deadline, so the request stops waiting here and the
+	// sends finish on their own.
+	select {
+	case <-sent:
+	case <-time.After(pushDispatchWait):
+		log.Printf("mfa push: challenge %s still sending after %s; answering without waiting", challenge.ID, pushDispatchWait)
 	}
 }
+
+// pushDispatchWait is how long a sign-in or step-up waits for its pushes to be handed to the
+// relays. A variable only so tests can shorten it.
+var pushDispatchWait = 10 * time.Second
 
 // ErrUnsignedDevice reports that no paired device is able to sign push responses, so no
 // response can be authenticated. The user must re-pair an authenticator.

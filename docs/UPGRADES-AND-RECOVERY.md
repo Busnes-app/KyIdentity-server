@@ -85,7 +85,10 @@ recorded at deposit, unpacks it (custodian shares on stdin, never argv) and mark
 the directory as restored. The next start reads that marker once and invalidates what
 the capsule carried: sessions, issued tokens, authorization codes and interactions,
 MFA and step-up challenges and grants, invitation and reset links, device pairing
-tokens and in-flight delivery fences. Back-channel logouts go the other way: a restore
+tokens and in-flight delivery fences. Spent device sign-on assertion IDs are kept until
+they expire, so an assertion used before the capsule was taken cannot be replayed into the
+restored server; they only ever refuse. The replica configuration record is removed, and
+the first start afterwards records the restored environment's. Back-channel logouts go the other way: a restore
 ends every login here, so before the sessions go it queues a logout for each one to the
 relying parties that saw it, and keeps the logouts it already owed rather than deleting
 them. Nothing else would re-derive that work, and a receiver told nothing keeps its own
@@ -123,6 +126,35 @@ Procedures are in [docs/RUNBOOKS.md](RUNBOOKS.md) and
 [docs/RESTORE.md](RESTORE.md); what has and has not been verified for a release is
 in [docs/RELEASE-EVIDENCE.md](RELEASE-EVIDENCE.md). Device attestation checks that need a
 physical phone are in [docs/attestation-verification-plan.md](attestation-verification-plan.md).
+
+## Replica drain, leases and configuration check
+
+This release changes what a stopping or misconfigured server does. Nothing needs migrating.
+
+- **Replicas** (`KYIDENTITY_REPLICATED=true`) take up to 20 s to stop: `/readyz` answers 503
+  for 5 s before the listener closes. Give them a 30 s grace period. A single server stops
+  within 8 s as before. See [RUNNING.md](RUNNING.md#stopping-a-replica).
+- **PostgreSQL** installs, a single server included, record a fingerprint of the shared
+  settings on first start and refuse a start that differs. Upgrade by stopping every server,
+  starting one, then the rest; change a shared setting later by stopping every server,
+  running `kyidentity accept-replica-config` once with their full environment, then starting
+  them. See [RUNNING.md](RUNNING.md#shared-configuration).
+- Every request has a 25 s deadline (`503 request_timeout`), apart from named long routes;
+  give a proxy at least a 30 s upstream timeout, and 16 minutes for the three backup routes.
+- The backup and drill leases are 2 minutes, renewed while the run lasts, and a crashed
+  holder no longer blocks backups for 2 hours. A renewal that does not answer (a replica
+  cut off from the database) ends the run before the lease can pass to another replica. A
+  backup cancelled by shutdown or a lost lease is recorded as a failed `admin.backup_run`.
+- A settings read that fails makes the backup page answer 503 and Back up now or export
+  answer a server error, instead of reporting the instance unpaired; the page then shows
+  the status as unknown. The pinned key's k-of-n is now written once: offering the same key
+  with another split is refused with 409 naming the pinned split. A wrong pinned split is
+  corrected by clearing the pin by hand ([RUNNING.md](RUNNING.md#keys)).
+- A session the database cannot look up is answered 503, not 401, and the web app offers
+  to retry instead of showing the sign-in page.
+- A sign-in or step-up waits at most 10 s for its push sends; the push still goes out.
+- `migrate-to-postgres` also refuses a source that fails SQLite's integrity or foreign key
+  check, or that changes while it is copied.
 
 ## RSA signing-key minimum
 

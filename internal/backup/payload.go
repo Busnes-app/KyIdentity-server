@@ -164,11 +164,11 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 	}
 	var files []recoveryclient.File
 
-	scratch, err := os.MkdirTemp(cfg.DataDir, "snapshot-*")
+	scratch, release, err := lockedScratch(cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create snapshot scratch directory: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(scratch) }()
+	defer release()
 	snapPath := filepath.Join(scratch, "kyidentity.db")
 	if err := snap.SnapshotTo(snapPath); err != nil {
 		return nil, err

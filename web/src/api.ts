@@ -131,6 +131,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Whether a failed session check means this browser is signed out. Only a 401 does: a 503
+ * (the server could not look the session up) or a network failure says nothing about the
+ * cookie, and a sign-in screen over a live session hands the account to the next person.
+ */
+export function isSignedOut(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
+}
+
 /** True when the server is asking for a fresh re-authentication before this change. */
 export function isStepUpRequired(err: unknown): boolean {
   return err instanceof ApiError && err.code === 'step_up_required';

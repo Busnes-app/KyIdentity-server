@@ -203,7 +203,11 @@ Failures you may see, and what they mean:
 
 Restoring into Postgres (`KYIDENTITY_DATABASE_URL` or `_FILE` set): the same command loads
 the database into Postgres and applies the restored state there; add `-replace-database` to
-overwrite a database that holds rows. See [RUNNING.md](RUNNING.md#restoring-into-postgres).
+overwrite a database that holds rows. See [RUNNING.md](RUNNING.md#restoring-into-postgres). Stop every
+replica first. The restore removes the replica configuration record; start one replica, which
+records this environment's settings, and check that it serves before starting the rest. A
+replica configured differently then refuses to start and names the setting
+([RUNNING.md](RUNNING.md#shared-configuration)).
 Step 3's empty-volume rule then applies to the keys only.
 
 ## Step 2: check what came out

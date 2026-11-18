@@ -58,6 +58,17 @@ guidance, not by the software. See [Known limitations](../SECURITY.md#known-limi
    keys live in separate `0600` files.
 5. **Administrator → KyIdentity.** Permissions are recomputed per request; destructive actions
    need step-up re-authentication.
+6. **Replica ↔ shared PostgreSQL database.** Replicas trust the database credentials and the
+   keys they share. On first start one records a fingerprint of the shared settings
+   (`replica_config_fingerprint`), each an HMAC under a subkey of the encryption key, so a
+   database reader cannot test guesses for the issuer, networks or relay URLs, and key
+   files are compared by public-key digest or keyed HMAC, never raw. A start that differs
+   refuses and names fields only. A database writer can force that refusal, a denial of
+   service, but already controls everything else. `kyidentity accept-replica-config` is an
+   operator shell command, not a route: it rewrites the record with an
+   `admin.replica_config_accepted` audit row and never accepts a different encryption key.
+   The recovery key stays anchored to `KYIDENTITY_RECOVERY_KEY_ID`, which the database
+   cannot write, and its k-of-n is written once.
 
 ## Secure design principles applied
 
@@ -110,6 +121,11 @@ pairings, `appattest` not counting as MFA, process-local rate limits, no key rot
   `crypto`, `mfa`, `oauth`, `sync`); CONTRIBUTING requires attack-path tests for security changes.
   CI runs the whole suite under the race detector on every push and pull request.
 - **Static analysis:** CodeQL on every push and pull request, `go vet`, and `govulncheck`.
+- **Replicas:** real server processes on one PostgreSQL database are stopped with SIGTERM (drain
+  before close) and run against a database frozen behind an in-test relay
+  (`cmd/kyidentity/processes_drain_test.go`); `scripts/check-postgres-cutover.sh` runs the
+  SQLite-to-PostgreSQL cutover with the real image in the `docker` job. These prove
+  correctness, not capacity, PostgreSQL high availability or proxy behaviour.
 - **Dynamic analysis:** the race detector on the full suite, a Go native fuzz target for the App
   Attest parser (its seed corpus runs with every test run), and container smoke tests that prove
   a public HTTP issuer is refused.

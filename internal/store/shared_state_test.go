@@ -2,6 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -382,5 +386,285 @@ func TestRestoreDropsTheCapsulesLeases(t *testing.T) {
 	}
 	if ok, _ := s.AllowRate("reset:u", 1, 0, time.Now(), true); !ok {
 		t.Fatal("the restored server inherited the capsule's rate-limit buckets")
+	}
+}
+
+// Lease time is the database's: a row the database says is live is refused, and one it says
+// has expired is taken, whatever the asking replica's own clock reads.
+func TestLeaseUsesTheDatabaseClock(t *testing.T) {
+	stores := replicas(t, 2)
+	a, b := stores[0], stores[1]
+	var dbNow int64
+	if err := a.db.QueryRow(`SELECT ` + a.leaseNow()).Scan(&dbNow); err != nil {
+		t.Fatal(err)
+	}
+	if skew := time.Now().UnixMilli() - dbNow; skew > 5000 || skew < -5000 {
+		t.Fatalf("database clock read %d ms away from this process", skew)
+	}
+	// Live by database time though an hour stale by any replica clock an hour fast.
+	if _, err := a.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES('job','someone',` + a.leaseNow() + `+60000)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := b.AcquireLease("job", time.Minute); err != nil || ok {
+		t.Fatal("a lease the database holds live was taken:", ok, err)
+	}
+	if _, err := a.db.Exec(`UPDATE leases SET until_ms=` + a.leaseNow() + `-1 WHERE name='job'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := b.AcquireLease("job", time.Minute); err != nil || !ok {
+		t.Fatal("a lease the database holds expired was refused:", ok, err)
+	}
+}
+
+// A live holder keeps its lease through work far longer than the ttl.
+func TestHeldLeaseOutlivesItsTTL(t *testing.T) {
+	stores := replicas(t, 2)
+	ttl := 400 * time.Millisecond
+	ctx, release, ok, err := stores[0].HoldLease(context.Background(), "backup", ttl)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	deadline := time.Now().Add(4 * ttl)
+	for time.Now().Before(deadline) {
+		if _, ok, _ := stores[1].AcquireLease("backup", ttl); ok {
+			t.Fatal("another replica took a lease its holder was renewing")
+		}
+		if ctx.Err() != nil {
+			t.Fatal("the holder lost a lease nobody took:", context.Cause(ctx))
+		}
+		time.Sleep(ttl / 8)
+	}
+	release()
+	if ctx.Err() == nil {
+		t.Fatal("release left the hold's context running")
+	}
+	if _, ok, err := stores[1].AcquireLease("backup", ttl); err != nil || !ok {
+		t.Fatal("release did not give the lease back:", ok, err)
+	}
+}
+
+// Deleting or stealing the row ends the holder's context within one renewal interval, and
+// the holder's release then leaves the new holder alone.
+func TestALostLeaseEndsTheHold(t *testing.T) {
+	for _, how := range []string{"deleted", "stolen"} {
+		t.Run(how, func(t *testing.T) {
+			stores := replicas(t, 2)
+			ttl := 800 * time.Millisecond
+			ctx, release, ok, err := stores[0].HoldLease(context.Background(), "backup", ttl)
+			if err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			defer release()
+			q := `DELETE FROM leases WHERE name='backup'`
+			if how == "stolen" {
+				q = `UPDATE leases SET token='thief' WHERE name='backup'`
+			}
+			if _, err := stores[1].db.Exec(q); err != nil {
+				t.Fatal(err)
+			}
+			lost := time.Now()
+			select {
+			case <-ctx.Done():
+			case <-time.After(ttl/4 + time.Second):
+				t.Fatal("the holder kept working after its lease was gone")
+			}
+			if !errors.Is(context.Cause(ctx), ErrLeaseLost) {
+				t.Fatalf("cause %v", context.Cause(ctx))
+			}
+			t.Logf("lost after %v (interval %v)", time.Since(lost), ttl/4)
+			release()
+			if how == "stolen" {
+				var token string
+				if err := stores[1].db.QueryRow(`SELECT token FROM leases WHERE name='backup'`).Scan(&token); err != nil || token != "thief" {
+					t.Fatalf("the old holder's release freed the new holder's lease: %q %v", token, err)
+				}
+			}
+		})
+	}
+}
+
+// One failed renewal while plenty of the lease is left is retried, not treated as a loss;
+// failures that run the lease down below one interval end the hold.
+func TestRenewalErrorsEndTheHoldOnlyNearExpiry(t *testing.T) {
+	ttl := 400 * time.Millisecond
+	run := func(renew func() (bool, error)) error {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			keepLease(ctx, stop, cancel, ttl, time.Now().Add(ttl), func(context.Context) (bool, error) { return renew() })
+		}()
+		select {
+		case <-done:
+			return context.Cause(ctx)
+		case <-time.After(3 * ttl):
+			close(stop)
+			<-done
+			return nil
+		}
+	}
+	var calls atomic.Int32
+	if err := run(func() (bool, error) {
+		if calls.Add(1) == 1 {
+			return false, errors.New("lock timeout")
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatalf("one transient failure ended the hold: %v", err)
+	}
+	if calls.Load() < 3 {
+		t.Fatalf("renewal stopped after the failure: %d calls", calls.Load())
+	}
+	if err := run(func() (bool, error) { return false, errors.New("database unreachable") }); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("failures past the margin: %v", err)
+	}
+}
+
+// A renewal that never answers (a one-sided partition, a stalled proxy: the statement is sent
+// and nothing comes back) ends the hold before the lease expires on the database, so the
+// work stops before another replica can take it; and a release while the renewal is stuck
+// returns at once instead of waiting for the database.
+func TestABlockedRenewalEndsTheHoldBeforeExpiry(t *testing.T) {
+	ttl := 800 * time.Millisecond
+	every := ttl / 4
+	blocked := func(rctx context.Context) (bool, error) {
+		<-rctx.Done() // what a driver does with a statement the network swallowed
+		return false, rctx.Err()
+	}
+	t.Run("ends with ErrLeaseLost before the ttl", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		begun := time.Now()
+		done := make(chan struct{})
+		go func() { defer close(done); keepLease(ctx, make(chan struct{}), cancel, ttl, begun.Add(ttl), blocked) }()
+		select {
+		case <-done:
+		case <-time.After(2 * ttl):
+			t.Fatal("a renewal that never answered kept the hold past the lease's expiry")
+		}
+		took := time.Since(begun)
+		if !errors.Is(context.Cause(ctx), ErrLeaseLost) {
+			t.Fatalf("cause %v", context.Cause(ctx))
+		}
+		// The first renewal starts at one interval and may run until one interval before
+		// expiry: the hold ends there, a full interval before the lease could be taken.
+		if took < ttl-every-50*time.Millisecond || took >= ttl {
+			t.Fatalf("the hold ended after %v, want about %v and before %v", took, ttl-every, ttl)
+		}
+	})
+	t.Run("a slow take does not restart the expiry clock", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		// Half the lease elapsed before its successful take response arrived.
+		remaining := ttl / 2
+		expires := time.Now().Add(remaining)
+		done := make(chan struct{})
+		go func() { defer close(done); keepLease(ctx, make(chan struct{}), cancel, ttl, expires, blocked) }()
+		select {
+		case <-done:
+		case <-time.After(remaining):
+			t.Fatal("a delayed take response extended ownership past its original expiry")
+		}
+		if !errors.Is(context.Cause(ctx), ErrLeaseLost) {
+			t.Fatalf("cause %v", context.Cause(ctx))
+		}
+	})
+	t.Run("a release during the stuck renewal returns at once", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		stop, done := make(chan struct{}), make(chan struct{})
+		entered := make(chan struct{})
+		go func() {
+			defer close(done)
+			keepLease(ctx, stop, cancel, ttl, time.Now().Add(ttl), func(rctx context.Context) (bool, error) {
+				close(entered)
+				return blocked(rctx)
+			})
+		}()
+		<-entered
+		released := time.Now()
+		cancel(context.Canceled) // HoldLease's release: cancel, then stop and wait
+		close(stop)
+		select {
+		case <-done:
+		case <-time.After(every):
+			t.Fatal("release waited on a renewal stuck on the database")
+		}
+		if took := time.Since(released); took > 100*time.Millisecond {
+			t.Fatalf("release took %v", took)
+		}
+		if !errors.Is(context.Cause(ctx), context.Canceled) {
+			t.Fatalf("a release is not a lost lease: %v", context.Cause(ctx))
+		}
+	})
+}
+
+// shiftedClock opens a second handle on the store at path whose sessions see the database
+// clock moved by shift: a schema-local clock_timestamp() ahead of pg_catalog on the search
+// path. It stands in for a database whose clock differs from the caller's.
+func shiftedClock(t *testing.T, path string, shift string) *Store {
+	t.Helper()
+	schema, _, err := testSchema(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b [6]byte
+	_, _ = rand.Read(b[:])
+	clock := "kt_clock_" + hex.EncodeToString(b[:])
+	admin, err := sql.Open("kypg", testDatabaseURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(`DROP SCHEMA ` + clock + ` CASCADE`); _ = admin.Close() })
+	for _, q := range []string{`CREATE SCHEMA ` + clock,
+		`CREATE FUNCTION ` + clock + `.clock_timestamp() RETURNS timestamptz LANGUAGE sql AS $$ SELECT pg_catalog.clock_timestamp() + interval '` + shift + `' $$`} {
+		if _, err := admin.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := openPostgres(testDatabaseURL(), schema+","+clock+",pg_catalog,public", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+// The lease is decided by the database's clock, never the caller's: with the database an hour
+// ahead of every caller, a row expired by the database is taken although every caller's clock
+// says it is live; with it an hour behind, a row live by the database is refused although
+// every caller's clock says it has expired. A lease computed on the caller's clock fails both.
+func TestLeaseFollowsTheDatabaseClockNotTheCallers(t *testing.T) {
+	requirePostgres(t)
+	path := filepath.Join(t.TempDir(), "clock.db")
+	plain, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	set := func(untilFromNow time.Duration) {
+		t.Helper()
+		if _, err := plain.db.Exec(`DELETE FROM leases WHERE name='job'`); err != nil {
+			t.Fatal(err)
+		}
+		// The true time in ms, written as a literal so the shifted handles' clocks do not apply.
+		if _, err := plain.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES('job','someone',?)`, time.Now().Add(untilFromNow).UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ahead, behind := shiftedClock(t, path, "1 hour"), shiftedClock(t, path, "-1 hour")
+	var dbNow int64
+	if err := ahead.db.QueryRow(`SELECT ` + ahead.leaseNow()).Scan(&dbNow); err != nil || dbNow-time.Now().UnixMilli() < 50*60*1000 {
+		t.Fatalf("the shifted handle does not see a shifted database clock: %d %v", dbNow-time.Now().UnixMilli(), err)
+	}
+
+	set(30 * time.Minute) // live to every caller, expired to a database an hour ahead
+	if _, ok, err := ahead.AcquireLease("job", time.Minute); err != nil || !ok {
+		t.Fatal("a lease the database holds expired was refused by the caller's clock:", ok, err)
+	}
+	set(-30 * time.Minute) // expired to every caller, live to a database an hour behind
+	if _, ok, err := behind.AcquireLease("job", time.Minute); err != nil || ok {
+		t.Fatal("a lease the database holds live was taken by the caller's clock:", ok, err)
 	}
 }

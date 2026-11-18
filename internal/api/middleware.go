@@ -332,25 +332,33 @@ func (m *MiddlewareManager) allowLocal(key string, maxTokens, refillRate float64
 // authenticate resolves the session cookie to a live session and active user, or returns
 // nil. This is the single definition of "logged in"; RequireAuth and OptionalAuth both
 // use it so no endpoint can accidentally apply a weaker rule.
-func (m *MiddlewareManager) authenticate(r *http.Request) (*store.User, *store.Session) {
+// authenticate resolves the session cookie. err is a lookup that failed, which is not the
+// same as no session: the caller answers 503 rather than sending a signed-in user to sign in.
+func (m *MiddlewareManager) authenticate(r *http.Request) (*store.User, *store.Session, error) {
 	cookie, err := r.Cookie("kyidentity_session")
 	if err != nil || cookie.Value == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// GetSessionByTokenHash filters on expires_at, so an expired session is never returned.
 	sess, err := m.store.GetSessionByTokenHash(crypto.HashSHA256(cookie.Value), m.store.SessionLimits().IdleTTL())
 	if err != nil || sess == nil {
-		return nil, nil
+		return nil, nil, err
 	}
 
 	user, err := m.store.GetUserByID(sess.UserID)
 	if err != nil || user == nil || user.Status != "active" {
-		return nil, nil
+		return nil, nil, err
 	}
 
 	_ = m.store.TouchSession(sess.ID)
-	return user, sess
+	return user, sess, nil
+}
+
+func writeSessionUnavailable(w http.ResponseWriter, err error) {
+	log.Printf("session lookup failed: %v", err)
+	w.Header().Set("Cache-Control", "no-store")
+	writeAPIError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "The session could not be checked; try again shortly.")
 }
 
 func withIdentity(r *http.Request, user *store.User, sess *store.Session) *http.Request {
@@ -362,7 +370,11 @@ func withIdentity(r *http.Request, user *store.User, sess *store.Session) *http.
 // RequireAuth rejects the request unless it carries a live session.
 func (m *MiddlewareManager) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, sess := m.authenticate(r)
+		user, sess, err := m.authenticate(r)
+		if err != nil {
+			writeSessionUnavailable(w, err)
+			return
+		}
 		if user == nil {
 			http.Error(w, `{"error":"unauthorized","error_description":"Authentication required"}`, http.StatusUnauthorized)
 			return
@@ -388,7 +400,12 @@ func (m *MiddlewareManager) RequireAuth(next http.Handler) http.Handler {
 // /oauth/authorize, which redirects anonymous callers to the login UI.
 func (m *MiddlewareManager) OptionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if user, sess := m.authenticate(r); user != nil {
+		user, sess, err := m.authenticate(r)
+		if err != nil {
+			writeSessionUnavailable(w, err)
+			return
+		}
+		if user != nil {
 			r = withIdentity(r, user, sess)
 		}
 		next.ServeHTTP(w, r)

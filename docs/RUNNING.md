@@ -133,6 +133,169 @@ The files must be readable by the container's non-root user (`kyidentity`).
 Replicas share one Postgres database. An install on SQLite moves there with
 `migrate-to-postgres` (below); backup, the restore drill and `restore` work on both.
 
+Application replicas are not database high availability. PostgreSQL standby, failover and
+fencing are yours to run (below), and so is the load balancer in front. The replica tests
+prove correctness, not capacity: no user count or request rate is claimed.
+
+### Load balancer
+
+- **Health check.** Probe `/readyz` actively, every second. It answers 503 while this
+  replica cannot reach a writable database or is stopping. `/livez` only says the process
+  runs; use it for restarts, never for routing.
+- **Retries.** Retry a request on another replica only when it is idempotent (GET, HEAD)
+  and its connection failed before anything was sent. Never retry after a timeout: the
+  first replica may still be doing the work.
+- **Timeouts.** Give the upstream at least 30 s. An ordinary request is answered within
+  25 s (the request deadline, below). The few routes outside the deadline (mail sends, the
+  KyRecovery pairing claim, the audit export) put their own timeouts on their outbound
+  calls, but nothing bounds their database calls: on a frozen database they wait with it,
+  so the proxy's timeout is what ends them. The listener's 30 s write timeout stops the
+  answer being written, not the handler. Only the three backup routes need 16 minutes:
+  `POST /api/admin/backup/deposit`, `POST /api/admin/backup/drill` and
+  `GET /api/admin/backup/export-capsule`.
+- **nginx and Nginx Proxy Manager** (described from their documentation, not run here).
+  Open-source nginx, which Nginx Proxy Manager is built on, has passive checks only
+  (`max_fails`, `fail_timeout`): it notices a replica after requests to it fail, and never
+  reads `/readyz`, so a stopping replica stays in rotation until its listener closes.
+  Active `health_check` is an NGINX Plus feature. `proxy_next_upstream error;` retries on
+  another replica when the connection failed, but also when sending the request or
+  reading the response header failed, so an idempotent request that reached the first
+  replica may be sent again; nginx never resends POST, PATCH or LOCK unless
+  `non_idempotent` is set, so leave it off, and leave `timeout` out of the list. Nginx Proxy
+  Manager's proxy host forwards to one host: for several replicas, give it a host name
+  that resolves to every replica, or define an `upstream` in its custom configuration
+  (`/data/nginx/custom/http_top.conf`) and point the proxy host at it. A replica that
+  drains still serves for its five seconds, so passive checks lose nothing during a stop;
+  they do route new requests to a replica whose database is down until those requests
+  fail.
+
+### Stopping a replica
+
+On SIGTERM a replica (`KYIDENTITY_REPLICATED=true`):
+
+1. turns `/readyz` to 503 (`checks.server = "draining"`), stops starting scheduled
+   backups and other background work, and answers new Back up now and drill requests 503;
+2. keeps serving for 5 s, five one-second probes, so the load balancer takes it out;
+3. closes its listener and lets requests in flight finish, for up to 5 s;
+4. cancels any backup or drill still running;
+5. waits up to 10 s for those and the sync worker to record their outcome and give back
+   their leases.
+
+That is 20 s at most. **Give replicas a 30 s grace period** (Compose
+`stop_grace_period: 30s`; Kubernetes' default `terminationGracePeriodSeconds` is 30). A
+single server has no drain step: 5 s for requests, then 3 s for backup work, 8 s in all,
+inside Docker's default 10 s, so `docker-compose.yml` needs nothing. On a single server the
+listener closes at once, so a new Back up now or drill request gets no answer at all
+rather than the 503.
+
+A Kubernetes sketch, **not executed by CI**:
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 30
+  containers:
+    - name: kyidentity
+      readinessProbe:
+        httpGet: { path: /readyz, port: 5867 }
+        periodSeconds: 1
+        timeoutSeconds: 3      # /readyz allows its database read 2 s; the default is 1 s
+        failureThreshold: 2    # two failed probes still fit inside the 5 s drain
+      livenessProbe:
+        httpGet: { path: /livez, port: 5867 }
+        periodSeconds: 10
+        failureThreshold: 6
+```
+
+### Request deadline
+
+Store calls have no client-side deadline, so a database that freezes (a paused VM, a storage
+hang) would hold requests open. Every request therefore has 25 s; one that has not been
+answered by then gets `503 {"error":"request_timeout"}`. **A 503 after the deadline does not
+prove the request had no effect**: the work may finish once the database answers, so check
+before repeating a change. The routes that keep budgets of their own are the three backup
+routes above and those that wait on another server: `POST /api/admin/backup/pair-remote`,
+`GET /api/admin/audit-events/export`, `POST /api/admin/mail/test`,
+`POST /api/admin/users/{id}/activation-link` and `reset-link`, and
+`POST /api/admin/access-requests/{id}/approve` and `deny`. A sign-in or step-up that sends a
+push waits at most 10 s for the push relays, so a relay key being renewed cannot take it
+past the deadline. Sends continue in the background while the process remains running;
+retry or use another factor if the replica stops before delivery. A session the database cannot look up is
+answered `503 temporarily_unavailable`, never 401, and the web app then offers to retry
+rather than showing the sign-in page. Browser navigations to `/oauth/authorize`,
+`/oauth/logout` and `/forward/start` get that answer as JSON: without the database neither the
+client nor its redirect can be checked, so there is nowhere safe to send the browser.
+
+### Shared configuration
+
+On Postgres, the first server to start records a fingerprint of the settings every replica
+must share, in the database, and every later start compares its own. **This applies to a
+single server on Postgres too**: after changing one of these settings it refuses to start
+until the change is accepted. A server that differs refuses to start and names the
+settings, never their values:
+
+```
+Refusing to start: this server's configuration differs from the one recorded in the database by an earlier start: KYIDENTITY_ISSUER_URL. Use the same values on every server. After a deliberate change: stop every server, run `kyidentity accept-replica-config` once with the new values, then start them
+```
+
+Shared: `KYIDENTITY_ISSUER_URL`, the secret and encryption keys, the RSA signing and VAPID
+**public** keys (the paths may differ), `KYIDENTITY_REPLICATED`,
+`KYIDENTITY_SECURE_COOKIES`, `KYIDENTITY_SESSION_TTL`, `KYIDENTITY_SESSION_IDLE_TTL`,
+`RATE_LIMIT_EXEMPT_CIDRS`, `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS`, `PUSH_RELAY_URL`/`_KEY`,
+`APNS_RELAY_URL`/`_KEY`, `KYIDENTITY_UBUNTU_PUSH_URL`/`_APPID`, `KYIDENTITY_APP_NAME`,
+`KYIDENTITY_BACKUP_DEPOSIT_INTERVAL`, `KYIDENTITY_BACKUP_ALLOW_PRIVATE_RECOVERY`,
+`KYIDENTITY_ATTESTATION_STATUS_URL`, the content of `KYIDENTITY_ATTESTATION_EXTRA_ROOTS`,
+`KYIDENTITY_KYAUTH_CERT_SHA256`, `KYIDENTITY_APPATTEST_APP_IDS` and `_ALLOW_DEVELOPMENT`.
+
+Per host, free to differ: port and listen host, data directory and SQLite path, the
+database URL (host lists may differ), key file paths, `TRUSTED_PROXY_CIDRS`,
+`KYIDENTITY_FORWARDED_HEADER`, `KYIDENTITY_BACKUP_DIR`/`_KEEP`, `BOOTSTRAP_ADMIN_*` and
+`KYIDENTITY_RECOVERY_KEY_ID`, so the rolling recovery-key replacement under Keys still works.
+
+Each value is an HMAC under a subkey of the encryption key, so someone who can read the
+database cannot test guesses for an issuer, a network list or a relay URL. A different
+encryption key is reported alone, since every other value depends on it. SQLite records
+nothing, and no command other than the server start compares.
+
+To change a shared setting deliberately:
+
+1. Stop every server.
+2. Change the setting everywhere.
+3. Run `kyidentity accept-replica-config` once, with the new configuration. It rewrites
+   the record and writes an `admin.replica_config_accepted` audit row naming the changed
+   settings; it never prints a value. `-h` prints its usage and changes nothing; it takes
+   no other argument.
+4. Start the servers.
+
+Run it **with the servers' own, complete environment**: the same variables, key files and
+Secrets. It records what that process sees, so a bare shell or a container missing some of
+it records the defaults (an unset `PUSH_RELAY_URL` is the production relay, for one), and
+every server then refuses; run it again with the right environment. With Compose, the
+servers stopped, this runs the service's own configuration once without its ports
+(checked with throwaway containers on a Postgres override of `docker-compose.yml`):
+
+```bash
+docker compose run --rm --no-deps kyidentity-server accept-replica-config
+```
+
+On Kubernetes (not executed here), scale the Deployment to zero, then use a one-off **Job**
+with the Deployment's image, `env`, `envFrom`, volumes, Secret mounts and `securityContext`
+(including `fsGroup`). Set `args: ["accept-replica-config"]`, `restartPolicy: Never` in the
+pod spec and `backoffLimit: 0` in the Job spec; omit probes and use labels that match neither
+the Deployment's selector nor the Service's. Wait for successful completion, then scale
+the Deployment back up. Also allow the Job through any NetworkPolicy required to reach
+Postgres. Copying the whole Deployment template unchanged is not valid.
+
+**Never use it for the encryption key**: it refuses, because every sealed secret opens only
+under the key the servers already use.
+
+Upgrading a Postgres install to this release: stop every server, start one (it records the
+configuration), then start the rest. A restore removes the record, and the first start
+afterwards records the restored environment's. Turning on `KYIDENTITY_REPLICATED` on an
+install that already started on Postgres is a change to a shared setting: stop the server,
+run `accept-replica-config` with the replicas' environment, then start the replicas. When
+moving keys into a Secret, copy them unchanged; if a key differs, fix the copy rather than
+accepting the change. A different encryption key is always refused.
+
 ### The shared database
 
 Replicas cannot share a SQLite file, so `KYIDENTITY_REPLICATED=true` is refused at startup
@@ -193,8 +356,12 @@ capsule restores onto either backend.
 
 ### Moving an install from SQLite to Postgres
 
-1. Stop the server. The copy refuses a file with a `-wal` beside it, which a server that
-   is still running (or did not stop cleanly) leaves; start and stop it once if so.
+1. Stop the server (`docker stop` at its default timeout is enough), and any commands such
+   as `deposit` that share the live file. The copy refuses a file with a `-wal` beside it,
+   which a running server (or one that stopped uncleanly) leaves; start and stop it once
+   if so. For replicas, set `KYIDENTITY_REPLICATED=true` before the first Postgres start
+   (copy the keys unchanged, as under Keys), or accept that flag change later as under
+   Shared configuration.
 2. Create the database as above. Nothing else may have written to it.
 3. Copy the data:
 
@@ -205,10 +372,16 @@ capsule restores onto either backend.
    It copies every table in one transaction and prints each table's row count, then
    counts again after the commit and fails if any table differs. It refuses a database
    that holds any row, and a file from a newer release than this one (a file from an older
-   release is brought up to date on a private copy first). The file
-   is never modified. If the copy fails, the database is left as it was.
+   release is brought up to date on a private copy first). It also refuses a file that
+   fails SQLite's `integrity_check` or `foreign_key_check`, and one that changes while it is
+   copied (a different size, time or SHA-256, or a `-wal` that appears): it rolls back and
+   leaves the database empty. The file is never modified, so it can be mounted read-only.
+   `-from` may be relative. If the copy fails, the database is left as it was.
 4. Set the variable on the server and start it. The keys stay where they are; for
    replicas, move them into a Secret as described under Keys.
+
+`scripts/check-postgres-cutover.sh` runs these steps with the real image, offline, and CI
+runs it on every change.
 
 There is no command back. To return to SQLite, take a capsule on Postgres (Back up now or
 `export-capsule`) and restore it with the variable unset ([RESTORE.md](RESTORE.md)).
@@ -264,7 +437,14 @@ These hold with or without the flag, because they cost a single instance nothing
 
 - Work that must happen once takes a lease in the database first: the scheduled backup,
   Back up now, the restore drill, the daily device-attestation sweep and push relay
-  registration. Alert mail is claimed row by row before it is sent.
+  registration. Alert mail is claimed row by row before it is sent. Lease time is the
+  database's clock, so a replica whose clock is off neither takes a live lease nor keeps a
+  dead one. The backup and drill leases last 2 minutes and are renewed every 30 s while the
+  work runs, so a replica that crashes mid-backup delays the next one by at most 2 minutes
+  and a tick. A run that loses its lease (renewal finds another holder, or keeps failing
+  until the lease is nearly out) stops its upload and records a failure. A lease is single
+  ownership of scheduling, not exactly-once: a deposit is idempotent per capsule, and sync,
+  logout, HR and reconciliation keep their own fences.
 - The push relay keys live in the database, sealed under the encryption key, so every
   replica presents the same key and one of them renews it.
 - Session limits changed on one replica reach the others within five seconds.
@@ -298,11 +478,69 @@ These hold with or without the flag, because they cost a single instance nothing
   3. Remove `recovery.pub` from every replica's data directory that has one, then pin the
      new key. A replica still holding the old `recovery.pub` refuses to pin and to back up
      until that file is removed; it never seals to the old key.
+- A pinned key's custodian split (k of n) is written once: pinning or pairing the same key
+  with another split is refused with 409, naming the split it is pinned with. If that
+  pinned split is wrong (a typo when pinning by hand), correct it the way a key is replaced:
+  clear the pin with the `DELETE` above, remove `recovery.pub` from every data directory
+  that has one, and pin it again with the right split. A refused pairing has already spent
+  its pairing code: ask the KyRecovery administrator to revoke the token KyRecovery issued
+  for it.
+  For a **single-server SQLite install**, keep the same suite public key and
+  `KYIDENTITY_RECOVERY_KEY_ID` if set, and confirm the correct split against the ceremony
+  record. From the install's Compose directory, stop the server and repair its
+  `kysignon_data` volume with this disposable helper (the server image has no SQLite shell;
+  `apk` installs it only in the helper, which needs access to the Alpine package mirror):
+
+  ```bash
+  docker compose stop kyidentity-server
+  docker compose run --rm --no-deps -T --user 0 --entrypoint /bin/sh kyidentity-server -es <<'REPAIR'
+  apk add --no-cache sqlite
+  db=${KYIDENTITY_DB_PATH:-/data/kyidentity.db}
+  if [ -z "${KYIDENTITY_DB_PATH:-}" ] && [ ! -f "$db" ]; then db=/data/kysignon.db; fi
+  test -f "$db" || { echo "No SQLite database at $db; check the data volume and KYIDENTITY_DB_PATH" >&2; exit 1; }
+  echo "Clearing the recovery-key pin in $db"
+  sqlite3 -bail "$db" <<'SQL'
+  BEGIN IMMEDIATE;
+  DELETE FROM system_settings WHERE key IN
+    ('kyrecovery_key_id', 'kyrecovery_threshold', 'kyrecovery_total_shares', 'kyrecovery_public_key');
+  COMMIT;
+  SQL
+  rm -f /data/recovery.pub
+  REPAIR
+  docker compose up -d --wait kyidentity-server
+  ```
+
+  This preserves pairing credentials, receipts and existing capsules. Pin the same key
+  again with the correct split, or pair again with a fresh code. Never delete the database
+  or its encryption/signing keys to repair a split. For a host install, stop it and run the
+  same SQL with the host's `sqlite3` on its data file, then remove only `recovery.pub`.
 - A scheduled backup that finds a pinned key it cannot load is recorded as a failed
   `admin.backup_run`; it is never skipped quietly.
 
-Still one per replica, and not shared: local backup copies in `KYIDENTITY_BACKUP_DIR` and
-the files `apply-setup` writes under `<data>/installer/`.
+`KYIDENTITY_BACKUP_DIR` takes either layout:
+
+- **One per replica** (the default): each replica keeps the copies it made in its own
+  directory, under the same names as on a single server, and lists only those. The backup
+  page shows the directory of whichever replica answered it, so behind a load balancer its
+  count and newest copy can change from one refresh to the next.
+- **One directory shared by every replica**, on a filesystem you provide (NFS, a shared
+  volume): KyIdentity implements no shared storage. Copies are written (to a temporary
+  file, then renamed) and pruned to `KYIDENTITY_BACKUP_KEEP` only inside a backup run,
+  which holds the backup lease, so one replica writes at a time; the backup page only reads
+  the directory, so every replica lists the same copies. Set the same
+  `KYIDENTITY_BACKUP_KEEP` on every replica that shares a directory: it is per host, so
+  otherwise how many copies stay depends on which replica ran last. One limit remains: a
+  run whose lease is lost while it is sealing a large capsule (after its snapshot) still
+  writes and prunes its copy before it notices, because the sealing step belongs to the
+  backup library and does not yet check for that; the copies stay complete files (written
+  to a temporary name, then renamed), but for that moment two replicas may write at once.
+
+The plaintext database snapshot a backup seals is written to a private, locked
+`snapshot-*` directory under the data directory and removed as soon as the capsule is
+sealed. One left by a killed process is removed when the server next starts; one in use by
+a running command is left alone.
+
+The files `apply-setup` writes under `<data>/installer/` stay per replica.
 
 ## Health & Status Verification
 
@@ -324,11 +562,12 @@ You can verify the status of the server at any time:
   ```
 * **Readiness** (can this instance actually authenticate someone). Point your load balancer
   at this one. It runs a bounded database read and confirms the signing and encryption keys
-  are loaded, and returns `503` when they are not. Unlike `/healthz`, it evaluates each
-  request immediately and keeps its existing response shape.
+  are loaded, and returns `503` when they are not, or while the server is stopping
+  (`"server":"draining"`). Unlike `/healthz`, it evaluates each request immediately. Both
+  `/readyz` and `/livez` are sent with `Cache-Control: no-store`.
   ```bash
   curl http://localhost:5867/readyz
-  # Response: {"status":"ready","checks":{"audit":"ok","database":"ok",...}}
+  # Response: {"status":"ready","checks":{"audit":"ok","database":"ok",...,"server":"ok"}}
   ```
 * **Proxy and scheme check** (public, the suite installer status endpoint that
   `kyquickstart verify-edge` reads): reports the client address and scheme as KyIdentity
@@ -372,5 +611,9 @@ action is audited. To retire a bootstrap administrator once another exists, use
 Restoring from a `.kycap` backup is `kyidentity restore`, with the capsule's digest from
 KyRecovery's deposit record as `-expect-digest` and k custodian shares typed on stdin. The full procedure, including putting the result back into service and proving it,
 is [docs/RESTORE.md](RESTORE.md).
+
+On PostgreSQL replicas, `kyidentity accept-replica-config` records a deliberate change to a
+shared setting once every replica has it; see
+[Shared configuration](#shared-configuration).
 
 ---

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BackupDrillResult, BackupStatus } from '../types';
-import { apiJson, apiRequest, errorMessage } from '../api';
+import { ApiError, apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { parseBackupStatus, parseDrillResult, parseBackupRun } from '../parsers';
 import {
@@ -50,8 +50,10 @@ function bytes(n: number): string {
 }
 
 // A schedule only runs with a pinned key and a destination; otherwise say what it waits for.
+// No status read yet is unknown: never "manual only", which would be a guess.
 export function scheduleFact(s: BackupStatus | null): { badge: 'success' | 'warning' | 'danger'; text: string } {
-  if (!s?.intervalSec) return { badge: 'warning', text: 'Manual only' };
+  if (!s) return { badge: 'warning', text: 'Unknown' };
+  if (!s.intervalSec) return { badge: 'warning', text: 'Manual only' };
   if (!s.keyPinned) return { badge: 'danger', text: 'Waiting for recovery key' };
   if (!s.paired && !s.localDir) return { badge: 'danger', text: 'Waiting for a destination' };
   return { badge: 'success', text: s.nextRunAt ? `Next ${when(s.nextRunAt)}` : 'Next run not scheduled' };
@@ -66,6 +68,57 @@ export async function copyText(text: string): Promise<boolean> {
     return false;
   }
 }
+
+/** One fact card. With no status read, it says so rather than showing an off state. */
+const Fact: React.FC<{
+  label: string;
+  known: boolean;
+  tone: 'success' | 'warning' | 'danger';
+  badge: string;
+  value: React.ReactNode;
+  note: React.ReactNode;
+  mono?: boolean;
+  unknownNote: string;
+}> = ({ label, known, tone, badge, value, note, mono, unknownNote }) => (
+  <div className="dr-fact">
+    <div className="dr-fact-label">
+      <span>{label}</span>
+      <span className="ky-status" data-ky-status={known ? tone : 'warning'}>{known ? badge : 'Unknown'}</span>
+    </div>
+    <div className={mono && known ? 'dr-fact-value font-mono' : 'dr-fact-value'}>{known ? value : '—'}</div>
+    <div className="dr-fact-note">{known ? note : unknownNote}</div>
+  </div>
+);
+
+/**
+ * The four facts at the top of the page. Until a status has been read (still loading, or the
+ * server answered 503 because its settings could not be read) every fact is unknown: showing
+ * "Not paired" or "None" then would invite an administrator to pair or pin again.
+ */
+export const BackupFacts: React.FC<{ status: BackupStatus | null; loading: boolean }> = ({ status, loading }) => {
+  const known = status !== null;
+  const keyPinned = status?.keyPinned ?? false;
+  const paired = status?.paired ?? false;
+  const hasLocal = Boolean(status?.localDir);
+  const schedule = scheduleFact(status);
+  const newestLocal = status?.localCopies[0];
+  const unknownNote = loading ? 'Loading the backup status…' : 'The backup status could not be read';
+  return (
+    <div className="dr-facts">
+      <Fact label="Recovery key" known={known} unknownNote={unknownNote} tone={keyPinned ? 'success' : 'warning'} badge={keyPinned ? 'Pinned' : 'None'} mono
+        value={status?.recovery_key_id ?? '—'}
+        note={keyPinned ? `${status?.threshold} of ${status?.total_shares} custodian cards open a capsule` : 'Nothing can be sealed until a key is pinned'} />
+      <Fact label="KyRecovery" known={known} unknownNote={unknownNote} tone={paired ? 'success' : 'danger'} badge={paired ? 'Paired' : 'Not paired'}
+        value={paired ? status?.recovery_url : 'No off-site copy'}
+        note={status?.last_deposit ? `Last deposit ${when(status.last_deposit.depositedAt)}` : paired ? 'Nothing deposited yet' : ''} />
+      <Fact label="Local copies" known={known} unknownNote={unknownNote} tone={hasLocal ? 'success' : 'danger'} badge={hasLocal ? `${status?.localCopies.length ?? 0} of ${status?.localKeep}` : 'Off'} mono
+        value={status?.localDir ?? 'KYIDENTITY_BACKUP_DIR not set'}
+        note={status?.localError ?? (newestLocal ? `Newest ${when(newestLocal.createdAt)}` : hasLocal ? 'Nothing written yet' : '')} />
+      <Fact label="Schedule" known={known} unknownNote={unknownNote} tone={schedule.badge} badge={every(status?.intervalSec)}
+        value={schedule.text} note="Counts from the last attempt, successful or not" />
+    </div>
+  );
+};
 
 export const AdminBackup: React.FC = () => {
   const [status, setStatus] = useState<BackupStatus | null>(null);
@@ -160,12 +213,7 @@ export const AdminBackup: React.FC = () => {
         headers: { 'X-KyIdentity-StepUp': grant },
       });
       if (!res.ok) {
-        const body: unknown = await res.json().catch(() => ({}));
-        const message =
-          typeof body === 'object' && body !== null && 'error' in body
-            ? String((body as { error: unknown }).error)
-            : `Download failed (HTTP ${res.status})`;
-        throw new Error(message);
+        throw new ApiError(res.status, await res.json().catch(() => ({})));
       }
       const match = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '');
       const url = URL.createObjectURL(await res.blob());
@@ -281,13 +329,18 @@ export const AdminBackup: React.FC = () => {
     }
   };
 
+  // A failed refresh keeps the last status read; with none, nothing depends on a guess.
+  const known = status !== null;
   const keyPinned = status?.keyPinned ?? false;
   const paired = status?.paired ?? false;
   const hasLocal = Boolean(status?.localDir);
   const canBackUp = keyPinned && (paired || hasLocal);
   const scheduleOn = (status?.intervalSec ?? 0) > 0;
-  const schedule = scheduleFact(status);
-  const newestLocal = status?.localCopies[0];
+  const waitingForStatus = (
+    <p className="form-hint" style={{ marginBottom: 0 }}>
+      {loadingStatus ? 'Loading the backup status…' : 'Available once the backup status can be read. Refresh to try again.'}
+    </p>
+  );
 
   return (
     <div className="admin-page">
@@ -303,8 +356,8 @@ export const AdminBackup: React.FC = () => {
       </div>
 
       {statusError && (
-        <div className="alert-box error sm">
-          <AlertCircle size={16} /> {statusError}
+        <div className="alert-box error sm" role="alert">
+          <AlertCircle size={16} /> {statusError}{known ? ' Showing the last status read.' : ''}
         </div>
       )}
       {status?.recovery_key_error && (
@@ -328,44 +381,7 @@ export const AdminBackup: React.FC = () => {
         </div>
       )}
 
-      <div className="dr-facts">
-        <div className="dr-fact">
-          <div className="dr-fact-label">
-            <span>Recovery key</span>
-            <span className="ky-status" data-ky-status={keyPinned ? 'success' : 'warning'}>{keyPinned ? 'Pinned' : 'None'}</span>
-          </div>
-          <div className="dr-fact-value font-mono">{status?.recovery_key_id ?? '—'}</div>
-          <div className="dr-fact-note">
-            {keyPinned ? `${status?.threshold} of ${status?.total_shares} custodian cards open a capsule` : 'Nothing can be sealed until a key is pinned'}
-          </div>
-        </div>
-        <div className="dr-fact">
-          <div className="dr-fact-label">
-            <span>KyRecovery</span>
-            <span className="ky-status" data-ky-status={paired ? 'success' : 'danger'}>{paired ? 'Paired' : 'Not paired'}</span>
-          </div>
-          <div className="dr-fact-value">{paired ? status?.recovery_url : 'No off-site copy'}</div>
-          <div className="dr-fact-note">
-            {status?.last_deposit ? `Last deposit ${when(status.last_deposit.depositedAt)}` : paired ? 'Nothing deposited yet' : ''}
-          </div>
-        </div>
-        <div className="dr-fact">
-          <div className="dr-fact-label">
-            <span>Local copies</span>
-            <span className="ky-status" data-ky-status={hasLocal ? 'success' : 'danger'}>{hasLocal ? `${status?.localCopies.length ?? 0} of ${status?.localKeep}` : 'Off'}</span>
-          </div>
-          <div className="dr-fact-value font-mono">{status?.localDir ?? 'KYIDENTITY_BACKUP_DIR not set'}</div>
-          <div className="dr-fact-note">{status?.localError ?? (newestLocal ? `Newest ${when(newestLocal.createdAt)}` : hasLocal ? 'Nothing written yet' : '')}</div>
-        </div>
-        <div className="dr-fact">
-          <div className="dr-fact-label">
-            <span>Schedule</span>
-            <span className="ky-status" data-ky-status={schedule.badge}>{every(status?.intervalSec)}</span>
-          </div>
-          <div className="dr-fact-value">{schedule.text}</div>
-          <div className="dr-fact-note">Counts from the last attempt, successful or not</div>
-        </div>
-      </div>
+      <BackupFacts status={status} loading={loadingStatus} />
 
       <div className="settings-section">
         <div className="section-header">
@@ -468,7 +484,7 @@ export const AdminBackup: React.FC = () => {
               <label className="form-label" htmlFor="backup-interval">
                 Back up automatically
               </label>
-              <select id="backup-interval" className="form-select" value={scheduleSec} onChange={(e) => setScheduleSec(Number(e.target.value))}>
+              <select id="backup-interval" className="form-select" disabled={!known} value={scheduleSec} onChange={(e) => setScheduleSec(Number(e.target.value))}>
                 {SCHEDULE_CHOICES.map((c) => (
                   <option key={c.sec} value={c.sec}>
                     {c.label}
@@ -476,7 +492,7 @@ export const AdminBackup: React.FC = () => {
                 ))}
               </select>
             </div>
-            <button type="submit" className="primary-btn sm" disabled={scheduleSaving || scheduleSec === (status?.intervalSec ?? -1)}>
+            <button type="submit" className="primary-btn sm" disabled={!known || scheduleSaving || scheduleSec === status?.intervalSec}>
               {scheduleSaving ? <Loader2 size={14} className="spin" /> : <Clock size={14} />}
               <span>Save</span>
             </button>
@@ -506,9 +522,10 @@ export const AdminBackup: React.FC = () => {
                 <Server size={16} className="icon-cyan" /> KyRecovery
               </h2>
             </div>
-            <span className="ky-status" data-ky-status={paired ? 'success' : 'danger'}>{paired ? 'Paired' : 'Not paired'}</span>
+            <span className="ky-status" data-ky-status={!known ? 'warning' : paired ? 'success' : 'danger'}>{!known ? 'Unknown' : paired ? 'Paired' : 'Not paired'}</span>
           </div>
           <div className="dr-body">
+            {!known ? waitingForStatus : <>
             <p className="form-hint">
               KyRecovery keeps capsules it cannot open, off this host. In its dashboard, generate a pairing code for
               this service and enter it here. Pairing hands this server the suite recovery key and a deposit credential;
@@ -550,6 +567,7 @@ export const AdminBackup: React.FC = () => {
                 <XCircle size={16} /> {pairError}
               </div>
             )}
+            </>}
           </div>
         </div>
 
@@ -560,10 +578,10 @@ export const AdminBackup: React.FC = () => {
                 <KeyRound size={16} className="icon-cyan" /> Recovery key by hand
               </h2>
             </div>
-            <span className="ky-status" data-ky-status={keyPinned ? 'success' : 'warning'}>{keyPinned ? 'Pinned' : 'None'}</span>
+            <span className="ky-status" data-ky-status={known && keyPinned ? 'success' : 'warning'}>{!known ? 'Unknown' : keyPinned ? 'Pinned' : 'None'}</span>
           </div>
           <div className="dr-body">
-            {keyPinned ? (
+            {!known ? waitingForStatus : keyPinned ? (
               <p className="form-hint" style={{ marginBottom: 0 }}>
                 The key is pinned{paired ? ' by pairing' : ''}. Rotating it means a new ceremony and a fresh data
                 directory; there is no button for that on purpose.

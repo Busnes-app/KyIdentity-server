@@ -205,7 +205,7 @@ jobs:
   docker:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker build -t kyidentity-ci .
@@ -228,6 +228,8 @@ jobs:
             echo "server accepted a non-loopback HTTP issuer"
             exit 1
           fi
+      # The documented SQLite to PostgreSQL cutover, with this image, offline.
+      - run: scripts/check-postgres-cutover.sh kyidentity-ci
 
       # Hand the exact image the checks above ran against to the publish job,
       # so what gets pushed is what was tested, never a second build.
