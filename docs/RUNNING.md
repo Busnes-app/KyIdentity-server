@@ -146,18 +146,28 @@ prove correctness, not capacity: no user count or request rate is claimed.
   and its connection failed before anything was sent. Never retry after a timeout: the
   first replica may still be doing the work.
 - **Timeouts.** Give the upstream at least 30 s. An ordinary request is answered within
-  25 s (the request deadline, below); the few routes outside the deadline (mail sends, the
-  KyRecovery pairing claim, the audit export) are bounded by the server's 30 s write
-  timeout. Only the three backup routes need 16 minutes: `POST /api/admin/backup/deposit`,
-  `POST /api/admin/backup/drill` and `GET /api/admin/backup/export-capsule`.
-- **nginx and Nginx Proxy Manager.** Open-source nginx, which Nginx Proxy Manager is built
-  on, has passive checks only (`max_fails`, `fail_timeout`): it notices a replica after
-  requests to it fail, and never reads `/readyz`, so a stopping replica stays in rotation
-  until its listener closes. Active `health_check` is an NGINX Plus feature. With either,
-  set `proxy_next_upstream error;` so a request is retried only when the connection
-  failed, never after a timeout, and leave `non_idempotent` off. A replica that drains
-  still serves for its five seconds, so passive checks lose nothing during a stop; they
-  do route new requests to a replica whose database is down until those requests fail.
+  25 s (the request deadline, below). The few routes outside the deadline (mail sends, the
+  KyRecovery pairing claim, the audit export) put their own timeouts on their outbound
+  calls, but nothing bounds their database calls: on a frozen database they wait with it,
+  so the proxy's timeout is what ends them. The listener's 30 s write timeout stops the
+  answer being written, not the handler. Only the three backup routes need 16 minutes:
+  `POST /api/admin/backup/deposit`, `POST /api/admin/backup/drill` and
+  `GET /api/admin/backup/export-capsule`.
+- **nginx and Nginx Proxy Manager** (described from their documentation, not run here).
+  Open-source nginx, which Nginx Proxy Manager is built on, has passive checks only
+  (`max_fails`, `fail_timeout`): it notices a replica after requests to it fail, and never
+  reads `/readyz`, so a stopping replica stays in rotation until its listener closes.
+  Active `health_check` is an NGINX Plus feature. `proxy_next_upstream error;` retries on
+  another replica when the connection failed, but also when sending the request or
+  reading the response header failed, so an idempotent request that reached the first
+  replica may be sent again; nginx never resends POST, PATCH or LOCK unless
+  `non_idempotent` is set, so leave it off, and leave `timeout` out of the list. Nginx Proxy
+  Manager's proxy host forwards to one host: for several replicas, give it a host name
+  that resolves to every replica, or define an `upstream` in its custom configuration
+  (`/data/nginx/custom/http_top.conf`) and point the proxy host at it. A replica that
+  drains still serves for its five seconds, so passive checks lose nothing during a stop;
+  they do route new requests to a replica whose database is down until those requests
+  fail.
 
 ### Stopping a replica
 
@@ -174,7 +184,9 @@ On SIGTERM a replica (`KYIDENTITY_REPLICATED=true`):
 That is 20 s at most. **Give replicas a 30 s grace period** (Compose
 `stop_grace_period: 30s`; Kubernetes' default `terminationGracePeriodSeconds` is 30). A
 single server has no drain step: 5 s for requests, then 3 s for backup work, 8 s in all,
-inside Docker's default 10 s, so `docker-compose.yml` needs nothing.
+inside Docker's default 10 s, so `docker-compose.yml` needs nothing. On a single server the
+listener closes at once, so a new Back up now or drill request gets no answer at all
+rather than the 503.
 
 A Kubernetes sketch, **not executed by CI**:
 
@@ -186,7 +198,8 @@ spec:
       readinessProbe:
         httpGet: { path: /readyz, port: 5867 }
         periodSeconds: 1
-        failureThreshold: 1
+        timeoutSeconds: 3      # /readyz allows its database read 2 s; the default is 1 s
+        failureThreshold: 2    # two failed probes still fit inside the 5 s drain
       livenessProbe:
         httpGet: { path: /livez, port: 5867 }
         periodSeconds: 10
@@ -203,17 +216,24 @@ before repeating a change. The routes that keep budgets of their own are the thr
 routes above and those that wait on another server: `POST /api/admin/backup/pair-remote`,
 `GET /api/admin/audit-events/export`, `POST /api/admin/mail/test`,
 `POST /api/admin/users/{id}/activation-link` and `reset-link`, and
-`POST /api/admin/access-requests/{id}/approve` and `deny`. A session the database cannot
-look up is answered 503 too, never as signed out.
+`POST /api/admin/access-requests/{id}/approve` and `deny`. A sign-in or step-up that sends a
+push waits at most 10 s for the push relays, so a relay key being renewed cannot take it
+past the deadline; the push itself is still sent. A session the database cannot look up is
+answered `503 temporarily_unavailable`, never 401, and the web app then offers to retry
+rather than showing the sign-in page. Browser navigations to `/oauth/authorize`,
+`/oauth/logout` and `/forward/start` get that answer as JSON: without the database neither the
+client nor its redirect can be checked, so there is nowhere safe to send the browser.
 
 ### Shared configuration
 
 On Postgres, the first server to start records a fingerprint of the settings every replica
-must share, in the database, and every later start compares its own. A replica that
-differs refuses to start and names the settings, never their values:
+must share, in the database, and every later start compares its own. **This applies to a
+single server on Postgres too**: after changing one of these settings it refuses to start
+until the change is accepted. A server that differs refuses to start and names the
+settings, never their values:
 
 ```
-Refusing to start: this replica's configuration differs from the one the other replicas recorded: KYIDENTITY_ISSUER_URL. ...
+Refusing to start: this server's configuration differs from the one recorded in the database by an earlier start: KYIDENTITY_ISSUER_URL. Use the same values on every server. After a deliberate change: stop every server, run `kyidentity accept-replica-config` once with the new values, then start them
 ```
 
 Shared: `KYIDENTITY_ISSUER_URL`, the secret and encryption keys, the RSA signing and VAPID
@@ -237,19 +257,39 @@ nothing, and no command other than the server start compares.
 
 To change a shared setting deliberately:
 
-1. Stop every replica.
+1. Stop every server.
 2. Change the setting everywhere.
 3. Run `kyidentity accept-replica-config` once, with the new configuration. It rewrites
    the record and writes an `admin.replica_config_accepted` audit row naming the changed
-   settings; it never prints a value.
-4. Start the replicas.
+   settings; it never prints a value. `-h` prints its usage and changes nothing; it takes
+   no other argument.
+4. Start the servers.
+
+Run it **with the servers' own, complete environment**: the same variables, key files and
+Secrets. It records what that process sees, so a bare shell or a container missing some of
+it records the defaults (an unset `PUSH_RELAY_URL` is the production relay, for one), and
+every server then refuses; run it again with the right environment. With Compose, the
+servers stopped, this runs the service's own configuration once without its ports
+(checked with throwaway containers on a Postgres override of `docker-compose.yml`):
+
+```bash
+docker compose run --rm --no-deps kyidentity-server accept-replica-config
+```
+
+On Kubernetes (not executed here), run a one-off Job or Pod from the Deployment's pod
+template, with the same image, `env`, `envFrom` and Secret volume mounts, and
+`args: ["accept-replica-config"]`, while the Deployment is scaled to zero; then scale it
+back up.
 
 **Never use it for the encryption key**: it refuses, because every sealed secret opens only
-under the key the replicas already use.
+under the key the servers already use.
 
-Upgrading a replicated install to this release: stop every replica, start one (it records
-the configuration), then start the rest. A restore removes the record, and the first start
-afterwards records the restored environment's.
+Upgrading a Postgres install to this release: stop every server, start one (it records the
+configuration), then start the rest. A restore removes the record, and the first start
+afterwards records the restored environment's. Turning on `KYIDENTITY_REPLICATED` on an
+install that already started on Postgres, or moving its keys into a Secret with different
+values, is a change to a shared setting: stop the server, run `accept-replica-config` with
+the replicas' environment, then start the replicas.
 
 ### The shared database
 
@@ -311,7 +351,10 @@ capsule restores onto either backend.
 
 ### Moving an install from SQLite to Postgres
 
-1. Stop the server (`docker stop` at its default timeout is enough). The copy refuses a
+1. Stop the server (`docker stop` at its default timeout is enough). If you will run more than
+   one replica, decide now: set `KYIDENTITY_REPLICATED=true` (with the keys in a Secret, as
+   under Keys) before the first start on Postgres, or accept the change later as under
+   Shared configuration. The copy refuses a
    file with a `-wal` beside it, which a server that is still running (or did not stop
    cleanly) leaves; start and stop it once if so. Commands such as `deposit` share the
    live file by design, so stop those too.
@@ -431,18 +474,33 @@ These hold with or without the flag, because they cost a single instance nothing
   3. Remove `recovery.pub` from every replica's data directory that has one, then pin the
      new key. A replica still holding the old `recovery.pub` refuses to pin and to back up
      until that file is removed; it never seals to the old key.
+- A pinned key's custodian split (k of n) is written once: pinning or pairing the same key
+  with another split is refused with 409, naming the split it is pinned with. If that
+  pinned split is wrong (a typo when pinning by hand), correct it the way a key is replaced:
+  clear the pin with the `DELETE` above, remove `recovery.pub` from every data directory
+  that has one, and pin it again with the right split. A refused pairing has already spent
+  its pairing code: ask the KyRecovery administrator to revoke the token KyRecovery issued
+  for it.
 - A scheduled backup that finds a pinned key it cannot load is recorded as a failed
   `admin.backup_run`; it is never skipped quietly.
 
 `KYIDENTITY_BACKUP_DIR` takes either layout:
 
 - **One per replica** (the default): each replica keeps the copies it made in its own
-  directory, under the same names as on a single server, and lists only those.
+  directory, under the same names as on a single server, and lists only those. The backup
+  page shows the directory of whichever replica answered it, so behind a load balancer its
+  count and newest copy can change from one refresh to the next.
 - **One directory shared by every replica**, on a filesystem you provide (NFS, a shared
   volume): KyIdentity implements no shared storage. Copies are written (to a temporary
   file, then renamed) and pruned to `KYIDENTITY_BACKUP_KEEP` only inside a backup run,
   which holds the backup lease, so one replica writes at a time; the backup page only reads
-  the directory, so every replica lists the same copies.
+  the directory, so every replica lists the same copies. Set the same
+  `KYIDENTITY_BACKUP_KEEP` on every replica that shares a directory: it is per host, so
+  otherwise how many copies stay depends on which replica ran last. One limit remains: a
+  run whose lease is lost while it is sealing a large capsule (after its snapshot) still
+  writes and prunes its copy before it notices, because the sealing step belongs to the
+  backup library and does not yet check for that; the copies stay complete files (written
+  to a temporary name, then renamed), but for that moment two replicas may write at once.
 
 The plaintext database snapshot a backup seals is written to a private, locked
 `snapshot-*` directory under the data directory and removed as soon as the capsule is

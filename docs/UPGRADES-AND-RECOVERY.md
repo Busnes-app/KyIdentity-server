@@ -134,19 +134,25 @@ This release changes what a stopping or misconfigured server does. Nothing needs
 - **Replicas** (`KYIDENTITY_REPLICATED=true`) take up to 20 s to stop: `/readyz` answers 503
   for 5 s before the listener closes. Give them a 30 s grace period. A single server stops
   within 8 s as before. See [RUNNING.md](RUNNING.md#stopping-a-replica).
-- **PostgreSQL** installs record a fingerprint of the shared settings on first start and
-  refuse a start that differs. Upgrade a replicated install by stopping every replica,
-  starting one, then the rest; change a shared setting later with
-  `kyidentity accept-replica-config`. See [RUNNING.md](RUNNING.md#shared-configuration).
+- **PostgreSQL** installs, a single server included, record a fingerprint of the shared
+  settings on first start and refuse a start that differs. Upgrade by stopping every server,
+  starting one, then the rest; change a shared setting later by stopping every server,
+  running `kyidentity accept-replica-config` once with their full environment, then starting
+  them. See [RUNNING.md](RUNNING.md#shared-configuration).
 - Every request has a 25 s deadline (`503 request_timeout`), apart from named long routes;
   give a proxy at least a 30 s upstream timeout, and 16 minutes for the three backup routes.
 - The backup and drill leases are 2 minutes, renewed while the run lasts, and a crashed
-  holder no longer blocks backups for 2 hours. A backup cancelled by shutdown or a lost
-  lease is recorded as a failed `admin.backup_run`.
+  holder no longer blocks backups for 2 hours. A renewal that does not answer (a replica
+  cut off from the database) ends the run before the lease can pass to another replica. A
+  backup cancelled by shutdown or a lost lease is recorded as a failed `admin.backup_run`.
 - A settings read that fails makes the backup page answer 503 and Back up now or export
-  answer a server error, instead of reporting the instance unpaired. The pinned key's k-of-n
-  is now written once: offering the same key with another topology is refused with 409.
-- A session the database cannot look up is answered 503, not 401.
+  answer a server error, instead of reporting the instance unpaired; the page then shows
+  the status as unknown. The pinned key's k-of-n is now written once: offering the same key
+  with another split is refused with 409 naming the pinned split. A wrong pinned split is
+  corrected by clearing the pin by hand ([RUNNING.md](RUNNING.md#keys)).
+- A session the database cannot look up is answered 503, not 401, and the web app offers
+  to retry instead of showing the sign-in page.
+- A sign-in or step-up waits at most 10 s for its push sends; the push still goes out.
 - `migrate-to-postgres` also refuses a source that fails SQLite's integrity or foreign key
   check, or that changes while it is copied.
 
