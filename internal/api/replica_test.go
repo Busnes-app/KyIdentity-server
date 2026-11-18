@@ -396,3 +396,35 @@ func TestReplicaFingerprintIsInNoAPIResponse(t *testing.T) {
 		}
 	}
 }
+
+// A session lookup that fails is 503, not 401: a signed-in user is not sent to sign in
+// because the database did not answer.
+func TestAFailedSessionLookupIsUnavailable(t *testing.T) {
+	srv, s, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	do := adminCaller(t, srv, s)
+	if w := do("GET", "/api/auth/me", nil, false); w.Code != http.StatusOK {
+		t.Fatalf("before: %d", w.Code)
+	}
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`ALTER TABLE sessions RENAME TO sessions_hidden`); err != nil {
+		t.Fatal(err)
+	}
+	w := do("GET", "/api/auth/me", nil, false)
+	if _, err := raw.Exec(`ALTER TABLE sessions_hidden RENAME TO sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusServiceUnavailable || decode(t, w)["error"] != "temporarily_unavailable" {
+		t.Fatalf("a failed session lookup: %d %s", w.Code, w.Body.String())
+	}
+	req := httptest.NewRequest("GET", "/api/auth/me", nil)
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no cookie at all is still 401: %d", rec.Code)
+	}
+}
