@@ -16,8 +16,10 @@ import (
 // request had no effect: the handler may still finish once the database answers.
 var requestDeadline = 25 * time.Second
 
-// longRoutes are the mux patterns the deadline does not cover, each with the budget it keeps
-// instead. TestLongRoutesAreExactlyTheNamedExemptions pins this list.
+// longRoutes are the mux patterns the deadline does not cover, each with the budget its
+// outbound calls keep instead. Nothing bounds their database calls, and the listener's
+// WriteTimeout does not end a handler, so on a frozen database they wait with it.
+// TestLongRoutesAreExactlyTheNamedExemptions pins this list.
 var longRoutes = map[string]string{
 	"POST /api/admin/backup/deposit":               "depositWriteBudget (16 min): snapshot, seal and upload a capsule",
 	"POST /api/admin/backup/drill":                 "depositWriteBudget (16 min): snapshot, seal and open a capsule in a sandbox",
