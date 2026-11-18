@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { User, canAdminister } from './types';
-import { apiJson, logout } from './api';
+import { apiJson, isSignedOut, logout } from './api';
 import { parseMe } from './parsers';
 import { Sidebar } from './components/Sidebar';
 import { LoginView } from './components/LoginView';
@@ -24,6 +24,7 @@ import { AdminAlerts } from './components/AdminAlerts';
 import { AccountLinkView } from './components/AccountLinkView';
 import { PasswordChangeRequired } from './components/PasswordChangeRequired';
 import { LicenseFooter } from './components/LicenseFooter';
+import { SessionUnavailable } from './components/SessionUnavailable';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -32,6 +33,8 @@ export const App: React.FC = () => {
   const [activeTab, setTab] = useState(() => tabFromHash(window.location.hash));
   const [groupUser, setGroupUser] = useState<User | null>(null);
   const [logoutFailed, setLogoutFailed] = useState(false);
+  // The last session check failed without saying the session is gone (503, network).
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
 
   // The view lives in the URL hash, so links and the back button work.
   const setActiveTab = (tab: string) => {
@@ -54,11 +57,19 @@ export const App: React.FC = () => {
   // Link pages need no session and must not wait for one.
   const linkKind = window.location.pathname === '/activate' ? 'activation' : window.location.pathname === '/reset' ? 'reset' : null;
 
+  // Only a 401 signs this browser out. Any other failure keeps whoever is signed in, and with
+  // nobody yet shows a retry screen rather than sign-in over a session that may be live.
   const checkSession = async () => {
     try {
       setCurrentUser(await apiJson('/api/auth/me', parseMe));
-    } catch {
-      setCurrentUser(null);
+      setSessionUnavailable(false);
+    } catch (err) {
+      if (isSignedOut(err)) {
+        setCurrentUser(null);
+        setSessionUnavailable(false);
+      } else {
+        setSessionUnavailable(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -101,6 +112,10 @@ export const App: React.FC = () => {
   }
 
   if (linkKind) return <AccountLinkView kind={linkKind} />;
+
+  if (!currentUser && sessionUnavailable) {
+    return <SessionUnavailable onRetry={() => { setLoading(true); void checkSession(); }} />;
+  }
 
   if (!currentUser || (window.location.pathname === '/login' && new URLSearchParams(window.location.search).has('interaction'))) {
     return <LoginView onLoginSuccess={(u) => { setLogoutFailed(false); setCurrentUser(u); checkSession(); }} />;

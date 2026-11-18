@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiAllPages, apiJson, apiRequest, fetchCSRF, isStepUpRequired, logout } from './api';
+import { ApiError, apiAllPages, apiJson, apiRequest, fetchCSRF, isSignedOut, isStepUpRequired, logout } from './api';
 
 /** A fetch stub that answers from a queue, recording what it was asked for. */
 function stubFetch(responses: Array<{ status?: number; body?: unknown; text?: string }>) {
@@ -190,5 +190,14 @@ describe('apiAllPages', () => {
     const all = await apiAllPages('/api/admin/groups', parse);
     expect(all).toHaveLength(150);
     expect(calls.map(c => c.path)).toEqual(['/api/admin/groups?limit=100&offset=0', '/api/admin/groups?limit=100&offset=100']);
+  });
+});
+
+describe('isSignedOut', () => {
+  it('reads only a 401 as signed out', () => {
+    expect(isSignedOut(new ApiError(401, { error: 'unauthorized' }))).toBe(true);
+    expect(isSignedOut(new ApiError(503, { error: 'temporarily_unavailable' }))).toBe(false);
+    expect(isSignedOut(new ApiError(500, {}))).toBe(false);
+    expect(isSignedOut(new TypeError('Failed to fetch'))).toBe(false);
   });
 });
