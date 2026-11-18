@@ -83,14 +83,21 @@ var ErrLeaseLost = errors.New("the lease was lost to another holder or could not
 // scheduling, not exactly-once: the work keeps its own idempotency.
 func (s *Store) HoldLease(parent context.Context, name string, ttl time.Duration) (ctx context.Context, release func(), ok bool, err error) {
 	token := uuid.New().String()
-	if ok, err := s.takeLease(parent, name, token, ttl); err != nil || !ok {
+	start := time.Now()
+	takeCtx, cancelTake := context.WithTimeout(parent, ttl/4)
+	ok, err = s.takeLease(takeCtx, name, token, ttl)
+	if err == nil {
+		err = takeCtx.Err() // an ambiguous late commit never grants ownership
+	}
+	cancelTake()
+	if err != nil || !ok {
 		return nil, nil, false, err
 	}
 	ctx, cancel := context.WithCancelCause(parent)
 	stop, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(stopped)
-		keepLease(ctx, stop, cancel, ttl, func(rctx context.Context) (bool, error) {
+		keepLease(ctx, stop, cancel, ttl, start.Add(ttl), func(rctx context.Context) (bool, error) {
 			res, err := s.db.ExecContext(rctx, `UPDATE leases SET until_ms=`+s.leaseNow()+`+? WHERE name=? AND token=?`, ttl.Milliseconds(), name, token)
 			if err != nil {
 				return false, err
@@ -114,9 +121,12 @@ func (s *Store) HoldLease(parent context.Context, name string, ttl time.Duration
 // lease the moment it expires there. A renewal that finds the row gone or another token's
 // ends the hold at once; one that fails or runs out of time ends it only once less than one
 // interval is left, since the next try would land after the lease expired.
-func keepLease(ctx context.Context, stop <-chan struct{}, lost context.CancelCauseFunc, ttl time.Duration, renew func(context.Context) (bool, error)) {
+func keepLease(ctx context.Context, stop <-chan struct{}, lost context.CancelCauseFunc, ttl time.Duration, expires time.Time, renew func(context.Context) (bool, error)) {
 	every := ttl / 4
-	expires := time.Now().Add(ttl)
+	if time.Until(expires) <= every {
+		lost(ErrLeaseLost)
+		return
+	}
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for {

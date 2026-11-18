@@ -235,7 +235,8 @@ func accepted(cfg *config.Config, id string) error {
 
 // ErrTopologyChanged is the pinned key offered again with a different k-of-n. The split a
 // key was made with does not change, so a different one is a mistake or a forgery. The error
-// returned is a *TopologyError naming the pinned split; it matches this and fs.ErrExist.
+// normally returned is a *TopologyError naming the pinned split, also matching fs.ErrExist.
+// An unreadable stored split returns only ErrTopologyChanged.
 var ErrTopologyChanged = errors.New("this recovery key is already pinned with a different custodian topology")
 
 // TopologyError says which k-of-n the key is pinned with. Both are public: the ceremony page

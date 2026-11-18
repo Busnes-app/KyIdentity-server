@@ -140,10 +140,11 @@ func TestStoppingAReplicaDrainsBeforeItCloses(t *testing.T) {
 // relay forwards TCP to target and can be frozen: bytes stop moving in both directions, as on
 // a paused VM or a storage hang, while every connection stays open.
 type relay struct {
-	ln     net.Listener
-	mu     gosync.Mutex
-	frozen bool
-	thawed *gosync.Cond
+	ln      net.Listener
+	mu      gosync.Mutex
+	frozen  bool
+	thawed  *gosync.Cond
+	blocked chan struct{}
 }
 
 func newRelay(t *testing.T, target string) *relay {
@@ -152,7 +153,7 @@ func newRelay(t *testing.T, target string) *relay {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &relay{ln: ln}
+	r := &relay{ln: ln, blocked: make(chan struct{}, 1)}
 	r.thawed = gosync.NewCond(&r.mu)
 	t.Cleanup(func() { r.set(false); _ = ln.Close() })
 	go func() {
@@ -189,6 +190,10 @@ func (r *relay) pipe(from, to net.Conn) {
 		if n > 0 {
 			r.mu.Lock()
 			for r.frozen {
+				select {
+				case r.blocked <- struct{}{}:
+				default:
+				}
 				r.thawed.Wait()
 			}
 			r.mu.Unlock()
@@ -200,6 +205,79 @@ func (r *relay) pipe(from, to net.Conn) {
 			return
 		}
 	}
+}
+
+// Exercise the actual HoldLease release, not a copy of its cancellation sequence.
+func TestHoldLeaseAcquisitionAndReleaseOnAFrozenConnection(t *testing.T) {
+	if os.Getenv("KYIDENTITY_TEST_DATABASE_URL") == "" {
+		t.Skip("needs KYIDENTITY_TEST_DATABASE_URL")
+	}
+	direct, err := store.PostgresURLForTest(filepath.Join(t.TempDir(), "lease-release.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(direct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRelay(t, u.Host)
+	u.Host = r.ln.Addr().String()
+	holder, err := store.NewPostgres(u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+
+	t.Run("taking the lease is bounded", func(t *testing.T) {
+		r.set(true)
+		defer r.set(false)
+		begun := time.Now()
+		ctx, release, ok, err := holder.HoldLease(context.Background(), "stalled-take", 2*time.Second)
+		if err == nil || ok || ctx != nil || release != nil {
+			t.Fatalf("a frozen take granted work: ok=%v err=%v", ok, err)
+		}
+		if took := time.Since(begun); took > time.Second {
+			t.Fatalf("a frozen take waited %v, want at most one renewal interval", took)
+		}
+	})
+
+	t.Run("release cancels a renewal before waiting for it", func(t *testing.T) {
+		ctx, release, ok, err := holder.HoldLease(context.Background(), "stalled-release", 8*time.Second)
+		if err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+		defer release()
+		// Discard the blocked notification from the acquisition subtest.
+		for len(r.blocked) > 0 {
+			<-r.blocked
+		}
+		r.set(true)
+		defer r.set(false)
+		select {
+		case <-r.blocked: // the renewal has reached the frozen connection
+		case <-time.After(4 * time.Second):
+			t.Fatal("no renewal reached the frozen connection")
+		}
+		begun := time.Now()
+		done := make(chan struct{})
+		go func() { release(); close(done) }()
+		select {
+		case <-ctx.Done():
+			if !errors.Is(context.Cause(ctx), context.Canceled) {
+				t.Errorf("release cause: %v", context.Cause(ctx))
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Error("release waited for the stuck renewal before cancelling work")
+			r.set(false) // let a broken release finish before the test exits
+		}
+		select {
+		case <-done:
+		case <-time.After(6 * time.Second):
+			r.set(false)
+			t.Fatal("release exceeded the five-second give-back budget")
+		}
+		t.Logf("release while renewal blocked: %v", time.Since(begun))
+	})
 }
 
 // With the database frozen, every replica leaves rotation within seconds while staying alive,

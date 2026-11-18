@@ -484,7 +484,7 @@ export const AdminBackup: React.FC = () => {
               <label className="form-label" htmlFor="backup-interval">
                 Back up automatically
               </label>
-              <select id="backup-interval" className="form-select" value={scheduleSec} onChange={(e) => setScheduleSec(Number(e.target.value))}>
+              <select id="backup-interval" className="form-select" disabled={!known} value={scheduleSec} onChange={(e) => setScheduleSec(Number(e.target.value))}>
                 {SCHEDULE_CHOICES.map((c) => (
                   <option key={c.sec} value={c.sec}>
                     {c.label}

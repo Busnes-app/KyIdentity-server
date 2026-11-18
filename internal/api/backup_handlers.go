@@ -301,9 +301,9 @@ const pairingCodeSpent = "The pairing code is now spent: ask the KyRecovery admi
 func topologyRefusal(err error) string {
 	var te *backup.TopologyError
 	if errors.As(err, &te) {
-		return fmt.Sprintf("This recovery key is pinned as %d of %d custodian cards. Offer %d of %d; if the pinned split is wrong, clear the pin by hand as docs/RUNNING.md (Keys) describes, then pin it again.", te.Threshold, te.TotalShares, te.Threshold, te.TotalShares)
+		return fmt.Sprintf("This recovery key is pinned as %d of %d custodian cards. Verify the split against the ceremony record; if the pinned split is wrong, clear the pin by hand as docs/RUNNING.md (Keys) describes, then pin or pair again.", te.Threshold, te.TotalShares)
 	}
-	return "This recovery key is already pinned with a different custodian topology; if the pinned split is wrong, clear the pin by hand as docs/RUNNING.md (Keys) describes, then pin it again."
+	return "This recovery key is already pinned with a different custodian topology; if the pinned split is wrong, clear the pin by hand as docs/RUNNING.md (Keys) describes, then pin or pair again."
 }
 
 type RemotePairRequest struct {

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useReducer, useState } from 'react';
 import { User, canAdminister } from './types';
 import { apiJson, isSignedOut, logout } from './api';
 import { parseMe } from './parsers';
+import { nextSession } from './session';
 import { Sidebar } from './components/Sidebar';
 import { LoginView } from './components/LoginView';
 import { UserDashboard } from './components/UserDashboard';
@@ -28,13 +29,12 @@ import { SessionUnavailable } from './components/SessionUnavailable';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [session, updateSession] = useReducer(nextSession, { kind: 'signedOut' });
+  const currentUser = session.kind === 'signedIn' ? session.user : null;
   const [loading, setLoading] = useState(true);
   const [activeTab, setTab] = useState(() => tabFromHash(window.location.hash));
   const [groupUser, setGroupUser] = useState<User | null>(null);
   const [logoutFailed, setLogoutFailed] = useState(false);
-  // The last session check failed without saying the session is gone (503, network).
-  const [sessionUnavailable, setSessionUnavailable] = useState(false);
 
   // The view lives in the URL hash, so links and the back button work.
   const setActiveTab = (tab: string) => {
@@ -61,14 +61,12 @@ export const App: React.FC = () => {
   // nobody yet shows a retry screen rather than sign-in over a session that may be live.
   const checkSession = async () => {
     try {
-      setCurrentUser(await apiJson('/api/auth/me', parseMe));
-      setSessionUnavailable(false);
+      updateSession({ kind: 'signedIn', user: await apiJson('/api/auth/me', parseMe) });
     } catch (err) {
       if (isSignedOut(err)) {
-        setCurrentUser(null);
-        setSessionUnavailable(false);
+        updateSession({ kind: 'signedOut' });
       } else {
-        setSessionUnavailable(true);
+        updateSession({ kind: 'unavailable' });
       }
     } finally {
       setLoading(false);
@@ -80,7 +78,7 @@ export const App: React.FC = () => {
 
     const handleUnauthorized = () => {
       setLogoutFailed(false);
-      setCurrentUser(null);
+      updateSession({ kind: 'signedOut' });
     };
 
     window.addEventListener('kyidentity:unauthorized', handleUnauthorized);
@@ -97,7 +95,7 @@ export const App: React.FC = () => {
       return;
     }
     setLogoutFailed(false);
-    setCurrentUser(null);
+    updateSession({ kind: 'signedOut' });
     setActiveTab('dashboard');
   };
   const logoutAlert = logoutFailed && <div className="alert-box error" role="alert"><p>Sign-out did not reach the server, so this browser is still signed in. Check the connection and sign out again.</p></div>;
@@ -113,12 +111,12 @@ export const App: React.FC = () => {
 
   if (linkKind) return <AccountLinkView kind={linkKind} />;
 
-  if (!currentUser && sessionUnavailable) {
+  if (session.kind === 'unavailable') {
     return <SessionUnavailable onRetry={() => { setLoading(true); void checkSession(); }} />;
   }
 
   if (!currentUser || (window.location.pathname === '/login' && new URLSearchParams(window.location.search).has('interaction'))) {
-    return <LoginView onLoginSuccess={(u) => { setLogoutFailed(false); setCurrentUser(u); checkSession(); }} />;
+    return <LoginView onLoginSuccess={(u) => { setLogoutFailed(false); updateSession({ kind: 'signedIn', user: u }); checkSession(); }} />;
   }
 
   if (currentUser.enrollment?.restricted) return <main className="ky-content">

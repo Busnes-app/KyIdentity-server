@@ -218,7 +218,8 @@ routes above and those that wait on another server: `POST /api/admin/backup/pair
 `POST /api/admin/users/{id}/activation-link` and `reset-link`, and
 `POST /api/admin/access-requests/{id}/approve` and `deny`. A sign-in or step-up that sends a
 push waits at most 10 s for the push relays, so a relay key being renewed cannot take it
-past the deadline; the push itself is still sent. A session the database cannot look up is
+past the deadline. Sends continue in the background while the process remains running;
+retry or use another factor if the replica stops before delivery. A session the database cannot look up is
 answered `503 temporarily_unavailable`, never 401, and the web app then offers to retry
 rather than showing the sign-in page. Browser navigations to `/oauth/authorize`,
 `/oauth/logout` and `/forward/start` get that answer as JSON: without the database neither the
@@ -276,10 +277,12 @@ servers stopped, this runs the service's own configuration once without its port
 docker compose run --rm --no-deps kyidentity-server accept-replica-config
 ```
 
-On Kubernetes (not executed here), run a one-off Job or Pod from the Deployment's pod
-template, with the same image, `env`, `envFrom` and Secret volume mounts, and
-`args: ["accept-replica-config"]`, while the Deployment is scaled to zero; then scale it
-back up.
+On Kubernetes (not executed here), scale the Deployment to zero, then use a one-off **Job**
+with the Deployment's image, `env`, `envFrom`, volumes, Secret mounts and `securityContext`
+(including `fsGroup`). Set `args: ["accept-replica-config"]`, `restartPolicy: Never` in the
+pod spec and `backoffLimit: 0` in the Job spec; omit probes and use labels that match neither
+the Deployment's selector nor the Service's. Wait for successful completion, then scale
+the Deployment back up. Copying the whole Deployment template unchanged is not valid.
 
 **Never use it for the encryption key**: it refuses, because every sealed secret opens only
 under the key the servers already use.
@@ -287,9 +290,10 @@ under the key the servers already use.
 Upgrading a Postgres install to this release: stop every server, start one (it records the
 configuration), then start the rest. A restore removes the record, and the first start
 afterwards records the restored environment's. Turning on `KYIDENTITY_REPLICATED` on an
-install that already started on Postgres, or moving its keys into a Secret with different
-values, is a change to a shared setting: stop the server, run `accept-replica-config` with
-the replicas' environment, then start the replicas.
+install that already started on Postgres is a change to a shared setting: stop the server,
+run `accept-replica-config` with the replicas' environment, then start the replicas. When
+moving keys into a Secret, copy them unchanged; if a key differs, fix the copy rather than
+accepting the change. A different encryption key is always refused.
 
 ### The shared database
 
@@ -351,13 +355,12 @@ capsule restores onto either backend.
 
 ### Moving an install from SQLite to Postgres
 
-1. Stop the server (`docker stop` at its default timeout is enough). If you will run more than
-   one replica, decide now: set `KYIDENTITY_REPLICATED=true` (with the keys in a Secret, as
-   under Keys) before the first start on Postgres, or accept the change later as under
-   Shared configuration. The copy refuses a
-   file with a `-wal` beside it, which a server that is still running (or did not stop
-   cleanly) leaves; start and stop it once if so. Commands such as `deposit` share the
-   live file by design, so stop those too.
+1. Stop the server (`docker stop` at its default timeout is enough), and any commands such
+   as `deposit` that share the live file. The copy refuses a file with a `-wal` beside it,
+   which a running server (or one that stopped uncleanly) leaves; start and stop it once
+   if so. For replicas, set `KYIDENTITY_REPLICATED=true` before the first Postgres start
+   (copy the keys unchanged, as under Keys), or accept that flag change later as under
+   Shared configuration.
 2. Create the database as above. Nothing else may have written to it.
 3. Copy the data:
 
@@ -481,6 +484,32 @@ These hold with or without the flag, because they cost a single instance nothing
   that has one, and pin it again with the right split. A refused pairing has already spent
   its pairing code: ask the KyRecovery administrator to revoke the token KyRecovery issued
   for it.
+  For a **single-server SQLite install**, keep the same suite public key and
+  `KYIDENTITY_RECOVERY_KEY_ID` if set, and confirm the correct split against the ceremony
+  record. From the install's Compose directory, stop the server and repair its
+  `kysignon_data` volume with this disposable helper (the server image has no SQLite shell;
+  `apk` installs it only in the helper, which needs access to the Alpine package mirror):
+
+  ```bash
+  docker compose stop kyidentity-server
+  docker compose run --rm --no-deps -T --user 0 --entrypoint /bin/sh kyidentity-server -es <<'REPAIR'
+  apk add --no-cache sqlite
+  test -f /data/kyidentity.db
+  sqlite3 -bail /data/kyidentity.db <<'SQL'
+  BEGIN IMMEDIATE;
+  DELETE FROM system_settings WHERE key IN
+    ('kyrecovery_key_id', 'kyrecovery_threshold', 'kyrecovery_total_shares', 'kyrecovery_public_key');
+  COMMIT;
+  SQL
+  rm -f /data/recovery.pub
+  REPAIR
+  docker compose up -d --wait kyidentity-server
+  ```
+
+  This preserves pairing credentials, receipts and existing capsules. Pin the same key
+  again with the correct split, or pair again with a fresh code. Never delete the database
+  or its encryption/signing keys to repair a split. For a host install, stop it and run the
+  same SQL with the host's `sqlite3` on its data file, then remove only `recovery.pub`.
 - A scheduled backup that finds a pinned key it cannot load is recorded as a failed
   `admin.backup_run`; it is never skipped quietly.
 

@@ -69,8 +69,8 @@ func TestPairingReadsAreCoherentUnderConcurrentRepairing(t *testing.T) {
 				return backup.StorePairing(st, cfg.EncryptionKey, url, match[url])
 			})
 			writes.Add(1)
-			// Leave the readers room on the single writer, and on PostgreSQL other packages'
-			// tests too: the writer lock is one key for the whole test database.
+			// Leave this test's readers room on its schema's single writer.
+			// Other test schemas have separate writer-lock keys.
 			time.Sleep(pause)
 		}
 		writerDone <- err

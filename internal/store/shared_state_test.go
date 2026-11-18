@@ -494,7 +494,7 @@ func TestRenewalErrorsEndTheHoldOnlyNearExpiry(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			keepLease(ctx, stop, cancel, ttl, func(context.Context) (bool, error) { return renew() })
+			keepLease(ctx, stop, cancel, ttl, time.Now().Add(ttl), func(context.Context) (bool, error) { return renew() })
 		}()
 		select {
 		case <-done:
@@ -538,7 +538,7 @@ func TestABlockedRenewalEndsTheHoldBeforeExpiry(t *testing.T) {
 		defer cancel(nil)
 		begun := time.Now()
 		done := make(chan struct{})
-		go func() { defer close(done); keepLease(ctx, make(chan struct{}), cancel, ttl, blocked) }()
+		go func() { defer close(done); keepLease(ctx, make(chan struct{}), cancel, ttl, begun.Add(ttl), blocked) }()
 		select {
 		case <-done:
 		case <-time.After(2 * ttl):
@@ -554,13 +554,30 @@ func TestABlockedRenewalEndsTheHoldBeforeExpiry(t *testing.T) {
 			t.Fatalf("the hold ended after %v, want about %v and before %v", took, ttl-every, ttl)
 		}
 	})
+	t.Run("a slow take does not restart the expiry clock", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		// Half the lease elapsed before its successful take response arrived.
+		remaining := ttl / 2
+		expires := time.Now().Add(remaining)
+		done := make(chan struct{})
+		go func() { defer close(done); keepLease(ctx, make(chan struct{}), cancel, ttl, expires, blocked) }()
+		select {
+		case <-done:
+		case <-time.After(remaining):
+			t.Fatal("a delayed take response extended ownership past its original expiry")
+		}
+		if !errors.Is(context.Cause(ctx), ErrLeaseLost) {
+			t.Fatalf("cause %v", context.Cause(ctx))
+		}
+	})
 	t.Run("a release during the stuck renewal returns at once", func(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(context.Background())
 		stop, done := make(chan struct{}), make(chan struct{})
 		entered := make(chan struct{})
 		go func() {
 			defer close(done)
-			keepLease(ctx, stop, cancel, ttl, func(rctx context.Context) (bool, error) {
+			keepLease(ctx, stop, cancel, ttl, time.Now().Add(ttl), func(rctx context.Context) (bool, error) {
 				close(entered)
 				return blocked(rctx)
 			})

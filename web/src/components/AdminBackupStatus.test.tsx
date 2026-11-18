@@ -32,14 +32,15 @@ describe('backup status that has not been read', () => {
     for (const control of ['id="recovery-url"', 'id="pairing-code"', 'id="pin-key"', '>Pin key<', '>Pair<', '>Unpair<']) expect(html).not.toContain(control);
     expect(html).toMatch(/<button type="submit" class="primary-btn sm" disabled="">.*?<span>Save<\/span>/);
     expect(html).toMatch(/<button type="button" class="primary-btn sm" disabled="">.*?Back up now/);
+    expect(html).toMatch(/<select id="backup-interval"[^>]*disabled=""/);
   });
 });
 
 describe('a session that could not be checked', () => {
-  it('offers a retry and says the browser is still signed in, with no sign-in form', () => {
+  it('offers a retry without claiming a session exists, with no sign-in form', () => {
     const html = renderToStaticMarkup(<SessionUnavailable onRetry={() => {}} />);
     expect(html).toContain('Try again');
-    expect(html).toContain('You have not been signed out');
+    expect(html).toContain('whether you are signed in');
     expect(html).not.toMatch(/password|Sign in/i);
   });
 });
