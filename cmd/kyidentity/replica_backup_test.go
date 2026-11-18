@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -11,6 +11,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/capsule"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
@@ -214,13 +215,17 @@ func TestLocalBackupDirectoryLayouts(t *testing.T) {
 		if err != nil || runs != 4 {
 			t.Fatalf("%d successful runs for four due runs: %v", runs, err)
 		}
+		// Each replica's own backup page, its own data directory and handle, lists the same copies.
 		want := localCopies(t, cfg.BackupDir, cfg.AppName)
+		cfgs := make([]*config.Config, len(stores))
 		for i := range stores {
-			// Each replica lists the directory it is configured with: here, the same one.
-			replica := *cfg
-			replica.DataDir = filepath.Join(t.TempDir(), "replica")
-			if got := localCopies(t, replica.BackupDir, replica.AppName); !slices.Equal(got, want) {
-				t.Fatalf("handle %d lists %v, want %v", i, got, want)
+			own := *cfg
+			own.DataDir = t.TempDir()
+			cfgs[i] = &own
+		}
+		for i, got := range statusCopies(t, stores, cfgs) {
+			if !slices.Equal(got, want) {
+				t.Fatalf("replica %d's backup page lists %v, want %v", i, got, want)
 			}
 		}
 	})
@@ -267,7 +272,47 @@ func TestLocalBackupDirectoryLayouts(t *testing.T) {
 				t.Fatalf("round %d: %d capsules across the replicas, want %d", round, total, round)
 			}
 		}
+		// Each replica's backup page lists its own directory and nothing from the others'.
+		cfgs := make([]*config.Config, len(stores))
+		for i := range stores {
+			own := *cfg
+			own.BackupDir, own.BackupKeep, own.DataDir = dirs[i], 5, t.TempDir()
+			cfgs[i] = &own
+		}
+		for i, got := range statusCopies(t, stores, cfgs) {
+			if want := localCopies(t, dirs[i], cfg.AppName); !slices.Equal(got, want) {
+				t.Fatalf("replica %d's backup page lists %v, its directory holds %v", i, got, want)
+			}
+		}
 	})
+}
+
+// statusCopies serves each store with its configuration and returns the local copies each
+// server's GET /api/admin/backup/status lists, as an administrator signed in on the first.
+func statusCopies(t *testing.T, stores []*store.Store, cfgs []*config.Config) [][]string {
+	t.Helper()
+	var admin *adminClient
+	out := make([][]string, len(stores))
+	for i, s := range stores {
+		_, base := liveServer(t, cfgs[i], s)
+		if admin == nil {
+			admin = newAdminClient(t, s, base)
+		}
+		res := admin.at(base).do("GET", "/api/admin/backup/status")
+		var body struct {
+			LocalCopies []struct {
+				Name string `json:"name"`
+			} `json:"local_copies"`
+		}
+		if res.status != 200 || json.Unmarshal(res.body, &body) != nil {
+			t.Fatalf("replica %d status: %d %s", i, res.status, res.body)
+		}
+		for _, c := range body.LocalCopies {
+			out[i] = append(out[i], c.Name)
+		}
+		slices.Sort(out[i])
+	}
+	return out
 }
 
 // fakeDepositor is KyRecovery accepting a deposit and answering with its receipt.

@@ -155,6 +155,28 @@ func TestEveryIdentityContinuesPastImportedRows(t *testing.T) {
 		}
 	}
 	check("after import")
+	// TRUNCATE does not reset an identity, so without this the sequences would already be past
+	// the rows and the restore's own restart would go unchecked.
+	rows, err := pg.db.Query(`SELECT c.relname, a.attname FROM pg_attribute a
+ JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+ WHERE a.attidentity<>'' AND c.relkind='r' AND n.nspname=current_schema()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reset []string
+	for rows.Next() {
+		var table, col string
+		if err := rows.Scan(&table, &col); err != nil {
+			t.Fatal(err)
+		}
+		reset = append(reset, `ALTER TABLE `+quoteIdent(table)+` ALTER COLUMN `+quoteIdent(col)+` RESTART WITH 1`)
+	}
+	rows.Close()
+	for _, q := range reset {
+		if _, err := pg.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
 	event := &AuditEvent{ID: "restored", Action: "system.restored", Outcome: "success", CreatedAt: time.Now().UTC()}
 	if _, err := ImportSQLite(url, src, ImportOptions{Replace: true, Restored: event}); err != nil {
 		t.Fatal(err)

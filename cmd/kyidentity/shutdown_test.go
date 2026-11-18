@@ -130,6 +130,13 @@ type answer struct {
 	err    error
 }
 
+// at is the same signed-in browser talking to another server on the same database.
+func (c *adminClient) at(base string) *adminClient {
+	other := *c
+	other.base = base
+	return &other
+}
+
 func (c *adminClient) do(method, path string) answer {
 	req, _ := http.NewRequest(method, c.base+path, nil)
 	if c.csrf != "" {
@@ -147,6 +154,25 @@ func (c *adminClient) do(method, path string) answer {
 func (c *adminClient) start(method, path string) <-chan answer {
 	out := make(chan answer, 1)
 	go func() { out <- c.do(method, path) }()
+	return out
+}
+
+// answeredAt receives the one answer from ch and the time it came, from begun.
+func answeredAt(ch <-chan answer, begun *time.Time) <-chan struct {
+	answer
+	at time.Duration
+} {
+	out := make(chan struct {
+		answer
+		at time.Duration
+	}, 1)
+	go func() {
+		a := <-ch
+		out <- struct {
+			answer
+			at time.Duration
+		}{a, time.Since(*begun)}
+	}()
 	return out
 }
 
@@ -215,10 +241,13 @@ func TestGracefulStopDrainsCancelsAndWaits(t *testing.T) {
 			backupLoop(sched, work, cfg, s, deposits, audit.NewLogger(s), 20*time.Millisecond)
 		}()
 		deposits.wait(t, "the scheduled deposit")
-		drill := admin.start("POST", "/api/admin/backup/drill")
+		var begun time.Time
+		drill := answeredAt(admin.start("POST", "/api/admin/backup/drill"), &begun)
 		drills.wait(t, "the drill")
 
-		begun := time.Now()
+		begun = time.Now()
+		loopEnded := make(chan time.Duration, 1)
+		go func() { <-loopDone; loopEnded <- time.Since(begun) }()
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
@@ -256,8 +285,15 @@ func TestGracefulStopDrainsCancelsAndWaits(t *testing.T) {
 		if took < readinessDrainDelay || took > 20*time.Second+2*time.Second {
 			t.Fatalf("the replicated sequence took %v", took)
 		}
-		if res := <-drill; res.err != nil || res.status != http.StatusInternalServerError {
-			t.Fatalf("the in-flight drill: %d %s %v", res.status, res.body, res.err)
+		// Cancelled at the wait phase: after the drain and after the listener's full shutdown,
+		// which the in-flight drill holds open, never before.
+		phase := readinessDrainDelay + httpShutdownTimeout - 200*time.Millisecond
+		res := <-drill
+		if res.err != nil || res.status != http.StatusInternalServerError || res.at < phase {
+			t.Fatalf("the in-flight drill: %d %s %v at %v, want a failure after %v", res.status, res.body, res.err, res.at, phase)
+		}
+		if ended := <-loopEnded; ended < phase {
+			t.Fatalf("the scheduled run ended at %v, before the wait phase at %v", ended, phase)
 		}
 		if failures(t, s, "admin.backup_run") != 1 || failures(t, s, "admin.backup_drill_run") != 1 {
 			t.Fatalf("failures recorded: run %d, drill %d", failures(t, s, "admin.backup_run"), failures(t, s, "admin.backup_drill_run"))
@@ -278,12 +314,13 @@ func TestGracefulStopDrainsCancelsAndWaits(t *testing.T) {
 		srv, base := liveServer(t, cfg, s)
 		admin := newAdminClient(t, s, base)
 		checkHealth(t, admin, 200, "ok")
-		deposit := admin.start("POST", "/api/admin/backup/deposit")
+		var begun time.Time
+		deposit := answeredAt(admin.start("POST", "/api/admin/backup/deposit"), &begun)
 		deposits.wait(t, "back up now")
-		drill := admin.start("POST", "/api/admin/backup/drill")
+		drill := answeredAt(admin.start("POST", "/api/admin/backup/drill"), &begun)
 		drills.wait(t, "the drill")
 
-		begun := time.Now()
+		begun = time.Now()
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
@@ -308,9 +345,13 @@ func TestGracefulStopDrainsCancelsAndWaits(t *testing.T) {
 		if took := time.Since(begun); took > 8*time.Second+2*time.Second {
 			t.Fatalf("the single-server sequence took %v", took)
 		}
-		for name, ch := range map[string]<-chan answer{"back up now": deposit, "drill": drill} {
-			if res := <-ch; res.err != nil || res.status < 500 {
-				t.Fatalf("the in-flight %s: %d %s %v", name, res.status, res.body, res.err)
+		for name, ch := range map[string]<-chan struct {
+			answer
+			at time.Duration
+		}{"back up now": deposit, "drill": drill} {
+			// No drain: cancelled once the listener's shutdown has waited its full time.
+			if res := <-ch; res.err != nil || res.status < 500 || res.at < httpShutdownTimeout-200*time.Millisecond {
+				t.Fatalf("the in-flight %s: %d %s %v at %v", name, res.status, res.body, res.err, res.at)
 			}
 		}
 		if failures(t, s, "admin.backup_run") != 1 || failures(t, s, "admin.backup_drill_run") != 1 {

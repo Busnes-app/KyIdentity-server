@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	gosync "sync"
 	"syscall"
 	"testing"
@@ -52,16 +53,28 @@ func sessionCookies(t *testing.T, b *browser, base string) []*http.Cookie {
 
 // A replica told to stop leaves rotation first: its own /readyz answers 503 while its listener
 // still serves, it exits cleanly inside the grace period, and the other replica keeps
-// honouring the same session.
+// honouring the same session. On the way, the real server start sweeps a snapshot a crash
+// left in its data directory, and a replica configured unlike the others refuses to start.
 func TestStoppingAReplicaDrainsBeforeItCloses(t *testing.T) {
 	c := newCluster(t)
 	var live []*process
 	var liveMu gosync.Mutex
 	c.loadBalancer(func() []*process { liveMu.Lock(); defer liveMu.Unlock(); return live })
+	// What a backup killed mid-snapshot leaves: a plaintext database in an unlocked directory.
+	leftover := filepath.Join(c.dir, "b", "data", "snapshot-crashed")
+	if err := os.MkdirAll(leftover, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leftover, "kyidentity.db"), []byte("plaintext"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	a := c.spawn("a")
 	b := c.spawn("b")
 	c.waitReady(a)
 	c.waitReady(b)
+	if _, err := os.Stat(leftover); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the server start left the crashed snapshot in place: %v", err)
+	}
 	liveMu.Lock()
 	live = []*process{a, b}
 	liveMu.Unlock()
@@ -105,6 +118,21 @@ func TestStoppingAReplicaDrainsBeforeItCloses(t *testing.T) {
 	t.Logf("exited %v after SIGTERM", time.Since(signalled))
 	if status, _, err := probe(b.url, "/api/auth/me", cookies...); err != nil || status != 200 {
 		t.Fatalf("the remaining replica no longer honours the session: %d %v", status, err)
+	}
+
+	// A third replica with a different service name refuses to start, naming the setting only.
+	odd := c.spawn("odd", "KYIDENTITY_APP_NAME=OddServiceName")
+	select {
+	case <-odd.exited:
+	case <-time.After(60 * time.Second):
+		t.Fatal("a replica configured unlike the others kept running")
+	}
+	out := odd.log(t)
+	if odd.cmd.ProcessState.ExitCode() == 0 || !strings.Contains(out, "configuration differs") || !strings.Contains(out, "KYIDENTITY_APP_NAME") || strings.Contains(out, "OddServiceName") {
+		t.Fatalf("the mismatched replica exited %d:\n%s", odd.cmd.ProcessState.ExitCode(), out)
+	}
+	if status, _, err := probe(b.url, "/readyz"); err != nil || status != 200 {
+		t.Fatalf("the refused start disturbed the running replica: %d %v", status, err)
 	}
 	c.checkLogs()
 }
