@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -290,4 +292,76 @@ func TestReplicasSurviveAFrozenDatabase(t *testing.T) {
 	}
 	release()
 	c.checkLogs()
+}
+
+// A replica holding the backup lease whose own path to PostgreSQL freezes (the others still
+// reach it) ends its hold before the lease expires on the database, gives the lease back
+// within a bounded time, and another replica takes the lease only after that: the pgx driver
+// abandons the renewal at its deadline. Real driver and real network stall; the database
+// itself never stops.
+func TestALeaseHeldOverAFrozenConnectionEndsBeforeItExpires(t *testing.T) {
+	if os.Getenv("KYIDENTITY_TEST_DATABASE_URL") == "" {
+		t.Skip("needs KYIDENTITY_TEST_DATABASE_URL")
+	}
+	direct, err := store.PostgresURLForTest(filepath.Join(t.TempDir(), "partition.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(direct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRelay(t, u.Host)
+	u.Host = r.ln.Addr().String()
+	holder, err := store.NewPostgres(u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	other, err := store.NewPostgres(direct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+
+	const ttl = 2 * time.Second
+	ctx, release, ok, err := holder.HoldLease(context.Background(), backup.Lease, ttl)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	r.set(true) // a one-sided partition: only the holder's connections stall
+	frozen := time.Now()
+	taken := make(chan time.Duration, 1)
+	go func() { // the other replica tries for the lease the whole time
+		for time.Since(frozen) < ttl+10*time.Second {
+			if _, ok, err := other.AcquireLease(backup.Lease, time.Minute); err == nil && ok {
+				taken <- time.Since(frozen)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		taken <- -1
+	}()
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * ttl):
+		t.Fatal("the hold outlived its lease while the renewal was stuck on the network")
+	}
+	ended := time.Since(frozen)
+	if !errors.Is(context.Cause(ctx), store.ErrLeaseLost) || ended >= ttl {
+		t.Fatalf("the hold ended after %v (ttl %v) with %v", ended, ttl, context.Cause(ctx))
+	}
+	released := time.Now()
+	release()
+	if took := time.Since(released); took > 6*time.Second {
+		t.Fatalf("release waited %v on the frozen connection", took)
+	}
+	takenAt := <-taken
+	if takenAt < 0 {
+		t.Fatal("the other replica never got the lease")
+	}
+	if takenAt < ended {
+		t.Fatalf("the lease was taken %v after the freeze, before the hold ended at %v", takenAt, ended)
+	}
+	t.Logf("hold ended %v after the freeze, release took %v, lease taken by the other replica at %v", ended, time.Since(released), takenAt)
 }

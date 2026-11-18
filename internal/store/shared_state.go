@@ -43,15 +43,15 @@ func (s *Store) leaseNow() string {
 // pick a ttl longer than the work, or use HoldLease.
 func (s *Store) AcquireLease(name string, ttl time.Duration) (release func(), ok bool, err error) {
 	token := uuid.New().String()
-	if ok, err := s.takeLease(name, token, ttl); err != nil || !ok {
+	if ok, err := s.takeLease(context.Background(), name, token, ttl); err != nil || !ok {
 		return nil, false, err
 	}
 	return func() { s.dropLease(name, token) }, true, nil
 }
 
-func (s *Store) takeLease(name, token string, ttl time.Duration) (bool, error) {
+func (s *Store) takeLease(ctx context.Context, name, token string, ttl time.Duration) (bool, error) {
 	now := s.leaseNow()
-	res, err := s.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES(?,?,`+now+`+?)
+	res, err := s.db.ExecContext(ctx, `INSERT INTO leases(name, token, until_ms) VALUES(?,?,`+now+`+?)
  ON CONFLICT(name) DO UPDATE SET token=excluded.token, until_ms=excluded.until_ms WHERE leases.until_ms<=`+now,
 		name, token, ttl.Milliseconds())
 	if err != nil {
@@ -61,8 +61,14 @@ func (s *Store) takeLease(name, token string, ttl time.Duration) (bool, error) {
 	return n == 1, err
 }
 
+// leaseDropTimeout bounds giving a lease back. A database that does not answer keeps the
+// row until it expires, which is what a holder that died does too.
+const leaseDropTimeout = 5 * time.Second
+
 func (s *Store) dropLease(name, token string) {
-	_, _ = s.db.Exec(`DELETE FROM leases WHERE name=? AND token=?`, name, token)
+	ctx, cancel := context.WithTimeout(context.Background(), leaseDropTimeout)
+	defer cancel()
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM leases WHERE name=? AND token=?`, name, token)
 }
 
 // ErrLeaseLost is the cause of a HoldLease context that ended because the lease did.
@@ -71,20 +77,21 @@ var ErrLeaseLost = errors.New("the lease was lost to another holder or could not
 // HoldLease takes the named lease like AcquireLease and keeps it for as long as the work
 // runs, renewing it every ttl/4 on the database clock with a token-checked update. The
 // returned context ends, with cause ErrLeaseLost, when renewal finds the lease is no longer
-// this holder's, or when failed renewals leave less than one renewal interval of it; parent
-// ending ends it too. release stops renewing and gives the lease back. A lease is single
-// ownership of scheduling, not exactly-once: the work keeps its own idempotency.
+// this holder's, or when renewals that fail or do not answer leave less than one renewal
+// interval of it; parent ending ends it too. release stops renewing and gives the lease
+// back, both bounded when the database does not answer. A lease is single ownership of
+// scheduling, not exactly-once: the work keeps its own idempotency.
 func (s *Store) HoldLease(parent context.Context, name string, ttl time.Duration) (ctx context.Context, release func(), ok bool, err error) {
 	token := uuid.New().String()
-	if ok, err := s.takeLease(name, token, ttl); err != nil || !ok {
+	if ok, err := s.takeLease(parent, name, token, ttl); err != nil || !ok {
 		return nil, nil, false, err
 	}
 	ctx, cancel := context.WithCancelCause(parent)
 	stop, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(stopped)
-		keepLease(ctx, stop, cancel, ttl, func() (bool, error) {
-			res, err := s.db.Exec(`UPDATE leases SET until_ms=`+s.leaseNow()+`+? WHERE name=? AND token=?`, ttl.Milliseconds(), name, token)
+		keepLease(ctx, stop, cancel, ttl, func(rctx context.Context) (bool, error) {
+			res, err := s.db.ExecContext(rctx, `UPDATE leases SET until_ms=`+s.leaseNow()+`+? WHERE name=? AND token=?`, ttl.Milliseconds(), name, token)
 			if err != nil {
 				return false, err
 			}
@@ -93,17 +100,21 @@ func (s *Store) HoldLease(parent context.Context, name string, ttl time.Duration
 		})
 	}()
 	return ctx, sync.OnceFunc(func() {
+		// Cancel first: a renewal stuck on a database that does not answer returns now.
+		cancel(context.Canceled)
 		close(stop)
 		<-stopped
-		cancel(context.Canceled)
 		s.dropLease(name, token)
 	}), true, nil
 }
 
-// keepLease renews every ttl/4 until stop or ctx ends. A renewal that finds the row gone or
-// another token's ends the hold at once; a failed one ends it only once what is left of the
-// ttl is under one interval, since the next try would land after the lease expired.
-func keepLease(ctx context.Context, stop <-chan struct{}, lost context.CancelCauseFunc, ttl time.Duration, renew func() (bool, error)) {
+// keepLease renews every ttl/4 until stop or ctx ends. Each renewal must answer before the
+// lease, as this process measures it, has less than one interval left: the database clock
+// can be ahead of ours by the time the statement took, and another replica may take the
+// lease the moment it expires there. A renewal that finds the row gone or another token's
+// ends the hold at once; one that fails or runs out of time ends it only once less than one
+// interval is left, since the next try would land after the lease expired.
+func keepLease(ctx context.Context, stop <-chan struct{}, lost context.CancelCauseFunc, ttl time.Duration, renew func(context.Context) (bool, error)) {
 	every := ttl / 4
 	expires := time.Now().Add(ttl)
 	tick := time.NewTicker(every)
@@ -117,14 +128,19 @@ func keepLease(ctx context.Context, stop <-chan struct{}, lost context.CancelCau
 		case <-tick.C:
 		}
 		start := time.Now()
-		held, err := renew()
+		rctx, cancel := context.WithDeadline(ctx, expires.Add(-every))
+		held, err := renew(rctx)
+		cancel()
+		if ctx.Err() != nil {
+			return // released, or the parent ended
+		}
 		switch {
 		case err == nil && held:
 			expires = start.Add(ttl)
 		case err == nil:
 			lost(ErrLeaseLost)
 			return
-		case time.Until(expires) < every:
+		case time.Until(expires) <= every:
 			log.Printf("lease: renewal failed with too little of the lease left: %v", err)
 			lost(ErrLeaseLost)
 			return

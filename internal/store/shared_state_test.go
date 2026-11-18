@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -489,7 +492,10 @@ func TestRenewalErrorsEndTheHoldOnlyNearExpiry(t *testing.T) {
 		defer cancel(nil)
 		stop := make(chan struct{})
 		done := make(chan struct{})
-		go func() { defer close(done); keepLease(ctx, stop, cancel, ttl, renew) }()
+		go func() {
+			defer close(done)
+			keepLease(ctx, stop, cancel, ttl, func(context.Context) (bool, error) { return renew() })
+		}()
 		select {
 		case <-done:
 			return context.Cause(ctx)
@@ -513,5 +519,135 @@ func TestRenewalErrorsEndTheHoldOnlyNearExpiry(t *testing.T) {
 	}
 	if err := run(func() (bool, error) { return false, errors.New("database unreachable") }); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("failures past the margin: %v", err)
+	}
+}
+
+// A renewal that never answers (a one-sided partition, a stalled proxy: the statement is sent
+// and nothing comes back) ends the hold before the lease expires on the database, so the
+// work stops before another replica can take it; and a release while the renewal is stuck
+// returns at once instead of waiting for the database.
+func TestABlockedRenewalEndsTheHoldBeforeExpiry(t *testing.T) {
+	ttl := 800 * time.Millisecond
+	every := ttl / 4
+	blocked := func(rctx context.Context) (bool, error) {
+		<-rctx.Done() // what a driver does with a statement the network swallowed
+		return false, rctx.Err()
+	}
+	t.Run("ends with ErrLeaseLost before the ttl", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		begun := time.Now()
+		done := make(chan struct{})
+		go func() { defer close(done); keepLease(ctx, make(chan struct{}), cancel, ttl, blocked) }()
+		select {
+		case <-done:
+		case <-time.After(2 * ttl):
+			t.Fatal("a renewal that never answered kept the hold past the lease's expiry")
+		}
+		took := time.Since(begun)
+		if !errors.Is(context.Cause(ctx), ErrLeaseLost) {
+			t.Fatalf("cause %v", context.Cause(ctx))
+		}
+		// The first renewal starts at one interval and may run until one interval before
+		// expiry: the hold ends there, a full interval before the lease could be taken.
+		if took < ttl-every-50*time.Millisecond || took >= ttl {
+			t.Fatalf("the hold ended after %v, want about %v and before %v", took, ttl-every, ttl)
+		}
+	})
+	t.Run("a release during the stuck renewal returns at once", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		stop, done := make(chan struct{}), make(chan struct{})
+		entered := make(chan struct{})
+		go func() {
+			defer close(done)
+			keepLease(ctx, stop, cancel, ttl, func(rctx context.Context) (bool, error) {
+				close(entered)
+				return blocked(rctx)
+			})
+		}()
+		<-entered
+		released := time.Now()
+		cancel(context.Canceled) // HoldLease's release: cancel, then stop and wait
+		close(stop)
+		select {
+		case <-done:
+		case <-time.After(every):
+			t.Fatal("release waited on a renewal stuck on the database")
+		}
+		if took := time.Since(released); took > 100*time.Millisecond {
+			t.Fatalf("release took %v", took)
+		}
+		if !errors.Is(context.Cause(ctx), context.Canceled) {
+			t.Fatalf("a release is not a lost lease: %v", context.Cause(ctx))
+		}
+	})
+}
+
+// shiftedClock opens a second handle on the store at path whose sessions see the database
+// clock moved by shift: a schema-local clock_timestamp() ahead of pg_catalog on the search
+// path. It stands in for a database whose clock differs from the caller's.
+func shiftedClock(t *testing.T, path string, shift string) *Store {
+	t.Helper()
+	schema, _, err := testSchema(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b [6]byte
+	_, _ = rand.Read(b[:])
+	clock := "kt_clock_" + hex.EncodeToString(b[:])
+	admin, err := sql.Open("kypg", testDatabaseURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(`DROP SCHEMA ` + clock + ` CASCADE`); _ = admin.Close() })
+	for _, q := range []string{`CREATE SCHEMA ` + clock,
+		`CREATE FUNCTION ` + clock + `.clock_timestamp() RETURNS timestamptz LANGUAGE sql AS $$ SELECT pg_catalog.clock_timestamp() + interval '` + shift + `' $$`} {
+		if _, err := admin.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := openPostgres(testDatabaseURL(), schema+","+clock+",pg_catalog,public", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+// The lease is decided by the database's clock, never the caller's: with the database an hour
+// ahead of every caller, a row expired by the database is taken although every caller's clock
+// says it is live; with it an hour behind, a row live by the database is refused although
+// every caller's clock says it has expired. A lease computed on the caller's clock fails both.
+func TestLeaseFollowsTheDatabaseClockNotTheCallers(t *testing.T) {
+	requirePostgres(t)
+	path := filepath.Join(t.TempDir(), "clock.db")
+	plain, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	set := func(untilFromNow time.Duration) {
+		t.Helper()
+		if _, err := plain.db.Exec(`DELETE FROM leases WHERE name='job'`); err != nil {
+			t.Fatal(err)
+		}
+		// The true time in ms, written as a literal so the shifted handles' clocks do not apply.
+		if _, err := plain.db.Exec(`INSERT INTO leases(name, token, until_ms) VALUES('job','someone',?)`, time.Now().Add(untilFromNow).UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ahead, behind := shiftedClock(t, path, "1 hour"), shiftedClock(t, path, "-1 hour")
+	var dbNow int64
+	if err := ahead.db.QueryRow(`SELECT ` + ahead.leaseNow()).Scan(&dbNow); err != nil || dbNow-time.Now().UnixMilli() < 50*60*1000 {
+		t.Fatalf("the shifted handle does not see a shifted database clock: %d %v", dbNow-time.Now().UnixMilli(), err)
+	}
+
+	set(30 * time.Minute) // live to every caller, expired to a database an hour ahead
+	if _, ok, err := ahead.AcquireLease("job", time.Minute); err != nil || !ok {
+		t.Fatal("a lease the database holds expired was refused by the caller's clock:", ok, err)
+	}
+	set(-30 * time.Minute) // expired to every caller, live to a database an hour behind
+	if _, ok, err := behind.AcquireLease("job", time.Minute); err != nil || ok {
+		t.Fatal("a lease the database holds live was taken by the caller's clock:", ok, err)
 	}
 }
