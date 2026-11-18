@@ -40,6 +40,7 @@ type Server struct {
 	// deposits and drills in flight.
 	draining atomic.Bool
 	work     *backupWork
+	mux      *http.ServeMux
 }
 
 func NewServer(
@@ -71,6 +72,7 @@ func NewServer(
 	}
 
 	mux := srv.routes()
+	srv.mux = mux
 
 	// Order matters: the deadline covers everything, then cap the body before any handler
 	// reads it, then headers, then CSRF.

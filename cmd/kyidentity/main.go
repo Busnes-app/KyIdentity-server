@@ -300,7 +300,7 @@ func main() {
 	backupDone := make(chan struct{})
 	go func() {
 		defer close(backupDone)
-		backupLoop(ctx, work, cfg, dbStore, auditLogger, time.Minute)
+		backupLoop(ctx, work, cfg, dbStore, backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery), auditLogger, time.Minute)
 	}()
 
 	server := api.NewServer(
@@ -800,8 +800,7 @@ func describe(res backup.Result) string {
 // effect without a restart and a restart never loses its place: the last attempt is in the
 // database. It starts nothing once sched ends; a run in progress then ends with work, at the
 // shutdown's cancel phase, and records its failure before backupLoop returns.
-func backupLoop(sched, work context.Context, cfg *config.Config, dbStore *store.Store, auditLogger *audit.Logger, tick time.Duration) {
-	client := backup.NewKyRecoveryClient(cfg.BackupAllowPrivateRecovery)
+func backupLoop(sched, work context.Context, cfg *config.Config, dbStore *store.Store, client backup.Depositor, auditLogger *audit.Logger, tick time.Duration) {
 	// An install paired before the key was kept in the database shares it now, before
 	// another replica's backup comes due and needs it.
 	if _, err := backup.LoadRecoveryKey(cfg, dbStore); err != nil && !errors.Is(err, backup.ErrNotPaired) {

@@ -259,7 +259,7 @@ func TestBackupLoopStopsOnShutdown(t *testing.T) {
 	cancel()
 	done := make(chan struct{})
 	go func() {
-		backupLoop(ctx, context.Background(), cfg, s, audit.NewLogger(s), time.Minute)
+		backupLoop(ctx, context.Background(), cfg, s, nil, audit.NewLogger(s), time.Minute)
 		close(done)
 	}()
 	// The loop's ticker is a minute, so a loop that ignored ctx would still be blocked here.

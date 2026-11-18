@@ -347,6 +347,7 @@ func (h *BackupHandler) PairRemote(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 	case errors.Is(err, backup.ErrTopologyChanged):
 		fail(http.StatusConflict, "This recovery key is already pinned with a different custodian topology")
+		return
 	case errors.Is(err, fs.ErrExist):
 		fail(http.StatusConflict, "Already paired to a different recovery key")
 		return
