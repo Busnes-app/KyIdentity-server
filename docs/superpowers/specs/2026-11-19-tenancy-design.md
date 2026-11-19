@@ -56,7 +56,7 @@ check in code.
 | Member of org A, or staff working in org A | Read or change org B's users, groups, assignments, audit or policy by putting B's IDs in account, suite or admin calls | Every org-owned query runs through an `OrgStore`. For a member or a suite call it is bound to the authenticated principal's org, never to the request. For staff it is bound to the org the staff member selected (see Roles), and only after the caller is proven to be staff. A cross-org ID is `404`, the same answer as a missing one. Composite foreign keys on `group_memberships` make a cross-org membership impossible to write at the database level. An assignment has only one org-owned side, so it cannot span two orgs. Proven by the cross-org matrix test. Inbound SCIM and HR connectors are off in multi-tenant mode (see Per-org features), so they are no path. |
 | Member of org A | Gain access through a global app set to `all_active_users` that A's plan does not enable | Today `app_access_facts` is `app_registry CROSS JOIN users` (`pg_schema.go:512-517`), so that mode means every user on the install. The view gains a required join on `org_apps`/`orgs.all_apps` for the user's org. A test gives one org an app with all-users access and proves the other org's users get no access. |
 | Malicious relying party, or a bug in one | Forge or swap `org_id` | Tokens are RS256, signed by KyIdentity (`oauth.go:502`). `org_id` is read from `users.org_id` at issuance, never from the request. `users.org_id` is immutable: a trigger refuses any update, on both backends. Apps must take the org only from a verified token or a suite API answer (see Downstream contract). |
-| Thief of a platform token | Create, suspend or delete orgs; add or remove members | Platform tokens are 256-bit, stored hashed, scoped, expiring and revocable, like SCIM connector tokens (`pg_schema.go:343`, `scim_inbound.go:243`). They are accepted only on a separate platform listener that is never published through the public proxy. They are never accepted on the public listener, and browser sessions, SCIM tokens and OAuth clients are never accepted on the platform listener. A token reads lifecycle data, counts, and member emails and statuses, nothing else. Delete needs its own scope, and only works after a deletion was scheduled and its grace period has passed. Every call is audited. |
+| Thief of a platform token | Create, suspend or delete orgs; add or remove members | Platform tokens are 256-bit, stored hashed, scoped, expiring and revocable, like SCIM connector tokens (`pg_schema.go:343`, `scim_inbound.go:243`). They are accepted only on a separate platform listener that is never published through the public proxy. They are never accepted on the public listener, and browser sessions, SCIM tokens and OAuth clients are never accepted on the platform listener. An `orgs:*` token (billing service) reads lifecycle data and counts only, and no user data. A `members:*` token (customer portal) also reads member emails and statuses, and nothing else. A token never holds both kinds. Delete needs its own scope, and only works after a deletion was scheduled and its grace period has passed. Every call is audited. |
 | Compromised billing portal (the customer portal of our billing service) | Add or remove members, resend invites, or join an org by adding an attacker's address | The portal's token holds only `members:read` and `members:write`, not the org lifecycle scopes. Member writes are rate limited per org and per token. Each is audited in the org's log, queues an `org.member_changed` event, and mails a notice to the account holder. The added person gets an activation invite at their own address. A new member gets member rights only: no admin route, no export, no recovery of another member. Removing members is disruptive, and staff undo it. Whether member writes also need the account holder's own sign-in is open question 11. |
 | Staff abuse, or a stolen staff account | Read or change any org's directory: blast radius is every org | Staff need a passkey second factor, and step-up stays on sensitive routes (see Roles). Every staff read or write in a customer org is audited in that org's log, naming the org, and staff admins read the audit across orgs by actor. There is no impersonation: no "sign in as user", no password set on a customer account, no email change, and activation and reset links go only by mail to the address on file, never to the screen. Residual risk: staff see every org's directory. |
 | Replayed or reordered billing calls (Stripe retries, out-of-order webhooks) | Undo a suspension, or apply an old plan | Every mutating call has an `Idempotency-Key`, and every org lifecycle call a per-org `revision`. The same key and body returns the stored answer. The same key with a different body is `422`. A `revision` at or below the stored one is `409 stale_revision`. |
@@ -289,8 +289,8 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
 | Multi | **Staff**: accounts in the staff org (D8), admins and staff with today's delegations | The admin UI in any customer org, one selected org at a time, with today's permissions. Staff admins also use `platform` routes. | Sign in as a user, set a customer's password, change a customer's email, see an activation or reset link, read app content |
 | Multi | **Member**: every customer account | Its own account pages, and the apps its org's plan enables | Any admin route (refused as today, `writeForbidden` at `permissions.go:84`), any platform-listener route |
 | Multi | **Account holder**: one member (D9) | What a member can, plus the export-only session while a deletion is scheduled, the deletion banner, and member-change notices by mail | Anything a member cannot. It maps to no `Access` field and passes no permission check. |
-| Multi | **Billing service**: a platform token with `orgs:*` | Org lifecycle, plan, seats, apps, account holder | Read users, beyond member emails and statuses |
-| Multi | **Billing portal**: a platform token with `members:*` | Member endpoints | Org lifecycle |
+| Multi | **Billing service**: a platform token with `orgs:*` | Org lifecycle, plan, seats, apps, account holder (by `user_id`), counts | Read any user data, member emails and statuses included: those are `members:*` only |
+| Multi | **Billing portal**: a platform token with `members:*` | Member endpoints, which read member emails and statuses | Org lifecycle |
 
 **Staff.**
 
@@ -467,7 +467,7 @@ member is an everyday account (`role='user'`), and the endpoints reach no other 
 | Route | Scope | Effect |
 |---|---|---|
 | `GET /orgs/{id}/members` | `members:read` | `{user_id, email, status: pending\|active\|disabled, account_holder}` for each member. No names, sessions or factors. |
-| `POST /orgs/{id}/members` | `members:write` | `{email, name}`. Creates a pending member (username = email, D5) and mails an activation invite. An existing member of this org with that email is `200` with it. `409 email_in_use` if the email is elsewhere, `409 seat_limit`, `503 mail_not_configured`. |
+| `POST /orgs/{id}/members` | `members:write` | `{email, name}`. Creates a pending member (username = email, D5) and mails an activation invite. Answers `{user_id, status}`. An existing member of this org with that email is `200` with the same. `409 email_in_use` if the email is elsewhere, `409 seat_limit`, `503 mail_not_configured`. |
 | `POST /orgs/{id}/members/{user_id}/resend-invite` | `members:write` | Pending members only, otherwise `409`. Issues a new activation token, which ends the old one, and mails it. Rate limited per member. |
 | `POST /orgs/{id}/members/{user_id}/disable`, `…/enable` | `members:write` | Disable revokes every grant (`revokeSessionGrantsTx`). Enable adds a seat, so it is checked. |
 | `DELETE /orgs/{id}/members/{user_id}` | `members:write` | Deletes the account through the existing path (`DeleteUserWithSyncEvents`, `store.go:1073`), so apps get the usual deprovisioning event. |
@@ -495,9 +495,13 @@ backends:
 - The store maps both refusals to `ErrAccountHolder` (`409 account_holder` in the API, the
   same message in the admin UI). A holder row already due for expiry when the trigger
   lands is skipped and audited by `RunDueExpiries`, like its other per-account failures.
-- `orgs` `BEFORE INSERT` and `BEFORE UPDATE` of `account_holder_user_id`: the value must be a
-  live user of the same org. `POST /orgs` creates the user first, then sets the pointer, in
-  one transaction. NULL is refused once set, except by org deletion.
+- `orgs` `BEFORE INSERT`: the pointer must be NULL. No user of a new org can exist yet,
+  because `users.org_id` references `orgs(id)` (the Postgres FK, or the SQLite existence
+  trigger).
+- `orgs` `BEFORE UPDATE` of `account_holder_user_id`: the new value must be a live user of
+  the same org. Changing a set pointer to NULL is refused, except by org deletion.
+- `POST /orgs`, in one transaction: insert the org with a NULL pointer, create the pending
+  user in it, then set the pointer. The NULL never commits.
 - Org deletion clears the pointer first, then deletes the users, in one transaction.
 
 A pending holder whose activation token expires is not deleted. The open question 3 cleanup
@@ -662,7 +666,7 @@ tests.
        `POST /orgs` with a pending holder succeeds.
      - Delete removes every org row, checked against the table classification.
      - Platform tokens are refused on the public listener, and browser and SCIM
-       credentials are refused on the platform listener. A `members:*` token is refused on
+       credentials are refused on the platform listener. An `orgs:*` token is refused on every member endpoint. A `members:*` token is refused on
        every org lifecycle route.
      - The account holder cannot be deleted, disabled or ended through any path: the
        member endpoints, the admin UI routes, `disable-user`, `RunDueExpiries` and the
@@ -833,6 +837,16 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `hr_workers` | `hr.go:51` | (migration 3) | D | `connector_id` FK |
 | `suite_groups` | `suite_groups.go:16` | (migration 4) | O | A tombstone with no FK, so it needs its own `org_id`. Slug unique per org. Unverified: whether any app uses the slug in a global namespace (for example KyPost list addresses). |
 | `suite_group_apps` | `suite_groups.go:19` | (migration 4) | D | `group_id` FK to `suite_groups` |
+
+Tables this spec adds (migration 6, both backends):
+
+| Table | Class | Reasoning |
+|---|---|---|
+| `orgs` | P | The tenant registry. It is the target of every `org_id`, not a row in an org. `DELETE /orgs/{id}` keeps it as a tombstone. |
+| `org_apps` | O | `org_id` is part of its primary key. `DELETE /orgs/{id}` removes it with the org's other rows. |
+| `platform_tokens` | P | Credentials of the billing service and portal, which span every org |
+| `platform_requests` | P | Idempotency records, keyed by token and kept 30 days. Stored responses hold IDs and states only (member writes answer `{user_id, status}`), so no user data outlives a deleted org here. |
+| `platform_events` | P | Outbox to billing. `org_id` is a plain reference with no FK, because `org.deleted` must still be delivered after the org's rows are gone. Bodies carry no personal data (see Events back to billing). Delivered rows are removed after 30 days. |
 
 `account_sync_events_new` (`store.go:872`) is a temporary name inside the legacy rebuild,
 not a live table.
