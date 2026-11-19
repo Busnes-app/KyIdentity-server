@@ -60,7 +60,7 @@ check in code.
 | Compromised billing portal (the customer portal of our billing service) | Add or remove members, resend invites, or join an org by adding an attacker's address | The portal's token holds only `members:read` and `members:write`, not the org lifecycle scopes. Member writes are rate limited per org and per token. Each is audited in the org's log, queues an `org.member_changed` event, and mails a notice to the account holder. The added person gets an activation invite at their own address. A new member gets member rights only: no admin route, no export, no recovery of another member. Removing members is disruptive, and staff undo it. Whether member writes also need the account holder's own sign-in is open question 11. |
 | Staff abuse, or a stolen staff account | Read or change any org's directory: blast radius is every org | Staff need a passkey second factor, and step-up stays on sensitive routes (see Roles). Every staff read or write in a customer org is audited in that org's log, naming the org, and staff admins read the audit across orgs by actor. There is no impersonation: no "sign in as user", no password set on a customer account, no email change, and activation and reset links go only by mail to the address on file, never to the screen. Residual risk: staff see every org's directory. |
 | Replayed or reordered billing calls (Stripe retries, out-of-order webhooks) | Undo a suspension, or apply an old plan | Every mutating call has an `Idempotency-Key`, and every org lifecycle call a per-org `revision`. The same key and body returns the stored answer. The same key with a different body is `422`. A `revision` at or below the stored one is `409 stale_revision`. |
-| User of a suspended or deleted org | Keep working | Suspension revokes every session, refresh family, issued token and forward session in one transaction (`revokeSessionGrantsTx`, `sessions.go:136`), and queues back-channel logouts. Every sign-in path checks one `active_principals` view (user active and org active). Access tokens live 15 minutes at most (`oauth.go:22`). `/oauth/userinfo` refuses at once. Apps see `status: suspended` within one poll (≤ 60 s). |
+| User of a suspended or deleted org | Keep working | Suspension revokes every session, refresh family, issued token and forward session in one transaction (`revokeSessionGrantsTx`, `sessions.go:136`), and queues back-channel logouts. Everything that grants or uses access checks one `active_principals` view (user active and org active). Only the credential steps of interactive sign-in skip it, and they grant nothing (see Views). Access tokens live 15 minutes at most (`oauth.go:22`). `/oauth/userinfo` refuses at once. Apps see `status: suspended` within one poll (≤ 60 s). |
 | Customer of org A, adding members through the billing portal | Take over a person's identity by creating an account with their email (email squatting) | Emails are globally unique, so whoever creates an address first holds it. A pending account cannot sign in, and resets go only to a verified address (`onboarding_handlers.go:209`). A pending, never-activated account gives up its email when its activation token expires (open question 3). Nobody in another org can edit, reset or claim that account. |
 | Anyone at the sign-in page | Find out whether an email exists, or which org it is in | Unknown, inactive and locked accounts all answer like a wrong password, after the same Argon2 cost (`auth_handlers.go:100-104`, `loginRefusal` at `:296`). A suspended org's account gives the same answers until every factor has passed. Only then does it get `org_suspended` (owner answer 4, see Suspension), which only a holder of valid credentials can reach. Forgot-password always answers the same way (`onboarding_handlers.go:178-197`). No sign-in or recovery answer names an org. |
 | Customer of org A, adding members through the billing portal | Find out whether an email exists in another org, from a `409` on add | Unavoidable with global uniqueness (D5). The answer is `409 email_in_use`, never "in another org". Adds are rate limited per org. Residual risk. |
@@ -164,10 +164,22 @@ Views (`app_access.go:58-65`, `pg_schema.go:510-545`):
 - The enrollment views (`group_enrollment.go:68-78`) do not change. With platform-wide
   policies (D10), the `organization` scope means every account, and the `administrators`
   scope means staff, since only staff hold `role='admin'` or delegations (D8).
-- `active_principals` is new: users that are active and not ended, joined to an org that is
-  `active`. Every sign-in, token and session check reads it, in place of the inline
-  `users.status = 'active'` tests spread across the store today (for example
-  `store.go:2660`, `pg_schema.go:513`).
+- Two named predicates replace the inline `users.status = 'active'` tests spread across
+  the store today (for example `store.go:2660`, `pg_schema.go:513`):
+  - **`credential_principals`**: users that are active and not ended, with the org's
+    state ignored. This is today's check, under a name. Only the credential steps of
+    interactive sign-in read it: the user lookup, password verification, lockout, the MFA
+    token store and `resolveMFAToken`, and passkey assertion. These steps grant nothing.
+  - **`active_principals`** (a view): the same users, joined to an org that is `active`.
+    Everything that grants or uses access reads it: session creation, code and token
+    issuance, refresh, device sign-on, code exchange, userinfo, forward sessions, session
+    checks and the suite APIs.
+  - Interactive sign-in ends in one session-creation function. Inside its transaction it
+    re-reads the user through `active_principals`. A user who passed every credential step
+    but whose org is not `active` gets `ErrOrgSuspended` and no session (see Suspension).
+    That function is also the only place the export-only exception below is made.
+  - `TestOrgSQLNamesOrgID`'s allowlist names the `credential_principals` call sites. A new
+    one fails the build until it is listed with a reason.
 - One exception is outside `active_principals`. While its org is `deletion_scheduled`,
   the org's account holder may sign in with password and second factor.
   - The session is marked restricted. It works like today's `enrollment_only` sessions
@@ -437,6 +449,10 @@ listener is served on it.
   different hash is `422 idempotency_conflict`.
 - Org lifecycle writes carry `revision`, a per-org counter the billing service increases.
   One at or below `orgs.billing_revision` is `409 stale_revision` with the current value.
+- Order of checks for every write: `billing_ref` on create (below), then the
+  `platform_requests` lookup, then `revision`. A retry with the same key and body
+  therefore gets its stored answer, even though its revision now equals
+  `billing_revision`. Only a call under a new key is checked for a stale revision.
   Member writes carry no `revision`. They are synchronous user actions from the portal, not
   replayed webhooks, and each is idempotent on its target state.
 - `billing_ref` is unique. A `POST /orgs` whose `billing_ref` already exists is decided
@@ -524,12 +540,14 @@ After that:
 - Refresh, device sign-on and code exchange are refused with their generic answers, because
   `active_principals` excludes the org.
 - Interactive sign-in (owner answer 4, option (b)):
-  - The password and second-factor steps run as for any active account. They take the same
-    Argon2 cost, give the same wrong-password answer, and apply the same lockout. A wrong
-    credential never reveals the org's state.
-  - Only after every factor the account requires has passed does sign-in answer
-    `org_suspended` ("Your organisation is suspended"), instead of creating a session. It
-    issues no session, code or token.
+  - The password and second-factor steps read `credential_principals`, so they run as for
+    any active account. They take the same Argon2 cost, give the same wrong-password
+    answer, and apply the same lockout. A wrong credential never reveals the org's state.
+    The MFA token they store is the usual short-lived challenge token, and it grants
+    nothing by itself.
+  - Only after every factor the account requires has passed does session creation read
+    `active_principals`, refuse, and answer `org_suspended` ("Your organisation is
+    suspended"). It issues no session, code or token, and the MFA token is spent.
   - The factors required are whatever the platform-wide enrollment policy (D10) requires
     of that account. Where it requires a second factor, the answer needs both. A member it
     leaves with a password only sees the answer after a correct password.
@@ -656,7 +674,11 @@ tests.
    create, update, suspend, resume and deletion, the member endpoints, the account holder
    and its notices, the events outbox, and `active_principals`.
    - Tests:
-     - Replay, conflict and stale-revision cases.
+     - Replay, conflict and stale-revision cases, including a retry of a successful
+       suspend under the same key and body, which must get the stored answer and not
+       `stale_revision`.
+     - Every `credential_principals` call site is on the allowlist. A suspended-org user
+       reaches the second factor and gets `org_suspended` only from session creation.
      - Suspension ends every grant: a table of every credential type, like
        `TestForwardRevocationWithin30Seconds`.
      - Every sign-in path refuses a suspended org. Interactive sign-in gives the
