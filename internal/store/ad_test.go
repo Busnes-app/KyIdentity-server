@@ -285,3 +285,33 @@ func TestDirectoryPasswordQueueReportsReadErrors(t *testing.T) {
 		t.Fatal("a failed read of the current hash was reported as nothing to queue", n, err)
 	}
 }
+
+func TestDirectoryPasswordRetriesDoNotBlockTheQueue(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	_, app := adStoreFixture(t, s, "ad-1")
+	var users []*User
+	for i := 0; i < 3; i++ {
+		u := createTestUser(t, s)
+		if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Queued-pass-1"), queuedAudit); err != nil {
+			t.Fatal(err)
+		}
+		users = append(users, u)
+	}
+	page, err := s.PendingADPasswords("ad-1", time.Now(), 2)
+	if err != nil || len(page) != 2 {
+		t.Fatal(page, err)
+	}
+	for _, e := range page {
+		if err := s.FinishADPassword("ad-1", e.UserID, e.Seq, "retry", "user_not_found"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next, err := s.PendingADPasswords("ad-1", time.Now(), 2)
+	if err != nil || len(next) != 2 || next[0].UserID != users[2].ID {
+		t.Fatal("retried entries kept the untried one off the page", next, err)
+	}
+}

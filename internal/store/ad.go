@@ -260,10 +260,11 @@ type ADPasswordEntry struct {
 	Signature  string `json:"signature"`
 }
 
-// PendingADPasswords returns a connector's live entries, oldest first.
+// PendingADPasswords returns a connector's live entries, least-tried first, then oldest, so
+// entries the agent keeps retrying cannot hold newer ones off the page.
 func (s *Store) PendingADPasswords(systemID string, now time.Time, limit int) ([]ADPasswordEntry, error) {
 	now = now.UTC()
-	rows, err := s.db.Query(`SELECT user_id,seq,expires_at,ciphertext,signature FROM ad_passwords WHERE system_id=? AND ciphertext<>'' AND expires_at>? ORDER BY seq LIMIT ?`, systemID, now, limit)
+	rows, err := s.db.Query(`SELECT user_id,seq,expires_at,ciphertext,signature FROM ad_passwords WHERE system_id=? AND ciphertext<>'' AND expires_at>? ORDER BY attempts,seq LIMIT ?`, systemID, now, limit)
 	if err != nil {
 		return nil, err
 	}

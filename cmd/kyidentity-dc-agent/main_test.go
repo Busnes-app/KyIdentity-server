@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -87,6 +88,9 @@ func newFixture(t *testing.T) *fixture {
 		BindPasswordFile: filepath.Join(dir, "bind"), BaseDN: testOU}
 	raw, _ := json.Marshal(cfg)
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadOrCreateKey(cfg.KeyFile); err != nil {
 		t.Fatal(err)
 	}
 	a, err := newAgent(filepath.Join(dir, "config.json"))
@@ -288,5 +292,18 @@ func TestAgentKeyFile(t *testing.T) {
 	}
 	if _, err := loadOrCreateKey(path); err == nil {
 		t.Fatal("a world-readable key was used")
+	}
+}
+
+func TestRunRefusesAMissingKey(t *testing.T) {
+	f := newFixture(t)
+	if err := os.Remove(f.agent.cfg.KeyFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newAgent(filepath.Join(f.dir, "config.json")); err == nil || !strings.Contains(err.Error(), "init") {
+		t.Fatal("run started without its key", err)
+	}
+	if _, err := os.Stat(f.agent.cfg.KeyFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("run created a key file", err)
 	}
 }

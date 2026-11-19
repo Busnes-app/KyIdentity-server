@@ -114,11 +114,12 @@ func readSecretFile(field, path string) ([]byte, error) {
 	return raw, nil
 }
 
+// loadOrCreateKey is init's: it creates the key once and reloads it after.
 func loadOrCreateKey(path string) (*ecdh.PrivateKey, error) {
 	if path == "" {
 		return nil, errors.New("-key is required")
 	}
-	raw, err := readSecretFile("keyFile", path)
+	k, err := loadKey(path)
 	if errors.Is(err, os.ErrNotExist) {
 		k, err := adpass.GenerateKey()
 		if err != nil {
@@ -133,6 +134,13 @@ func loadOrCreateKey(path string) (*ecdh.PrivateKey, error) {
 		}
 		return k, f.Close()
 	}
+	return k, err
+}
+
+// loadKey is run's: a missing key is an error, never a new key, because a new key would
+// fail to open every queued entry and the server would discard them.
+func loadKey(path string) (*ecdh.PrivateKey, error) {
+	raw, err := readSecretFile("keyFile", path)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +187,9 @@ func newAgent(path string) (*agent, error) {
 	if a.signing, err = adpass.ParseSigningKey(c.SigningKey); err != nil {
 		return nil, fmt.Errorf("kyidentitySigningKey: %w", err)
 	}
-	if a.key, err = loadOrCreateKey(c.KeyFile); err != nil {
+	if a.key, err = loadKey(c.KeyFile); errors.Is(err, os.ErrNotExist) {
+		return nil, errors.New("keyFile does not exist; create it with kyidentity-dc-agent init -key FILE and set its public key in KyIdentity")
+	} else if err != nil {
 		return nil, err
 	}
 	for _, f := range []struct {
