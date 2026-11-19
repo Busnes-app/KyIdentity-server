@@ -362,7 +362,7 @@ func TestDirectoryPasswordsAfterARestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	report, err := s.ApplyRestoredState(time.Now().UTC(), nil)
-	if err != nil || report.DirectoryPasswords != 1 || report.QueuedDeliveries != outbox {
+	if err != nil || report.ADEntriesDiscarded != 1 || report.QueuedDeliveries != outbox {
 		t.Fatalf("restore report %+v, %v: directory passwords are counted on their own", report, err)
 	}
 	var ct string

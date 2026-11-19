@@ -99,7 +99,7 @@ func TestRestoreInvalidatesEphemeralCredentialsAndHoldsProvisioning(t *testing.T
 	// go with them by cascade. Two
 	// deliveries are queued: the assignment's own and the one standing in for the
 	// capsule's.
-	if report.Credentials != 16 || report.QueuedDeliveries != 2 || report.DirectoryPasswords != 0 || report.HeldConnectors != 1 {
+	if report.Credentials != 16 || report.QueuedDeliveries != 2 || report.ADEntriesDiscarded != 0 || report.HeldConnectors != 1 {
 		t.Fatalf("report: %+v", report)
 	}
 	if len(report.Connectors) != 1 || report.Connectors[0] != "hr" {

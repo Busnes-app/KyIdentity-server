@@ -940,7 +940,7 @@ func restoredEvent(l *audit.Logger, marker restoreMarker) *audit.Pending {
 
 func describeRestore(report store.RestoreReport) string {
 	return fmt.Sprintf("Restored directory applied: %d credential(s) invalidated, %d queued delivery/deliveries closed, %d directory password(s) discarded, %d back-channel logout(s) queued for the logins it ended, provisioning held on %v until each is reconciled; review their stored credentials for rotation",
-		report.Credentials, report.QueuedDeliveries, report.DirectoryPasswords, report.LogoutsQueued, report.Connectors)
+		report.Credentials, report.QueuedDeliveries, report.ADEntriesDiscarded, report.LogoutsQueued, report.Connectors)
 }
 
 // sha256Hex is a capsule's digest as KyRecovery records it at deposit.

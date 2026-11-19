@@ -57,8 +57,8 @@ type RestoreReport struct {
 	Credentials int
 	// QueuedDeliveries counts outbox rows closed out rather than delivered.
 	QueuedDeliveries int
-	// DirectoryPasswords counts sealed AD passwords discarded, none of which may reach AD.
-	DirectoryPasswords int
+	// ADEntriesDiscarded counts sealed directory-queue entries discarded; none may reach AD.
+	ADEntriesDiscarded int
 	// LogoutsQueued counts back-channel logouts newly queued for the logins this
 	// restore ended. Logouts already owed are kept, not counted again.
 	LogoutsQueued int
@@ -192,7 +192,7 @@ func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEven
 		if n, err = res.RowsAffected(); err != nil {
 			return err
 		}
-		report.DirectoryPasswords = int(n)
+		report.ADEntriesDiscarded = int(n)
 
 		rows, err := tx.Query(`SELECT name FROM paired_systems WHERE status<>'disabled' ORDER BY name`)
 		if err != nil {
@@ -235,7 +235,7 @@ func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEven
 			}
 			details["credentialsInvalidated"] = report.Credentials
 			details["queuedDeliveriesClosed"] = report.QueuedDeliveries
-			details["directoryPasswordsDiscarded"] = report.DirectoryPasswords
+			details["directoryPasswordsDiscarded"] = report.ADEntriesDiscarded
 			details["logoutsQueued"] = report.LogoutsQueued
 			details["connectorsHeld"] = report.Connectors
 			details["scheduledDepositsOff"] = true
