@@ -1,7 +1,7 @@
 # Tenancy: single-tenant and multi-tenant (SaaS), design
 
 Date: 2026-11-19. Owner decisions: 2026-11-19 tenancy brief (fixed, listed below). Worker:
-tenancy-spec. Status: design only, nothing built.
+tenancy-spec. Status: approved design, nothing built.
 
 KyIdentity today is one organisation per install (`AGENTS.md:3`, `design.md:31` defers
 multi-tenancy). This spec adds a second mode to the same binary. **Single-tenant** is
@@ -626,7 +626,10 @@ tests.
      (one succeeds), and app disablement removing access and suite listing.
 7. (Optional) **Postgres row-level security** as extra protection.
 
-## Open questions for the owner
+## Owner answers
+
+On 2026-11-19 the owner approved every recommendation below. Where a recommendation is
+conditional (10, 11), the condition decides it when the billing service is designed.
 
 1. **Multi-tenant only on Postgres?**
    - (a) Yes.
