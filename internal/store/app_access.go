@@ -81,6 +81,10 @@ func revokeLostAppAccessTx(tx *sql.Tx) error {
 	if _, err := tx.Exec(`DELETE FROM authorization_codes AS t WHERE ` + lost); err != nil {
 		return err
 	}
+	// An approval must not come back to life if the access is granted again.
+	if _, err := tx.Exec(`UPDATE device_codes AS t SET status='denied' WHERE status='approved' AND redeemed_at IS NULL AND ` + lost); err != nil {
+		return err
+	}
 	// A client that saw a login for access that no longer exists is told to log out,
 	// and the sid mapping goes with the access so the delivery happens once.
 	lostSession := `NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE e.user_id=cs.user_id AND a.client_id=cs.client_id)`

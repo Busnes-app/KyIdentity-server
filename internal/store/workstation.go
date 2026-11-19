@@ -200,6 +200,12 @@ func (s *Store) UpdateWorkstationApp(clientID string, grant bool, ttl, window in
 			return ErrNotFound
 		}
 		now := time.Now().UTC()
+		if !grant {
+			// Turning the grant off ends every code in flight; turning it on again revives none.
+			if _, err = tx.Exec(`UPDATE device_codes SET status='denied' WHERE client_id=? AND status IN ('pending','approved') AND redeemed_at IS NULL`, clientID); err != nil {
+				return err
+			}
+		}
 		if window == 0 {
 			_, err = revokeSessionsTx(tx, now, `workstation_client_id=?`, clientID)
 			return err

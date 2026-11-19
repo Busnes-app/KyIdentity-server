@@ -641,3 +641,37 @@ func TestAppAccessRevocationWithdrawsWorkstationAccess(t *testing.T) {
 		t.Fatal("workstation session survived the app revocation")
 	}
 }
+
+// Losing app access withdraws an unredeemed approval, so restoring the access does not
+// revive it.
+func TestLostAccessWithdrawsApprovalForGood(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	u, cookie := f.assignedUser()
+	device, userCode := f.start()
+	if rr := f.decide(cookie, userCode, true); rr.Code != 200 {
+		t.Fatalf("approve: %d", rr.Code)
+	}
+	if err := f.db.SetAppAssignment(f.appID, "users", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppAssignment(f.appID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := f.poll(f.clientID, device); status == 200 || body["error"] != "access_denied" {
+		t.Fatalf("approval revived with the access: %d %v", status, body)
+	}
+	// Turning the grant off and on again does not revive an approval either.
+	device, userCode = f.start()
+	if rr := f.decide(cookie, userCode, true); rr.Code != 200 {
+		t.Fatalf("approve: %d", rr.Code)
+	}
+	f.settings(false, 300, 604800)
+	f.settings(true, 300, 604800)
+	if status, body := f.poll(f.clientID, device); status == 200 || body["error"] != "access_denied" {
+		t.Fatalf("approval revived with the grant: %d %v", status, body)
+	}
+	if f.workstationSessions(u.ID) != 0 {
+		t.Fatal("a workstation session was created")
+	}
+}
