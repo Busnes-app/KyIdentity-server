@@ -182,6 +182,11 @@ export function ActiveDirectoryPanel({ system, onClose, onTest }: { system: Pair
     <button className="secondary-btn sm" onClick={onClose}>Close</button>
     {token && <IssuedAgentToken token={token} />}
     {data && <>
+      <div className="form-group">
+        <label className="form-label" htmlFor={`signing-${system.id}`}>KyIdentity signing key</label>
+        <input id={`signing-${system.id}`} className="form-input font-mono" readOnly value={data.entrySigningKey} />
+        <span className="muted">Put this in the agent configuration as <code>kyidentitySigningKey</code>; the agent refuses entries it does not sign.</span>
+      </div>
       <h4>Directory passwords</h4>
       <DirectoryPasswords passwords={data.passwords} busy={busy} onRequest={request} />
       <details className="settings-section">

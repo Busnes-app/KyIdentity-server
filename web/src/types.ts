@@ -80,6 +80,8 @@ export interface ADPasswordStatus {
 
 export interface ActiveDirectory {
   ldapsUrl: string;
+  /** KyIdentity's public entry-signing key, pinned in the agent configuration. */
+  entrySigningKey: string;
   settings: ADSettings;
   passwords: ADPasswordStatus[];
 }

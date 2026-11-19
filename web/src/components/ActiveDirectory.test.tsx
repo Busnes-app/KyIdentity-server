@@ -39,7 +39,7 @@ describe('active directory connector', () => {
   });
 
   it('never pre-fills or shows the bind password', () => {
-    const parsed = parseActiveDirectory({ ldapsUrl: 'ldaps://dc1', bindPassword: 'leak', settings: { systemId: 's1', bindDn: 'b', baseDn: 'o', caPem: 'p', agentPublicKey: '', agentTokenSet: true, passwordTtlMinutes: 60, bindPassword: 'leak' }, passwords: [] });
+    const parsed = parseActiveDirectory({ ldapsUrl: 'ldaps://dc1', entrySigningKey: 'ed25519:k', bindPassword: 'leak', settings: { systemId: 's1', bindDn: 'b', baseDn: 'o', caPem: 'p', agentPublicKey: '', agentTokenSet: true, passwordTtlMinutes: 60, bindPassword: 'leak' }, passwords: [] });
     expect(JSON.stringify(parsed)).not.toContain('leak');
     const html = renderToStaticMarkup(<ADFields value={{ ...ad, bindPassword: '' }} onChange={() => {}} passwordSet />);
     expect(html).toContain('Bind password: set');

@@ -390,6 +390,7 @@ export function parseActiveDirectory(value: unknown): ActiveDirectory {
   const s = obj(o.settings, 'Active Directory settings');
   return {
     ldapsUrl: str(o, 'ldapsUrl'),
+    entrySigningKey: str(o, 'entrySigningKey'),
     settings: {
       systemId: str(s, 'systemId'), bindDn: str(s, 'bindDn'), baseDn: str(s, 'baseDn'), caPem: str(s, 'caPem'),
       agentPublicKey: str(s, 'agentPublicKey'), agentTokenSet: requiredBool(s, 'agentTokenSet'), passwordTtlMinutes: directoryCount(s, 'passwordTtlMinutes'),
