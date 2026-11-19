@@ -206,7 +206,7 @@ Views (`app_access.go:58-65`, `pg_schema.go:510-545`):
   - It issues no codes or tokens and opens no suite or forward session.
   - A test calls every other route with such a session and expects a refusal.
 
-### Migration of an existing install (schema version 6)
+### Migration of an existing install (the tenancy schema version)
 
 One migration (`migrations.go:23` list), on both backends:
 
@@ -678,11 +678,11 @@ Before PR 6, member adds do not enforce seats. Until PR 6, multi-tenant code run
 tests.
 
 1. **Org model and default-org migration.**
-   - Adds schema version 6 on both backends: the tables, columns, triggers and views above,
+   - Adds the next free schema version on both backends (6 is workstation login, and 7 is Active Directory if PR 256 lands first): the tables, columns, triggers and views above,
      and `tenancy_mode`. No delegation kind changes. The account holder guard triggers
      land here too. Single-tenant never sets the pointer, so they never fire there.
    - Tests:
-     - An upgrade test from a version 5 database on both backends (`upgrade_test.go`
+     - An upgrade test from the previous version's database on both backends (`upgrade_test.go`
        style). Every view returns the same rows before and after.
      - `TestEveryTableIsClassified` and `TestOrgOwnedTablesHaveOrgID`.
      - `TestBackendsHaveTheSameColumns` still passes.
@@ -899,7 +899,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `suite_groups` | `suite_groups.go:16` | (migration 4) | O | A tombstone with no FK, so it needs its own `org_id`. Slug unique per org. Unverified: whether any app uses the slug in a global namespace (for example KyPost list addresses). |
 | `suite_group_apps` | `suite_groups.go:19` | (migration 4) | D | `group_id` FK to `suite_groups` |
 
-Tables this spec adds (migration 6, both backends):
+Tables this spec adds (the tenancy migration, both backends):
 
 | Table | Class | Reasoning |
 |---|---|---|
