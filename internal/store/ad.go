@@ -172,8 +172,10 @@ func passwordTag(hash string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// QueueDirectoryPassword seals plaintext for every AD connector that holds the user and has
-// an agent key, replacing any undelivered entry. It queues only while passwordHash is still
+// QueueDirectoryPassword seals plaintext for every AD connector that has ever held the user
+// (a disabled account included) and has an agent key, replacing any undelivered entry. A
+// reset while the account is disabled must replace the directory's copy before the account
+// can be enabled again (see ADPasswordBehind). It queues only while passwordHash is still
 // the user's current hash, so of two racing changes only the current one is queued, and
 // with the higher sequence number. audit builds one row per queued entry.
 func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string, plaintext []byte, audit func(systemID string, seq int64, superseded bool) *AuditEvent) (int, error) {
@@ -201,7 +203,7 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 	}
 	rows, err := tx.Query(`SELECT c.system_id,c.agent_public_key,c.agent_key_mac,c.password_ttl_minutes,COALESCE(p.seq,0),COALESCE(p.ciphertext,'')<>''
  FROM ad_connectors c JOIN paired_systems s ON s.id=c.system_id
- JOIN sync_resource_state st ON st.system_id=c.system_id AND st.resource_id=? AND st.kind='user' AND st.active
+ JOIN sync_resource_state st ON st.system_id=c.system_id AND st.resource_id=? AND st.kind='user'
  LEFT JOIN ad_passwords p ON p.system_id=c.system_id AND p.user_id=?
  WHERE s.status<>'disabled' AND c.agent_public_key<>'' ORDER BY c.system_id`, userID, userID)
 	if err != nil {
@@ -259,6 +261,26 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 		return queued, fmt.Errorf("%w: connector %s", ErrAgentKeyTampered, strings.Join(tampered, ", "))
 	}
 	return queued, nil
+}
+
+// ADEnableWaitsForPassword is the delivery error of an enable that waits for the agent.
+const ADEnableWaitsForPassword = "waiting for the DC agent to replace the directory password before enabling the account"
+
+// ADPasswordBehind reports whether the directory still holds a password KyIdentity has since
+// replaced: one was delivered once, and the user's current one is not applied yet. Enabling
+// the account then would let the replaced password sign in again.
+func (s *Store) ADPasswordBehind(systemID, userID string) (bool, error) {
+	var hash, tag string
+	var seq, delivered int64
+	err := s.db.QueryRow(`SELECT u.password_hash,p.password_tag,p.seq,p.delivered_seq FROM ad_passwords p JOIN users u ON u.id=p.user_id
+ WHERE p.system_id=? AND p.user_id=?`, systemID, userID).Scan(&hash, &tag, &seq, &delivered)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return delivered > 0 && !(delivered == seq && tag == passwordTag(hash)), nil
 }
 
 // ErrAgentKeyTampered is an agent public key whose MAC does not verify. QueueDirectoryPassword
@@ -378,6 +400,11 @@ func (s *Store) FinishADPassword(systemID, userID string, seq int64, outcome, re
 	}
 	switch outcome {
 	case "applied":
+		// An enable that waited for this password goes out now rather than after its backoff.
+		if _, err = tx.Exec(`UPDATE account_sync_events SET status='pending',attempts=0,next_attempt_at=NULL,updated_at=?
+ WHERE system_id=? AND user_id=? AND status IN ('pending','failed') AND last_error=?`, now, systemID, userID, ADEnableWaitsForPassword); err != nil {
+			return err
+		}
 		err = recordAuditTx(tx, directoryAudit("directory.password_delivered", userID, systemID, seq, ""))
 	case "rejected":
 		err = recordAuditTx(tx, directoryAudit("directory.password_rejected", userID, systemID, seq, reason))

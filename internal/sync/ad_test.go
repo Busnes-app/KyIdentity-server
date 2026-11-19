@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/adpass"
 	"github.com/Busnes-app/kyidentity-server/internal/ldaptest"
@@ -216,5 +217,75 @@ func TestADSettingsValidation(t *testing.T) {
 	}
 	if adDomain("OU=a,OU=b,DC=Example,DC=org") != "Example.org" {
 		t.Error("domain from OU")
+	}
+}
+
+// A password reset while the account is disabled must reach the directory before the
+// account is enabled again, or the replaced password signs in on re-enable.
+func TestADEnableWaitsForAResetMadeWhileDisabled(t *testing.T) {
+	netguard.AllowLoopback = true
+	t.Cleanup(func() { netguard.AllowLoopback = false })
+	e, s, _, cleanup := setupTestSyncEngine(t)
+	t.Cleanup(cleanup)
+	dc := ldaptest.Start(t)
+	dc.Users[strings.ToLower(adBindDN)] = "bind-secret"
+	dc.Put(adOU, map[string][]string{"objectClass": {"organizationalUnit"}})
+	agentKey, _ := adpass.GenerateKey()
+	sys, _, err := e.CreateSystem(&CreateSystemRequest{Name: "dc", SystemType: "active_directory", CallbackURL: dc.URL, BearerToken: "bind-secret",
+		ActiveDirectory: &ADSettings{BindDN: adBindDN, BaseDN: adOU, CAPEM: dc.CAPEM, AgentPublicKey: adpass.EncodePublicKey(agentKey.PublicKey()), PasswordTTLMinutes: 60}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := &store.User{ID: uuid.NewString(), Username: "bob", DisplayName: "Bob", Email: "bob@example.com", PasswordHash: "first-hash", Role: "user", Status: "active"}
+	if err := s.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	apply := func() {
+		t.Helper()
+		pending, err := s.PendingADPasswords(sys.ID, time.Now(), 10)
+		if err != nil || len(pending) != 1 {
+			t.Fatal(pending, err)
+		}
+		if err := s.FinishADPassword(sys.ID, u.ID, pending[0].Seq, "applied", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.QueueDirectoryPassword(e.DirectoryKeys(), u.ID, "first-hash", []byte("First-Pass-1"), nil); err != nil {
+		t.Fatal(err)
+	}
+	apply()
+	edit := func(f func(*store.User)) {
+		t.Helper()
+		if _, err := s.EditUser(u.ID, nil, func(x *store.User) (bool, error) { f(x); return true, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit(func(x *store.User) { x.Status = "disabled" })
+	drain(t, e)
+	edit(func(x *store.User) { x.PasswordHash = "reset-hash" })
+	if n, err := s.QueueDirectoryPassword(e.DirectoryKeys(), u.ID, "reset-hash", []byte("Reset-Pass-2"), nil); err != nil || n != 1 {
+		t.Fatal("reset not queued for the disabled account", n, err)
+	}
+	edit(func(x *store.User) { x.Status = "active" })
+	drain(t, e)
+	if got := adUser(t, dc, sys.ID, u.ID); first(got, "userAccountControl") != "514" {
+		t.Fatal("enabled while the directory still holds the replaced password", got.Attrs)
+	}
+	waiting := false
+	left, _ := s.GetPendingSyncEvents(20)
+	for _, ev := range left {
+		waiting = waiting || ev.LastError == store.ADEnableWaitsForPassword
+	}
+	if !waiting {
+		t.Fatal("the held enable does not say why", left)
+	}
+	apply()
+	drain(t, e)
+	if got := adUser(t, dc, sys.ID, u.ID); first(got, "userAccountControl") != "512" {
+		t.Fatal("not enabled once the reset was applied", got.Attrs)
 	}
 }

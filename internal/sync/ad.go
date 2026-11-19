@@ -36,6 +36,7 @@ var (
 	errADAmbiguous = errors.New("more than one directory object carries this KyIdentity marker")
 	errADName      = errors.New("name cannot be used as an Active Directory account name")
 	errADConfig    = errors.New("directory connector settings are incomplete")
+	errADBehind    = errors.New(store.ADEnableWaitsForPassword)
 )
 
 // ADSettings is what the admin submits for a directory connector.
@@ -286,6 +287,13 @@ func (e *Engine) deliverAD(ctx context.Context, sys *store.PairedSystem, secret,
 		}
 		return e.createADUser(conn, sys, c, localID, &desired)
 	}
+	if active && found.GetAttributeValue("userAccountControl") == uacDisabled {
+		if behind, err := e.store.ADPasswordBehind(sys.ID, localID); err != nil {
+			return err
+		} else if behind {
+			return errADBehind
+		}
+	}
 	mod := ldap.NewModifyRequest(found.DN, nil)
 	uac := uacDisabled
 	if active {
@@ -422,7 +430,7 @@ func adMemberDNs(conn *ldap.Conn, systemID, baseDN string, userIDs []string) ([]
 // adDeliveryError is the stored, admin-visible text: fixed words and a result code, never
 // the server's diagnostic message, which can echo values.
 func adDeliveryError(err error) (string, bool) {
-	for _, known := range []error{errADConflict, errADAmbiguous, errADName, errADConfig} {
+	for _, known := range []error{errADConflict, errADAmbiguous, errADName, errADConfig, errADBehind} {
 		if errors.Is(err, known) {
 			return known.Error(), true
 		}

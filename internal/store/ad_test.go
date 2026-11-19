@@ -2,6 +2,7 @@ package store
 
 import (
 	"crypto/ecdh"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -408,5 +409,58 @@ func TestDirectoryPasswordTamperedConnectorSkipsOnlyItself(t *testing.T) {
 	}
 	if queueAudits(t, s, "directory.password_queued") != 1 {
 		t.Fatal("the healthy connector's entry is audited")
+	}
+}
+
+func TestDirectoryPasswordReachesADisabledAccount(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	_, app := adStoreFixture(t, s, "ad-1")
+	u := createTestUser(t, s)
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("First-pass-1"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	e, _ := s.PendingADPasswords("ad-1", time.Now(), 10)
+	if err := s.FinishADPassword("ad-1", u.ID, e[0].Seq, "applied", ""); err != nil {
+		t.Fatal(err)
+	}
+	if behind, err := s.ADPasswordBehind("ad-1", u.ID); err != nil || behind {
+		t.Fatal("an applied password reads as behind", behind, err)
+	}
+	if _, err := s.EditUser(u.ID, nil, func(x *User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
+		t.Fatal(err)
+	}
+	var active bool
+	if err := s.db.QueryRow(`SELECT active FROM sync_resource_state WHERE system_id='ad-1' AND resource_id=?`, u.ID).Scan(&active); err != nil || active {
+		t.Fatal("the disabled user is still active for the connector", active, err)
+	}
+	// An administrator resets the disabled user's password.
+	if _, err := s.db.Exec(`UPDATE users SET password_hash='reset-hash' WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.QueueDirectoryPassword(testKeys, u.ID, "reset-hash", []byte("Reset-pass-2"), queuedAudit); err != nil || n != 1 {
+		t.Fatal("a reset while disabled never reaches the directory", n, err)
+	}
+	if behind, _ := s.ADPasswordBehind("ad-1", u.ID); !behind {
+		t.Fatal("the directory's old password is not reported as behind")
+	}
+	// An enable waiting on it is re-pended the moment the agent applies it.
+	if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,status,revision,last_error,next_attempt_at) VALUES('ev-enable',?,'ad-1','user.updated','{}','pending',1,?,?)`,
+		u.ID, ADEnableWaitsForPassword, time.Now().Add(time.Hour).UTC()); err != nil {
+		t.Fatal(err)
+	}
+	e, _ = s.PendingADPasswords("ad-1", time.Now(), 10)
+	if err := s.FinishADPassword("ad-1", u.ID, e[0].Seq, "applied", ""); err != nil {
+		t.Fatal(err)
+	}
+	if behind, _ := s.ADPasswordBehind("ad-1", u.ID); behind {
+		t.Fatal("still behind after the agent applied the reset")
+	}
+	var next sql.NullTime
+	if err := s.db.QueryRow(`SELECT next_attempt_at FROM account_sync_events WHERE id='ev-enable'`).Scan(&next); err != nil || next.Valid {
+		t.Fatal("the waiting enable was not re-pended", next, err)
 	}
 }

@@ -225,6 +225,21 @@ func TestSambaADEndToEnd(t *testing.T) {
 	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-5")
 	must("the disabled account no longer logs in", !ok)
 
+	// A reset while disabled replaces the directory's copy before the account is enabled.
+	setByAdmin("Kyws-Admin-Set-6")
+	if rr := adminRequest(t, srv, "PUT", "/api/admin/users/"+user.ID, cookie, `{"status":"active"}`); rr.Code != http.StatusOK {
+		t.Fatal(rr.Body.String())
+	}
+	dispatch()
+	uac, _ = dc("dc_uac", "winuser")
+	must("re-enabling waits for the agent to replace the retained password", strings.TrimSpace(uac) == "514")
+	agent()
+	dispatch()
+	uac, _ = dc("dc_uac", "winuser")
+	must("the account is enabled once the reset reached the directory", strings.TrimSpace(uac) == "512")
+	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-5")
+	must("the password from before the reset no longer logs in", !ok)
+
 	// A KyIdentity user whose name an unmanaged AD object holds is refused, not merged.
 	if rr := adminRequest(t, srv, "POST", "/api/admin/users", cookie, `{"username":"squatter","email":"squatter@kyws.test","password":"Kyws-Squatter-Pass-4"}`); rr.Code != http.StatusOK {
 		t.Fatal(rr.Body.String())
