@@ -188,6 +188,11 @@ func TestDeviceGrantLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The admin list names the assigned groups, which become pam_allow_groups.
+	if rr := adminRequestNoStepUp(t, f.srv, "GET", "/api/admin/workstation-apps", f.admin, ""); rr.Code != 200 || !strings.Contains(rr.Body.String(), `"groups":["linux-users"]`) || !strings.Contains(rr.Body.String(), `"issuer":"`+f.srv.cfg.IssuerURL+`"`) {
+		t.Fatalf("workstation app list: %d %s", rr.Code, rr.Body.String())
+	}
+
 	device, userCode := f.start()
 	if status, body := f.poll(f.clientID, device); status != 400 || body["error"] != "authorization_pending" {
 		t.Fatalf("pending: %d %v", status, body)
