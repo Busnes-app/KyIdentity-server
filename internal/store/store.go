@@ -1201,7 +1201,7 @@ func (s *Store) CreateSessionForInteraction(sess *Session, interactionHash, brow
 // session by forgetting either check.
 func (s *Store) GetSessionByTokenHash(tokenHash string, idleTTL time.Duration) (*Session, error) {
 	now := time.Now().UTC()
-	query := `SELECT id, user_id, session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method FROM sessions WHERE session_token_hash = ? AND expires_at > ? AND last_active_at > ? AND created_at > ?`
+	query := `SELECT id, user_id, session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method FROM sessions WHERE session_token_hash = ? AND expires_at > ? AND last_active_at > ? AND created_at > ? AND workstation_client_id IS NULL`
 	sess := &Session{}
 	err := s.db.QueryRow(query, tokenHash, now, now.Add(-idleTTL), now.Add(-s.SessionLimits().AbsoluteTTL())).Scan(&sess.ID, &sess.UserID, &sess.SessionTokenHash, &sess.IPAddress, &sess.UserAgent, &sess.ExpiresAt, &sess.CreatedAt, &sess.LastActiveAt, &sess.PrimaryAuthenticatedAt, &sess.FactorAuthenticatedAt, &sess.FactorMethod)
 	if err == sql.ErrNoRows {
@@ -2566,9 +2566,13 @@ func (s *Store) DeleteOAuthClient(id string, audit *AuditEvent) (bool, error) {
 }
 
 func revokeClientTokensTx(tx *sql.Tx, clientID string, now time.Time) error {
-	_, err := tx.Exec(
+	if _, err := tx.Exec(
 		`UPDATE issued_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL`,
-		now, clientID)
+		now, clientID); err != nil {
+		return err
+	}
+	// A device approval not yet redeemed would otherwise mint fresh tokens afterwards.
+	_, err := tx.Exec(`UPDATE device_codes SET status='denied' WHERE client_id=? AND status='approved' AND redeemed_at IS NULL`, clientID)
 	return err
 }
 
@@ -3063,6 +3067,9 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 		return err
 	}
 	if err := spendMFATokensTx(tx, now, userID); err != nil {
+		return err
+	}
+	if err := denyApprovedDeviceCodesTx(tx, userID, ""); err != nil {
 		return err
 	}
 	// An outstanding activation or reset link is a credential too.

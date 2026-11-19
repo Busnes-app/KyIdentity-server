@@ -148,6 +148,8 @@ func copyFixture(t *testing.T, s *Store) {
 		{`INSERT INTO scim_connector_tokens(id,connector_id,token_hash,scope,created_at) VALUES('sct-1',?,'th','write',?)`, []any{inbound.ID, now}},
 		{`INSERT INTO access_requests(id,app_id,user_id,reason,status,created_at,expires_at) VALUES('ar-1',?,?,'need it','pending',?,1900000000)`, []any{app, user.ID, now}},
 		{`INSERT INTO installer_setup_resources(kind,name,setup_id,object_id,contract) VALUES('group','Ops','setup-1','obj-1','c')`, nil},
+		{`INSERT INTO workstation_apps(client_id,device_grant_enabled,device_code_ttl,offline_window) VALUES('client-2',TRUE,600,0)`, nil},
+		{`INSERT INTO device_codes(id,client_id,device_code_hash,user_code_hash,scope,ip_address,user_agent,interval_seconds,status,user_id,factor_method,expires_at,created_at) VALUES('dc-1','client-2','dch','uch','openid','203.0.113.9','ua',5,'approved',?,'totp',?,?)`, []any{user.ID, now.Add(time.Minute), now}},
 	} {
 		if _, err := s.db.Exec(q.sql, q.args...); err != nil {
 			t.Fatalf("%s: %v", q.sql[:40], err)

@@ -210,6 +210,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /oauth/logout", s.middleware.OptionalAuth(s.middleware.RateLimit("oauth_logout", 30, 1.0)(http.HandlerFunc(oauthH.EndSession))))
 	mux.Handle("POST /oauth/logout", s.middleware.OptionalAuth(s.middleware.RateLimit("oauth_logout", 30, 1.0)(http.HandlerFunc(oauthH.EndSession))))
 	mux.Handle("POST /oauth/token", s.middleware.RateLimit("oauth_token", 30, 1.0)(http.HandlerFunc(oauthH.Token)))
+	mux.HandleFunc("POST /oauth/device_authorization", oauthH.DeviceAuthorization)
+	mux.Handle("POST /api/device/lookup", authM(http.HandlerFunc(oauthH.DeviceLookup)))
+	mux.Handle("POST /api/device/decision", authM(http.HandlerFunc(oauthH.DeviceDecision)))
 	mux.Handle("GET /oauth/userinfo", s.middleware.RateLimit("oauth_userinfo", 120, 2.0)(http.HandlerFunc(oauthH.Userinfo)))
 	mux.Handle("POST /oauth/revoke", s.middleware.RateLimit("oauth_revoke", 30, 1.0)(http.HandlerFunc(oauthH.Revoke)))
 
@@ -304,6 +307,9 @@ func (s *Server) routes() *http.ServeMux {
 		{"DELETE", "/api/admin/systems/{id}", permAdmin, true, http.HandlerFunc(adminH.DeletePairedSystem)},
 		{"GET", "/api/admin/clients", permRead, false, http.HandlerFunc(adminH.ListOAuthClients)},
 		{"POST", "/api/admin/clients", permAdmin, true, http.HandlerFunc(adminH.CreateOAuthClient)},
+		{"GET", "/api/admin/workstation-apps", permRead, false, http.HandlerFunc(adminH.ListWorkstationApps)},
+		{"POST", "/api/admin/workstation-apps", permAdmin, true, http.HandlerFunc(adminH.CreateWorkstationApp)},
+		{"PUT", "/api/admin/workstation-apps/{id}", permAdmin, true, http.HandlerFunc(adminH.UpdateWorkstationApp)},
 		{"PUT", "/api/admin/clients/{id}", permAdmin, true, http.HandlerFunc(adminH.UpdateOAuthClient)},
 		{"DELETE", "/api/admin/clients/{id}", permAdmin, true, http.HandlerFunc(adminH.DeleteOAuthClient)},
 		{"PUT", "/api/admin/clients/{id}/launcher", permAdmin, false, http.HandlerFunc(adminH.UpdateClientLauncher)},
