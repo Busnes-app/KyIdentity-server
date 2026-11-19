@@ -91,23 +91,31 @@ func usage() {
 	os.Exit(2)
 }
 
-// readSecretFile reads a file that must not be readable by group or others.
-func readSecretFile(path string) ([]byte, error) {
+// readSecretFile reads a file that must not be readable by group or others. Errors name
+// the config field, never the file's contents.
+func readSecretFile(field, path string) ([]byte, error) {
 	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%s: %w", field, os.ErrNotExist)
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s cannot be read", field)
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("%s is readable by group or others; chmod 600 it", path)
+		return nil, fmt.Errorf("%s is readable by group or others; chmod 600 it", field)
 	}
-	return os.ReadFile(path)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s cannot be read", field)
+	}
+	return raw, nil
 }
 
 func loadOrCreateKey(path string) (*ecdh.PrivateKey, error) {
 	if path == "" {
 		return nil, errors.New("-key is required")
 	}
-	raw, err := readSecretFile(path)
+	raw, err := readSecretFile("keyFile", path)
 	if errors.Is(err, os.ErrNotExist) {
 		k, err := adpass.GenerateKey()
 		if err != nil {
@@ -118,8 +126,7 @@ func loadOrCreateKey(path string) (*ecdh.PrivateKey, error) {
 			return nil, err
 		}
 		if _, err := f.WriteString(privatePrefix + base64.StdEncoding.EncodeToString(k.Bytes()) + "\n"); err != nil {
-			f.Close()
-			return nil, err
+			return nil, errors.Join(err, f.Close())
 		}
 		return k, f.Close()
 	}
@@ -169,10 +176,10 @@ func newAgent(path string) (*agent, error) {
 		return nil, err
 	}
 	for _, f := range []struct {
-		path string
-		into *string
-	}{{c.TokenFile, &a.token}, {c.BindPasswordFile, &a.password}} {
-		b, err := readSecretFile(f.path)
+		field, path string
+		into        *string
+	}{{"tokenFile", c.TokenFile, &a.token}, {"bindPasswordFile", c.BindPasswordFile, &a.password}} {
+		b, err := readSecretFile(f.field, f.path)
 		if err != nil {
 			return nil, err
 		}
@@ -199,7 +206,7 @@ func newAgent(path string) (*agent, error) {
 	}
 	a.http = &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{TLSClientConfig: tlsCfg},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	if raw, err := readSecretFile(c.StateFile); err == nil {
+	if raw, err := readSecretFile("stateFile", c.StateFile); err == nil {
 		if err := json.Unmarshal(raw, &a.state); err != nil {
 			return nil, fmt.Errorf("state file: %w", err)
 		}
