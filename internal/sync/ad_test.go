@@ -145,7 +145,7 @@ func TestADConnectorLeavesForeignObjectsAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	drain(t, e)
-	if dc.Get("CN=squatter,"+adOU).Attrs["userAccountControl"][0] != "512" {
+	if dc.Get("CN=squatter," + adOU).Attrs["userAccountControl"][0] != "512" {
 		t.Fatal("removal reached a foreign object")
 	}
 }
@@ -218,4 +218,3 @@ func TestADSettingsValidation(t *testing.T) {
 		t.Error("domain from OU")
 	}
 }
-
