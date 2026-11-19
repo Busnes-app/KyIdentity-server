@@ -104,10 +104,10 @@ ID is never reused. This follows the same rule as `suite_groups` (`suite_groups.
 
 ### `org_id` columns and constraints
 
-Each table marked org-owned in the appendix gets `org_id TEXT NOT NULL`. There is one
-named exception: `audit_events.org_id` is nullable, and NULL means a platform event. Its
-existence trigger admits NULL, and its immutability trigger also refuses changing NULL to
-an org or back.
+Each table marked org-owned in the appendix gets `org_id TEXT NOT NULL`. There are two
+named exceptions: `audit_events.org_id` and `alerts.org_id` are nullable, and NULL means a
+platform row. Their existence triggers admit NULL, and their immutability triggers also
+refuse changing NULL to an org or back.
 
 - On Postgres it gets `REFERENCES orgs(id)`. The default is set for the backfill, then
   dropped.
@@ -226,8 +226,8 @@ read pool and every worker would need a bypass role. Deferred (open question 7).
   no classification fails the build.
 - `TestOrgOwnedTablesHaveOrgID` requires every org-owned table to have a non-null `org_id`,
   the existence and immutability triggers, and, on Postgres, the foreign key to `orgs`.
-  The one exception is `nullableOrgID = {"audit_events"}`, which must be nullable. The
-  test fails if any other table appears there.
+  The exceptions are `nullableOrgID = {"audit_events", "alerts"}`, which must be nullable.
+  The test fails if any other table appears there.
 - `TestOrgSQLNamesOrgID` is a go/ast scan of the string literals in `internal/store`. Any
   SQL that names an org-owned table must also name `org_id`, or be on the pre-org or
   platform allowlist with a reason. It is crude, and it is cheap.
@@ -238,6 +238,8 @@ read pool and every worker would need a bypass role. Deferred (open question 7).
   - For every admin, account, SCIM and suite route, call it as each A principal with B's
     object IDs. Expect `404`, or an empty list, with B's rows unchanged.
   - Call it again with A's IDs, expecting what the permission matrix already expects.
+  - Call every `platform` route (see Roles) as every org persona, owner included. Expect
+    `404`, with the global rows unchanged.
   - Runs on Postgres in the `postgres` CI job.
 - Token tests: a user's `org_id` reaches the ID token, the access token, userinfo and the
   logout token, and changing `users.org_id` is refused.
@@ -247,7 +249,7 @@ read pool and every worker would need a bypass role. Deferred (open question 7).
 | Mode | Principal | Can | Cannot |
 |---|---|---|---|
 | Single | Administrator (`role='admin'`) and delegations (`permissions.go:17-41`) | Unchanged | Unchanged |
-| Multi | **Org owner**: an everyday account with a new `owner` delegation kind | Everything a global admin can do today, inside its org. Export and the deletion state. | Change the plan or seats (billing does that), act in another org |
+| Multi | **Org owner**: an everyday account with a new `owner` delegation kind | Every admin route that acts on its org's rows (below). Export and the deletion state. | Change the plan or seats (billing does that), act in another org, call any `platform` route |
 | Multi | **Org admin**: everyday account with a new `admin` delegation kind, or a dedicated `role='admin'` account in the org | Same as owner, except it cannot remove or demote the owner | Same as owner |
 | Multi | Helpdesk, auditor, app owner | Unchanged, inside the org | — |
 | Multi | Member | Unchanged | — |
@@ -260,6 +262,22 @@ Notes:
   (`docs/SUITE-DIRECTORY.md`, people).
 - `accessFor` (`permissions.go:65`) maps the `owner` and `admin` delegations to
   `Access.Admin`, scoped by `OrgStore`.
+- `Access.Admin` alone is not enough for routes that write global resources. `permission`
+  (`permissions.go:17`) gains a `platform` flag, and every route names it or not, as each
+  route already names its permission. In multi-tenant mode a `platform` route answers
+  `404` to every org principal and is reached only through the container-local CLI. In
+  single-tenant mode the flag changes nothing.
+  - **Platform:** OAuth clients (create, edit, delete, secret rotation, back-channel URI);
+    paired systems and outbound connectors; app registry policy, linking, `requestable`
+    and launcher-card settings; `app_roles` definitions (create, rename, delete,
+    administrator flag); launcher cards and icons; proxy apps; mail, session limits, alert
+    settings, attestation, rate-limit networks and push relays; backups, the drill and
+    recovery keys; installer resources.
+  - **Org:** users, groups, memberships, delegations, app and role *assignments*,
+    `org_apps.access_mode` for apps the plan enables, access requests and approvals,
+    expiry, offboarding, enrollment policies, inbound SCIM connectors and tokens,
+    sessions, and the org's audit and alerts.
+  - PR 2 adds the flag and fails the build for an admin route that names neither.
 - The `administrators` enrollment scope already counts anyone holding a delegation
   (`pg_schema.go:522`), so these kinds are covered with no view change.
 - The last-admin rule (`ErrLastActiveAdmin`, `expiry.go:28`) becomes per org, and also
@@ -415,8 +433,11 @@ KyIdentity stores `max_seats` on `orgs`, and per-app enablement and opaque quota
 - **KyIdentity enforces seats and app enablement.**
   - A seat is an everyday account (`role='user'`) that is active or pending (open
     question 8).
-  - A user create, an invite, a SCIM create or an activation that would pass `max_seats` is
-    refused with `seat_limit`.
+  - Only a transition that adds a seat is checked: a user create, an invite, a SCIM create,
+    or re-enabling a disabled account. One that would pass `max_seats` is refused with
+    `seat_limit`.
+  - Activation never is, because the pending account already holds its seat. An invited
+    user can activate even while the org is `over_limit`.
   - A disabled app gives no access: the `app_access_facts` join above means no token and no
     suite listing.
 - **Apps enforce their own quotas** (storage, mailboxes) from `GET /api/suite/orgs`.
@@ -565,7 +586,7 @@ Classes:
 - **O** (org-owned): gets `org_id`.
 - **D** (derived): scoped through the parent named, no column of its own.
 - **P** (platform): global.
-- **?**: the answer is unclear. Reasoning is given.
+- **I**: interim. A class is fixed for PR 1, and the reasoning says what would change it.
 
 SQLite sources are listed. The Postgres v1 definitions are in `pg_schema.go`, at the line
 given. Migrations 2–4 use one SQL text on both backends, with only the column types substituted.
@@ -580,7 +601,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `group_memberships` | `store.go:143` | `:41` | O | Joins two org-owned rows. A composite FK keeps both in one org. |
 | `sessions` | `store.go:150` | `:47` | D | `user_id` FK. Found by token hash, a pre-org lookup. |
 | `login_failures` | `store.go:163` | `:58` | D | `user_id` FK |
-| `paired_systems` | `store.go:171` | `:66` | ? | P in v1: suite app targets are shared. Customer-owned generic SCIM targets would need a nullable `org_id` later. |
+| `paired_systems` | `store.go:171` | `:66` | I: P | Suite app targets are shared. Customer-owned generic SCIM targets (disabled in v1) would need a nullable `org_id` later. |
 | `account_sync_events` | `store.go:184` | `:79` | O | `user_id` has no FK, and events outlive the user. The payload needs the org after deletion. |
 | `native_devices` | `store.go:724` | `:95` | D | `user_id` FK |
 | `device_pairing_tokens` | `store.go:202` | `:118` | D | `user_id` FK |
@@ -592,25 +613,25 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `oauth_clients` | `store.go:266` | `:176` | P | Owner decision: apps are global |
 | `authorization_codes` | `store.go:280` | `:190` | D | `user_id` FK. Found by hash. |
 | `launcher_icons` | `store.go:296` | `:205` | P | Icons of platform cards |
-| `applications` | `store.go:303` | `:212` | ? | P in v1, with custom org cards disabled. Becomes O if orgs get their own cards. |
+| `applications` | `store.go:303` | `:212` | I: P | Custom org cards are disabled in v1. Becomes O if orgs get their own cards. |
 | `issued_tokens` | `store.go:317` | `:223` | D | `user_id` FK |
 | `audit_events` | `store.go:328` | `:232` | O | Nullable `org_id`: NULL means a platform event. This is the one nullable exception (`nullableOrgID`, and the NULL case in its triggers). |
 | `system_settings` | `store.go:343` | `:246` | P | Platform settings. Future per-org settings go into a new `org_settings` table, never prefixed keys. |
 | `step_up_tokens` | `store.go:352` | `:252` | D | `user_id` FK |
 | `webauthn_credentials` | `store.go:363` | `:262` | D | `user_id` FK. `credential_id` is global (one RP). |
 | `webauthn_challenges` | `store.go:378` | `:276` | D | `user_id` FK |
-| `scim_user_links` | `scim.go:10` | `:287` | ? | D through `local_id`, which has no FK and is a user or a group. Survives local deletion. Probably O for the same reason as `account_sync_events`. |
-| `sync_delivery_attempts` | `sync_delivery.go:24` | `:295` | ? | No FK on `user_id`. A short-lived claim marker. D, if every reader joins `users`; unverified. |
+| `scim_user_links` | `scim.go:10` | `:287` | O | `local_id` has no FK, is a user or a group, and survives local deletion. Same reason as `account_sync_events`. |
+| `sync_delivery_attempts` | `sync_delivery.go:24` | `:295` | O | No FK on `user_id`. Giving it `org_id` is cheaper than proving every reader joins `users`. |
 | `step_up_challenges` | `stepup.go:34` | `:300` | D | `user_id` and `session_id` FKs |
 | `app_registry` | `app_registry.go:70` | `:308` | P | One record per global client, card or system. Per-org mode lives in `org_apps`. |
 | `app_user_assignments` | `app_access.go:34` | `:316` | D | `user_id` FK. The app is global. |
 | `app_group_assignments` | `app_access.go:37` | `:320` | D | `group_id` FK |
-| `authorization_interactions` | `authorization_interactions.go:34` | `:324` | ? | `user_id` is `''` before sign-in, so it has no org until it is bound. D once bound, through the user. |
+| `authorization_interactions` | `authorization_interactions.go:34` | `:324` | P | Pre-sign-in flow state, keyed by hash and browser. `user_id` is `''` until bound, then it is checked against the session's user, whose org scopes everything after. |
 | `oidc_client_sessions` | `client_sessions.go:19` | `:329` | D | `session_id` FK |
 | `account_tokens` | `onboarding.go:30` | `:333` | D | `user_id` FK |
 | `scim_connectors` | `scim_inbound.go:42` | `:339` | O | A connector belongs to one org. Its token decides the org. |
 | `scim_connector_tokens` | `scim_inbound.go:45` | `:343` | D | `connector_id` FK |
-| `app_roles` | `app_roles.go:76` | `:348` | ? | P in v1: roles describe a global app. Becomes O if orgs define their own roles. |
+| `app_roles` | `app_roles.go:76` | `:348` | I: P | Roles describe a global app, and their definitions are `platform` routes. Becomes O if orgs define their own roles. |
 | `app_role_user_assignments` | `app_roles.go:80` | `:352` | D | `user_id` FK |
 | `app_role_group_assignments` | `app_roles.go:83` | `:356` | D | `group_id` FK |
 | `admin_delegations` | `delegations.go:27` | `:360` | D | `user_id` FK. New `owner` and `admin` kinds. |
@@ -620,7 +641,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `enrollment_deadlines` | `group_enrollment.go:55` | `:388` | O | FK to `(org_id, scope)` |
 | `sync_resource_state` | `provisioning.go:35` | `:391` | O | `resource_id` has no FK, and offboarded rows persist after deletion |
 | `sync_reconcile_jobs` | `reconcile.go:30` | `:398` | P | Per system, across every org. Per-org repair is later. |
-| `alerts` | `alerts.go:82` | `:408` | ? | O with a nullable `org_id` for org-scoped rules (failed sign-ins). Platform alerts have no recipient, since there is no platform user. Needs a decision before PR 5. |
+| `alerts` | `alerts.go:82` | `:408` | O | Nullable `org_id` (`nullableOrgID`). Org rules (failed sign-ins) go to the org's admins. Platform alerts (NULL) have no user recipient, only the log, until a platform channel exists. |
 | `alert_queue` | `alerts.go:92` | `:417` | D | `event_id` FK to `audit_events` |
 | `alert_deliveries` | `alerts.go:98` | `:421` | D | `alert_id` FK. The recipient is an org admin. |
 | `launcher_prefs` | `launcher_prefs.go:82` | `:430` | D | `user_id` FK |
