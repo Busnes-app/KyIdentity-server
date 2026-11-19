@@ -264,6 +264,8 @@ type CreateSystemRequest struct {
 	IconURL     string `json:"iconUrl,omitempty"`
 	CallbackURL string `json:"callbackUrl"`
 	BearerToken string `json:"bearerToken,omitempty"`
+	// ActiveDirectory holds a directory connector's settings; BearerToken is its bind password.
+	ActiveDirectory *ADSettings `json:"activeDirectory,omitempty"`
 }
 
 // CreateSystem stores a supplied SCIM token or generates a suite webhook signing secret.
@@ -277,6 +279,10 @@ func (e *Engine) CreateSystem(req *CreateSystemRequest, audit func(*store.Paired
 	}
 	if req.SystemType == "" {
 		req.SystemType = "scim"
+	}
+	if req.SystemType == adSystemType {
+		ps, err := e.CreateADSystem(req, audit)
+		return ps, "", err
 	}
 	if err := ValidateCallbackURL(req.CallbackURL); err != nil {
 		return nil, "", store.InputError(err.Error())
@@ -533,6 +539,11 @@ func resolveSCIMURL(sys *store.PairedSystem, eventType, userID string) (method s
 }
 
 func (e *Engine) deliver(ctx context.Context, sys *store.PairedSystem, secret, eventID, eventType, userID string, payload []byte) error {
+	if sys.SystemType == adSystemType {
+		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		return e.deliverAD(ctx, sys, secret, eventType, userID, payload)
+	}
 	if strings.HasPrefix(eventType, "group.") {
 		if sys.SystemType != "scim" || !sys.GroupsEnabled {
 			return errors.New("group delivery is not enabled for this connector")
@@ -671,6 +682,9 @@ func (e *Engine) StartWorker(ctx context.Context) {
 			}
 			if err := e.store.ScheduleReconcileJobs(time.Now().UTC()); err != nil && ctx.Err() == nil {
 				log.Printf("reconciliation scheduling failed: %v", err)
+			}
+			if _, err := e.store.ExpireADPasswords(time.Now().UTC()); err != nil && ctx.Err() == nil {
+				log.Printf("directory password expiry failed: %v", err)
 			}
 		case <-ticker.C:
 			if err := e.DispatchPendingEvents(ctx); err != nil && ctx.Err() == nil {

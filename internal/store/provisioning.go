@@ -378,7 +378,7 @@ type desiredGroup struct{ systemID, groupID, name string }
 func desiredGroupsTx(tx *sql.Tx, systemID string) ([]desiredGroup, error) {
 	rows, err := tx.Query(`SELECT s.id,g.id,g.name FROM paired_systems s JOIN app_registry a ON a.system_id=s.id
  JOIN app_group_assignments ga ON ga.app_id=a.id JOIN directory_groups g ON g.id=ga.group_id
- WHERE s.groups_enabled AND s.system_type='scim' AND s.status<>'disabled' AND (?='' OR s.id=?) ORDER BY s.id,g.id`, systemID, systemID)
+ WHERE s.groups_enabled AND s.system_type IN ('scim','active_directory') AND s.status<>'disabled' AND (?='' OR s.id=?) ORDER BY s.id,g.id`, systemID, systemID)
 	if err != nil {
 		return nil, err
 	}

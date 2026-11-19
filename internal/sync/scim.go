@@ -20,7 +20,7 @@ import (
 
 func supportedSystemType(kind string) bool {
 	switch kind {
-	case "scim", "suite_webhook", "kypost", "kypasswords", "kybookmarks", "kynotes":
+	case "scim", "suite_webhook", "kypost", "kypasswords", "kybookmarks", "kynotes", adSystemType:
 		return true
 	}
 	return false
@@ -45,6 +45,9 @@ func (e *Engine) scimClient(sys *store.PairedSystem, secret string) *scim.Client
 // Never store remote text, URLs, or wrapped transport errors: a server can echo
 // credentials in a Location or error body, including transformed credentials.
 func deliveryError(err error) string {
+	if text, ok := adDeliveryError(err); ok {
+		return text
+	}
 	var remote *scim.Error
 	if errors.As(err, &remote) {
 		return fmt.Sprintf("SCIM HTTP %d", remote.Status)
@@ -330,6 +333,13 @@ func (e *Engine) createSCIMUser(ctx context.Context, c *scim.Client, desired sci
 }
 
 func (e *Engine) TestSystem(ctx context.Context, sys *store.PairedSystem) error {
+	if sys.SystemType == adSystemType {
+		secret, err := e.SigningSecret(sys)
+		if err != nil {
+			return err
+		}
+		return e.testAD(sys, secret)
+	}
 	if sys.SystemType != "scim" {
 		return errors.New("connection testing is available for generic SCIM connectors")
 	}
@@ -350,6 +360,9 @@ func (e *Engine) TestSystem(ctx context.Context, sys *store.PairedSystem) error 
 // replacement for SCIM, and the SCIM group-delivery flag. An established SCIM connector
 // keeps its token when none is supplied. Suite protocols cannot be switched or deliver groups.
 func (e *Engine) ReviewSystem(sys *store.PairedSystem, kind, token string, groups bool, reconcileHours int, audit *store.AuditEvent) error {
+	if sys.SystemType == adSystemType {
+		return store.InputError("configure an Active Directory connector in its own settings")
+	}
 	if kind != "scim" && kind != "suite_webhook" {
 		return store.InputError("choose scim or suite_webhook")
 	}

@@ -117,12 +117,27 @@ func cidrs(list ...string) []*net.IPNet {
 
 // ValidateURL rejects anything the server should not be made to send data to. field names
 // the offending input so the error points the operator at the right field.
-func ValidateURL(raw, field string) error { return validate(raw, field, false) }
+func ValidateURL(raw, field string) error { return validate(raw, field, false, "https") }
+
+// ValidateLDAPS is ValidateURL for an operator-supplied directory: ldaps only, and no
+// path, query or user info.
+func ValidateLDAPS(raw, field string) error {
+	if err := validate(raw, field, false, "ldaps"); err != nil {
+		return err
+	}
+	if u, _ := url.Parse(raw); (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("%s must be ldaps://host[:port] with nothing after it", field)
+	}
+	return nil
+}
+
+// Dialer is the dial policy Client enforces, for operator-supplied non-HTTP connections.
+func Dialer(timeout time.Duration) *net.Dialer { return dialer(timeout, false) }
 
 // ValidateDeviceURL is ValidateURL for device-supplied URLs: https only, no private ranges.
-func ValidateDeviceURL(raw, field string) error { return validate(raw, field, true) }
+func ValidateDeviceURL(raw, field string) error { return validate(raw, field, true, "https") }
 
-func validate(raw, field string, device bool) error {
+func validate(raw, field string, device bool, scheme string) error {
 	allowPrivate := AllowPrivate && !device
 	if strings.TrimSpace(raw) == "" {
 		return fmt.Errorf("%s is required", field)
@@ -131,8 +146,8 @@ func validate(raw, field string, device bool) error {
 	if err != nil {
 		return fmt.Errorf("%s is not a valid URL: %w", field, err)
 	}
-	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && allowPrivate) {
-		return fmt.Errorf("%s must use https", field)
+	if parsed.Scheme != scheme && !(scheme == "https" && parsed.Scheme == "http" && allowPrivate) {
+		return fmt.Errorf("%s must use %s", field, scheme)
 	}
 	host := parsed.Hostname()
 	if host == "" {
