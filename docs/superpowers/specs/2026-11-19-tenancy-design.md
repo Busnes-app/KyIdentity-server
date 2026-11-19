@@ -181,16 +181,22 @@ Views (`app_access.go:58-65`, `pg_schema.go:510-545`):
     That function is also the only place the export-only exception below is made.
   - `TestOrgSQLNamesOrgID`'s allowlist names the `credential_principals` call sites. A new
     one fails the build until it is listed with a reason.
-  - The account flows outside sign-in all use `active_principals`. None of them is on the
-    allowlist:
+  - The account flows outside sign-in keep today's per-flow user rules, which include
+    pending accounts where they must. Each adds one condition, **`org_active`**: the user's
+    org has `status='active'`. They do not read `active_principals`, which holds no pending
+    user. None of them is on the allowlist:
 
-    | Flow | Predicate | In an org that is not `active` |
-    |---|---|---|
-    | Account-token issuance (`IssueAccountToken`: invite, resend-invite, reset) | `active_principals` | Refused. The member endpoints answer `409 org_not_active`. |
-    | Forgot-password | `active_principals` | The usual identical answer, and no mail is sent |
-    | Activation and reset redemption (`RedeemAccountToken`) | `active_principals`, re-read in its transaction | Refused like an expired link. Nobody activates, sets a password or clears a lockout. |
-    | Step-up | `active_principals` | Refused. The export-only session cannot step up, because it reaches no route that needs it. |
+    | Flow | User rule (today's, unchanged) | Org condition | In an org that is not `active` |
+    |---|---|---|---|
+    | Activation invite and resend-invite (`IssueAccountToken`, activation) | pending (`onboarding.go:45`) | `org_active` | Refused. The member endpoints answer `409 org_not_active`. |
+    | Reset link (`IssueAccountToken`, reset) | active and not pending (`onboarding.go:47`) | `org_active` | Refused |
+    | Forgot-password | as reset | `org_active` | The usual identical answer, and no mail is sent |
+    | Activation and reset redemption (`RedeemAccountToken`) | the issuance rule, re-asserted in its transaction (`onboarding.go:113`) | `org_active`, read in the same transaction | Refused like an expired link. Nobody activates, sets a password or clears a lockout. |
+    | Step-up | `active_principals` (a signed-in, activated user) | included | Refused. The export-only session cannot step up, because it reaches no route that needs it. |
 
+    - `org_active` is one SQL fragment shared by these call sites,
+      `EXISTS (SELECT 1 FROM orgs o WHERE o.id = users.org_id AND o.status = 'active')`, so
+      the four flows cannot drift apart.
     - Suspension and schedule-deletion also expire the org's outstanding account tokens,
       in the same transaction (as `revokeUserAccessTx` does). The redemption check is the
       backstop.
@@ -715,6 +721,9 @@ tests.
      - In a suspended or `deletion_scheduled` org, each account flow in the Views table
        refuses: issuance, forgot-password (no mail), redemption of a link issued before the
        suspension, and step-up. A pending member cannot activate.
+     - In an `active` org, the full pending path works: `POST /orgs` mails the holder's
+       invite, `resend-invite` issues a new one, the holder and a member each activate,
+       and a reset link works for an activated member.
      - Every sign-in path refuses a suspended org. Interactive sign-in gives the
        wrong-password answer for a wrong credential, and `org_suspended` only after every
        required factor has passed, with no session created.
