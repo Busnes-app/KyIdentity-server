@@ -6,8 +6,8 @@ tenancy-spec. Status: design only, nothing built.
 KyIdentity today is one organisation per install (`AGENTS.md:3`, `design.md:31` defers
 multi-tenancy). This spec adds a second mode to the same binary. **Single-tenant** is
 today's behaviour, unchanged for existing installs. **Multi-tenant** is a hosted service
-where every customer (a person, a household or a business) is an *organisation* (org), all
-under one issuer, one sign-in page and one WebAuthn relying party.
+where every customer (a person or a household) is an *organisation* (org), all under one
+issuer, one sign-in page and one WebAuthn relying party. Our own staff administer it.
 
 Owner decisions (not reopened here):
 
@@ -21,6 +21,15 @@ Owner decisions (not reopened here):
    platform provisioning API. KyIdentity has no Stripe code and never sees payment data.
 5. No public self-signup in KyIdentity. Orgs are created by the provisioning API or by
    the operator.
+6. In multi-tenant mode, nobody in a customer org is an administrator. The only
+   administrators are our own staff. There are no org owners, no org admins and no
+   delegations inside customer orgs. Every customer account is a member. Single-tenant is
+   not affected: self-hosted installs keep today's administrators and delegations
+   unchanged.
+7. Businesses run on isolated platforms. A business customer gets its own KyIdentity
+   install in single-tenant mode, with its own administrators and delegations. The shared
+   multi-tenant service holds only individuals and households. Staff-only administration
+   (decision 6) applies to the shared service only.
 
 Line references are to `master` at `09caf1c`. "Unverified" marks a claim this spec did not
 check in code.
@@ -30,42 +39,48 @@ check in code.
 | # | Decision | Why |
 |---|---|---|
 | D1 | `KYIDENTITY_TENANCY=single` (default) or `multi`, recorded in `system_settings` at first start. A later start with the other value refuses to start. Added to the shared replica configuration (`internal/config/replica.go:19`). | Install-time, as decided. A replica started with the wrong mode must not serve. |
-| D2 | **Multi-tenant requires PostgreSQL.** SQLite stays single-tenant only. Both backends get the same `org_id` columns, so `TestBackendsHaveTheSameColumns` (`internal/store/postgres_test.go:47`) still holds. | Several global uniques must become per-org: `directory_groups.name` (`store.go:139`), `suite_groups.slug` (`suite_groups.go:16`), and the `enrollment_policies` primary key `scope` (`group_enrollment.go:50`). On SQLite an inline `UNIQUE` or a primary key can only be dropped by rebuilding the table. Migrations run inside a transaction (`migrations.go:144`), where `PRAGMA foreign_keys` cannot be turned off. `DROP TABLE directory_groups` with foreign keys on would cascade-delete memberships, assignments and policies. On Postgres these are `ALTER TABLE … DROP CONSTRAINT`. With one org, the global uniques are correct, so SQLite keeps them. |
+| D2 | **Multi-tenant requires PostgreSQL.** SQLite stays single-tenant only. Both backends get the same `org_id` columns, so `TestBackendsHaveTheSameColumns` (`internal/store/postgres_test.go:47`) still holds. | Two global uniques must become per-org: `directory_groups.name` (`store.go:139`) and `suite_groups.slug` (`suite_groups.go:16`). On SQLite an inline `UNIQUE` can only be dropped by rebuilding the table. Migrations run inside a transaction (`migrations.go:144`), where `PRAGMA foreign_keys` cannot be turned off. `DROP TABLE directory_groups` with foreign keys on would cascade-delete memberships, assignments and policies. On Postgres these are `ALTER TABLE … DROP CONSTRAINT`. With one org, the global uniques are correct, so SQLite keeps them. |
 | D3 | Isolation is enforced in the application, through an org-bound store handle (`OrgStore`). Postgres row-level security is optional extra protection, added later. | The store has one SQL source in SQLite's dialect (`AGENTS.md:192`), and single-tenant installs on SQLite use the same code. App-level scoping is the only mechanism that covers both. |
 | D4 | The org is in tokens as an `org_id` claim, **in multi-tenant mode only**. | Zero change for single-tenant relying parties. An absent claim means single-tenant. |
 | D5 | Username and email stay globally unique (`pg_schema.go:21,23`). In multi-tenant mode, username = email at creation. | There is one sign-in page, and login looks a user up by username alone (`auth_handlers.go:94`). Using the email means no `alice` collisions between orgs and no new lookup path. |
 | D6 | Entitlements reach apps through a suite API pull (`GET /api/suite/orgs`), not a token claim or a webhook. | See Entitlements. |
 | D7 | OAuth clients, the app registry, app roles and launcher cards stay global. Each org's access to an app is a new per-org row (`org_apps`). | Owner decision 2 (shared apps). |
+| D8 | Staff are accounts in one internal staff org (`orgs.kind='staff'`): `role='admin'`, or everyday accounts with today's delegations. In multi-tenant mode the store refuses `role='admin'` and any `admin_delegations` row for an account outside the staff org. | Owner decision 6. No new role or delegation kind, so `accessFor` (`permissions.go:66`) and the permission matrix stay as they are. |
+| D9 | One member of each customer org may be the **account holder** (`orgs.account_holder_user_id`), named by billing. It is a pointer, not a role: it maps to no `Access` field. | Export, the deletion banner and member-change notices need a person to go to. Billing already knows who pays. |
+| D10 | In multi-tenant mode, MFA enrollment policies are platform-wide, set by staff. `group:` scopes are refused. | A household has nobody to ask for a different policy. Per-org policies would need a per-org primary key (D2) with no one to request it. |
 
 ## Threat model
 
 | Attacker | Goal | Defence |
 |---|---|---|
-| Admin or member of org A | Read or change org B's users, groups, assignments, audit or policy by putting B's IDs in admin, SCIM or suite calls | Every org-owned query runs through an `OrgStore` bound to the caller's org. The binding comes from the authenticated principal, never from the request. A cross-org ID is `404`, the same answer as a missing one. Composite foreign keys (`(org_id, user_id)`, `(org_id, group_id)`) make a cross-org membership, policy or deadline impossible to write at the database level. Proven by the cross-org matrix test. |
-| Org A admin | Gain access through a global app set to `all_active_users` | Today `app_access_facts` is `app_registry CROSS JOIN users` (`pg_schema.go:512-517`), so that mode means every user on the install. The view gains a required join on `org_apps`/`orgs.all_apps` for the user's org. A test gives one org an app with all-users access and proves the other org's users get no access. |
+| Member of org A, or staff working in org A | Read or change org B's users, groups, assignments, audit or policy by putting B's IDs in account, suite or admin calls | Every org-owned query runs through an `OrgStore`. For a member or a suite call it is bound to the authenticated principal's org, never to the request. For staff it is bound to the org the staff member selected (see Roles), and only after the caller is proven to be staff. A cross-org ID is `404`, the same answer as a missing one. Composite foreign keys (`(org_id, user_id)`, `(org_id, group_id)`) make a cross-org membership or assignment impossible to write at the database level. Proven by the cross-org matrix test. Inbound SCIM and HR connectors are off in multi-tenant mode (see Per-org features), so they are no path. |
+| Member of org A | Gain access through a global app set to `all_active_users` that A's plan does not enable | Today `app_access_facts` is `app_registry CROSS JOIN users` (`pg_schema.go:512-517`), so that mode means every user on the install. The view gains a required join on `org_apps`/`orgs.all_apps` for the user's org. A test gives one org an app with all-users access and proves the other org's users get no access. |
 | Malicious relying party, or a bug in one | Forge or swap `org_id` | Tokens are RS256, signed by KyIdentity (`oauth.go:502`). `org_id` is read from `users.org_id` at issuance, never from the request. `users.org_id` is immutable: a trigger refuses any update, on both backends. Apps must take the org only from a verified token or a suite API answer (see Downstream contract). |
-| Thief of a platform token | Create, suspend or delete orgs | Platform tokens are 256-bit, stored hashed, scoped, expiring and revocable, like SCIM connector tokens (`pg_schema.go:343`, `scim_inbound.go:243`). They are accepted only on a separate platform listener that is never published through the public proxy. They are never accepted on the public listener, and browser sessions, SCIM tokens and OAuth clients are never accepted on the platform listener. A token cannot read users' content (see Roles). Delete needs its own scope, and only works after a deletion was scheduled and its grace period has passed. Every call is audited. |
-| Replayed or reordered billing calls (Stripe retries, out-of-order webhooks) | Undo a suspension, or apply an old plan | Every mutating call has an `Idempotency-Key` and a per-org `revision`. The same key and body returns the stored answer. The same key with a different body is `422`. A `revision` at or below the stored one is `409 stale_revision`. |
+| Thief of a platform token | Create, suspend or delete orgs; add or remove members | Platform tokens are 256-bit, stored hashed, scoped, expiring and revocable, like SCIM connector tokens (`pg_schema.go:343`, `scim_inbound.go:243`). They are accepted only on a separate platform listener that is never published through the public proxy. They are never accepted on the public listener, and browser sessions, SCIM tokens and OAuth clients are never accepted on the platform listener. A token reads lifecycle data, counts, and member emails and statuses, nothing else. Delete needs its own scope, and only works after a deletion was scheduled and its grace period has passed. Every call is audited. |
+| Compromised billing portal (the customer portal of our billing service) | Add or remove members, resend invites, or join an org by adding an attacker's address | The portal's token holds only `members:read` and `members:write`, not the org lifecycle scopes. Member writes are rate limited per org and per token. Each is audited in the org's log, queues an `org.member_changed` event, and mails a notice to the account holder. The added person gets an activation invite at their own address. A new member gets member rights only: no admin route, no export, no recovery of another member. Removing members is disruptive, and staff undo it. Whether member writes also need the account holder's own sign-in is open question 11. |
+| Staff abuse, or a stolen staff account | Read or change any org's directory: blast radius is every org | Staff need a passkey second factor, and step-up stays on sensitive routes (see Roles). Every staff read or write in a customer org is audited in that org's log, naming the org, and staff admins read the audit across orgs by actor. There is no impersonation: no "sign in as user", no password set on a customer account, no email change, and activation and reset links go only by mail to the address on file, never to the screen. Residual risk: staff see every org's directory. |
+| Replayed or reordered billing calls (Stripe retries, out-of-order webhooks) | Undo a suspension, or apply an old plan | Every mutating call has an `Idempotency-Key`, and every org lifecycle call a per-org `revision`. The same key and body returns the stored answer. The same key with a different body is `422`. A `revision` at or below the stored one is `409 stale_revision`. |
 | User of a suspended or deleted org | Keep working | Suspension revokes every session, refresh family, issued token and forward session in one transaction (`revokeSessionGrantsTx`, `sessions.go:136`), and queues back-channel logouts. Every sign-in path checks one `active_principals` view (user active and org active). Access tokens live 15 minutes at most (`oauth.go:22`). `/oauth/userinfo` refuses at once. Apps see `status: suspended` within one poll (≤ 60 s). |
-| Org A admin | Take over a person's identity by creating an account with their email (email squatting) | Emails are globally unique, so whoever creates an address first holds it. A pending account cannot sign in, and resets go only to a verified address (`onboarding_handlers.go:209`). A pending, never-activated account gives up its email when its activation token expires (open question 3). Another org's admin can never edit, reset or claim that account. |
+| Customer of org A, adding members through the billing portal | Take over a person's identity by creating an account with their email (email squatting) | Emails are globally unique, so whoever creates an address first holds it. A pending account cannot sign in, and resets go only to a verified address (`onboarding_handlers.go:209`). A pending, never-activated account gives up its email when its activation token expires (open question 3). Nobody in another org can edit, reset or claim that account. |
 | Anyone at the sign-in page | Find out whether an email exists, or which org it is in | Unknown, inactive, locked and suspended-org accounts all answer like a wrong password, after the same Argon2 cost (`auth_handlers.go:100-104`, `loginRefusal` at `:296`). Forgot-password always answers the same way (`onboarding_handlers.go:178-197`). No sign-in or recovery answer names an org. |
-| Org A admin or SCIM connector | Find out whether an email exists in another org, from a `409` on create | Unavoidable with global uniqueness (D5). The answer is the existing generic `409` (`admin_handlers.go:127`, `scim_inbound_handlers.go:385`), never "in another org". Creates are rate limited per org. Residual risk. |
-| Operator restoring one org's backup | Load org A's data into org B, or roll every org back | v1 has no per-org restore or import. A capsule is the whole install (`internal/backup`, `store.go:2984`). The per-org export is read-only JSON. Any future import must assign the target org from the signed-in owner's context and new IDs, never from the file. |
-| Platform operator | Read customers' content | The platform API returns lifecycle data and counts only. There is no platform user account and no platform view of users. Anyone with database or host access can read everything. That is the trust boundary, and it is a residual risk. |
+| Customer of org A, adding members through the billing portal | Find out whether an email exists in another org, from a `409` on add | Unavoidable with global uniqueness (D5). The answer is `409 email_in_use`, never "in another org". Adds are rate limited per org. Residual risk. |
+| Operator restoring one org's backup | Load org A's data into org B, or roll every org back | v1 has no per-org restore or import. A capsule is the whole install (`internal/backup`, `store.go:2984`). The per-org export is read-only JSON. Any future import must assign the target org from the org staff selected and new IDs, never from the file. |
 
 Residual risks (accepted):
 
 - **One writer for every org.** Every Postgres write transaction takes one advisory lock
-  (`AGENTS.md:191`, `docs/RUNNING.md:343`). A large SCIM import in one org delays sign-ins
+  (`AGENTS.md:191`, `docs/RUNNING.md:343`). A burst of writes in one org delays sign-ins
   (which write `sessions`) in every other org. Per-org rate limits soften this but do not
-  remove it. Capacity is unmeasured (open question 9).
+  remove it. Capacity is unmeasured (open question 8).
 - **A restore rolls back every org.** Restoring a capsule to fix one customer's problem
   loses every other customer's writes since that capsule was taken.
 - **Global uniqueness leaks existence.** One org can tell an email is taken elsewhere
-  (see the table). The billing service's checkout must not echo `email_in_use` to an
-  anonymous buyer in a way that confirms another customer's address.
+  (see the table). The billing service's checkout and portal must not echo `email_in_use`
+  to a buyer in a way that confirms another customer's address.
 - **Offline token validation.** An app that checks JWTs offline keeps serving a suspended
   org for up to 15 minutes, or until its next poll of `/api/suite/orgs`.
+- **Staff see every org's directory** (users, groups, sessions, audit), though not app
+  content, which lives in the apps.
 - **The operator is trusted** with the database, keys and host.
 
 ## Data model
@@ -76,13 +91,15 @@ Residual risks (accepted):
 orgs (
   id TEXT PRIMARY KEY,                 -- UUID; never reused
   name TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('person','household','business')),
+  kind TEXT NOT NULL CHECK (kind IN ('default','person','household','staff')),
+                                       -- 'default': the single-tenant org; one 'staff' org in multi
   status TEXT NOT NULL CHECK (status IN ('active','suspended','deletion_scheduled','deleted')),
   status_reason TEXT NOT NULL DEFAULT '' CHECK (status_reason IN ('','payment','abuse','operator')),
   all_apps BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE only for the single-tenant default org
   plan TEXT NOT NULL DEFAULT '',
-  max_seats BIGINT NOT NULL DEFAULT 0,      -- 0 = unlimited (default org)
-  owner_user_id TEXT,                       -- no FK (users references orgs); checked in the store
+  max_seats BIGINT NOT NULL DEFAULT 0,      -- 0 = unlimited (default and staff orgs)
+  account_holder_user_id TEXT,              -- D9. No FK (users references orgs); the store
+                                            -- requires an active member of this org
   billing_ref TEXT UNIQUE,                  -- the billing service's own opaque ID, never a Stripe ID
   billing_revision BIGINT NOT NULL DEFAULT 0,
   revision BIGINT NOT NULL DEFAULT 1,       -- KyIdentity's own version, carried in events
@@ -93,6 +110,7 @@ org_apps (org_id, app_id REFERENCES app_registry ON DELETE CASCADE,
   quotas_json TEXT NOT NULL DEFAULT '{}',   -- opaque to KyIdentity, ≤ 4 KiB
   PRIMARY KEY(org_id, app_id))
 platform_tokens (id, name, token_hash UNIQUE, scopes, created_at, expires_at, last_used_at, revoked_at)
+                                            -- scopes: orgs:read|write|delete, members:read|write
 platform_requests (token_id, idempotency_key, request_hash, status, response_json, created_at,
   PRIMARY KEY(token_id, idempotency_key))   -- kept 30 days
 platform_events (id, org_id, type, payload_json, status, attempts, next_attempt_at,
@@ -122,29 +140,28 @@ refuse changing NULL to an org or back.
 Composite keys make cross-org links impossible to write:
 
 - `users` and `directory_groups` get `UNIQUE(org_id, id)`.
-- `group_memberships`, `enrollment_policies`, `enrollment_deadlines`, `suite_groups`,
-  `app_group_assignments` and `app_role_group_assignments` reference
-  `(org_id, user_id)` and `(org_id, group_id)` wherever they join two org-owned rows. On
-  SQLite these are trigger checks.
-- Per-org uniques, on Postgres only (D2): `directory_groups(org_id, name)`,
-  `suite_groups(org_id, slug)`, and an `enrollment_policies` primary key of
-  `(org_id, scope)`.
+- `group_memberships`, `suite_groups`, `app_group_assignments` and
+  `app_role_group_assignments` reference `(org_id, user_id)` and `(org_id, group_id)`
+  wherever they join two org-owned rows. On SQLite these are trigger checks.
+- Per-org uniques, on Postgres only (D2): `directory_groups(org_id, name)` and
+  `suite_groups(org_id, slug)`.
 - `users.username`, `users.email` and `webauthn_credentials.credential_id` stay global
   (D5, one RP).
 
-Views (`app_access.go:58-65`, `group_enrollment.go:68-78`, `pg_schema.go:510-545`):
+Views (`app_access.go:58-65`, `pg_schema.go:510-545`):
 
 - `app_access_facts` joins `orgs` and `org_apps` on `u.org_id`. An app counts for a user
   only when `o.all_apps` is set or an `org_apps` row is enabled, and the access mode is
   `COALESCE(oa.access_mode, a.access_mode)`.
-- `applicable_enrollment_policies` and `enrollment_requirements` add
-  `p.org_id = u.org_id` to the `'organization'` and `'administrators'` scopes.
+- The enrollment views (`group_enrollment.go:68-78`) do not change. With platform-wide
+  policies (D10), the `organization` scope means every account, and the `administrators`
+  scope means staff, since only staff hold `role='admin'` or delegations (D8).
 - `active_principals` is new: users that are active and not ended, joined to an org that is
   `active`. Every sign-in, token and session check reads it, in place of the inline
   `users.status = 'active'` tests spread across the store today (for example
   `store.go:2660`, `pg_schema.go:513`).
 - One exception is outside `active_principals`. While its org is `deletion_scheduled`,
-  the org owner may sign in with password and second factor.
+  the org's account holder may sign in with password and second factor.
   - The session is marked restricted. It works like today's `enrollment_only` sessions
     (`pg_schema.go:56`, refused by `mfa_session_access` at `:539`).
   - It reaches only the export page, the export download and sign-out.
@@ -155,13 +172,14 @@ Views (`app_access.go:58-65`, `group_enrollment.go:68-78`, `pg_schema.go:510-545
 
 One migration (`migrations.go:23` list), on both backends:
 
-1. Create `orgs` and insert the default org: the fixed ID
+1. Create `orgs` and insert the default org (`kind='default'`): the fixed ID
    `00000000-0000-0000-0000-000000000001`, `all_apps=TRUE`, `max_seats=0`, status
    `active`. Its name comes from `branding_org_name` (`branding.go:14`), or "Organisation".
 2. Add `org_id`, defaulting to the default org, to every org-owned table.
 3. Add the triggers, the composite uniques and the view changes.
 4. Record `tenancy_mode=single`, unless the database is empty and `KYIDENTITY_TENANCY=multi`.
-   In that case no default org is created, and step 1 inserts nothing.
+   In that case no default org is created, and step 1 inserts nothing. The staff org is
+   created by the first-start bootstrap (see Roles).
 
 With one org and `all_apps=TRUE`, every view returns the same rows as before. That is the
 zero-change argument, and the upgrade test proves it.
@@ -178,7 +196,8 @@ The fixed default org ID leaves room to add it later.
   every replica at the next request.
 - Backups stay whole-install capsules, unchanged. Per-org backup is not offered. Per-org
   **export** (JSON: org, users without credentials, groups, memberships, assignments, the
-  org's audit) is available to the org owner while a deletion is scheduled, and on request.
+  org's audit) is available to the account holder while a deletion is scheduled, and on
+  request through staff (open question 9).
 - `migrate-to-postgres` and `restore` copy `orgs` like any table (`pgcopy.go` is driven by
   the catalogs, `AGENTS.md:194`).
 
@@ -190,8 +209,11 @@ and binds `org_id` itself. The `*Store` versions are removed, not kept beside it
 handler cannot call the unscoped one.
 
 - `OrgID` is a distinct type. The only way to build one is from an authenticated principal:
-  a session's user, a SCIM connector, a suite call's `sub`, or a platform request's path,
-  which the platform layer checks against `orgs`.
+  a session's user, a SCIM connector (single-tenant only), a suite call's `sub`, or a
+  platform request's path, which the platform layer checks against `orgs`.
+- The one request-chosen org is a staff member's org selection on an org-bound admin route
+  (see Roles). Middleware builds it only after `accessFor` has found a staff principal, and
+  checks it against `orgs`. A member's session never reaches this path.
 - A handler gets its `OrgStore` from the request context, put there by middleware. Single
   tenant binds the default org, so handlers have one code path.
 
@@ -208,15 +230,17 @@ They are an allowlist in code:
 Each returns a principal carrying `org_id`. The caller must go through `OrgStore` for
 anything after that.
 
-**Platform-level workers.** The sync dispatcher, reconcile, the housekeeping sweeps and
-alerts read across orgs through a `PlatformStore`. That handle exposes only the worker
-queries, and every row it returns carries `org_id`, so each payload is stamped with the
-row's own org.
+**Platform-level workers and staff.** The sync dispatcher, reconcile, the housekeeping
+sweeps and alerts read across orgs through a `PlatformStore`. So do the few cross-org staff
+reads: the org list with counts, finding an org by a member's exact email, and the audit
+by actor. That handle exposes only those queries, and every row it returns carries
+`org_id`, so each payload or audit row is stamped with the row's own org. No handler gets an
+unscoped `*Store` for org-owned tables.
 
 **Postgres row-level security** would add a second layer: a non-owner role, policies of
 `org_id = current_setting('ky.org')`, and `SET LOCAL` per transaction. The work is real and
 unverified. `pgdialect` wraps statements in its own transactions (`AGENTS.md:191`), and the
-read pool and every worker would need a bypass role. Deferred (open question 7).
+read pool and every worker would need a bypass role. Deferred (open question 6).
 
 **Tests:**
 
@@ -233,13 +257,18 @@ read pool and every worker would need a bypass role. Deferred (open question 7).
   platform allowlist with a reason. It is crude, and it is cheap.
 - `TestCrossOrgMatrix` is in the style of `TestPermissionMatrixCoversEveryAdminRoute`
   (`internal/api/permissions_test.go:15`), which enumerates the route table:
-  - Set up orgs A and B. Each has an owner, an admin, a helpdesk, an auditor, an app owner,
-    a member, a SCIM connector and a suite group.
-  - For every admin, account, SCIM and suite route, call it as each A principal with B's
-    object IDs. Expect `404`, or an empty list, with B's rows unchanged.
-  - Call it again with A's IDs, expecting what the permission matrix already expects.
-  - Call every `platform` route (see Roles) as every org persona, owner included. Expect
-    `404`, with the global rows unchanged.
+  - Set up orgs A and B. Each has an account holder, a member and a suite group. Set up the
+    staff org with a staff admin, a staff helpdesk and a staff auditor.
+  - For every account and suite route, call it as each A principal with B's object IDs.
+    Expect `404`, or an empty list, with B's rows unchanged.
+  - For every org-bound admin route, call it as each staff persona with org A selected and
+    B's object IDs. Expect `404`, B's rows unchanged, and an audit row in A's log only.
+  - For every member endpoint, call it with A in the path and B's user IDs. Expect `404`.
+  - Call every admin and platform-listener route as A's account holder and member. Expect
+    the refusal a non-admin gets today, with nothing changed.
+  - Try to give an A account `role='admin'` or a delegation through every write path
+    (admin API, platform API). Expect a refusal.
+  - Call every inbound SCIM and HR route. Expect `404` (off in multi-tenant v1).
   - Runs on Postgres in the `postgres` CI job.
 - Token tests: a user's `org_id` reaches the ID token, the access token, userinfo and the
   logout token, and changing `users.org_id` is refused.
@@ -248,66 +277,85 @@ read pool and every worker would need a bypass role. Deferred (open question 7).
 
 | Mode | Principal | Can | Cannot |
 |---|---|---|---|
-| Single | Administrator (`role='admin'`) and delegations (`permissions.go:17-41`) | Unchanged | Unchanged |
-| Multi | **Org owner**: an everyday account with a new `owner` delegation kind | Every admin route that acts on its org's rows (below). Export and the deletion state. | Change the plan or seats (billing does that), act in another org, call any `platform` route |
-| Multi | **Org admin**: everyday account with a new `admin` delegation kind, or a dedicated `role='admin'` account in the org | Same as owner, except it cannot remove or demote the owner | Same as owner |
-| Multi | Helpdesk, auditor, app owner | Unchanged, inside the org | — |
-| Multi | Member | Unchanged | — |
-| Multi | **Platform operator**: a platform token, or the container-local CLI | Org lifecycle, plan, limits, counts (seats, pending invites, connectors), platform audit, owner recovery | List or read an org's users, groups, audit details, sessions or settings through any API. Sign in as a user. |
+| Single | Administrator (`role='admin'`) and delegations (`permissions.go:17-41`) | Unchanged. This includes business platforms (decision 7). | Unchanged |
+| Multi | **Staff**: accounts in the staff org (D8), admins and staff with today's delegations | The admin UI in any customer org, one selected org at a time, with today's permissions. Staff admins also use `platform` routes. | Sign in as a user, set a customer's password, change a customer's email, see an activation or reset link, read app content |
+| Multi | **Member**: every customer account | Its own account pages, and the apps its org's plan enables | Any admin route (refused as today, `writeForbidden` at `permissions.go:84`), any platform-listener route |
+| Multi | **Account holder**: one member (D9) | What a member can, plus the export-only session while a deletion is scheduled, the deletion banner, and member-change notices by mail | Anything a member cannot. It maps to no `Access` field and passes no permission check. |
+| Multi | **Billing service**: a platform token with `orgs:*` | Org lifecycle, plan, seats, apps, account holder | Read users, beyond member emails and statuses |
+| Multi | **Billing portal**: a platform token with `members:*` | Member endpoints | Org lifecycle |
 
-Notes:
+**Staff.**
 
-- The owner and org admins are everyday accounts. In a person's or a household's org the
-  owner also uses KyPost, and dedicated admin accounts are left out of the suite directory
-  (`docs/SUITE-DIRECTORY.md`, people).
-- `accessFor` (`permissions.go:65`) maps the `owner` and `admin` delegations to
-  `Access.Admin`, scoped by `OrgStore`.
-- `Access.Admin` alone is not enough for routes that write global resources. `permission`
-  (`permissions.go:17`) gains a `platform` flag, and every route names it or not, as each
-  route already names its permission. In multi-tenant mode a `platform` route answers
-  `404` to every org principal and is reached only through the container-local CLI. In
-  single-tenant mode the flag changes nothing.
-  - **Platform:** OAuth clients (create, edit, delete, secret rotation, back-channel URI);
-    paired systems and outbound connectors; app registry policy, linking, `requestable`
-    and launcher-card settings; `app_roles` definitions (create, rename, delete,
-    administrator flag); launcher cards and icons; proxy apps; mail, session limits, alert
-    settings, attestation, rate-limit networks and push relays; backups, the drill and
-    recovery keys; installer resources.
-  - **Org:** users, groups, memberships, delegations, app and role *assignments*,
-    `org_apps.access_mode` for apps the plan enables, access requests and approvals,
-    expiry, offboarding, enrollment policies, inbound SCIM connectors and tokens,
-    sessions, and the org's audit and alerts.
+- **Passkey MFA.** Today an administrator needs no second factor unless an operator turns
+  on the `administrators` enrollment policy. That policy is created not required, with
+  every factor allowed (`group_enrollment.go:52,66`). Its scope covers `role='admin'` and
+  every delegation holder (`:70`). Step-up guards sensitive routes (`require` at
+  `permissions.go:90`, `requireStepUp` at `server.go:536`). In multi-tenant mode the
+  policy is pinned: required, passkey only (`allowed_mask=4`, `enrollment_policy.go:30`),
+  grace 0. The admin API refuses any change to it. A new staff account gets an
+  enrollment-only session until it registers a passkey. Step-up stays as it is.
+- **Org selection.** The admin UI gains an org selector. Staff find an org by ID,
+  `billing_ref` or a member's exact email. The UI sends the selection as an `X-Ky-Org`
+  header on org-bound admin routes. In multi-tenant mode, an org-bound route without the
+  header answers `400 org_required`. Single-tenant ignores the header and binds the default
+  org.
+- **Route classes.** `permission` (`permissions.go:17`) gains a `platform` flag, and every
+  admin route names it or not, as each route already names its permission. The flag no
+  longer keeps anyone out, since every admin principal is staff. It decides which store
+  the request gets, and it still earns its place for that:
+  - An **org** route gets an `OrgStore` bound to the selected org: users, groups,
+    memberships, app and role *assignments*, `org_apps.access_mode` for apps the plan
+    enables, access requests and approvals, expiry, offboarding, sessions, and the org's
+    audit and alerts.
+  - A **platform** route gets no `OrgStore`, and needs `Access.Admin`. That matches today's
+    rule that only global administrators change global policy (`permissions.go:11-16`).
+    These are: OAuth clients (create, edit, delete, secret rotation, back-channel URI);
+    paired systems; app registry policy, linking, `requestable` and launcher-card
+    settings; `app_roles` definitions; launcher cards and icons; proxy apps; enrollment
+    policies (D10); delegations (staff org only, D8); mail, session limits, alert settings,
+    attestation, rate-limit networks and push relays; backups, the drill and recovery keys;
+    installer resources.
+  - In single-tenant mode the flag changes nothing.
   - PR 2 adds the flag and fails the build for an admin route that names neither.
-- The `administrators` enrollment scope already counts anyone holding a delegation
-  (`pg_schema.go:522`), so these kinds are covered with no view change.
-- The last-admin rule (`ErrLastActiveAdmin`, `expiry.go:28`) becomes per org, and also
-  requires one active owner.
+- **Audit.** Every staff request on an org route writes an audit row in the selected org's
+  log, naming the staff user and the org. Reads write `staff.read` with the route. Writes
+  keep their existing audit rows, now carrying the org. A cross-org staff read writes one
+  platform row (`org_id` NULL) that names every org whose rows it returned. Staff admins
+  read the audit across orgs by actor, so staff leads see what each staff member did.
+- **What staff see.** Directory data: users, groups, sessions, assignments and audit.
+  KyIdentity holds no app content, so none is reachable from here.
+- **No credential for a customer account.** For a customer account in multi-tenant mode,
+  the admin API refuses a password on create and update (`admin_handlers.go:102,172`) and
+  any email change (`:194`). Activation and reset links are always mailed: `send` is forced
+  on (`onboarding_handlers.go:116-119`), and the link is never returned to the screen.
+- The last-admin rule (`ErrLastActiveAdmin`, `expiry.go:28`) is unchanged and applies to
+  the staff org, the only org with administrators. There is no per-org rule.
 
-Emergency access:
+**Emergency access and recovery.**
 
 - **Single-tenant:** unchanged. `bootstrap-admin`, `disable-user` (`docs/RUNNING.md:593-610`).
-- **Multi-tenant:** `bootstrap-admin` is refused, because there is no global admin.
-  - `kyidentity org owner-recovery --org <id>` (CLI) and
-    `POST /platform/v1/orgs/{id}/owner-recovery` (API) issue a reset link to the owner's
-    email on file. The CLI prints the link once. The API sends it by mail only.
-  - Neither can change the owner's email. If the billing account is taken over, it must not
-    lead to taking over the org.
-  - Each use is audited in the org's own log, which the owner can see.
+- **Multi-tenant:** `bootstrap-admin`, and the first-start bootstrap (`CountAdmins` at
+  `cmd/kyidentity/main.go:435`), create the staff org if it is missing, and the first staff
+  admin in it. That admin must register a passkey at first sign-in. `disable-user` is
+  unchanged.
+- **Account-holder recovery.** The account holder recovers like any member: forgot-password
+  sends a link to the verified address (`onboarding_handlers.go:178-197`). If the second
+  factor is lost too, staff reset it (`reset-mfa`, `server.go:260`) after billing confirms
+  the person, and the reset link is mailed. There is no platform API for recovery: the
+  password path needs none, and an MFA reset needs a human check. If the portal could reset
+  MFA, a portal compromise could strip second factors. A lost mailbox is open question 12.
 
-**Platform settings in multi-tenant mode.** Some settings are platform-wide (see Per-org
-features): mail, session limits, alert settings, attestation, rate-limit exemptions, push
-relays and backup pairing.
+**Platform settings in multi-tenant mode** (mail, session limits, alert settings,
+attestation, rate-limit exemptions, push relays, backup pairing) stay in the admin UI as
+`platform` routes, for staff admins with step-up, as today. There is no separate
+container-local channel. Staff now have the admin UI, which is already step-up protected
+and audited. A second channel would need host access, which is a broader privilege to hand
+out, and it would add code.
 
-- Today a global administrator sets them in the admin UI, with step-up.
-- Multi-tenant mode has no such account, so they are set with container-local commands:
-  `kyidentity platform-settings show|set <area>`, plus the existing environment variables.
-  This is the channel `apply-setup` and `disable-user` already use (`AGENTS.md`, installer
-  setup), and it needs no listener and no session.
 - Each change is audited as a platform event (`org_id` NULL).
-- The admin UI routes for these settings answer `404` to org admins.
 - Startup does not require mail. Until mail is configured, `POST /platform/v1/orgs` and
-  owner recovery answer `503 mail_not_configured` and create nothing. Billing retries with
-  the same idempotency key.
+  member adds answer `503 mail_not_configured` and create nothing. Billing retries with the
+  same idempotency key.
 
 ## Tokens and suite contracts (multi-tenant)
 
@@ -336,7 +384,7 @@ relays and backup pairing.
 
 **Outbound sync** to suite apps. The signed webhook body gains `org_id`. `syncauth.Sign`
 covers the payload (`sync.go:560`), so the org is authenticated. Generic outbound SCIM
-targets (customer-owned) are off in multi-tenant v1 (see Per-org features).
+targets are off in multi-tenant v1 (see Per-org features).
 
 **Downstream contract.** In shared multi-tenant mode an app must:
 
@@ -357,18 +405,21 @@ Each app's PR documents its half against this list.
 **Listener.** `KYIDENTITY_PLATFORM_LISTEN` (for example `10.0.0.5:5868`). Unset means no
 platform API, and it is always unset in single-tenant mode. Plain HTTP, like the main
 listener (`docs/RUNNING.md`), so TLS or mTLS is terminated by a private proxy (open
-question 12). Nothing on it is served on the public listener, and nothing from the public
+question 10). Nothing on it is served on the public listener, and nothing from the public
 listener is served on it.
 
 **Authentication.**
 
 - `Authorization: Bearer kyp_<id>_<secret>`, 256 bits. Only the SHA-256 is stored, as with
   SCIM tokens.
-- Scopes: `orgs:read`, `orgs:write`, `orgs:delete`.
+- Scopes: `orgs:read`, `orgs:write`, `orgs:delete` for the billing service, and
+  `members:read`, `members:write` for the customer portal. A token never holds both kinds.
 - Created and revoked only with `kyidentity platform-token create|revoke|list`. The CLI
   prints the token once and audits each action.
-- Failed authentication is rate limited per IP, and each token is rate limited.
-- Every call is audited as `platform.*`, with the token ID as the actor.
+- Failed authentication is rate limited per IP, and each token is rate limited. Member
+  writes are also rate limited per org.
+- Every call is audited as `platform.*`, with the token ID as the actor. A call on one org
+  is audited in that org's log.
 
 **Idempotency and order.**
 
@@ -376,8 +427,10 @@ listener is served on it.
 - `platform_requests` stores the request hash and the response, in the same transaction as
   the change. The same key and hash returns the stored response. The same key with a
   different hash is `422 idempotency_conflict`.
-- Writes carry `revision`, a per-org counter the billing service increases. One at or below
-  `orgs.billing_revision` is `409 stale_revision` with the current value.
+- Org lifecycle writes carry `revision`, a per-org counter the billing service increases.
+  One at or below `orgs.billing_revision` is `409 stale_revision` with the current value.
+  Member writes carry no `revision`. They are synchronous user actions from the portal, not
+  replayed webhooks, and each is idempotent on its target state.
 - `billing_ref` is unique. A `POST /orgs` whose `billing_ref` already exists is decided
   first, before the idempotency and revision rules:
   - If the create fields match the stored org, it is `200` with the existing org.
@@ -385,19 +438,36 @@ listener is served on it.
   - A retry under a new key, or after the 30-day `platform_requests` window, therefore
     gets the same answer.
 
-**Endpoints** (`/platform/v1`). Bodies hold no personal data except the owner's name and
-email on create.
+**Org endpoints** (`/platform/v1`). Bodies hold no personal data except the account
+holder's name and email on create.
 
 | Route | Scope | Effect |
 |---|---|---|
-| `POST /orgs` | write | `{name, kind, plan, max_seats, apps:{client_id:{enabled, quotas}}, owner_email, owner_name, billing_ref, revision}`. Creates the org and a pending owner, and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere. |
-| `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | read | Status, reason, plan, limits, `seats_used`, `pending_invites`, `owner_activated`, `delete_after`, `revision`. No names or emails of users. |
-| `PATCH /orgs/{id}` | write | Plan, `max_seats`, apps and quotas, name. Lowering seats below the number used is accepted: the org is marked `over_limit`, new seats are refused, and nobody is disabled. |
-| `POST /orgs/{id}/suspend` | write | `{reason: payment\|abuse, revision}`. Semantics below. |
-| `POST /orgs/{id}/resume` | write | From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
-| `POST /orgs/{id}/schedule-deletion` | write | `{grace_days 7–90, revision}`. Suspends the org and sets `delete_after`. The owner can still sign in to a restricted, export-only session (the `active_principals` exception under Views). |
-| `DELETE /orgs/{id}` | delete | Only for `deletion_scheduled` once `delete_after` has passed, otherwise `409`. Deletes every org-owned and derived row in one transaction and leaves the tombstone. That includes the org's `audit_events`. This is a second, named audit-deletion path beside `DeleteAuditEventsOlderThan`, and the audit retention contract in `AGENTS.md` must be amended to say so. The org's audit is in the owner's export. In the same transaction, a platform audit row (`org_id` NULL), `platform.org_deleted`, records the org ID, the token and row counts per table, with no content. If it cannot be written, nothing is deleted (fail closed). A test proves both. |
-| `POST /orgs/{id}/owner-recovery` | write | See Roles. |
+| `POST /orgs` | `orgs:write` | `{name, kind: person\|household, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, billing_ref, revision}`. Creates the org and a pending account holder, and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere. |
+| `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `over_limit`, `holder_activated`, `delete_after`, `revision`. No names or emails of users. |
+| `PATCH /orgs/{id}` | `orgs:write` | Plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (an active member of the org). Lowering seats below the number used is accepted: the org is `over_limit`, new seats are refused, and nobody is disabled. |
+| `POST /orgs/{id}/suspend` | `orgs:write` | `{reason: payment\|abuse, revision}`. Semantics below. |
+| `POST /orgs/{id}/resume` | `orgs:write` | From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
+| `POST /orgs/{id}/schedule-deletion` | `orgs:write` | `{grace_days 7–90, revision}`. Suspends the org and sets `delete_after`. The account holder can still sign in to a restricted, export-only session (the `active_principals` exception under Views). |
+| `DELETE /orgs/{id}` | `orgs:delete` | Only for `deletion_scheduled` once `delete_after` has passed, otherwise `409`. Deletes every org-owned and derived row in one transaction and leaves the tombstone. That includes the org's `audit_events`. This is a second, named audit-deletion path beside `DeleteAuditEventsOlderThan`, and the audit retention contract in `AGENTS.md` must be amended to say so. The org's audit is in the account holder's export. In the same transaction, a platform audit row (`org_id` NULL), `platform.org_deleted`, records the org ID, the token and row counts per table, with no content. If it cannot be written, nothing is deleted (fail closed). A test proves both. |
+
+**Member endpoints.** A household still invites and removes its people, and resends
+invites. With no org admin (decision 6), the billing service's customer portal does it for
+the account holder through these endpoints. Staff do the same in the admin UI. Every
+member is an everyday account (`role='user'`), and the endpoints reach no other kind.
+
+| Route | Scope | Effect |
+|---|---|---|
+| `GET /orgs/{id}/members` | `members:read` | `{user_id, email, status: pending\|active\|disabled, account_holder}` for each member. No names, sessions or factors. |
+| `POST /orgs/{id}/members` | `members:write` | `{email, name}`. Creates a pending member (username = email, D5) and mails an activation invite. An existing member of this org with that email is `200` with it. `409 email_in_use` if the email is elsewhere, `409 seat_limit`, `503 mail_not_configured`. |
+| `POST /orgs/{id}/members/{user_id}/resend-invite` | `members:write` | Pending members only, otherwise `409`. Issues a new activation token, which ends the old one, and mails it. Rate limited per member. |
+| `POST /orgs/{id}/members/{user_id}/disable`, `…/enable` | `members:write` | Disable revokes every grant (`revokeSessionGrantsTx`). Enable adds a seat, so it is checked. |
+| `DELETE /orgs/{id}/members/{user_id}` | `members:write` | Deletes the account through the existing path (`DeleteUserWithSyncEvents`, `store.go:1073`), so apps get the usual deprovisioning event. |
+
+- The account holder cannot be disabled or deleted here (`409 account_holder`). Billing
+  first moves the role with `PATCH /orgs/{id}`.
+- Every member write is audited in the org's log, queues `org.member_changed`, and mails a
+  notice to the account holder (new mail text, no link).
 
 **Suspension**, in one transaction with its audit row:
 
@@ -405,8 +475,7 @@ email on create.
 2. Revoke every session and token grant of the org's users (`revokeSessionGrantsTx`). This
    ends forward sessions too.
 3. Queue back-channel logouts for every client session.
-4. Hold the org's inbound SCIM: tokens answer `403`.
-5. Queue `org.suspended`.
+4. Queue `org.suspended`.
 
 After that:
 
@@ -422,19 +491,16 @@ After that:
 - Sent from `platform_events` (outbox) to `KYIDENTITY_PLATFORM_EVENTS_URL`. Each is signed
   with `ky-primitives/syncauth`, using a secret sealed at rest and set by
   `kyidentity platform-events set-secret`.
-- Types: `org.created`, `org.owner_activated`, `org.seats_changed` (at most one per org a
-  minute), `org.over_limit` and `org.within_limit`, `org.suspended`, `org.resumed`,
-  `org.deletion_scheduled`, `org.deleted`.
+- Types: `org.created`, `org.member_changed` (`change`: `added`, `activated`, `disabled`,
+  `enabled` or `removed`, for any member including the account holder), `org.over_limit`
+  and `org.within_limit`, `org.suspended`, `org.resumed`, `org.deletion_scheduled`,
+  `org.deleted`.
 - `over_limit` is **derived**: `seats_used > max_seats`, with `max_seats > 0`. It is not
-  stored, and it is not an `orgs.status` value.
-  - A transaction that changes either side (a `PATCH` of `max_seats`, a disable, a
-    delete) computes the flag before and after. When it flips, it queues
-    `org.over_limit` or `org.within_limit` in the same transaction.
-  - Seat-adding transitions are refused while the org is at or over the limit, so they
-    never flip it.
-  - `GET /orgs/{id}` returns the derived `over_limit`.
-- Body: `{event_id, type, org_id, billing_ref, revision, status, seats_used, at}`. No
-  personal data.
+  stored, and it is not an `orgs.status` value. A transaction that changes either side
+  computes it before and after, and queues `org.over_limit` or `org.within_limit` in the
+  same transaction when it flips.
+- Body: `{event_id, type, org_id, billing_ref, revision, status, seats_used, user_id?,
+  change?, at}`. `user_id` is the opaque KyIdentity ID. No personal data.
 - Delivery is at least once and unordered. Billing de-duplicates by `event_id` and orders
   by `revision`.
 
@@ -445,12 +511,16 @@ KyIdentity stores `max_seats` on `orgs`, and per-app enablement and opaque quota
 
 - **KyIdentity enforces seats and app enablement.**
   - A seat is an everyday account (`role='user'`) that is active or pending (open
-    question 8).
-  - Only a transition that adds a seat is checked: a user create, an invite, a SCIM create,
-    or re-enabling a disabled account. One that would pass `max_seats` is refused with
-    `seat_limit`.
+    question 7).
+  - Only a transition that adds a seat is checked: a member add (platform API or admin UI)
+    or re-enabling a disabled account. SCIM and HR creates are off in multi-tenant v1.
+    One that would pass `max_seats` is refused with `seat_limit`.
   - Activation never is, because the pending account already holds its seat. An invited
-    user can activate even while the org is `over_limit`.
+    member can activate even while the org is `over_limit`.
+  - One store function counts and inserts inside the write transaction. Postgres write
+    transactions are already serialised on one advisory lock across every replica
+    (`AGENTS.md:191`), so count-then-insert cannot race. No per-org lock or seat counter
+    column is needed.
   - A disabled app gives no access: the `app_access_facts` join above means no token and no
     suite listing.
 - **Apps enforce their own quotas** (storage, mailboxes) from `GET /api/suite/orgs`.
@@ -467,48 +537,58 @@ Why a suite API pull:
 
 ## Per-org features
 
+Customer orgs are people and households. Business features stay in single-tenant installs
+(see Business platforms).
+
 | Feature | Multi-tenant v1 | Notes |
 |---|---|---|
-| Users, groups, delegations, access requests, expiry, offboarding | Per org | `OrgStore` |
-| App assignment, app roles assignment | Per org | Roles themselves are global (appendix) |
-| MFA enrollment policies (`enrollment_policies`) | Per org | The `organization` scope becomes the org's |
-| Inbound SCIM connectors | Per org, plan-gated | A connector's token authenticates into its org. Seats apply. |
+| Users, groups, access requests, expiry, offboarding | Per org, run by staff | `OrgStore` |
+| Delegations | Staff org only | D8 |
+| App assignment, app roles assignment | Per org, run by staff | Roles themselves are global (appendix) |
+| MFA enrollment policies (`enrollment_policies`) | Platform-wide, set by staff | D10. Staff are pinned to passkeys (Roles). |
+| Inbound SCIM connectors | Disabled | Syncs a business directory. A household has none. |
+| HR provisioning | Disabled | Feeds a business HR system, and reserves a KyPost address per `domain` (`hr.go:46`). |
+| Upstream SSO / federation per org | Absent | Does not exist today (`docs/access-lifecycle-plan.md:73`, `design.md:32`). It serves a business's own IdP. |
+| Generic outbound SCIM to customer targets | Disabled | Provisions a business's own apps, and would need per-org `paired_systems`. |
 | Outbound to suite apps (`paired_systems` of suite types) | Platform | Payload carries `org_id` |
-| Generic outbound SCIM to customer targets | Disabled | Would need per-org `paired_systems`, held per org |
-| HR provisioning | Disabled | Reserves a KyPost address per `domain` (`hr.go:46`). Per-org domain ownership is not designed. |
 | Forward-auth proxy apps | Disabled | Hosts and edge secrets are install-wide (`2026-11-15-forward-auth-design.md`) |
 | Custom launcher cards (`applications`) | Disabled for orgs | Platform cards only |
-| Upstream SSO / federation | Absent | Does not exist today (`docs/access-lifecycle-plan.md:73`, `design.md:32`) |
-| Branding (`branding_org_name`, `branding_logo`) | Platform only | The sign-in page comes before the org is known. The org name shows after sign-in (open question 6). |
+| Branding (`branding_org_name`, `branding_logo`) | Platform only | The sign-in page comes before the org is known. The org name shows after sign-in (open question 5). |
 | Session limits, mail, alerts settings, attestation, rate-limit exemptions, push relays | Platform | `system_settings` keys (`session_limits.go:13`, `sealed.go:30`) |
 | Installer setup (`apply-setup`, `proxy-app`) | Refused | The installer channel is single-tenant |
 | Backups, restore, drill | Platform | Whole install |
 | Audit log | Per org view, plus platform | `audit_events.org_id`, NULL for platform events |
 
+The disabled features answer `404` in multi-tenant mode, and their admin routes refuse to
+create a connector, as the cross-org matrix test checks.
+
+## Business platforms
+
+A business customer gets its own dedicated KyIdentity install in single-tenant mode, with
+its own administrators and delegations. That is today's self-hosted behaviour, with every
+business feature above. For now staff set these installs up by hand. The billing service
+only bills them and does not deploy them. They are outside this spec.
+
 ## Phased build plan
 
 Each PR is shippable on its own, with single-tenant behaviour unchanged. `KYIDENTITY_TENANCY=multi`
-is refused at startup until PR 6 lands. Before then, an org could have an owner who cannot
-administer it, or a plan whose seats are not enforced. Until PR 6, multi-tenant code runs
-only in tests.
+is refused at startup until PR 6 lands. Before PR 5, staff cannot work in a customer org.
+Before PR 6, member adds do not enforce seats. Until PR 6, multi-tenant code runs only in
+tests.
 
 1. **Org model and default-org migration.**
    - Adds schema version 6 on both backends: the tables, columns, triggers and views above,
-     and `tenancy_mode`.
-   - On Postgres only, it widens the `admin_delegations.kind` CHECK (`delegations.go:29`)
-     to admit `owner` and `admin`, so no later schema change is needed for them.
-     - On SQLite a CHECK changes only by a table rebuild, which D2 rules out. SQLite is
-       single-tenant only and never uses these kinds, so it keeps the CHECK.
-     - `TestBackendsHaveTheSameColumns` compares names, not CHECKs, so it is unaffected.
+     and `tenancy_mode`. No delegation kind changes.
    - Tests:
      - An upgrade test from a version 5 database on both backends (`upgrade_test.go`
        style). Every view returns the same rows before and after.
      - `TestEveryTableIsClassified` and `TestOrgOwnedTablesHaveOrgID`.
      - `TestBackendsHaveTheSameColumns` still passes.
      - The full `go test -race ./...` and the `postgres` job.
-2. **Store scoping.** `OrgStore`, `PlatformStore` and the pre-org allowlist. Split by area so
-   each PR stays reviewable: (a) users, groups and memberships, (b) apps, assignments and
-   roles, (c) sessions and credentials, (d) provisioning, SCIM and audit.
+2. **Store scoping.** `OrgStore`, `PlatformStore`, the pre-org allowlist, the `platform`
+   route flag, and the staff-org rule for `role='admin'` and delegations (D8). Split by
+   area so each PR stays reviewable: (a) users, groups and memberships, (b) apps,
+   assignments and roles, (c) sessions and credentials, (d) provisioning and audit.
    - Tests: `TestOrgSQLNamesOrgID`, and `TestCrossOrgMatrix`, which grows with each sub-PR.
      It runs with a test-only multi-org constructor on Postgres. Existing tests pass
      unchanged on the default org.
@@ -518,10 +598,8 @@ only in tests.
    - Tests: single-tenant golden tokens are byte-identical apart from `jti`, `iat` and
      `exp`. Multi-org suite tests. A `ky-primitives/suitedir` `Orgs` method.
 4. **Platform provisioning API.** The listener, tokens and CLI, idempotency, revision,
-   create, update, suspend, resume, deletion and owner recovery, the events outbox and
-   `active_principals`. The `owner` and `admin` delegations take effect here, mapped to
-   `Access.Admin` and kept off `platform` routes, so an activated owner can administer
-   the org. The per-org last-owner rule also lands here.
+   create, update, suspend, resume and deletion, the member endpoints, the account holder
+   and its notices, the events outbox, and `active_principals`.
    - Tests:
      - Replay, conflict and stale-revision cases.
      - Suspension ends every grant: a table of every credential type, like
@@ -529,19 +607,23 @@ only in tests.
      - Every sign-in path refuses a suspended org.
      - Delete removes every org row, checked against the table classification.
      - Platform tokens are refused on the public listener, and browser and SCIM
-       credentials are refused on the platform listener.
+       credentials are refused on the platform listener. A `members:*` token is refused on
+       every org lifecycle route.
+     - The account holder cannot be disabled or deleted through the member endpoints.
      - Events are signed and retried.
-5. **Org owner and admin UI.**
-   - Adds the UI for owner and admin delegations, per-org last-admin rules, a seats
-     display, the export, the scheduled-deletion banner, and per-org enrollment policy UI.
-   - Tests: the extended permission matrix, the existing UI verification flow
-     (`UI-VERIFICATION.md`), and the export's content proven to hold no other org's rows.
+5. **Staff admin UI.**
+   - Adds the org selector and `X-Ky-Org`, staff read audit and the cross-org audit by
+     actor, the pinned passkey policy, the customer-account guards (no password, no email
+     change, links only by mail), and the account holder's export page and deletion
+     banner.
+   - Tests: the extended permission matrix with staff personas, a refusal of every change
+     to the pinned policy, the existing UI verification flow (`UI-VERIFICATION.md`), and
+     the export's content proven to hold no other org's rows.
 6. **Entitlements.**
-   - Seat enforcement on every create path (admin, SCIM, invite, activation), `over_limit`,
-     `org_apps` from the platform API, and quotas in `/api/suite/orgs`.
-   - Tests: the seat limit on each path under concurrency (two replicas, the
-     `replica_proofs_test.go` style), and app disablement removing access and suite
-     listing.
+   - Seat enforcement on every seat-adding path (member add, admin create, re-enable),
+     `over_limit`, `org_apps` from the platform API, and quotas in `/api/suite/orgs`.
+   - Tests: the seat limit on each path, two parallel adds on Postgres with one seat free
+     (one succeeds), and app disablement removing access and suite listing.
 7. (Optional) **Postgres row-level security** as extra protection.
 
 ## Open questions for the owner
@@ -557,49 +639,59 @@ only in tests.
    - (b) Always, with the default org's ID.
    - Recommend (a) for zero change. Apps treat an absent claim as single-tenant.
 3. **Email squatting by a pending account in another org.**
-   - (a) First come, first served, released by the operator.
+   - (a) First come, first served, released by staff.
    - (b) A pending, never-activated account is deleted when its activation token expires,
      which frees the address.
    - Recommend (b), with a 7-day activation lifetime in multi-tenant mode.
-4. **Dedicated admin accounts in multi-tenant orgs?**
-   - (a) Allowed.
-   - (b) Only everyday accounts with owner or admin delegations.
-   - Recommend (a), optional. The owner is always an everyday account.
-5. **What a suspended org's user sees after a correct password and second factor.**
+4. **What a suspended org's user sees after a correct password and second factor.**
    - (a) The generic invalid-credentials answer.
    - (b) "Your organisation is suspended".
    - Recommend (b). Only a holder of valid credentials learns anything.
-   - Either way, the owner's export-only session during scheduled deletion stays as
-     designed above.
-6. **Per-org branding.**
+   - Either way, the account holder's export-only session during scheduled deletion stays
+     as designed above.
+5. **Per-org branding.**
    - (a) Never.
    - (b) After sign-in only (launcher, account pages), later.
    - Recommend (b), after v1.
-7. **Postgres row-level security.**
+6. **Postgres row-level security.**
    - (a) In v1.
    - (b) After PR 2's app-level isolation is proven.
    - Recommend (b).
-8. **What is a seat?**
+7. **What is a seat?**
    - (a) Active and pending everyday accounts.
    - (b) Active only.
-   - (c) Every account, dedicated admins included.
    - Recommend (a): an invite reserves a seat, so a plan cannot be exceeded by inviting.
-9. **Capacity of the single writer.** Accept for v1, and set a measured target (orgs,
+8. **Capacity of the single writer.** Accept for v1, and set a measured target (orgs,
    sign-ins a minute) before launch? Recommend yes. Revisit per-org write locks only if the
    measurement fails.
-10. **Inbound SCIM in v1, for business orgs?**
-    - (a) Yes, plan-gated.
-    - (b) Later.
-    - Recommend (a). The connector is already scoped to its own accounts (`docs/PROVISIONING.md`, Inbound SCIM).
-11. **Grace period and export.** Bounds of 7–90 days, and the owner downloads the export. Or
-    should billing also get a copy? Recommend the owner only: the billing service never
-    holds users' data.
-12. **Platform API transport.**
+9. **Who gets the export.** Bounds of 7–90 days for the grace period. Then:
+   - (a) The account holder, signed in to the export-only session.
+   - (b) A one-time download link mailed to the account holder.
+   - (c) Staff, on the account holder's request.
+   - Recommend (a), with (c) for a holder who cannot sign in. (b) leaves a bearer link to
+     the whole org's directory in a mailbox. The billing service never gets a copy: it
+     never holds users' data.
+10. **Platform API transport.**
     - (a) Bearer token on a private listener.
     - (b) (a) plus mTLS at a private proxy.
     - (c) (a) plus a `syncauth` HMAC signature on every request.
     - Recommend (a) when billing runs on the same private network, and (b) otherwise. (c)
       adds little when the bearer travels on the same channel.
+11. **What authorises a member write.**
+    - (a) The portal's `members:write` token alone. The portal has signed in the account
+      holder in its own way.
+    - (b) The portal also passes a KyIdentity access token of the account holder, and
+      KyIdentity checks its `sub` is that org's holder.
+    - Recommend (b) if the portal signs customers in through KyIdentity anyway (unverified).
+      A stolen portal token then cannot add members to any org on its own. Otherwise (a),
+      with the defences in the threat model.
+12. **Account holder with a lost mailbox.** Staff cannot change a customer's email.
+    - (a) Keep that in v1. Billing names another member as account holder, or the person
+      gets a new account.
+    - (b) Staff change the email after billing confirms the person, with a notice to the
+      old address and a delay before it takes effect.
+    - Recommend (a) for v1. A staff email change is exactly the takeover path the
+      staff-abuse defence closes. Revisit (b) if support load shows the need.
 
 ## Appendix: table inventory
 
@@ -623,7 +715,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `group_memberships` | `store.go:143` | `:41` | O | Joins two org-owned rows. A composite FK keeps both in one org. |
 | `sessions` | `store.go:150` | `:47` | D | `user_id` FK. Found by token hash, a pre-org lookup. |
 | `login_failures` | `store.go:163` | `:58` | D | `user_id` FK |
-| `paired_systems` | `store.go:171` | `:66` | I: P | Suite app targets are shared. Customer-owned generic SCIM targets (disabled in v1) would need a nullable `org_id` later. |
+| `paired_systems` | `store.go:171` | `:66` | P | Suite app targets are shared. Customer-owned generic SCIM targets are business features, single-tenant only. |
 | `account_sync_events` | `store.go:184` | `:79` | O | `user_id` has no FK, and events outlive the user. The payload needs the org after deletion. |
 | `native_devices` | `store.go:724` | `:95` | D | `user_id` FK |
 | `device_pairing_tokens` | `store.go:202` | `:118` | D | `user_id` FK |
@@ -637,7 +729,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `launcher_icons` | `store.go:296` | `:205` | P | Icons of platform cards |
 | `applications` | `store.go:303` | `:212` | I: P | Custom org cards are disabled in v1. Becomes O if orgs get their own cards. |
 | `issued_tokens` | `store.go:317` | `:223` | D | `user_id` FK |
-| `audit_events` | `store.go:328` | `:232` | O | Nullable `org_id`: NULL means a platform event. This is the one nullable exception (`nullableOrgID`, and the NULL case in its triggers). |
+| `audit_events` | `store.go:328` | `:232` | O | Nullable `org_id`: NULL means a platform event (`nullableOrgID`, and the NULL case in its triggers). |
 | `system_settings` | `store.go:343` | `:246` | P | Platform settings. Future per-org settings go into a new `org_settings` table, never prefixed keys. |
 | `step_up_tokens` | `store.go:352` | `:252` | D | `user_id` FK |
 | `webauthn_credentials` | `store.go:363` | `:262` | D | `user_id` FK. `credential_id` is global (one RP). |
@@ -651,21 +743,21 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `authorization_interactions` | `authorization_interactions.go:34` | `:324` | P | Pre-sign-in flow state, keyed by hash and browser. `user_id` is `''` until bound, then it is checked against the session's user, whose org scopes everything after. |
 | `oidc_client_sessions` | `client_sessions.go:19` | `:329` | D | `session_id` FK |
 | `account_tokens` | `onboarding.go:30` | `:333` | D | `user_id` FK |
-| `scim_connectors` | `scim_inbound.go:42` | `:339` | O | A connector belongs to one org. Its token decides the org. |
+| `scim_connectors` | `scim_inbound.go:42` | `:339` | O | A connector belongs to one org, and its token decides the org. Single-tenant only in v1, so every row is in the default org. |
 | `scim_connector_tokens` | `scim_inbound.go:45` | `:343` | D | `connector_id` FK |
 | `app_roles` | `app_roles.go:76` | `:348` | I: P | Roles describe a global app, and their definitions are `platform` routes. Becomes O if orgs define their own roles. |
 | `app_role_user_assignments` | `app_roles.go:80` | `:352` | D | `user_id` FK |
 | `app_role_group_assignments` | `app_roles.go:83` | `:356` | D | `group_id` FK |
-| `admin_delegations` | `delegations.go:27` | `:360` | D | `user_id` FK. New `owner` and `admin` kinds. |
+| `admin_delegations` | `delegations.go:27` | `:360` | D | `user_id` FK. Kinds unchanged. Multi-tenant: staff org accounts only (D8). |
 | `access_requests` | `access_requests.go:70` | `:367` | D | `user_id` FK |
 | `logout_deliveries` | `logout_deliveries.go:34` | `:376` | O | `user_id` has no FK, and deliveries outlive the user. The logout token carries `org_id`. |
-| `enrollment_policies` | `group_enrollment.go:50` | `:382` | O | Primary key becomes `(org_id, scope)` on Postgres. The `organization` scope is per org. |
-| `enrollment_deadlines` | `group_enrollment.go:55` | `:388` | O | FK to `(org_id, scope)` |
+| `enrollment_policies` | `group_enrollment.go:50` | `:382` | P | Platform-wide in multi-tenant mode (D10), where `group:` scopes are refused. In single-tenant a `group:` row references a default-org group. |
+| `enrollment_deadlines` | `group_enrollment.go:55` | `:388` | D | `user_id` FK |
 | `sync_resource_state` | `provisioning.go:35` | `:391` | O | `resource_id` has no FK, and offboarded rows persist after deletion |
 | `sync_reconcile_jobs` | `reconcile.go:30` | `:398` | P | Per system, across every org. Per-org repair is later. |
-| `alerts` | `alerts.go:82` | `:408` | O | Nullable `org_id` (`nullableOrgID`). Org rules (failed sign-ins) go to the org's admins. Platform alerts (NULL) have no user recipient, only the log, until a platform channel exists. |
+| `alerts` | `alerts.go:82` | `:408` | O | Nullable `org_id` (`nullableOrgID`). An org's alerts (failed sign-ins) go to staff, tagged with the org. Platform alerts (NULL) have no user recipient, only the log, until a platform channel exists. |
 | `alert_queue` | `alerts.go:92` | `:417` | D | `event_id` FK to `audit_events` |
-| `alert_deliveries` | `alerts.go:98` | `:421` | D | `alert_id` FK. The recipient is an org admin. |
+| `alert_deliveries` | `alerts.go:98` | `:421` | D | `alert_id` FK. The recipient is an administrator: staff in multi-tenant mode. |
 | `launcher_prefs` | `launcher_prefs.go:82` | `:430` | D | `user_id` FK |
 | `refresh_families` | `refresh_tokens.go:52` | `:436` | D | `jti` FK to `issued_tokens` |
 | `refresh_tokens` | `refresh_tokens.go:63` | `:448` | D | `family_jti` FK |
@@ -674,7 +766,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `proxy_apps` | `forward_auth.go:19` | (migration 2) | P | Disabled in multi-tenant v1. The host is install-wide. |
 | `forward_codes` | `forward_auth.go:23` | (migration 2) | D | `user_id` and `session_id` FKs |
 | `forward_sessions` | `forward_auth.go:29` | (migration 2) | D | `user_id` FK |
-| `hr_connections` | `hr.go:46` | (migration 3) | D | `connector_id` FK to `scim_connectors`. Disabled in multi-tenant v1. |
+| `hr_connections` | `hr.go:46` | (migration 3) | D | `connector_id` FK to `scim_connectors`. Single-tenant only in v1. |
 | `hr_workers` | `hr.go:51` | (migration 3) | D | `connector_id` FK |
 | `suite_groups` | `suite_groups.go:16` | (migration 4) | O | A tombstone with no FK, so it needs its own `org_id`. Slug unique per org. Unverified: whether any app uses the slug in a global namespace (for example KyPost list addresses). |
 | `suite_group_apps` | `suite_groups.go:19` | (migration 4) | D | `group_id` FK to `suite_groups` |
