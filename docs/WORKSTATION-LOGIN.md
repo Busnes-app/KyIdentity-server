@@ -16,7 +16,7 @@ Design and the Himmelblau source review: `docs/superpowers/specs/2026-11-19-work
 2. **Manage access.** Assign the groups whose members may sign in to desktops. The app is
    assigned-only, so nobody else can approve a code for it. The same group names go into
    `pam_allow_groups`, so a desktop also refuses everyone else.
-3. **Settings.** Turn on **Allow device sign-in**. Choose the code lifetime (2-15 minutes,
+3. **Edit settings.** Turn on **Allow device sign-in**. Choose the code lifetime (2-15 minutes,
    default 5) and the offline window (0-30 days, default 7).
 4. **On each desktop**, install Himmelblau 4.0 or later (`himmelblau`, `nss-himmelblau`,
    `pam-himmelblau`) and copy the generated file to `/etc/himmelblau/himmelblau.conf`:

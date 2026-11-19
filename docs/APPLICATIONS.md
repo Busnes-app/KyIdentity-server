@@ -88,7 +88,7 @@ MFA. Setup, the nginx configuration and the three ways an app can take the sign-
 A **workstation app** lets people sign in to Linux desktops through Himmelblau with the
 device grant: the desktop shows a code, the person approves it at `/device`. Open **App
 connections**, then **Workstation login**. Device sign-in is off until you turn it on; assign
-groups with **Manage access**, set the code lifetime and offline window in **Settings**, and
+groups with **Manage access**, set the code lifetime and offline window in **Edit settings**, and
 copy the generated `himmelblau.conf`. Setup, break-glass and the offline trade-off are in
 [WORKSTATION-LOGIN.md](WORKSTATION-LOGIN.md).
 

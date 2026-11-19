@@ -56,7 +56,7 @@ try {
       shots.push(`${path} overflow=${over}`);
     };
     await page.evaluate(() => { location.hash = '#/admin-app-registry'; });
-    await page.getByRole('heading', { name: 'App connections' }).waitFor();
+    await page.getByRole('heading', { name: 'App connections', exact: true }).waitFor();
     await shot('app-connections');
     if (TAG === 'after') {
       await page.getByRole('button', { name: 'Workstation login' }).click();
@@ -68,11 +68,11 @@ try {
         clientId = await page.evaluate(async () => (await (await fetch('/api/admin/workstation-apps')).json()).apps[0].clientId);
         await enableAndSignInOnce(page);
         await page.reload();
-        await page.getByRole('heading', { name: 'Linux desktops' }).waitFor();
+        await page.getByRole('button', { name: 'Workstation login' }).click();
       }
       await page.getByRole('heading', { name: 'Linux desktops' }).waitFor();
       await shot('workstation-login');
-      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'Edit settings' }).click();
       await page.getByRole('dialog').getByLabel('Offline window (days)').waitFor();
       await shot('workstation-settings');
       await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();

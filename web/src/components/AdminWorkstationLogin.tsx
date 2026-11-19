@@ -75,8 +75,9 @@ export function AdminWorkstationLogin({ onClose, onManageAccess }: { onClose: ()
         <div className="section-header"><h2 id={`ws-${app.clientId}`}>{app.clientName}</h2>
           <div className="action-buttons-wrap">
             <button className="secondary-btn sm" disabled={busy} onClick={() => onManageAccess(app.clientId)}>Manage access</button>
-            <button className="secondary-btn sm" disabled={busy} onClick={() => setDraft({ clientId: app.clientId, name: app.clientName, grant: app.deviceGrantEnabled, minutes: app.deviceCodeTtl / 60, days: days(app.offlineWindow) })}>Settings</button>
+            <button className="secondary-btn sm" disabled={busy} onClick={() => setDraft({ clientId: app.clientId, name: app.clientName, grant: app.deviceGrantEnabled, minutes: app.deviceCodeTtl / 60, days: days(app.offlineWindow) })}>Edit settings</button>
           </div></div>
+        <div className="modal-body">
         <dl className="connection-details">
           <dt>Device sign-in</dt><dd>{app.deviceGrantEnabled ? <span className="ky-status" data-ky-status="success">On</span> : <span className="ky-status">Off</span>}</dd>
           <dt>Code lifetime</dt><dd>{app.deviceCodeTtl / 60} minutes</dd>
@@ -84,12 +85,13 @@ export function AdminWorkstationLogin({ onClose, onManageAccess }: { onClose: ()
           <dt>Groups</dt><dd>{app.groups.length ? app.groups.join(', ') : <span className="text-muted">None assigned</span>}</dd>
           <dt>Client ID</dt><dd><code className="cell-id">{app.clientId}</code></dd>
         </dl>
-        {!app.deviceGrantEnabled && <div className="alert-box warn sm" role="note">Device sign-in is off. Turn it on in Settings before desktops can sign in.</div>}
+        {!app.deviceGrantEnabled && <div className="alert-box warn sm" role="note">Device sign-in is off. Turn it on with Edit settings before desktops can sign in.</div>}
         {bad.length > 0 && <div className="alert-box warn sm" role="note">Himmelblau cannot match {bad.map(g => `"${g}"`).join(', ')}: a group name with a colon, comma or outer space is left out of pam_allow_groups. Rename it to use it here.</div>}
         <div className="form-group"><label className="form-label" htmlFor={`conf-${app.clientId}`}>/etc/himmelblau/himmelblau.conf</label>
           <textarea id={`conf-${app.clientId}`} className="form-input font-mono" readOnly rows={conf.split('\n').length} value={conf} onFocus={e => e.currentTarget.select()} />
           <div className="action-buttons-wrap"><button className="secondary-btn sm" onClick={() => copy(app, conf)}>Copy</button>{copied === app.clientId && <span role="status" className="text-muted">Copied</span>}</div></div>
         <div className="alert-box sm" role="note"><p>Then run <code>sudo aad-tool configure-pam</code>. Keep <code>pam_unix</code> in the PAM stack and one local administrator account with a password: it still signs in when KyIdentity or the network is down.</p></div>
+        </div>
       </section>;
     })}
     {draft && <Modal title={`Settings for ${draft.name}`} onClose={() => setDraft(null)}>
