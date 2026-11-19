@@ -18,7 +18,7 @@ const (
 	OfflineWindowMax       = 30 * 24 * 3600
 	OfflineWindowDefault   = 7 * 24 * 3600
 	DeviceCodeInterval     = 5
-	maxPendingDeviceCodes  = 100
+	maxPendingDeviceCodes  = 1000
 	deviceCodeSweepRetain  = time.Hour
 	deviceCodeStatusWait   = "pending"
 	deviceCodeStatusOK     = "approved"

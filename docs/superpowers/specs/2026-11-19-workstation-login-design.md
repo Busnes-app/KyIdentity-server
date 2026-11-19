@@ -100,7 +100,7 @@ sessions.workstation_client_id TEXT NULL  -- NULL: browser session
 
 | Route | Auth | Notes |
 |---|---|---|
-| `POST /oauth/device_authorization` | `client_id` of an enabled workstation app with the grant on (public client, no secret) | Rate limit `device_authorization` per address (10, 0.2/s); at most 100 live pending codes per app. Returns `device_code`, `user_code` (`XXXX-XXXX`), `verification_uri` (`<issuer>/device`), `verification_uri_complete`, `expires_in`, `interval` (5). `no-store`. Audit `device_grant.issued`. |
+| `POST /oauth/device_authorization` | `client_id` of an enabled workstation app with the grant on (public client, no secret) | Rate limit `device_authorization` per address (10, 0.2/s); at most 1,000 live pending codes per app. Returns `device_code`, `user_code` (`XXXX-XXXX`), `verification_uri` (`<issuer>/device`), `verification_uri_complete`, `expires_in`, `interval` (5). `no-store`. Audit `device_grant.issued`. |
 | `POST /oauth/token` `grant_type=urn:ietf:params:oauth:grant-type:device_code` | `client_id` must match the code's client | `authorization_pending`, `slow_down` (poll sooner than interval − 1 s; the interval is not lengthened, because Himmelblau ignores it), `access_denied`, `expired_token`, `invalid_grant` (unknown, redeemed, wrong client). Redeems once. Audit `device_grant.redeemed` / `device_grant.replayed`. |
 | `POST /oauth/token` `grant_type=refresh_token` | public workstation client by `client_id`, else confidential as today | Workstation families slide the session and family end by the offline window. |
 | `GET /device` | none (SPA) | Signs in through the existing screens, then shows code entry and approval. |
