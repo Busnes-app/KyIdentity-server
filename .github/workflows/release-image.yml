@@ -115,6 +115,7 @@ jobs:
             relay
             docker
             postgres
+            samba-ad
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
