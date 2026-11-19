@@ -53,7 +53,7 @@ check in code.
 
 | Attacker | Goal | Defence |
 |---|---|---|
-| Member of org A, or staff working in org A | Read or change org B's users, groups, assignments, audit or policy by putting B's IDs in account, suite or admin calls | Every org-owned query runs through an `OrgStore`. For a member or a suite call it is bound to the authenticated principal's org, never to the request. For staff it is bound to the org the staff member selected (see Roles), and only after the caller is proven to be staff. A cross-org ID is `404`, the same answer as a missing one. Composite foreign keys (`(org_id, user_id)`, `(org_id, group_id)`) make a cross-org membership or assignment impossible to write at the database level. Proven by the cross-org matrix test. Inbound SCIM and HR connectors are off in multi-tenant mode (see Per-org features), so they are no path. |
+| Member of org A, or staff working in org A | Read or change org B's users, groups, assignments, audit or policy by putting B's IDs in account, suite or admin calls | Every org-owned query runs through an `OrgStore`. For a member or a suite call it is bound to the authenticated principal's org, never to the request. For staff it is bound to the org the staff member selected (see Roles), and only after the caller is proven to be staff. A cross-org ID is `404`, the same answer as a missing one. Composite foreign keys on `group_memberships` make a cross-org membership impossible to write at the database level. An assignment has only one org-owned side, so it cannot span two orgs. Proven by the cross-org matrix test. Inbound SCIM and HR connectors are off in multi-tenant mode (see Per-org features), so they are no path. |
 | Member of org A | Gain access through a global app set to `all_active_users` that A's plan does not enable | Today `app_access_facts` is `app_registry CROSS JOIN users` (`pg_schema.go:512-517`), so that mode means every user on the install. The view gains a required join on `org_apps`/`orgs.all_apps` for the user's org. A test gives one org an app with all-users access and proves the other org's users get no access. |
 | Malicious relying party, or a bug in one | Forge or swap `org_id` | Tokens are RS256, signed by KyIdentity (`oauth.go:502`). `org_id` is read from `users.org_id` at issuance, never from the request. `users.org_id` is immutable: a trigger refuses any update, on both backends. Apps must take the org only from a verified token or a suite API answer (see Downstream contract). |
 | Thief of a platform token | Create, suspend or delete orgs; add or remove members | Platform tokens are 256-bit, stored hashed, scoped, expiring and revocable, like SCIM connector tokens (`pg_schema.go:343`, `scim_inbound.go:243`). They are accepted only on a separate platform listener that is never published through the public proxy. They are never accepted on the public listener, and browser sessions, SCIM tokens and OAuth clients are never accepted on the platform listener. A token reads lifecycle data, counts, and member emails and statuses, nothing else. Delete needs its own scope, and only works after a deletion was scheduled and its grace period has passed. Every call is audited. |
@@ -98,8 +98,8 @@ orgs (
   all_apps BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE only for the single-tenant default org
   plan TEXT NOT NULL DEFAULT '',
   max_seats BIGINT NOT NULL DEFAULT 0,      -- 0 = unlimited (default and staff orgs)
-  account_holder_user_id TEXT,              -- D9. No FK (users references orgs); the store
-                                            -- requires an active member of this org
+  account_holder_user_id TEXT,              -- D9. No FK (users references orgs); guarded by
+                                            -- triggers, see "Account holder guard"
   billing_ref TEXT UNIQUE,                  -- the billing service's own opaque ID, never a Stripe ID
   billing_revision BIGINT NOT NULL DEFAULT 0,
   revision BIGINT NOT NULL DEFAULT 1,       -- KyIdentity's own version, carried in events
@@ -140,9 +140,17 @@ refuse changing NULL to an org or back.
 Composite keys make cross-org links impossible to write:
 
 - `users` and `directory_groups` get `UNIQUE(org_id, id)`.
-- `group_memberships`, `suite_groups`, `app_group_assignments` and
-  `app_role_group_assignments` reference `(org_id, user_id)` and `(org_id, group_id)`
-  wherever they join two org-owned rows. On SQLite these are trigger checks.
+- `group_memberships` is the only table that joins two org-owned rows (a user and a
+  group). It references `(org_id, user_id)` and `(org_id, group_id)`. On SQLite these are
+  trigger checks.
+- `suite_groups` has no foreign key (it is a tombstone). A `BEFORE INSERT` trigger requires
+  its `org_id` to equal the `directory_groups` row's, and the immutability trigger keeps it.
+- The four assignment tables (`app_user_assignments`, `app_group_assignments`,
+  `app_role_user_assignments`, `app_role_group_assignments`) join one org-owned row to a
+  global app or role. They have no second org to disagree with, so they stay derived (no
+  `org_id`) and take the org of their user or group. Assigning org B's group while working
+  in org A fails earlier: `OrgStore` resolves the group by `(org_id, id)` and answers
+  `404`.
 - Per-org uniques, on Postgres only (D2): `directory_groups(org_id, name)` and
   `suite_groups(org_id, slug)`.
 - `users.username`, `users.email` and `webauthn_credentials.credential_id` stay global
@@ -466,6 +474,29 @@ member is an everyday account (`role='user'`), and the endpoints reach no other 
 
 - The account holder cannot be disabled or deleted here (`409 account_holder`). Billing
   first moves the role with `PATCH /orgs/{id}`.
+
+**Account holder guard.** The pointer is guarded in the database, so every path is covered:
+the member endpoints, the staff admin UI, `disable-user`, expiry (`RunDueExpiries`,
+`expiry.go:97`) and the pending-account cleanup of open question 3. Triggers on both
+backends:
+
+- `users` `BEFORE DELETE`, and `BEFORE UPDATE` of `status`, `ends_at` or `org_id`: refused
+  while an `orgs` row names the user as account holder. The store maps the error to
+  `ErrAccountHolder` (`409 account_holder` in the API, the same message in the admin UI).
+  Expiry therefore cannot be set on the holder. A holder row already due when the trigger
+  lands is skipped and audited by `RunDueExpiries`, like its other per-account failures.
+- `orgs` `BEFORE UPDATE` of `account_holder_user_id`: the new value must be a user of the
+  same org with `status='active'` (pending or activated, `users.pending`) and no
+  `ends_at`. NULL is refused once set, except by
+  org deletion.
+- Org deletion clears the pointer first, then deletes the users, in one transaction.
+
+A pending holder whose activation token expires is not deleted. The open question 3 cleanup
+skips any account named as holder. The org stays `active` with `holder_activated: false`, and
+a new `org.holder_invite_expired` event tells billing. Billing then calls `resend-invite`
+(the holder is still pending) or names another member with `PATCH /orgs/{id}`. If such an
+org reaches scheduled deletion, nobody can open the export session, so staff export on
+request (open question 9, (c)).
 - Every member write is audited in the org's log, queues `org.member_changed`, and mails a
   notice to the account holder (new mail text, no link).
 
@@ -494,7 +525,7 @@ After that:
 - Types: `org.created`, `org.member_changed` (`change`: `added`, `activated`, `disabled`,
   `enabled` or `removed`, for any member including the account holder), `org.over_limit`
   and `org.within_limit`, `org.suspended`, `org.resumed`, `org.deletion_scheduled`,
-  `org.deleted`.
+  `org.deleted`, `org.holder_invite_expired`.
 - `over_limit` is **derived**: `seats_used > max_seats`, with `max_seats > 0`. It is not
   stored, and it is not an `orgs.status` value. A transaction that changes either side
   computes it before and after, and queues `org.over_limit` or `org.within_limit` in the
@@ -578,7 +609,8 @@ tests.
 
 1. **Org model and default-org migration.**
    - Adds schema version 6 on both backends: the tables, columns, triggers and views above,
-     and `tenancy_mode`. No delegation kind changes.
+     and `tenancy_mode`. No delegation kind changes. The account holder guard triggers
+     land here too. Single-tenant never sets the pointer, so they never fire there.
    - Tests:
      - An upgrade test from a version 5 database on both backends (`upgrade_test.go`
        style). Every view returns the same rows before and after.
@@ -609,7 +641,11 @@ tests.
      - Platform tokens are refused on the public listener, and browser and SCIM
        credentials are refused on the platform listener. A `members:*` token is refused on
        every org lifecycle route.
-     - The account holder cannot be disabled or deleted through the member endpoints.
+     - The account holder cannot be deleted, disabled or ended through any path: the
+       member endpoints, the admin UI routes, `disable-user`, `RunDueExpiries` and the
+       pending-account cleanup. Each is called on the holder, and the pointer must still name
+       a live member afterwards. A pending holder past its token's expiry stays, and
+       `org.holder_invite_expired` is queued once.
      - Events are signed and retried.
 5. **Staff admin UI.**
    - Adds the org selector and `X-Ky-Org`, staff read audit and the cross-org audit by
@@ -645,7 +681,8 @@ conditional (10, 11), the condition decides it when the billing service is desig
    - (a) First come, first served, released by staff.
    - (b) A pending, never-activated account is deleted when its activation token expires,
      which frees the address.
-   - Recommend (b), with a 7-day activation lifetime in multi-tenant mode.
+   - Recommend (b), with a 7-day activation lifetime in multi-tenant mode. An account named
+     as holder is never deleted this way (see Account holder guard).
 4. **What a suspended org's user sees after a correct password and second factor.**
    - (a) The generic invalid-credentials answer.
    - (b) "Your organisation is suspended".
@@ -742,7 +779,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `step_up_challenges` | `stepup.go:34` | `:300` | D | `user_id` and `session_id` FKs |
 | `app_registry` | `app_registry.go:70` | `:308` | P | One record per global client, card or system. Per-org mode lives in `org_apps`. |
 | `app_user_assignments` | `app_access.go:34` | `:316` | D | `user_id` FK. The app is global. |
-| `app_group_assignments` | `app_access.go:37` | `:320` | D | `group_id` FK |
+| `app_group_assignments` | `app_access.go:37` | `:320` | D | `group_id` FK. The app is global, so the group is the only org-owned side. |
 | `authorization_interactions` | `authorization_interactions.go:34` | `:324` | P | Pre-sign-in flow state, keyed by hash and browser. `user_id` is `''` until bound, then it is checked against the session's user, whose org scopes everything after. |
 | `oidc_client_sessions` | `client_sessions.go:19` | `:329` | D | `session_id` FK |
 | `account_tokens` | `onboarding.go:30` | `:333` | D | `user_id` FK |
@@ -750,7 +787,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `scim_connector_tokens` | `scim_inbound.go:45` | `:343` | D | `connector_id` FK |
 | `app_roles` | `app_roles.go:76` | `:348` | I: P | Roles describe a global app, and their definitions are `platform` routes. Becomes O if orgs define their own roles. |
 | `app_role_user_assignments` | `app_roles.go:80` | `:352` | D | `user_id` FK |
-| `app_role_group_assignments` | `app_roles.go:83` | `:356` | D | `group_id` FK |
+| `app_role_group_assignments` | `app_roles.go:83` | `:356` | D | `group_id` FK. The role is global (above), so the group is the only org-owned side. |
 | `admin_delegations` | `delegations.go:27` | `:360` | D | `user_id` FK. Kinds unchanged. Multi-tenant: staff org accounts only (D8). |
 | `access_requests` | `access_requests.go:70` | `:367` | D | `user_id` FK |
 | `logout_deliveries` | `logout_deliveries.go:34` | `:376` | O | `user_id` has no FK, and deliveries outlive the user. The logout token carries `org_id`. |
