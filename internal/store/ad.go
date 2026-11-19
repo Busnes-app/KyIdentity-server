@@ -388,7 +388,7 @@ type ADPasswordStatus struct {
 // ADPasswordStatuses lists every user the connector holds, by username.
 // ponytail: unpaged; page it if a directory outgrows one answer.
 func (s *Store) ADPasswordStatuses(systemID string) ([]ADPasswordStatus, error) {
-	rows, err := s.db.Query(`SELECT u.id,u.username,u.display_name,u.password_hash,COALESCE(p.ciphertext,'')<>'',COALESCE(p.seq,0),COALESCE(p.delivered_seq,0),
+	rows, err := s.db.Query(`SELECT u.id,u.username,u.display_name,u.password_hash,u.password_change_required,COALESCE(p.ciphertext,'')<>'',COALESCE(p.seq,0),COALESCE(p.delivered_seq,0),
  COALESCE(p.password_tag,''),COALESCE(p.last_error,''),p.delivered_at,p.expires_at
  FROM sync_resource_state st JOIN users u ON u.id=st.resource_id
  LEFT JOIN ad_passwords p ON p.system_id=st.system_id AND p.user_id=u.id
@@ -401,14 +401,17 @@ func (s *Store) ADPasswordStatuses(systemID string) ([]ADPasswordStatus, error) 
 	for rows.Next() {
 		var st ADPasswordStatus
 		var hash, tag string
-		var pending bool
+		var pending, mustChange bool
 		var seq, delivered int64
-		if err := rows.Scan(&st.UserID, &st.Username, &st.DisplayName, &hash, &pending, &seq, &delivered, &tag, &st.LastError, &st.DeliveredAt, &st.ExpiresAt); err != nil {
+		if err := rows.Scan(&st.UserID, &st.Username, &st.DisplayName, &hash, &mustChange, &pending, &seq, &delivered, &tag, &st.LastError, &st.DeliveredAt, &st.ExpiresAt); err != nil {
 			return nil, err
 		}
 		switch {
 		case pending:
 			st.State = "pending"
+		case delivered > 0 && delivered == seq && hash != "" && tag == passwordTag(hash) && mustChange:
+			// What was delivered is the random lock queued for a temporary password.
+			st.State = "locked"
 		case delivered > 0 && delivered == seq && hash != "" && tag == passwordTag(hash):
 			st.State = "current"
 		case st.LastError != "" && st.LastError != "expired" && st.LastError != "agent_key_replaced":

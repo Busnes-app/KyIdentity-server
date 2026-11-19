@@ -57,10 +57,10 @@ describe('active directory connector', () => {
 
   it('labels every directory password state and offers a request only where a PC sign-in fails', () => {
     const html = renderToStaticMarkup(<DirectoryPasswords busy={false} onRequest={() => {}} passwords={[
-      user('current'), user('pending'), user('stale', 'expired'), user('rejected', 'password_policy'), user('missing', 'agent_key_replaced')]} />);
+      user('current'), user('locked'), user('pending'), user('stale', 'expired'), user('rejected', 'password_policy'), user('missing', 'agent_key_replaced')]} />);
     expect(html).toContain('3 users cannot sign in to a PC yet.');
     expect([...html.matchAll(/data-ky-status="(\w+)">([^<]+)/g)].map((m) => `${m[1]}:${m[2]}`)).toEqual([
-      'success:In directory', 'warning:Waiting for agent', 'warning:Older password in directory', 'danger:Rejected by directory', 'warning:Password not yet in directory']);
+      'success:In directory', 'warning:Locked until the user sets a password', 'warning:Waiting for agent', 'warning:Older password in directory', 'danger:Rejected by directory', 'warning:Password not yet in directory']);
     for (const words of ['Expired before the agent applied it', 'Directory password policy refused it', 'Agent key replaced']) expect(html).toContain(words);
     expect(html.match(/Send password-change request/g)).toHaveLength(3);
   });

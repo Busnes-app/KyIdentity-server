@@ -66,7 +66,7 @@ export interface ADSettings {
   passwordTtlMinutes: number;
 }
 
-export type ADPasswordState = 'current' | 'pending' | 'stale' | 'rejected' | 'missing';
+export type ADPasswordState = 'current' | 'locked' | 'pending' | 'stale' | 'rejected' | 'missing';
 
 export interface ADPasswordStatus {
   userId: string;

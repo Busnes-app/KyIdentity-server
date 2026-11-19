@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"log"
@@ -18,11 +19,14 @@ import (
 // queueDirectoryPassword seals a just-set password for every Active Directory connector
 // holding the user. Only ciphertext is stored; a failure leaves the user's directory
 // password stale, which the admin view shows. Never logs the password.
-func queueDirectoryPassword(keys store.ADKeys, s *store.Store, l *audit.Logger, m *MiddlewareManager, r *http.Request, actorID, actorName, userID, hash, plaintext string) {
+func queueDirectoryPassword(keys store.ADKeys, s *store.Store, l *audit.Logger, m *MiddlewareManager, r *http.Request, actorID, actorName, userID, hash, plaintext string, temporary bool) {
+	if temporary {
+		plaintext = lockPassword()
+	}
 	var queued []*audit.Pending
 	_, err := s.QueueDirectoryPassword(keys, userID, hash, []byte(plaintext), func(systemID string, seq int64, superseded bool) *store.AuditEvent {
 		p := l.Prepare("directory.password_queued", actorID, actorName, userID, "user", m.ClientIP(r), r.UserAgent(), "success",
-			map[string]any{"systemId": systemID, "seq": seq, "superseded": superseded})
+			map[string]any{"systemId": systemID, "seq": seq, "superseded": superseded, "temporary": temporary})
 		queued = append(queued, p)
 		return p.Row
 	})
@@ -34,6 +38,13 @@ func queueDirectoryPassword(keys store.ADKeys, s *store.Store, l *audit.Logger, 
 	for _, p := range queued {
 		p.Committed()
 	}
+}
+
+// lockPassword is what the directory gets instead of a temporary password its owner must
+// replace: random and never stored or shown, so the previous directory password stops
+// working and the temporary one never works there. The suffix meets AD's complexity rule.
+func lockPassword() string {
+	return rand.Text() + "a1!"
 }
 
 func (h *AdminHandler) adSystem(w http.ResponseWriter, r *http.Request) *store.PairedSystem {

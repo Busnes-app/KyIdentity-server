@@ -315,3 +315,32 @@ func TestDirectoryPasswordRetriesDoNotBlockTheQueue(t *testing.T) {
 		t.Fatal("retried entries kept the untried one off the page", next, err)
 	}
 }
+
+func TestDirectoryPasswordStatusShowsTheLock(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	_, app := adStoreFixture(t, s, "ad-1")
+	u := createTestUser(t, s)
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE users SET password_change_required=TRUE WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Random-lock-1"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	e, _ := s.PendingADPasswords("ad-1", time.Now(), 10)
+	if err := s.FinishADPassword("ad-1", u.ID, e[0].Seq, "applied", ""); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.ADPasswordStatuses("ad-1"); len(st) != 1 || st[0].State != "locked" {
+		t.Fatalf("a delivered lock for a temporary password reads as %+v", st)
+	}
+	if _, err := s.db.Exec(`UPDATE users SET password_change_required=FALSE WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.ADPasswordStatuses("ad-1"); st[0].State != "current" {
+		t.Fatalf("status %+v", st)
+	}
+}

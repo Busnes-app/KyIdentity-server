@@ -162,35 +162,58 @@ func TestSambaADEndToEnd(t *testing.T) {
 	_, ok := dc("dc_kinit", "winuser", "Kyws-Initial-Pass-1")
 	must("a password set before assignment does not log in", !ok)
 
-	if rr := adminRequest(t, srv, "PUT", "/api/admin/users/"+user.ID, cookie, `{"password":"Kyws-Admin-Set-2"}`); rr.Code != http.StatusOK {
-		t.Fatal(rr.Body.String())
+	// An administrator's password is temporary: AD gets a random lock instead, and only the
+	// password the user then chooses works on Windows.
+	setByAdmin := func(password string) {
+		t.Helper()
+		if rr := adminRequest(t, srv, "PUT", "/api/admin/users/"+user.ID, cookie, `{"password":"`+password+`"}`); rr.Code != http.StatusOK {
+			t.Fatal(rr.Body.String())
+		}
 	}
+	var userCookie string
+	change := func(from, to string) {
+		t.Helper()
+		if rr := adminRequest(t, srv, "POST", "/api/user/password", userCookie, `{"currentPassword":"`+from+`","newPassword":"`+to+`"}`); rr.Code != http.StatusOK {
+			t.Fatal(rr.Body.String())
+		}
+	}
+	setByAdmin("Kyws-Admin-Set-2")
 	must("the new password waits for the agent", state("winuser") == "pending ")
 	agent()
 	_, ok = dc("dc_kinit", "winuser", "Kyws-Admin-Set-2")
-	must("a password set in KyIdentity yields a Kerberos login (kinit)", ok)
-	_, ok = dc("dc_ntlm", "winuser", "Kyws-Admin-Set-2")
+	must("a temporary password an administrator set does not log in to Windows", !ok)
+	must("status says the directory is locked until the user sets a password", state("winuser") == "locked ")
+
+	userCookie = newSession(t, db, user, time.Now().UTC().Add(time.Hour))
+	change("Kyws-Admin-Set-2", "Kyws-Changed-Pass-3")
+	agent()
+	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-3")
+	must("a password the user sets in KyIdentity yields a Kerberos login (kinit)", ok)
+	_, ok = dc("dc_ntlm", "winuser", "Kyws-Changed-Pass-3")
 	must("the same password authenticates over NTLM (smbclient)", ok)
 	must("status says the password is current", state("winuser") == "current ")
+	_, ok = dc("dc_kinit", "winuser", "Kyws-Admin-Set-2")
+	must("the temporary password still does not log in", !ok)
 
-	userCookie := newSession(t, db, user, time.Now().UTC().Add(time.Hour))
-	if rr := adminRequest(t, srv, "POST", "/api/user/password", userCookie, `{"currentPassword":"Kyws-Admin-Set-2","newPassword":"Kyws-Changed-Pass-3"}`); rr.Code != http.StatusOK {
-		t.Fatal(rr.Body.String())
-	}
+	setByAdmin("Kyws-Admin-Set-4")
 	agent()
 	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-3")
+	must("an administrator's reset locks the previous Windows password out", !ok)
+	_, ok = dc("dc_kinit", "winuser", "Kyws-Admin-Set-4")
+	must("the reset's temporary password does not log in either", !ok)
+
+	userCookie = newSession(t, db, user, time.Now().UTC().Add(time.Hour))
+	change("Kyws-Admin-Set-4", "Kyws-Changed-Pass-5")
+	agent()
+	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-5")
 	must("a password change logs in with the new password", ok)
-	_, ok = dc("dc_kinit", "winuser", "Kyws-Admin-Set-2")
-	must("the replaced password no longer logs in", !ok)
-	_, ok = dc("dc_ntlm", "winuser", "Kyws-Changed-Pass-3")
+	_, ok = dc("dc_ntlm", "winuser", "Kyws-Changed-Pass-5")
 	must("NTLM uses the new password", ok)
 
-	if rr := adminRequest(t, srv, "PUT", "/api/admin/users/"+user.ID, cookie, `{"password":"onlylowercaseletterslong"}`); rr.Code != http.StatusOK {
-		t.Fatal(rr.Body.String())
-	}
+	change("Kyws-Changed-Pass-5", "onlylowercaseletterslong")
 	agent()
 	must("a password AD's complexity policy refuses is reported, without the password", state("winuser") == "rejected password_policy")
-	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-3")
+	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-5")
 	must("the refused password left the previous one in place", ok)
 
 	if rr := adminRequest(t, srv, "PUT", "/api/admin/users/"+user.ID, cookie, `{"status":"disabled"}`); rr.Code != http.StatusOK {
@@ -199,7 +222,7 @@ func TestSambaADEndToEnd(t *testing.T) {
 	dispatch()
 	uac, _ := dc("dc_uac", "winuser")
 	must("disabling the user in KyIdentity disables the AD account (514)", strings.TrimSpace(uac) == "514")
-	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-3")
+	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-5")
 	must("the disabled account no longer logs in", !ok)
 
 	// A KyIdentity user whose name an unmanaged AD object holds is refused, not merged.
@@ -221,7 +244,7 @@ func TestSambaADEndToEnd(t *testing.T) {
 	must("the unmanaged object in the OU is untouched", squatterBefore != "" && squatterAfter == squatterBefore)
 	outsiderAfter, _ := dc("dc_attrs_hash", env["E2E_DC_OUTSIDER_DN"])
 	must("an object outside the OU is untouched", outsiderBefore != "" && outsiderAfter == outsiderBefore)
-	for _, secret := range []string{"Kyws-Admin-Set-2", "Kyws-Changed-Pass-3", "onlylowercaseletterslong", issued.AgentToken} {
+	for _, secret := range []string{"Kyws-Admin-Set-2", "Kyws-Changed-Pass-5", "onlylowercaseletterslong", issued.AgentToken} {
 		must("the agent log holds no "+secret[:6]+"… secret", !strings.Contains(agentLog, secret))
 	}
 }

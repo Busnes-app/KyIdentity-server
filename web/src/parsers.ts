@@ -399,7 +399,7 @@ export function parseActiveDirectory(value: unknown): ActiveDirectory {
       const p = obj(item, 'a directory password status');
       return {
         userId: str(p, 'userId'), username: str(p, 'username'), displayName: str(p, 'displayName'),
-        state: oneOf(p, 'state', ['current', 'pending', 'stale', 'rejected', 'missing'] as const),
+        state: oneOf(p, 'state', ['current', 'locked', 'pending', 'stale', 'rejected', 'missing'] as const),
         lastError: optStr(p, 'lastError'), deliveredAt: optStr(p, 'deliveredAt'), expiresAt: optStr(p, 'expiresAt'),
       };
     }),

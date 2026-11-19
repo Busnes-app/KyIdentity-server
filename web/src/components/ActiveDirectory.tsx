@@ -11,6 +11,7 @@ export const blankAD: ADSettingsInput = { ldapsUrl: '', bindPassword: '', bindDn
 
 export const passwordStates: Record<ADPasswordState, { status: 'success' | 'warning' | 'danger'; word: string }> = {
   current: { status: 'success', word: 'In directory' },
+  locked: { status: 'warning', word: 'Locked until the user sets a password' },
   pending: { status: 'warning', word: 'Waiting for agent' },
   stale: { status: 'warning', word: 'Older password in directory' },
   rejected: { status: 'danger', word: 'Rejected by directory' },

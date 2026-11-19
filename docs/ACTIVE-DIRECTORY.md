@@ -142,7 +142,7 @@ older, so an old ciphertext cannot be replayed. Build it with
   token. The token is stored hashed and answers only its own connector's queue.
 
 The connector view lists every managed user's directory password: In directory, Waiting for
-agent, Older password in directory, Rejected by directory (with the reason, for example AD's
+agent, Locked until the user sets a password, Older password in directory, Rejected by directory (with the reason, for example AD's
 complexity policy), or Password not yet in directory.
 
 AD checks length and complexity on the agent's reset. It does not check password history on
