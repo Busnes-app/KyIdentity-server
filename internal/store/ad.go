@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/adpass"
@@ -219,13 +220,17 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 		return 0, err
 	}
 	now := time.Now().UTC()
+	queued := 0
+	var tampered []string
 	for _, t := range targets {
 		// Time-based, so a database restored from an older backup still issues numbers
 		// above anything the agent has applied.
 		seq := max(t.last+1, now.UnixMilli())
-		// A key the database holds but this server never approved gets nothing.
+		// A key the database holds but this server never approved gets nothing. Only that
+		// connector is skipped: the user's other connectors still get the password.
 		if !hmac.Equal([]byte(t.mac), []byte(keys.KeyMAC(t.id, t.key))) {
-			return 0, ErrAgentKeyTampered
+			tampered = append(tampered, t.id)
+			continue
 		}
 		ct, err := adpass.Seal(t.key, t.id, userID, seq, plaintext)
 		if err != nil {
@@ -244,11 +249,20 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 				return 0, err
 			}
 		}
+		queued++
 	}
-	return len(targets), tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	if len(tampered) > 0 {
+		// Committed: the count is what was queued, and the error names what was not.
+		return queued, fmt.Errorf("%w: connector %s", ErrAgentKeyTampered, strings.Join(tampered, ", "))
+	}
+	return queued, nil
 }
 
-// ErrAgentKeyTampered is an agent public key whose MAC does not verify.
+// ErrAgentKeyTampered is an agent public key whose MAC does not verify. QueueDirectoryPassword
+// returns it after committing the entries for every other connector.
 var ErrAgentKeyTampered = errors.New("agent public key failed its integrity check; set it again")
 
 // ADPasswordEntry is one queued ciphertext as the agent receives it, signed by KyIdentity.

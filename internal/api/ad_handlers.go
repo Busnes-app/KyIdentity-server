@@ -33,7 +33,10 @@ func queueDirectoryPassword(keys store.ADKeys, s *store.Store, l *audit.Logger, 
 	if err != nil {
 		log.Printf("directory password queue for user %s failed: %v", userID, err)
 		l.Observe("directory.password_queued", actorID, actorName, userID, "user", m.ClientIP(r), r.UserAgent(), "failure", nil)
-		return
+		// A tampered connector key fails only that connector; the rest were committed.
+		if !errors.Is(err, store.ErrAgentKeyTampered) {
+			return
+		}
 	}
 	for _, p := range queued {
 		p.Committed()

@@ -380,3 +380,33 @@ func TestDirectoryPasswordsAfterARestore(t *testing.T) {
 		t.Fatal("released connector got no work", e)
 	}
 }
+
+func TestDirectoryPasswordTamperedConnectorSkipsOnlyItself(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	_, good := adStoreFixture(t, s, "ad-1")
+	_, bad := adStoreFixture(t, s, "ad-2")
+	u := createTestUser(t, s)
+	for _, app := range []string{good, bad} {
+		if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	attacker, _ := adpass.GenerateKey()
+	if _, err := s.db.Exec(`UPDATE ad_connectors SET agent_public_key=? WHERE system_id='ad-2'`, adpass.EncodePublicKey(attacker.PublicKey())); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Healthy-pass-1"), queuedAudit)
+	if n != 1 || !errors.Is(err, ErrAgentKeyTampered) {
+		t.Fatal("want one queued and the tampered connector reported", n, err)
+	}
+	if e, _ := s.PendingADPasswords("ad-1", time.Now(), 10); len(e) != 1 {
+		t.Fatal("a tampered connector kept the healthy one from getting the password", e)
+	}
+	if e, _ := s.PendingADPasswords("ad-2", time.Now(), 10); len(e) != 0 {
+		t.Fatal("sealed to a tampered key", e)
+	}
+	if queueAudits(t, s, "directory.password_queued") != 1 {
+		t.Fatal("the healthy connector's entry is audited")
+	}
+}
