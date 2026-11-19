@@ -26,6 +26,7 @@ import type {
   DepositReceipt,
   NativeDevice,
   OAuthClient,
+  ActiveDirectory,
   PairedSystem,
   Passkey,
   ProvisioningRow,
@@ -382,6 +383,31 @@ export function parseCreatedSystem(value: unknown): CreatedSystem {
     system: parsePairedSystems({ systems: [o.system] })[0],
     bearerToken: optStr(o, 'bearerToken') ?? '',
   };
+}
+
+export function parseActiveDirectory(value: unknown): ActiveDirectory {
+  const o = obj(value, 'an Active Directory response');
+  const s = obj(o.settings, 'Active Directory settings');
+  return {
+    ldapsUrl: str(o, 'ldapsUrl'),
+    settings: {
+      systemId: str(s, 'systemId'), bindDn: str(s, 'bindDn'), baseDn: str(s, 'baseDn'), caPem: str(s, 'caPem'),
+      agentPublicKey: str(s, 'agentPublicKey'), agentTokenSet: requiredBool(s, 'agentTokenSet'), passwordTtlMinutes: directoryCount(s, 'passwordTtlMinutes'),
+    },
+    passwords: list(o.passwords, (item) => {
+      const p = obj(item, 'a directory password status');
+      return {
+        userId: str(p, 'userId'), username: str(p, 'username'), displayName: str(p, 'displayName'),
+        state: oneOf(p, 'state', ['current', 'pending', 'stale', 'rejected', 'missing'] as const),
+        lastError: optStr(p, 'lastError'), deliveredAt: optStr(p, 'deliveredAt'), expiresAt: optStr(p, 'expiresAt'),
+      };
+    }),
+  };
+}
+
+export function parseAgentToken(value: unknown): string {
+  const t = str(obj(value, 'an agent token response'), 'agentToken');
+  return t.startsWith('kyad_') ? t : fail('an agent token');
 }
 
 export function parseOAuthClients(value: unknown): OAuthClient[] {

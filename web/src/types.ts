@@ -55,6 +55,41 @@ export interface PairedSystem {
   provisioningHold: boolean;
 }
 
+/** An Active Directory connector's settings. The bind password and agent token never come back. */
+export interface ADSettings {
+  systemId: string;
+  bindDn: string;
+  baseDn: string;
+  caPem: string;
+  agentPublicKey: string;
+  agentTokenSet: boolean;
+  passwordTtlMinutes: number;
+}
+
+export type ADPasswordState = 'current' | 'pending' | 'stale' | 'rejected' | 'missing';
+
+export interface ADPasswordStatus {
+  userId: string;
+  username: string;
+  displayName: string;
+  state: ADPasswordState;
+  lastError?: string;
+  deliveredAt?: string;
+  expiresAt?: string;
+}
+
+export interface ActiveDirectory {
+  ldapsUrl: string;
+  settings: ADSettings;
+  passwords: ADPasswordStatus[];
+}
+
+/** The PUT body; an empty bindPassword keeps the current one. */
+export type ADSettingsInput = Pick<ADSettings, 'bindDn' | 'baseDn' | 'caPem' | 'agentPublicKey' | 'passwordTtlMinutes'> & {
+  ldapsUrl: string;
+  bindPassword: string;
+};
+
 export interface NativeDevice {
   id: string;
   userId: string;
