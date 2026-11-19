@@ -186,6 +186,8 @@ func (s *Server) serve(c net.Conn) {
 			out = append(out, result(id, ldap.ApplicationAddResponse, s.add(bound, op)))
 		case ldap.ApplicationModifyRequest:
 			out = append(out, result(id, ldap.ApplicationModifyResponse, s.modify(bound, op)))
+		case ldap.ApplicationModifyDNRequest:
+			out = append(out, result(id, ldap.ApplicationModifyDNResponse, s.modifyDN(bound, op)))
 		default:
 			return
 		}
@@ -331,6 +333,13 @@ func (s *Server) modify(bound bool, op *ber.Packet) uint16 {
 		seq := ber.NewSequence("")
 		seq.AppendChild(ch.Children[1])
 		mod := attributes(seq)
+		for _, sam := range get(&Entry{Attrs: mod}, "sAMAccountName") {
+			for _, other := range s.entries {
+				if other != e && has(other, "sAMAccountName", sam) {
+					return ldap.LDAPResultEntryAlreadyExists
+				}
+			}
+		}
 		for k, v := range mod {
 			for old := range e.Attrs {
 				if strings.EqualFold(old, k) {
@@ -339,6 +348,40 @@ func (s *Server) modify(bound bool, op *ber.Packet) uint16 {
 			}
 			if len(v) > 0 {
 				e.Attrs[k] = v
+			}
+		}
+	}
+	return ldap.LDAPResultSuccess
+}
+
+// modifyDN renames an entry under the same parent and, as AD does for linked attributes,
+// rewrites group members that pointed at the old name.
+func (s *Server) modifyDN(bound bool, op *ber.Packet) uint16 {
+	if !bound {
+		return ldap.LDAPResultInsufficientAccessRights
+	}
+	oldDN, rdn := op.Children[0].Data.String(), op.Children[1].Data.String()
+	parent := ""
+	if i := strings.Index(oldDN, ","); i >= 0 {
+		parent = oldDN[i:]
+	}
+	newDN := rdn + parent
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[strings.ToLower(oldDN)]
+	if e == nil {
+		return ldap.LDAPResultNoSuchObject
+	}
+	if s.entries[strings.ToLower(newDN)] != nil {
+		return ldap.LDAPResultEntryAlreadyExists
+	}
+	delete(s.entries, strings.ToLower(oldDN))
+	e.DN = newDN
+	s.entries[strings.ToLower(newDN)] = e
+	for _, other := range s.entries {
+		for i, m := range other.Attrs["member"] {
+			if strings.EqualFold(m, oldDN) {
+				other.Attrs["member"][i] = newDN
 			}
 		}
 	}

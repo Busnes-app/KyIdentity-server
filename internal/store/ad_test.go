@@ -357,8 +357,13 @@ func TestDirectoryPasswordsAfterARestore(t *testing.T) {
 	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Capsule-pass-1"), queuedAudit); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ApplyRestoredState(time.Now().UTC(), nil); err != nil {
+	var outbox int
+	if err := s.db.QueryRow(`SELECT count(*) FROM account_sync_events WHERE status IN ('pending','failed')`).Scan(&outbox); err != nil {
 		t.Fatal(err)
+	}
+	report, err := s.ApplyRestoredState(time.Now().UTC(), nil)
+	if err != nil || report.DirectoryPasswords != 1 || report.QueuedDeliveries != outbox {
+		t.Fatalf("restore report %+v, %v: directory passwords are counted on their own", report, err)
 	}
 	var ct string
 	if err := s.db.QueryRow(`SELECT ciphertext FROM ad_passwords WHERE user_id=?`, u.ID).Scan(&ct); err != nil || ct != "" {

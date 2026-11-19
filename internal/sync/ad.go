@@ -276,7 +276,8 @@ func (e *Engine) deliverAD(ctx context.Context, sys *store.PairedSystem, secret,
 		return errors.New("malformed user payload")
 	}
 	active := eventType != "user.deleted" && desired.Active
-	found, err := adFind(conn, c.BaseDN, adMarker(sys.ID, "user", localID), "userAccountControl")
+	marker := adMarker(sys.ID, "user", localID)
+	found, err := adFind(conn, c.BaseDN, marker, "userAccountControl", "sAMAccountName")
 	if err != nil {
 		return err
 	}
@@ -292,6 +293,11 @@ func (e *Engine) deliverAD(ctx context.Context, sys *store.PairedSystem, secret,
 			return err
 		} else if behind {
 			return errADBehind
+		}
+	}
+	if active {
+		if found, err = e.adRename(conn, found, c.BaseDN, marker, desired.UserName, 20, desired.UserName+"@"+adDomain(c.BaseDN)); err != nil {
+			return err
 		}
 	}
 	mod := ldap.NewModifyRequest(found.DN, nil)
@@ -363,7 +369,8 @@ func (e *Engine) deliverADGroup(conn *ldap.Conn, sys *store.PairedSystem, c *sto
 		return err
 	}
 	keep := eventType == "group.updated" && exists
-	found, err := adFind(conn, c.BaseDN, adMarker(sys.ID, "group", groupID))
+	marker := adMarker(sys.ID, "group", groupID)
+	found, err := adFind(conn, c.BaseDN, marker, "sAMAccountName")
 	if err != nil {
 		return err
 	}
@@ -397,9 +404,59 @@ func (e *Engine) deliverADGroup(conn *ldap.Conn, sys *store.PairedSystem, c *sto
 		}
 		return err
 	}
+	if found, err = e.adRename(conn, found, c.BaseDN, marker, name, 64, ""); err != nil {
+		return err
+	}
 	mod := ldap.NewModifyRequest(found.DN, nil)
 	mod.Replace("member", dns)
 	return e.adWrite(func() error { return conn.Modify(mod) })
+}
+
+// adRename keeps a managed object's names equal to KyIdentity's after a rename: the
+// sAMAccountName (and a user's UPN), then the CN. It answers the object as it now is. A
+// name another object holds is a conflict, never a merge, and an unusable one is errADName.
+func (e *Engine) adRename(conn *ldap.Conn, found *ldap.Entry, baseDN, marker, name string, limit int, upn string) (*ldap.Entry, error) {
+	dn, err := ldap.ParseDN(found.DN)
+	if err != nil || len(dn.RDNs) == 0 || len(dn.RDNs[0].Attributes) != 1 {
+		return nil, errADAmbiguous
+	}
+	cn := dn.RDNs[0].Attributes[0]
+	samSame := found.GetAttributeValue("sAMAccountName") == name
+	if samSame && strings.EqualFold(cn.Type, "CN") && cn.Value == name {
+		return found, nil
+	}
+	if !validSAM(name, limit) {
+		return nil, errADName
+	}
+	if !samSame {
+		mod := ldap.NewModifyRequest(found.DN, nil)
+		mod.Replace("sAMAccountName", []string{name})
+		if upn != "" {
+			mod.Replace("userPrincipalName", []string{upn})
+		}
+		if err := e.adWrite(func() error { return conn.Modify(mod) }); err != nil {
+			return nil, adNameError(err)
+		}
+	}
+	if !strings.EqualFold(cn.Type, "CN") || cn.Value != name {
+		req := ldap.NewModifyDNRequest(found.DN, "CN="+ldap.EscapeDN(name), true, "")
+		if err := e.adWrite(func() error { return conn.ModifyDN(req) }); err != nil {
+			return nil, adNameError(err)
+		}
+	}
+	renamed, err := adFind(conn, baseDN, marker, "userAccountControl", "sAMAccountName")
+	if err == nil && renamed == nil {
+		err = errADAmbiguous
+	}
+	return renamed, err
+}
+
+// adNameError maps a refused name to the conflict a directory reports for it.
+func adNameError(err error) error {
+	if ldap.IsErrorWithCode(err, ldap.LDAPResultEntryAlreadyExists) || ldap.IsErrorWithCode(err, ldap.LDAPResultConstraintViolation) {
+		return errADConflict
+	}
+	return err
 }
 
 func adMemberDNs(conn *ldap.Conn, systemID, baseDN string, userIDs []string) ([]string, error) {

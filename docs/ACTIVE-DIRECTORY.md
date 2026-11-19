@@ -39,6 +39,9 @@ Read these before you turn it on.
   `"/\[]:;|=,+*?<>@`; longer names are refused, never truncated), `userPrincipalName` =
   username@ the OU's DNS domain, `displayName`, `mail`. A new account gets a random
   password nobody knows until the agent sets the real one.
+- A rename in KyIdentity renames the AD account (`sAMAccountName`, `userPrincipalName` and
+  CN) or group (`sAMAccountName` and CN) with the same name rules. A new name another
+  object holds is a delivery error, and the account keeps its old name until it is fixed.
 - Who is synced: users with access to the connector's app (App access), and groups assigned
   to that app with their in-scope members. A managed group's `member` list is replaced by
   KyIdentity's; members added by hand in AD are removed.

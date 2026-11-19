@@ -289,3 +289,65 @@ func TestADEnableWaitsForAResetMadeWhileDisabled(t *testing.T) {
 		t.Fatal("not enabled once the reset was applied", got.Attrs)
 	}
 }
+
+// A rename in KyIdentity renames the directory account and group, so the Windows logon
+// name keeps matching the KyIdentity username. A name another object holds is refused.
+func TestADRenameFollowsKyIdentity(t *testing.T) {
+	e, s, _, dc, sys := adFixture(t)
+	u := &store.User{ID: uuid.NewString(), Username: "alice", DisplayName: "Alice", Email: "alice@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := s.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	group := &store.Group{ID: uuid.NewString(), Name: "pc-users"}
+	if err := s.CreateGroup(group, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "groups", group.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	rename := func(name string) {
+		t.Helper()
+		if _, err := s.EditUser(u.ID, nil, func(x *store.User) (bool, error) { x.Username = name; return false, nil }); err != nil {
+			t.Fatal(err)
+		}
+		drain(t, e)
+	}
+	rename("alice2")
+	acct := adUser(t, dc, sys.ID, u.ID)
+	if acct.DN != "CN=alice2,"+adOU || first(acct, "sAMAccountName") != "alice2" || first(acct, "userPrincipalName") != "alice2@kyws.test" {
+		t.Fatalf("rename not applied: %s %+v", acct.DN, acct.Attrs)
+	}
+	grp := dc.Find("adminDescription", adpass.Marker(sys.ID, "group", group.ID))[0]
+	if len(grp.Attrs["member"]) != 1 || grp.Attrs["member"][0] != acct.DN {
+		t.Fatal("group member not following the rename", grp.Attrs["member"])
+	}
+
+	rename("squatter")
+	if acct := adUser(t, dc, sys.ID, u.ID); first(acct, "sAMAccountName") != "alice2" {
+		t.Fatal("took a name an unmanaged object holds", acct.Attrs)
+	}
+	if squat := dc.Get("CN=squatter," + adOU); first(squat, "adminDescription") != "" {
+		t.Fatal("the unmanaged object was touched", squat.Attrs)
+	}
+	conflict := false
+	left, _ := s.GetPendingSyncEvents(20)
+	for _, ev := range left {
+		conflict = conflict || ev.LastError == errADConflict.Error()
+	}
+	if !conflict {
+		t.Fatal("the refused rename is not reported", left)
+	}
+
+	group.Name = "pc-staff"
+	if err := s.UpdateGroup(group, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	if grp := dc.Find("adminDescription", adpass.Marker(sys.ID, "group", group.ID))[0]; grp.DN != "CN=pc-staff,"+adOU || first(grp, "sAMAccountName") != "pc-staff" {
+		t.Fatalf("group rename not applied: %s %+v", grp.DN, grp.Attrs)
+	}
+}

@@ -240,6 +240,17 @@ func TestSambaADEndToEnd(t *testing.T) {
 	_, ok = dc("dc_kinit", "winuser", "Kyws-Changed-Pass-5")
 	must("the password from before the reset no longer logs in", !ok)
 
+	// A rename upstream (SCIM) renames the AD account: logon name, UPN and CN.
+	if _, err := db.EditUser(user.ID, nil, func(x *store.User) (bool, error) { x.Username = "winuser2"; return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	dispatch()
+	renamed, _ := dc("dc_ldapsearch", env["E2E_DC_OU"], "(sAMAccountName=winuser2)", "-o", "ldif-wrap=no", "adminDescription", "userPrincipalName")
+	must("a rename in KyIdentity renames the AD account", strings.Contains(renamed, "adminDescription: kyidentity:"+id+":user:"+user.ID) &&
+		strings.Contains(renamed, "userPrincipalName: winuser2@kyws.test") && strings.Contains(renamed, "dn: CN=winuser2,"+env["E2E_DC_OU"]))
+	old, _ := dc("dc_ldapsearch", env["E2E_DC_OU"], "(sAMAccountName=winuser)", "-o", "ldif-wrap=no", "dn")
+	must("the old logon name is gone", !strings.Contains(old, "dn:"))
+
 	// A KyIdentity user whose name an unmanaged AD object holds is refused, not merged.
 	if rr := adminRequest(t, srv, "POST", "/api/admin/users", cookie, `{"username":"squatter","email":"squatter@kyws.test","password":"Kyws-Squatter-Pass-4"}`); rr.Code != http.StatusOK {
 		t.Fatal(rr.Body.String())
