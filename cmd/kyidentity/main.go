@@ -231,6 +231,7 @@ func main() {
 	mfaEngine.SetUnifiedPushSender(unifiedPush)
 	mfaEngine.SetUbuntuPushSender(mfa.NewUbuntuPushSender(cfg.UbuntuPushURL, cfg.UbuntuPushAppID))
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
+	oauthEngine.SetUserCodeKey(cfg.SecretKey)
 
 	if err := bootstrapOnStart(dbStore, cfg.BootstrapUser, cfg.BootstrapPass, cfg.DataDir, cfg.Replicated); err != nil {
 		log.Fatalf("Bootstrap failed: %v", err)
@@ -1184,6 +1185,7 @@ func purgeExpired(s *store.Store, now time.Time) {
 		{"MFA tokens", s.DeleteExpiredMFATokens},
 		{"login failure counters", s.DeleteExpiredLoginFailures},
 		{"authorization codes", s.DeleteExpiredAuthorizationCodes},
+		{"device codes", s.DeleteExpiredDeviceCodes},
 		{"issued tokens", s.DeleteExpiredIssuedTokens},
 		{"device pairing tokens", s.DeleteExpiredDevicePairingTokens},
 		{"account tokens", s.DeleteExpiredAccountTokens},

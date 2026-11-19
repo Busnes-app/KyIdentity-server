@@ -299,6 +299,10 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		h.deviceSignOn(w, r, r.FormValue("assertion"), clientID)
 		return
 	}
+	if grantType == oauth.DeviceCodeGrantType {
+		h.deviceCodeGrant(w, r, r.FormValue("device_code"), clientID)
+		return
+	}
 	if grantType == "refresh_token" {
 		h.refresh(w, r, r.FormValue("refresh_token"), clientID, clientSecret, r.FormValue("scope"))
 		return

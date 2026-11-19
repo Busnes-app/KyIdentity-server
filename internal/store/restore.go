@@ -36,6 +36,7 @@ var restoredCleared = []string{
 	"refresh_families",
 	"issued_tokens",
 	"authorization_codes",
+	"device_codes",
 	"authorization_interactions",
 	"mfa_tokens",
 	"mfa_challenges",

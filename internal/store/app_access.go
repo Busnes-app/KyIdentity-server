@@ -87,7 +87,10 @@ func revokeLostAppAccessTx(tx *sql.Tx) error {
 	if err := enqueueLogoutTx(tx, now, lostSession); err != nil {
 		return err
 	}
-	_, err := tx.Exec(`DELETE FROM oidc_client_sessions AS cs WHERE ` + lostSession)
+	if _, err := tx.Exec(`DELETE FROM oidc_client_sessions AS cs WHERE ` + lostSession); err != nil {
+		return err
+	}
+	_, err := revokeSessionsTx(tx, now, `workstation_client_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE e.user_id=sessions.user_id AND a.client_id=sessions.workstation_client_id)`)
 	return err
 }
 func (s *Store) ClientAccessAllowed(userID, clientID string) (bool, error) {

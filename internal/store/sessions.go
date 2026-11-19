@@ -20,7 +20,8 @@ type AppGrant struct {
 // recently active first. The token hash is never loaded.
 func (s *Store) ListUserSessions(userID string, idleTTL time.Duration) ([]Session, error) {
 	now := time.Now().UTC()
-	rows, err := s.db.Query(`SELECT id, user_id, ip_address, user_agent, expires_at, created_at, last_active_at, factor_method FROM sessions WHERE user_id=? AND expires_at>? AND last_active_at>? AND created_at>? ORDER BY last_active_at DESC`, userID, now, now.Add(-idleTTL), now.Add(-s.SessionLimits().AbsoluteTTL()))
+	// Workstation sessions have their own sliding expiry and no browser limits.
+	rows, err := s.db.Query(`SELECT id, user_id, ip_address, user_agent, expires_at, created_at, last_active_at, factor_method, COALESCE(workstation_client_id,''), COALESCE((SELECT client_name FROM oauth_clients c WHERE c.id=sessions.workstation_client_id),'') FROM sessions WHERE user_id=? AND expires_at>? AND (workstation_client_id IS NOT NULL OR (last_active_at>? AND created_at>?)) ORDER BY last_active_at DESC`, userID, now, now.Add(-idleTTL), now.Add(-s.SessionLimits().AbsoluteTTL()))
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +29,7 @@ func (s *Store) ListUserSessions(userID string, idleTTL time.Duration) ([]Sessio
 	out := []Session{}
 	for rows.Next() {
 		var sess Session
-		if err := rows.Scan(&sess.ID, &sess.UserID, &sess.IPAddress, &sess.UserAgent, &sess.ExpiresAt, &sess.CreatedAt, &sess.LastActiveAt, &sess.FactorMethod); err != nil {
+		if err := rows.Scan(&sess.ID, &sess.UserID, &sess.IPAddress, &sess.UserAgent, &sess.ExpiresAt, &sess.CreatedAt, &sess.LastActiveAt, &sess.FactorMethod, &sess.WorkstationClientID, &sess.WorkstationApp); err != nil {
 			return nil, err
 		}
 		out = append(out, sess)

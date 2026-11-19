@@ -96,7 +96,7 @@ func (s *Store) SetSessionLimits(l SessionLimits, audit *AuditEvent) (int64, err
 			return err
 		}
 		now := time.Now().UTC()
-		if ended, err = revokeSessionsTx(tx, now, `last_active_at<=? OR created_at<=?`, now.Add(-strict.IdleTTL()), now.Add(-strict.AbsoluteTTL())); err != nil {
+		if ended, err = revokeSessionsTx(tx, now, `workstation_client_id IS NULL AND (last_active_at<=? OR created_at<=?)`, now.Add(-strict.IdleTTL()), now.Add(-strict.AbsoluteTTL())); err != nil {
 			return err
 		}
 		if audit != nil {

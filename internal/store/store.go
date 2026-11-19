@@ -1201,7 +1201,7 @@ func (s *Store) CreateSessionForInteraction(sess *Session, interactionHash, brow
 // session by forgetting either check.
 func (s *Store) GetSessionByTokenHash(tokenHash string, idleTTL time.Duration) (*Session, error) {
 	now := time.Now().UTC()
-	query := `SELECT id, user_id, session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method FROM sessions WHERE session_token_hash = ? AND expires_at > ? AND last_active_at > ? AND created_at > ?`
+	query := `SELECT id, user_id, session_token_hash, ip_address, user_agent, expires_at, created_at, last_active_at, primary_authenticated_at, factor_authenticated_at, factor_method FROM sessions WHERE session_token_hash = ? AND expires_at > ? AND last_active_at > ? AND created_at > ? AND workstation_client_id IS NULL`
 	sess := &Session{}
 	err := s.db.QueryRow(query, tokenHash, now, now.Add(-idleTTL), now.Add(-s.SessionLimits().AbsoluteTTL())).Scan(&sess.ID, &sess.UserID, &sess.SessionTokenHash, &sess.IPAddress, &sess.UserAgent, &sess.ExpiresAt, &sess.CreatedAt, &sess.LastActiveAt, &sess.PrimaryAuthenticatedAt, &sess.FactorAuthenticatedAt, &sess.FactorMethod)
 	if err == sql.ErrNoRows {
