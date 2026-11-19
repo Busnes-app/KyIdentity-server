@@ -56,6 +56,7 @@ var replicaShared = map[string]string{
 	"KyAuthCertSHA256":           "KYIDENTITY_KYAUTH_CERT_SHA256",
 	"AppAttestAppIDs":            "KYIDENTITY_APPATTEST_APP_IDS",
 	"AppAttestAllowDevelopment":  "KYIDENTITY_APPATTEST_ALLOW_DEVELOPMENT",
+	"Tenancy":                    "KYIDENTITY_TENANCY",
 }
 
 // RSAKeyPath and VAPIDKeyPath are paths, so per host; the keys they name are compared as
@@ -114,6 +115,7 @@ func sharedValues(c *Config, k ReplicaKeys) ([][2]string, error) {
 		{f["KyAuthCertSHA256"], strings.Join(c.KyAuthCertSHA256, ",")},
 		{f["AppAttestAppIDs"], strings.Join(c.AppAttestAppIDs, ",")},
 		{f["AppAttestAllowDevelopment"], b(c.AppAttestAllowDevelopment)},
+		{f["Tenancy"], c.Tenancy},
 	}, nil
 }
 

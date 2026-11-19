@@ -471,3 +471,22 @@ func TestAcceptReplicaConfigWithNoRecordSaysRecorded(t *testing.T) {
 		t.Fatal("the recorded configuration refused to start:", err)
 	}
 }
+
+// A database records its tenancy mode when it is created, and a start configured for the
+// other mode refuses before serving.
+func TestStartRefusesTheOtherTenancyMode(t *testing.T) {
+	cfg, _ := commandInstance(t, false)
+	s := handles(t, cfg.DBPath, 1)[0]
+	if cfg.Tenancy != "single" {
+		t.Fatalf("default tenancy %q", cfg.Tenancy)
+	}
+	if err := checkTenancy(cfg, s); err != nil {
+		t.Fatal("a single-tenant start on a single-tenant database:", err)
+	}
+	if err := s.SetSetting(store.TenancySetting, "multi"); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkTenancy(cfg, s); err == nil || !strings.Contains(err.Error(), "KYIDENTITY_TENANCY is single but this database was created multi-tenant") {
+		t.Fatalf("a single-tenant start on a multi-tenant database: %v", err)
+	}
+}
