@@ -83,6 +83,15 @@ policy with **Manage access** and **Authentication** as for any app. New proxy a
 MFA. Setup, the nginx configuration and the three ways an app can take the sign-in are in
 [FORWARD-AUTH.md](FORWARD-AUTH.md).
 
+## Workstation login
+
+A **workstation app** lets people sign in to Linux desktops through Himmelblau with the
+device grant: the desktop shows a code, the person approves it at `/device`. Open **App
+connections**, then **Workstation login**. Device sign-in is off until you turn it on; assign
+groups with **Manage access**, set the code lifetime and offline window in **Settings**, and
+copy the generated `himmelblau.conf`. Setup, break-glass and the offline trade-off are in
+[WORKSTATION-LOGIN.md](WORKSTATION-LOGIN.md).
+
 ## App roles and token claims
 
 **Roles.** App connections → Roles defines the fixed role names an app understands

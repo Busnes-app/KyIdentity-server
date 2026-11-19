@@ -39,7 +39,7 @@ export const SessionList: React.FC<SessionListProps> = ({ sessions, apps, logout
             <div className="device-icon-box"><Monitor size={20} className="icon-cyan" /></div>
             <div className="device-info">
               <span className="device-name">
-                {s.userAgent || 'Unknown browser'}
+                {s.workstationApp ? `Workstation login: ${s.workstationApp}` : s.userAgent || 'Unknown browser'}
                 {s.current && <span className="badge-type"> This session</span>}
               </span>
               <span className="device-id-mono">
