@@ -315,7 +315,11 @@ func TestDeviceGrantRefusals(t *testing.T) {
 	if rr := f.decide(c2, userCode, true); rr.Code != 200 {
 		t.Fatalf("approve: %d", rr.Code)
 	}
-	if err := f.db.RevokeUserAccess(u2.ID, nil); err != nil {
+	approving, err := f.db.GetSessionByTokenHash(crypto.HashSHA256(c2), time.Hour)
+	if err != nil || approving == nil {
+		t.Fatal(err)
+	}
+	if err := f.db.RevokeSession(u2.ID, approving.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if status, body := f.poll(f.clientID, device); status != 400 || body["error"] != "invalid_grant" {
@@ -548,5 +552,67 @@ func TestDevicePageAndDiscovery(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprint(meta["grant_types_supported"]), "password") {
 		t.Fatal("discovery advertises the password grant")
+	}
+}
+
+// The app's max_age bounds a workstation session: its expiry and every slide stop at the
+// original login's deadline, and refresh fails once the deadline has passed.
+func TestWorkstationRefreshKeepsAuthenticationDeadline(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	rows, _, err := f.db.ListAppRecords(f.clientID, 10, 0)
+	if err != nil || len(rows) != 1 {
+		t.Fatal(err)
+	}
+	if err := f.db.SetAppAuthenticationPolicy(rows[0].ID, store.AppAuthenticationPolicy{Mode: "max_age", Factor: "password", PrimaryMaxAge: 3600}, rows[0].Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := f.assignedUser()
+	raw, _ := crypto.GenerateRandomHex(32)
+	signedIn := time.Now().UTC().Add(-50 * time.Minute)
+	if err := f.db.CreateSession(&store.Session{ID: uuid.NewString(), UserID: u.ID, SessionTokenHash: crypto.HashSHA256(raw), IPAddress: "1.2.3.4", UserAgent: "test",
+		ExpiresAt: time.Now().UTC().Add(time.Hour), AuthenticationEvidence: store.AuthenticationEvidence{PrimaryAuthenticatedAt: &signedIn}}); err != nil {
+		t.Fatal(err)
+	}
+	tokens := f.login(raw)
+	var expires time.Time
+	if err := f.raw.QueryRow(`SELECT expires_at FROM sessions WHERE workstation_client_id=?`, f.clientID).Scan(&expires); err != nil || time.Until(expires) > 11*time.Minute {
+		t.Fatalf("session outlives the max_age deadline: %v %v", expires, err)
+	}
+	status, rotated := f.refresh(tokens["refresh_token"].(string))
+	if status != 200 {
+		t.Fatalf("refresh inside the deadline: %d %v", status, rotated)
+	}
+	if _, err := f.raw.Exec(`UPDATE refresh_families SET primary_authenticated_at=?`, time.Now().UTC().Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := f.refresh(rotated["refresh_token"].(string)); status != 400 || body["error"] != "invalid_grant" {
+		t.Fatalf("refresh past the deadline: %d %v", status, body)
+	}
+}
+
+// A password change keeps the browser that proved it, so it must withdraw that browser's
+// approvals that no desktop has redeemed yet.
+func TestPasswordChangeWithdrawsUnredeemedApproval(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	u, cookie := f.assignedUser()
+	device, userCode := f.start()
+	if rr := f.decide(cookie, userCode, true); rr.Code != 200 {
+		t.Fatalf("approve: %d", rr.Code)
+	}
+	sess, err := f.db.GetSessionByTokenHash(crypto.HashSHA256(cookie), time.Hour)
+	if err != nil || sess == nil {
+		t.Fatal(err)
+	}
+	hash, _ := auth.HashPassword("another-long-passphrase")
+	if err := f.db.ChangePassword(u.ID, sess.ID, hash, nil); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := f.poll(f.clientID, device); status == 200 || body["error"] != "access_denied" {
+		t.Fatalf("approval survived a password change: %d %v", status, body)
+	}
+	if f.workstationSessions(u.ID) != 0 {
+		t.Fatal("a workstation session was created after the password change")
 	}
 }

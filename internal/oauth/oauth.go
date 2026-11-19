@@ -497,6 +497,17 @@ func (e *Engine) ExchangeRefreshToken(raw, clientID, clientSecret, scope string)
 		} else if end != nil && end.Before(slide) {
 			slide = *end
 		}
+		// Sliding never outlives the app's re-authentication deadline for the original login.
+		policy, perr := e.store.ClientAuthenticationPolicy(clientID)
+		if perr != nil {
+			return nil, userID, perr
+		}
+		if at := policy.Deadline(peek.AuthenticationEvidence); at != nil && at.Before(slide) {
+			slide = *at
+		}
+		if !slide.After(now) {
+			return nil, userID, errors.New("workstation login is past its re-authentication deadline")
+		}
 		family, err = e.store.RotateWorkstationRefreshToken(oldHash, clientID, crypto.HashSHA256(next), access, slide)
 	} else {
 		family, err = e.store.RotateRefreshToken(oldHash, clientID, crypto.HashSHA256(next), access)

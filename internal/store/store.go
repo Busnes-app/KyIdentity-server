@@ -3065,6 +3065,9 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 	if err := spendMFATokensTx(tx, now, userID); err != nil {
 		return err
 	}
+	if err := denyApprovedDeviceCodesTx(tx, userID); err != nil {
+		return err
+	}
 	// An outstanding activation or reset link is a credential too.
 	return expireAccountTokensTx(tx, now, `user_id=?`, userID)
 }

@@ -239,6 +239,17 @@ func (e *Engine) PollDeviceCode(raw, clientID, ip, userAgent string) (*TokenResp
 	} else if end != nil && end.Before(sessionEnd) {
 		sessionEnd = *end
 	}
+	// The app's re-authentication deadline (max_age, factor age) bounds the session too.
+	if policy, err := e.store.ClientAuthenticationPolicy(clientID); err != nil {
+		return nil, d, err
+	} else if at := policy.Deadline(d.AuthenticationEvidence); at != nil {
+		if !at.After(now) {
+			return nil, d, ErrDeviceGrantInvalid
+		}
+		if at.Before(sessionEnd) {
+			sessionEnd = *at
+		}
+	}
 	exp := now.Add(AccessTokenTTL)
 	if sessionEnd.Before(exp) {
 		exp = sessionEnd

@@ -390,3 +390,10 @@ func (s *Store) DeleteExpiredDeviceCodes() error {
 	_, err := s.db.Exec(`DELETE FROM device_codes WHERE expires_at<?`, time.Now().UTC().Add(-deviceCodeSweepRetain))
 	return err
 }
+
+// denyApprovedDeviceCodesTx withdraws approvals not yet redeemed, for revocations that keep
+// the approving browser session alive (a password change keeps the proving one).
+func denyApprovedDeviceCodesTx(tx *sql.Tx, userID string) error {
+	_, err := tx.Exec(`UPDATE device_codes SET status='denied' WHERE user_id=? AND status='approved' AND redeemed_at IS NULL`, userID)
+	return err
+}
