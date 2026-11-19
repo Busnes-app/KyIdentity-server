@@ -182,10 +182,15 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 	}
 	defer tx.Rollback()
 	var current string
-	if err := tx.QueryRow(`SELECT password_hash FROM users WHERE id=?`, userID).Scan(&current); errors.Is(err, sql.ErrNoRows) || current != passwordHash || current == "" {
+	err = tx.QueryRow(`SELECT password_hash FROM users WHERE id=?`, userID).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
-	} else if err != nil {
+	}
+	if err != nil {
 		return 0, err
+	}
+	if current == "" || current != passwordHash {
+		return 0, nil
 	}
 	type target struct {
 		id, key, mac string

@@ -64,8 +64,12 @@ _dc_build_image() {
 		return 0
 	fi
 	_dc_log "building $E2E_DC_IMAGE"
-	flock /tmp/ky-integ-test.lock systemd-run --user --scope -q \
-		-p MemoryMax=4G -p MemorySwapMax=0 -p CPUQuota=400% -- \
+	# Cap the build where a user systemd manager exists (shared hosts); CI runners may lack one.
+	local cap=()
+	if systemd-run --user --scope -q true >/dev/null 2>&1; then
+		cap=(systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 -p CPUQuota=400% --)
+	fi
+	flock /tmp/ky-integ-test.lock "${cap[@]}" \
 		docker build -q -t "$E2E_DC_IMAGE" "$_DC_SCRIPT_DIR/e2e-samba-ad" >/dev/null
 }
 

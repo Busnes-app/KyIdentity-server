@@ -273,3 +273,15 @@ func TestDirectoryPasswordQueueRefusesATamperedAgentKeyAndSignsEntries(t *testin
 		t.Fatal("another key accepted:", err)
 	}
 }
+
+func TestDirectoryPasswordQueueReportsReadErrors(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := createTestUser(t, s)
+	if _, err := s.db.Exec(`ALTER TABLE users RENAME COLUMN password_hash TO password_hash_gone`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Unread-pass-1"), queuedAudit); err == nil || n != 0 {
+		t.Fatal("a failed read of the current hash was reported as nothing to queue", n, err)
+	}
+}
