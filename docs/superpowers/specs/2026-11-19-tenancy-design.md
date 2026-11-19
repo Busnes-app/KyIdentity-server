@@ -378,7 +378,12 @@ listener is served on it.
   different hash is `422 idempotency_conflict`.
 - Writes carry `revision`, a per-org counter the billing service increases. One at or below
   `orgs.billing_revision` is `409 stale_revision` with the current value.
-- `billing_ref` is unique, so a retried create returns the existing org.
+- `billing_ref` is unique. A `POST /orgs` whose `billing_ref` already exists is decided
+  first, before the idempotency and revision rules:
+  - If the create fields match the stored org, it is `200` with the existing org.
+  - If they do not, it is `409 billing_ref_conflict`.
+  - A retry under a new key, or after the 30-day `platform_requests` window, therefore
+    gets the same answer.
 
 **Endpoints** (`/platform/v1`). Bodies hold no personal data except the owner's name and
 email on create.
@@ -391,7 +396,7 @@ email on create.
 | `POST /orgs/{id}/suspend` | write | `{reason: payment\|abuse, revision}`. Semantics below. |
 | `POST /orgs/{id}/resume` | write | From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
 | `POST /orgs/{id}/schedule-deletion` | write | `{grace_days 7–90, revision}`. Suspends the org and sets `delete_after`. The owner can still sign in to a restricted, export-only session (the `active_principals` exception under Views). |
-| `DELETE /orgs/{id}` | delete | Only for `deletion_scheduled` once `delete_after` has passed, otherwise `409`. Deletes every org-owned and derived row in one transaction and leaves the tombstone. |
+| `DELETE /orgs/{id}` | delete | Only for `deletion_scheduled` once `delete_after` has passed, otherwise `409`. Deletes every org-owned and derived row in one transaction and leaves the tombstone. That includes the org's `audit_events`. This is a second, named audit-deletion path beside `DeleteAuditEventsOlderThan`, and the audit retention contract in `AGENTS.md` must be amended to say so. The org's audit is in the owner's export. In the same transaction, a platform audit row (`org_id` NULL), `platform.org_deleted`, records the org ID, the token and row counts per table, with no content. If it cannot be written, nothing is deleted (fail closed). A test proves both. |
 | `POST /orgs/{id}/owner-recovery` | write | See Roles. |
 
 **Suspension**, in one transaction with its audit row:
@@ -490,8 +495,11 @@ only in tests.
 1. **Org model and default-org migration.**
    - Adds schema version 6 on both backends: the tables, columns, triggers and views above,
      and `tenancy_mode`.
-   - It also widens the `admin_delegations.kind` CHECK (`delegations.go:29`) to admit
-     `owner` and `admin`, so no later schema change is needed for them.
+   - On Postgres only, it widens the `admin_delegations.kind` CHECK (`delegations.go:29`)
+     to admit `owner` and `admin`, so no later schema change is needed for them.
+     - On SQLite a CHECK changes only by a table rebuild, which D2 rules out. SQLite is
+       single-tenant only and never uses these kinds, so it keeps the CHECK.
+     - `TestBackendsHaveTheSameColumns` compares names, not CHECKs, so it is unaffected.
    - Tests:
      - An upgrade test from a version 5 database on both backends (`upgrade_test.go`
        style). Every view returns the same rows before and after.
