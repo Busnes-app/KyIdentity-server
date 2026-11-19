@@ -133,6 +133,17 @@ func (s *Store) LookupRefreshFamily(tokenHash string) (*RefreshFamily, error) {
 // as session activity. A spent token, or one presented by another client, revokes the
 // family and every access token it minted and returns ErrRefreshReuse.
 func (s *Store) RotateRefreshToken(oldHash, clientID, newHash string, access *IssuedToken) (*RefreshFamily, error) {
+	return s.rotateRefreshToken(oldHash, clientID, newHash, access, time.Time{})
+}
+
+// RotateWorkstationRefreshToken rotates a workstation session's token and slides the
+// session, the family and the new token to end at slideTo (now + the offline window,
+// capped by the user's access end). Only a live workstation session of clientID qualifies.
+func (s *Store) RotateWorkstationRefreshToken(oldHash, clientID, newHash string, access *IssuedToken, slideTo time.Time) (*RefreshFamily, error) {
+	return s.rotateRefreshToken(oldHash, clientID, newHash, access, slideTo)
+}
+
+func (s *Store) rotateRefreshToken(oldHash, clientID, newHash string, access *IssuedToken, slideTo time.Time) (*RefreshFamily, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
@@ -159,8 +170,17 @@ func (s *Store) RotateRefreshToken(oldHash, clientID, newHash string, access *Is
 		return nil, ErrRefreshInvalid
 	}
 	// The session's current limits apply; a refresh then counts as activity.
-	limits := s.SessionLimits()
-	res, err := tx.Exec(`UPDATE sessions SET last_active_at=? WHERE id=? AND last_active_at>? AND created_at>?`, now, f.SessionID, now.Add(-limits.IdleTTL()), now.Add(-limits.AbsoluteTTL()))
+	var res sql.Result
+	if slideTo.IsZero() {
+		limits := s.SessionLimits()
+		res, err = tx.Exec(`UPDATE sessions SET last_active_at=? WHERE id=? AND last_active_at>? AND created_at>? AND workstation_client_id IS NULL`, now, f.SessionID, now.Add(-limits.IdleTTL()), now.Add(-limits.AbsoluteTTL()))
+	} else {
+		res, err = tx.Exec(`UPDATE sessions SET last_active_at=?, expires_at=? WHERE id=? AND expires_at>? AND workstation_client_id=?`, now, slideTo, f.SessionID, now, clientID)
+		if err == nil {
+			_, err = tx.Exec(`UPDATE issued_tokens SET expires_at=? WHERE jti=?`, slideTo, f.JTI)
+		}
+		f.ExpiresAt, f.Idle = slideTo, slideTo.Sub(now)
+	}
 	if err != nil {
 		return nil, err
 	}

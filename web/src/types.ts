@@ -116,6 +116,8 @@ export interface BrowserSession {
   createdAt: string;
   lastActiveAt: string;
   expiresAt: string;
+  /** Set for a workstation session: the workstation app's name. */
+  workstationApp?: string;
 }
 
 export interface AppGrant {
@@ -418,3 +420,11 @@ export interface AttestationSettings { requireLockedBootloader: boolean }
 // Browser session lifetime and idle limit, in seconds.
 export interface SessionLimits { absolute: number; idle: number }
 export interface RateLimitNetworks { networks: string; environment: string; exempted: number }
+// A workstation login app (device grant for Himmelblau); lifetimes in seconds.
+export interface WorkstationApp {
+  clientId: string; clientName: string; appId: string; enabled: boolean;
+  deviceGrantEnabled: boolean; deviceCodeTtl: number; offlineWindow: number; groups: string[];
+}
+export interface WorkstationApps { apps: WorkstationApp[]; issuer: string }
+// What a user code would sign in to, shown before the user approves it.
+export interface DeviceCodeView { clientId: string; clientName: string; ipAddress: string; createdAt: string }

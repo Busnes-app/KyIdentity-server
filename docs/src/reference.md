@@ -20,6 +20,7 @@ The links below open repository documents and need network access.
 - [Accounts and access](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/ACCOUNTS-AND-ACCESS.md)
 - [Applications](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/APPLICATIONS.md)
 - [Forward-auth](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/FORWARD-AUTH.md)
+- [Workstation login](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/WORKSTATION-LOGIN.md)
 - [Audit and alerts](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/AUDIT-AND-ALERTS.md)
 - [Integrations](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/INTEGRATIONS.md)
 - [Provisioning](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/PROVISIONING.md)

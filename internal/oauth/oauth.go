@@ -28,6 +28,8 @@ type Engine struct {
 	store      *store.Store
 	keyManager *crypto.JWTKeyManager
 	issuerURL  string
+	// userCodeKey hashes device-grant user codes; see SetUserCodeKey.
+	userCodeKey []byte
 }
 
 func NewEngine(s *store.Store, km *crypto.JWTKeyManager, issuerURL string) *Engine {
@@ -47,6 +49,7 @@ type OIDCConfiguration struct {
 	UserinfoEndpoint                  string   `json:"userinfo_endpoint"`
 	JwksURI                           string   `json:"jwks_uri"`
 	RevocationEndpoint                string   `json:"revocation_endpoint,omitempty"`
+	DeviceAuthorizationEndpoint       string   `json:"device_authorization_endpoint"`
 	EndSessionEndpoint                string   `json:"end_session_endpoint"`
 	BackchannelLogoutSupported        bool     `json:"backchannel_logout_supported"`
 	BackchannelLogoutSessionSupported bool     `json:"backchannel_logout_session_supported"`
@@ -78,7 +81,8 @@ func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 		ScopesSupported:                   []string{"openid", "profile", "email"},
 		TokenEndpointAuthMethods:          []string{"client_secret_post", "client_secret_basic", "none"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
-		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer", DeviceCodeGrantType},
+		DeviceAuthorizationEndpoint:       e.issuerURL + "/oauth/device_authorization",
 		EndSessionEndpoint:                e.issuerURL + "/oauth/logout",
 		BackchannelLogoutSupported:        true,
 		BackchannelLogoutSessionSupported: true,
@@ -434,8 +438,9 @@ func (e *Engine) newRefreshFamily(code *store.AuthorizationCode, policy store.Ap
 // ErrRefreshReuse reports a replayed refresh token; the family has been revoked.
 var ErrRefreshReuse = store.ErrRefreshReuse
 
-// ExchangeRefreshToken rotates a refresh token for a confidential client and reports the
-// token's user when known, for the audit. Every check
+// ExchangeRefreshToken rotates a refresh token for a confidential client, or for a
+// workstation app (the one public-client exception: its families slide by the app's
+// offline window), and reports the token's user when known, for the audit. Every check
 // runs again in the store transaction; the ID token keeps the original login's
 // auth_time, amr and acr, and carries no nonce (OIDC Core 12.2). scope may narrow only.
 func (e *Engine) ExchangeRefreshToken(raw, clientID, clientSecret, scope string) (*TokenResponse, string, error) {
@@ -444,8 +449,15 @@ func (e *Engine) ExchangeRefreshToken(raw, clientID, clientSecret, scope string)
 	if err != nil {
 		return nil, userID, err
 	}
-	if client == nil || !client.Enabled || client.ClientType != "confidential" {
+	ws, err := e.store.GetWorkstationApp(clientID)
+	if err != nil {
+		return nil, userID, err
+	}
+	if client == nil || !client.Enabled || (client.ClientType != "confidential" && ws == nil) {
 		return nil, userID, errors.New("refresh requires an enabled confidential client")
+	}
+	if ws != nil && ws.OfflineWindow == 0 {
+		return nil, userID, errors.New("workstation app has no offline window")
 	}
 	if err := e.authenticateClient(client, clientSecret); err != nil {
 		return nil, userID, err
@@ -477,7 +489,29 @@ func (e *Engine) ExchangeRefreshToken(raw, clientID, clientSecret, scope string)
 		return nil, userID, err
 	}
 	access := &store.IssuedToken{JTI: uuid.New().String(), ExpiresAt: exp}
-	family, err := e.store.RotateRefreshToken(oldHash, clientID, crypto.HashSHA256(next), access)
+	var family *store.RefreshFamily
+	if ws != nil {
+		slide := now.Add(time.Duration(ws.OfflineWindow) * time.Second)
+		if end, err := e.store.AccessEndsAt(peek.UserID, clientID); err != nil {
+			return nil, userID, err
+		} else if end != nil && end.Before(slide) {
+			slide = *end
+		}
+		// Sliding never outlives the app's re-authentication deadline for the original login.
+		policy, perr := e.store.ClientAuthenticationPolicy(clientID)
+		if perr != nil {
+			return nil, userID, perr
+		}
+		if at := policy.Deadline(peek.AuthenticationEvidence); at != nil && at.Before(slide) {
+			slide = *at
+		}
+		if !slide.After(now) {
+			return nil, userID, errors.New("workstation login is past its re-authentication deadline")
+		}
+		family, err = e.store.RotateWorkstationRefreshToken(oldHash, clientID, crypto.HashSHA256(next), access, slide)
+	} else {
+		family, err = e.store.RotateRefreshToken(oldHash, clientID, crypto.HashSHA256(next), access)
+	}
 	if err != nil {
 		return nil, userID, err
 	}

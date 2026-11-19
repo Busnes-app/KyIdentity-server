@@ -737,6 +737,16 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 	// client is left declared confidential with nothing to authenticate with, and every
 	// token exchange it attempts fails.
 	rotate := req.RotateSecret
+	// A workstation app stays the public client its device grant and refresh rules assume.
+	if req.ClientType != nil || req.RotateSecret {
+		if ws, err := h.store.GetWorkstationApp(client.ID); err != nil {
+			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+			return
+		} else if ws != nil && (req.RotateSecret || *req.ClientType != "public") {
+			writeAPIError(w, http.StatusBadRequest, "invalid_client_type", "A workstation app is always a public client")
+			return
+		}
+	}
 	if req.ClientType != nil {
 		switch *req.ClientType {
 		case "confidential":

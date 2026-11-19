@@ -33,6 +33,9 @@ type sessionView struct {
 	CreatedAt    time.Time `json:"createdAt"`
 	LastActiveAt time.Time `json:"lastActiveAt"`
 	ExpiresAt    time.Time `json:"expiresAt"`
+	// Workstation sessions name their workstation app.
+	WorkstationClientID string `json:"workstationClientId,omitempty"`
+	WorkstationApp      string `json:"workstationApp,omitempty"`
 }
 
 // writeInventory renders a user's live browser sessions and the apps holding live tokens.
@@ -61,6 +64,7 @@ func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSe
 		views = append(views, sessionView{
 			ID: s.ID, Current: s.ID == currentSessionID, IPAddress: s.IPAddress, UserAgent: s.UserAgent,
 			FactorMethod: s.FactorMethod, CreatedAt: s.CreatedAt, LastActiveAt: s.LastActiveAt, ExpiresAt: s.ExpiresAt,
+			WorkstationClientID: s.WorkstationClientID, WorkstationApp: s.WorkstationApp,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")

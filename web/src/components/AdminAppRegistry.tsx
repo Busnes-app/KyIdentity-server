@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { apiRequest, errorMessage } from '../api';
+import { apiJson, apiRequest, errorMessage } from '../api';
 import { parseAppRecordPage } from '../parsers';
 import type { AppRecord } from '../types';
 import { pageSize, Pager, useDirectoryPage } from './DirectoryPage';
@@ -7,6 +7,7 @@ import { AdminAppAuthentication } from './AdminAppAuthentication';
 import { AdminAppAccess } from './AdminAppAccess';
 import { AdminAppRoles } from './AdminAppRoles';
 import { AdminProxyApps } from './AdminProxyApps';
+import { AdminWorkstationLogin } from './AdminWorkstationLogin';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 
 function recordName(a: AppRecord) { return a.launcherName || a.clientName || a.systemName || a.id; }
@@ -26,6 +27,7 @@ export function AdminAppRegistry({ onManageLaunchers }: { onManageLaunchers: () 
   const [accessApp, setAccessApp] = useState<AppRecord | null>(null);
   const [rolesApp, setRolesApp] = useState<AppRecord | null>(null);
   const [proxyApps, setProxyApps] = useState(false);
+  const [workstations, setWorkstations] = useState(false);
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
   const [target, setTarget] = useState<AppRecord | null>(null);
@@ -52,9 +54,14 @@ export function AdminAppRegistry({ onManageLaunchers }: { onManageLaunchers: () 
   if (authenticationApp) return <AdminAppAuthentication app={authenticationApp} onClose={() => { setAuthenticationApp(null); reload(); }} />;
   if (accessApp) return <AdminAppAccess app={accessApp} onClose={() => { setAccessApp(null); reload(); }} onChanged={reload} />;
   if (proxyApps) return <AdminProxyApps onClose={() => { setProxyApps(false); reload(); }} />;
+  // Group assignment for a workstation app is the ordinary Manage access screen.
+  const manageWorkstation = (clientId: string) => void apiJson(`/api/admin/app-registry?${new URLSearchParams({ q: clientId, limit: '1', offset: '0' })}`, parseAppRecordPage)
+    .then(p => { const app = p.items.find(a => a.clientId === clientId); if (app) { setWorkstations(false); setAccessApp(app); } })
+    .catch(err => setMutationError(errorMessage(err, 'Could not open access for this app')));
+  if (workstations) return <AdminWorkstationLogin onClose={() => { setWorkstations(false); reload(); }} onManageAccess={manageWorkstation} />;
   if (rolesApp) return <AdminAppRoles app={rolesApp} onClose={() => { setRolesApp(null); reload(); }} />;
   return <div className="admin-page">
-    <div className="page-header"><h1 className="page-title">App connections</h1><div className="action-buttons-wrap"><button className="secondary-btn" onClick={() => setProxyApps(true)}>Proxy apps</button><button className="primary-btn" onClick={onManageLaunchers}>Manage launcher cards</button></div></div><div className="page-intro">
+    <div className="page-header"><h1 className="page-title">App connections</h1><div className="action-buttons-wrap"><button className="secondary-btn" onClick={() => setProxyApps(true)}>Proxy apps</button><button className="secondary-btn" onClick={() => setWorkstations(true)}>Workstation login</button><button className="primary-btn" onClick={onManageLaunchers}>Manage launcher cards</button></div></div><div className="page-intro">
       <p>Link the OAuth client, launcher card, and provisioning connection that belong to the same app.</p>
       <p className="text-muted">Manage app access here. New apps require assignments; existing apps retain all-active-user access until you change it. Provisioning keeps its current scope.</p>
     </div>

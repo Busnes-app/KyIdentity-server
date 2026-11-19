@@ -7,7 +7,7 @@
  * server never sent.
  */
 import { isRecord } from './api';
-import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, RateLimitNetworks, OwnAccessRequests, AccessExplanation, ProxyApp, SuiteGroupSettings } from './types';
+import type { AccountLink, AppRole, AppRolePrincipal, MailSettings, Offboarding, SCIMConnector, SCIMToken, Access, Delegations, AccessRequest, Alert, AlertSettings, AttestationSettings, SessionLimits, RateLimitNetworks, OwnAccessRequests, AccessExplanation, ProxyApp, SuiteGroupSettings, WorkstationApp, WorkstationApps, DeviceCodeView } from './types';
 import type {
   AppRecord, AppAccessPage, AppAccessGroup, AppAuthenticationPolicy, EnrollmentStatus, EnrollmentPolicy, EnrollmentPreview,
   DirectoryGroup,
@@ -186,6 +186,7 @@ function parseBrowserSession(value: unknown): BrowserSession {
     createdAt: str(o, 'createdAt'),
     lastActiveAt: str(o, 'lastActiveAt'),
     expiresAt: str(o, 'expiresAt'),
+    workstationApp: optStr(o, 'workstationApp') || undefined,
   };
 }
 
@@ -918,4 +919,18 @@ export function parseAppRole(value: unknown): AppRole {
 export function parseAppRolesPage(value: unknown): { app: AppRecord; roles: AppRole[] } {
   const o = obj(value, 'an app roles page');
   return { app: parseAppRecord(o.app), roles: list(o.roles, parseAppRole) };
+}
+export function parseWorkstationApp(value: unknown): WorkstationApp {
+  const o = obj(value, 'a workstation app');
+  return { clientId: str(o, 'clientId'), clientName: str(o, 'clientName'), appId: str(o, 'appId'), enabled: bool(o, 'enabled'),
+    deviceGrantEnabled: bool(o, 'deviceGrantEnabled'), deviceCodeTtl: directoryCount(o, 'deviceCodeTtl'),
+    offlineWindow: directoryCount(o, 'offlineWindow'), groups: strArray(o.groups) };
+}
+export function parseWorkstationApps(value: unknown): WorkstationApps {
+  const o = obj(value, 'a workstation app list');
+  return { apps: arr(o.apps, 'array field "apps"').map(parseWorkstationApp), issuer: str(o, 'issuer') };
+}
+export function parseDeviceCodeView(value: unknown): DeviceCodeView {
+  const o = obj(value, 'a device sign-in');
+  return { clientId: str(o, 'clientId'), clientName: str(o, 'clientName'), ipAddress: str(o, 'ipAddress'), createdAt: str(o, 'createdAt') };
 }

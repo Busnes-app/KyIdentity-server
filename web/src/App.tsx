@@ -26,6 +26,7 @@ import { AccountLinkView } from './components/AccountLinkView';
 import { PasswordChangeRequired } from './components/PasswordChangeRequired';
 import { LicenseFooter } from './components/LicenseFooter';
 import { SessionUnavailable } from './components/SessionUnavailable';
+import { DeviceApproval } from './components/DeviceApproval';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -128,6 +129,9 @@ export const App: React.FC = () => {
   if (currentUser.passwordChangeRequired) {
     return <>{logoutAlert}<PasswordChangeRequired user={currentUser} onLogout={handleLogout} onChanged={() => { setActiveTab('dashboard'); checkSession(); }} /></>;
   }
+
+  // Workstation sign-in (RFC 8628): approve a code a computer shows.
+  if (window.location.pathname === '/device') return <DeviceApproval user={currentUser} />;
 
   return (
     <div className="ky-app">

@@ -168,6 +168,9 @@ func (s *Store) ChangePassword(userID, keepSessionID, passwordHash string, audit
 		if err := spendMFATokensTx(tx, now, userID); err != nil {
 			return err
 		}
+		if err := denyApprovedDeviceCodesTx(tx, userID, ""); err != nil {
+			return err
+		}
 		return expireAccountTokensTx(tx, now, `user_id=?`, userID)
 	})
 }
