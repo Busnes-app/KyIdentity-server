@@ -2566,9 +2566,13 @@ func (s *Store) DeleteOAuthClient(id string, audit *AuditEvent) (bool, error) {
 }
 
 func revokeClientTokensTx(tx *sql.Tx, clientID string, now time.Time) error {
-	_, err := tx.Exec(
+	if _, err := tx.Exec(
 		`UPDATE issued_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL`,
-		now, clientID)
+		now, clientID); err != nil {
+		return err
+	}
+	// A device approval not yet redeemed would otherwise mint fresh tokens afterwards.
+	_, err := tx.Exec(`UPDATE device_codes SET status='denied' WHERE client_id=? AND status='approved' AND redeemed_at IS NULL`, clientID)
 	return err
 }
 
@@ -3065,7 +3069,7 @@ func revokeUserAccessTx(tx *sql.Tx, userID string, now time.Time) error {
 	if err := spendMFATokensTx(tx, now, userID); err != nil {
 		return err
 	}
-	if err := denyApprovedDeviceCodesTx(tx, userID); err != nil {
+	if err := denyApprovedDeviceCodesTx(tx, userID, ""); err != nil {
 		return err
 	}
 	// An outstanding activation or reset link is a credential too.

@@ -616,3 +616,28 @@ func TestPasswordChangeWithdrawsUnredeemedApproval(t *testing.T) {
 		t.Fatal("a workstation session was created after the password change")
 	}
 }
+
+// Revoking one app's access for a user withdraws that app's unredeemed approvals and ends
+// its workstation sessions.
+func TestAppAccessRevocationWithdrawsWorkstationAccess(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	u, cookie := f.assignedUser()
+	tokens := f.login(cookie)
+	device, userCode := f.start()
+	if rr := f.decide(cookie, userCode, true); rr.Code != 200 {
+		t.Fatalf("approve: %d", rr.Code)
+	}
+	if rr := adminRequestNoStepUp(t, f.srv, "POST", "/api/admin/users/"+u.ID+"/apps/"+f.clientID+"/revoke", f.admin, ""); rr.Code != 200 {
+		t.Fatalf("revoke app: %d %s", rr.Code, rr.Body.String())
+	}
+	if status, body := f.poll(f.clientID, device); status == 200 || body["error"] != "access_denied" {
+		t.Fatalf("approval survived the app revocation: %d %v", status, body)
+	}
+	if status, body := f.refresh(tokens["refresh_token"].(string)); status != 400 || body["error"] != "invalid_grant" {
+		t.Fatalf("refresh after the app revocation: %d %v", status, body)
+	}
+	if f.workstationSessions(u.ID) != 0 {
+		t.Fatal("workstation session survived the app revocation")
+	}
+}

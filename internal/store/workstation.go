@@ -392,8 +392,9 @@ func (s *Store) DeleteExpiredDeviceCodes() error {
 }
 
 // denyApprovedDeviceCodesTx withdraws approvals not yet redeemed, for revocations that keep
-// the approving browser session alive (a password change keeps the proving one).
-func denyApprovedDeviceCodesTx(tx *sql.Tx, userID string) error {
-	_, err := tx.Exec(`UPDATE device_codes SET status='denied' WHERE user_id=? AND status='approved' AND redeemed_at IS NULL`, userID)
+// the approving browser session alive (a password change keeps the proving one). An empty
+// clientID means every app.
+func denyApprovedDeviceCodesTx(tx *sql.Tx, userID, clientID string) error {
+	_, err := tx.Exec(`UPDATE device_codes SET status='denied' WHERE user_id=? AND (?='' OR client_id=?) AND status='approved' AND redeemed_at IS NULL`, userID, clientID, clientID)
 	return err
 }

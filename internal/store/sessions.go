@@ -109,6 +109,12 @@ func (s *Store) RevokeUserClientAccess(userID, clientID string, audit *AuditEven
 		if _, err := tx.Exec(`UPDATE issued_tokens SET revoked_at=? WHERE user_id=? AND client_id=? AND revoked_at IS NULL`, now, userID, clientID); err != nil {
 			return err
 		}
+		if _, err := revokeSessionsTx(tx, now, `user_id=? AND workstation_client_id=?`, userID, clientID); err != nil {
+			return err
+		}
+		if err := denyApprovedDeviceCodesTx(tx, userID, clientID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(`DELETE FROM authorization_codes WHERE user_id=? AND client_id=?`, userID, clientID)
 		return err
 	})
