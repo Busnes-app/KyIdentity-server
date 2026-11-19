@@ -101,6 +101,7 @@ orgs (
   account_holder_user_id TEXT,              -- D9. No FK (users references orgs); guarded by
                                             -- triggers, see "Account holder guard"
   billing_ref TEXT UNIQUE,                  -- the billing service's own opaque ID, never a Stripe ID
+  create_request_hash TEXT,                 -- hash of the POST /orgs body; write-once
   billing_revision BIGINT NOT NULL DEFAULT 0,
   revision BIGINT NOT NULL DEFAULT 1,       -- KyIdentity's own version, carried in events
   delete_after BIGINT,                      -- unix seconds, set by schedule-deletion
@@ -449,18 +450,22 @@ listener is served on it.
   different hash is `422 idempotency_conflict`.
 - Org lifecycle writes carry `revision`, a per-org counter the billing service increases.
   One at or below `orgs.billing_revision` is `409 stale_revision` with the current value.
-- Order of checks for every write: `billing_ref` on create (below), then the
-  `platform_requests` lookup, then `revision`. A retry with the same key and body
-  therefore gets its stored answer, even though its revision now equals
-  `billing_revision`. Only a call under a new key is checked for a stale revision.
-  Member writes carry no `revision`. They are synchronous user actions from the portal, not
+- Order of checks for every write:
+  1. The `platform_requests` lookup. A retry with the same key and body gets its stored
+     answer, whatever has happened to the org since, including a later `PATCH`.
+  2. On `POST /orgs` only, `billing_ref` (below).
+  3. `revision`. Only a call under a new key reaches this check, so a same-key retry is
+     never `stale_revision`.
+- Member writes carry no `revision`. They are synchronous user actions from the portal, not
   replayed webhooks, and each is idempotent on its target state.
-- `billing_ref` is unique. A `POST /orgs` whose `billing_ref` already exists is decided
-  first, before the idempotency and revision rules:
-  - If the create fields match the stored org, it is `200` with the existing org.
-  - If they do not, it is `409 billing_ref_conflict`.
-  - A retry under a new key, or after the 30-day `platform_requests` window, therefore
-    gets the same answer.
+- `billing_ref` is unique. A new-key `POST /orgs` whose `billing_ref` already exists is
+  compared with the org's original create request, not its current state:
+  - `orgs.create_request_hash` keeps the hash of the request that created the org. It is
+    written once and never changes, so a later `PATCH` does not affect the comparison.
+  - The same hash is `200` with the existing org. A different hash is
+    `409 billing_ref_conflict`.
+  - A retry under a new key, or after the 30-day `platform_requests` window, therefore gets
+    the same answer as the first create.
 
 **Org endpoints** (`/platform/v1`). Bodies hold no personal data except the account
 holder's name and email on create.
@@ -676,7 +681,9 @@ tests.
    - Tests:
      - Replay, conflict and stale-revision cases, including a retry of a successful
        suspend under the same key and body, which must get the stored answer and not
-       `stale_revision`.
+       `stale_revision`. Also a create whose response was lost, then a `PATCH`, then the
+       create retried under the same key (stored answer) and under a new key (`200`, from
+       `create_request_hash`).
      - Every `credential_principals` call site is on the allowlist. A suspended-org user
        reaches the second factor and gets `org_suspended` only from session creation.
      - Suspension ends every grant: a table of every credential type, like
