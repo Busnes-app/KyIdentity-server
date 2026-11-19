@@ -81,12 +81,45 @@ works, not how long an offline desktop trusts its cache. Measured behaviour is b
 ## Measured with Himmelblau (end-to-end)
 
 `scripts/e2e-himmelblau.sh` runs a throwaway KyIdentity from the checkout behind a
-throwaway TLS terminator and Himmelblau (Community Nightly packages, Debian 13, systemd) in
-a podman container, and authenticates with `pamtester`. It needs podman, network access
-for the image and a few minutes, so it is a manual check, not a CI job.
+throwaway TLS terminator and Himmelblau (Community Nightly packages, Debian 13) in a podman
+container, and authenticates with `pamtester` through `pam_himmelblau`. It needs podman,
+socat, openssl, jq, network access for the image and about ten minutes, so it is a manual
+check, not a CI job. In the container `himmelblaud` runs directly as its own user: a
+rootless container cannot give the systemd units the namespaces they ask for.
 
-Results are recorded in the PR that introduced this feature and summarised here once
-measured.
+Measured on 2026-11-19 against Himmelblau `5.0.0-debian13~20261119` (nightly, built from
+`main`). The 4.0.8 release was read, not run (no free 4.x packages).
+
+| Case | Result |
+|---|---|
+| Assigned user: device code, approval, PIN enrolment; PAM `authenticate` and `acct_mgmt` | succeeds |
+| Assigned user: later online PIN sign-in | succeeds; **one refresh at KyIdentity per sign-in** |
+| Unassigned user | KyIdentity refuses the approval (`no_access`); the code expires; no PAM success |
+| Denied code | Himmelblau reports "User denied authorization" and shows a new code; no PAM success |
+| User KyIdentity admits but outside `pam_allow_groups` | PAM account management refuses |
+| Disabled after enrolment | next online PIN sign-in refused ("Your session has expired"), new code shown |
+| Sessions revoked, online | same: refused at the next PIN sign-in |
+| Offline (KyIdentity unreachable) | cached PIN sign-in succeeds |
+| Revoked while the desktop is offline | PIN keeps working offline; refused at the first PIN sign-in once Himmelblau sees KyIdentity again (it re-probes after 15 s) |
+| Background user refresh, then PIN sign-in | succeeds |
+| Background user refresh, then a daemon restart (or reboot), then PIN sign-in | **refused: a new device code is needed** (below) |
+
+A denied or expired code does not end the PAM conversation: Himmelblau reports it and
+starts a new code, so a greeter keeps offering sign-in.
+
+### Known issue: Himmelblau and single-use refresh tokens
+
+Himmelblau keeps two copies of the refresh token: one in memory and one sealed to the PIN
+key. A background user refresh (every `cache_timeout`, 300 s by default, while the account is
+looked up) rotates only the in-memory copy. After `himmelblaud` restarts, which includes
+every reboot, only the sealed copy is left, and it has already been spent. KyIdentity treats
+a spent refresh token as a replay and ends the family, so the next PIN sign-in fails and the
+person must approve a new code. Nothing is exposed; the cost is a device-code sign-in after
+a restart that follows a background refresh.
+
+Fixing it needs a Himmelblau change: re-seal the refresh token after a background refresh
+(or persist the latest copy). KyIdentity keeps strict reuse detection; a grace period for
+the previous token would weaken replay detection for every workstation.
 
 ## Endpoints
 

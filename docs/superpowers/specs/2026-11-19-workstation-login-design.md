@@ -42,8 +42,11 @@ Consequences for KyIdentity:
 5. Every refusal of a revoked refresh token must be `invalid_grant`; anything else leaves
    the PC on its cache.
 6. Group names with `:` never reach `pam_allow_groups`. Documented.
-7. The 4.0.8 rotation behaviour (row "Rotation") is a real interop risk with single-use
-   tokens. It is measured in the end-to-end test and reported; it is not loosened here.
+7. The rotation behaviour (row "Rotation") is a real interop problem with single-use
+   tokens. Measured on nightly 5.0.0: a background refresh followed by a daemon restart
+   presents the spent sealed token, reuse detection ends the family, and the person needs a
+   new device code. Reported in `docs/WORKSTATION-LOGIN.md` as needing a Himmelblau change
+   (re-seal after a background refresh); reuse detection is not loosened here.
 
 ## Threat model
 
