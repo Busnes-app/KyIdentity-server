@@ -104,7 +104,10 @@ ID is never reused. This follows the same rule as `suite_groups` (`suite_groups.
 
 ### `org_id` columns and constraints
 
-Each table marked org-owned in the appendix gets `org_id TEXT NOT NULL`:
+Each table marked org-owned in the appendix gets `org_id TEXT NOT NULL`. There is one
+named exception: `audit_events.org_id` is nullable, and NULL means a platform event. Its
+existence trigger admits NULL, and its immutability trigger also refuses changing NULL to
+an org or back.
 
 - On Postgres it gets `REFERENCES orgs(id)`. The default is set for the backfill, then
   dropped.
@@ -140,6 +143,13 @@ Views (`app_access.go:58-65`, `group_enrollment.go:68-78`, `pg_schema.go:510-545
   `active`. Every sign-in, token and session check reads it, in place of the inline
   `users.status = 'active'` tests spread across the store today (for example
   `store.go:2660`, `pg_schema.go:513`).
+- One exception is outside `active_principals`. While its org is `deletion_scheduled`,
+  the org owner may sign in with password and second factor.
+  - The session is marked restricted. It works like today's `enrollment_only` sessions
+    (`pg_schema.go:56`, refused by `mfa_session_access` at `:539`).
+  - It reaches only the export page, the export download and sign-out.
+  - It issues no codes or tokens and opens no suite or forward session.
+  - A test calls every other route with such a session and expects a refusal.
 
 ### Migration of an existing install (schema version 6)
 
@@ -216,6 +226,8 @@ read pool and every worker would need a bypass role. Deferred (open question 7).
   no classification fails the build.
 - `TestOrgOwnedTablesHaveOrgID` requires every org-owned table to have a non-null `org_id`,
   the existence and immutability triggers, and, on Postgres, the foreign key to `orgs`.
+  The one exception is `nullableOrgID = {"audit_events"}`, which must be nullable. The
+  test fails if any other table appears there.
 - `TestOrgSQLNamesOrgID` is a go/ast scan of the string literals in `internal/store`. Any
   SQL that names an org-owned table must also name `org_id`, or be on the pre-org or
   platform allowlist with a reason. It is crude, and it is cheap.
@@ -263,6 +275,21 @@ Emergency access:
   - Neither can change the owner's email. If the billing account is taken over, it must not
     lead to taking over the org.
   - Each use is audited in the org's own log, which the owner can see.
+
+**Platform settings in multi-tenant mode.** Some settings are platform-wide (see Per-org
+features): mail, session limits, alert settings, attestation, rate-limit exemptions, push
+relays and backup pairing.
+
+- Today a global administrator sets them in the admin UI, with step-up.
+- Multi-tenant mode has no such account, so they are set with container-local commands:
+  `kyidentity platform-settings show|set <area>`, plus the existing environment variables.
+  This is the channel `apply-setup` and `disable-user` already use (`AGENTS.md`, installer
+  setup), and it needs no listener and no session.
+- Each change is audited as a platform event (`org_id` NULL).
+- The admin UI routes for these settings answer `404` to org admins.
+- Startup does not require mail. Until mail is configured, `POST /platform/v1/orgs` and
+  owner recovery answer `503 mail_not_configured` and create nothing. Billing retries with
+  the same idempotency key.
 
 ## Tokens and suite contracts (multi-tenant)
 
@@ -340,12 +367,12 @@ email on create.
 
 | Route | Scope | Effect |
 |---|---|---|
-| `POST /orgs` | write | `{name, kind, plan, max_seats, apps:{client_id:{enabled, quotas}}, owner_email, owner_name, billing_ref, revision}`. Creates the org and a pending owner, and sends an activation invite by mail (`account_tokens`, delivery `email`). Mail must be configured in multi-tenant mode, or startup refuses. `409 email_in_use` if the email exists anywhere. |
+| `POST /orgs` | write | `{name, kind, plan, max_seats, apps:{client_id:{enabled, quotas}}, owner_email, owner_name, billing_ref, revision}`. Creates the org and a pending owner, and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere. |
 | `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | read | Status, reason, plan, limits, `seats_used`, `pending_invites`, `owner_activated`, `delete_after`, `revision`. No names or emails of users. |
 | `PATCH /orgs/{id}` | write | Plan, `max_seats`, apps and quotas, name. Lowering seats below the number used is accepted: the org is marked `over_limit`, new seats are refused, and nobody is disabled. |
 | `POST /orgs/{id}/suspend` | write | `{reason: payment\|abuse, revision}`. Semantics below. |
 | `POST /orgs/{id}/resume` | write | From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
-| `POST /orgs/{id}/schedule-deletion` | write | `{grace_days 7–90, revision}`. Suspends the org, sets `delete_after`, and opens the owner's export (the owner can still sign in to an export-only page; open question 5). |
+| `POST /orgs/{id}/schedule-deletion` | write | `{grace_days 7–90, revision}`. Suspends the org and sets `delete_after`. The owner can still sign in to a restricted, export-only session (the `active_principals` exception under Views). |
 | `DELETE /orgs/{id}` | delete | Only for `deletion_scheduled` once `delete_after` has passed, otherwise `409`. Deletes every org-owned and derived row in one transaction and leaves the tombstone. |
 | `POST /orgs/{id}/owner-recovery` | write | See Roles. |
 
@@ -497,9 +524,10 @@ is refused at startup until PR 4 lands.
    - Recommend (a), optional. The owner is always an everyday account.
 5. **What a suspended org's user sees after a correct password and second factor.**
    - (a) The generic invalid-credentials answer.
-   - (b) "Your organisation is suspended", plus an export-only page for the owner during
-     scheduled deletion.
+   - (b) "Your organisation is suspended".
    - Recommend (b). Only a holder of valid credentials learns anything.
+   - Either way, the owner's export-only session during scheduled deletion stays as
+     designed above.
 6. **Per-org branding.**
    - (a) Never.
    - (b) After sign-in only (launcher, account pages), later.
@@ -566,7 +594,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `launcher_icons` | `store.go:296` | `:205` | P | Icons of platform cards |
 | `applications` | `store.go:303` | `:212` | ? | P in v1, with custom org cards disabled. Becomes O if orgs get their own cards. |
 | `issued_tokens` | `store.go:317` | `:223` | D | `user_id` FK |
-| `audit_events` | `store.go:328` | `:232` | O | Nullable `org_id`: NULL means a platform event. This is the one nullable exception, tested as such. |
+| `audit_events` | `store.go:328` | `:232` | O | Nullable `org_id`: NULL means a platform event. This is the one nullable exception (`nullableOrgID`, and the NULL case in its triggers). |
 | `system_settings` | `store.go:343` | `:246` | P | Platform settings. Future per-org settings go into a new `org_settings` table, never prefixed keys. |
 | `step_up_tokens` | `store.go:352` | `:252` | D | `user_id` FK |
 | `webauthn_credentials` | `store.go:363` | `:262` | D | `user_id` FK. `credential_id` is global (one RP). |
