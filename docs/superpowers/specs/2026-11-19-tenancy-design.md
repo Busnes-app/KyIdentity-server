@@ -59,7 +59,7 @@ check in code.
 | Thief of a platform token | Create, suspend or delete orgs; add or remove members | Platform tokens are 256-bit, stored hashed, scoped, expiring and revocable, like SCIM connector tokens (`pg_schema.go:343`, `scim_inbound.go:243`). They are accepted only on a separate platform listener that is never published through the public proxy. They are never accepted on the public listener, and browser sessions, SCIM tokens and OAuth clients are never accepted on the platform listener. An `orgs:*` token (billing service) reads lifecycle data and counts only, and no user data. A `members:*` token (customer portal) also reads member emails and statuses, and nothing else. A token never holds both kinds. Delete needs its own scope, and only works after a deletion was scheduled and its grace period has passed. Every call is audited. |
 | Compromised billing portal (the customer portal of our billing service) | Add or remove members, resend invites, or join an org by adding an attacker's address | The portal's token holds only `members:read` and `members:write`, not the org lifecycle scopes. Member writes are rate limited per org and per token. Each is audited in the org's log, queues an `org.member_changed` event, and mails a notice to the account holder. The added person gets an activation invite at their own address. A new member gets member rights only: no admin route, no export, no recovery of another member. Removing members is disruptive, and staff undo it. Whether member writes also need the account holder's own sign-in is open question 11. |
 | Staff abuse, or a stolen staff account | Read or change any org's directory: blast radius is every org | Staff need a passkey second factor, and step-up stays on sensitive routes (see Roles). Every staff read or write in a customer org is audited in that org's log, naming the org, and staff admins read the audit across orgs by actor. There is no impersonation: no "sign in as user", no password set on a customer account, no email change, and activation and reset links go only by mail to the address on file, never to the screen. Residual risk: staff see every org's directory. |
-| Replayed or reordered billing calls (Stripe retries, out-of-order webhooks) | Undo a suspension, or apply an old plan | Every mutating call has an `Idempotency-Key`, and every org lifecycle call a per-org `revision`. The same key and body returns the stored answer. The same key with a different body is `422`. A `revision` at or below the stored one is `409 stale_revision`. |
+| Replayed or reordered billing calls (Stripe retries, out-of-order webhooks) | Undo a suspension, or apply an old plan | Every mutating call has an `Idempotency-Key`, and every org lifecycle write (`POST /orgs`, `PATCH`, suspend, resume, schedule-deletion) a per-org `revision`. `DELETE` has none: it works only from `deletion_scheduled` after `delete_after`, so a late one after a resume does nothing. The same key and body returns the stored answer. The same key with a different body is `422`. A `revision` at or below the stored one is `409 stale_revision`. |
 | User of a suspended or deleted org | Keep working | Suspension revokes every session, refresh family, issued token and forward session in one transaction (`revokeSessionGrantsTx`, `sessions.go:136`), and queues back-channel logouts. Everything that grants or uses access checks one `active_principals` view (user active and org active). Only the credential steps of interactive sign-in skip it, and they grant nothing (see Views). Access tokens live 15 minutes at most (`oauth.go:22`). `/oauth/userinfo` refuses at once. Apps see `status: suspended` within one poll (≤ 60 s). |
 | Customer of org A, adding members through the billing portal | Take over a person's identity by creating an account with their email (email squatting) | Emails are globally unique, so whoever creates an address first holds it. A pending account cannot sign in, and resets go only to a verified address (`onboarding_handlers.go:209`). A pending, never-activated account gives up its email when its activation token expires (open question 3). Nobody in another org can edit, reset or claim that account. |
 | Anyone at the sign-in page | Find out whether an email exists, or which org it is in | Unknown, inactive and locked accounts all answer like a wrong password, after the same Argon2 cost (`auth_handlers.go:100-104`, `loginRefusal` at `:296`). A suspended org's account gives the same answers until every factor has passed. Only then does it get `org_suspended` (owner answer 4, see Suspension), which only a holder of valid credentials can reach. Forgot-password always answers the same way (`onboarding_handlers.go:178-197`). No sign-in or recovery answer names an org. |
@@ -474,11 +474,11 @@ holder's name and email on create.
 |---|---|---|
 | `POST /orgs` | `orgs:write` | `{name, kind: person\|household, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, billing_ref, revision}`. Creates the org and a pending account holder, and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere. |
 | `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `over_limit`, `holder_activated`, `delete_after`, `revision`. No names or emails of users. |
-| `PATCH /orgs/{id}` | `orgs:write` | Plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). Lowering seats below the number used is accepted: the org is `over_limit`, new seats are refused, and nobody is disabled. |
+| `PATCH /orgs/{id}` | `orgs:write` | `{revision}` plus any of: plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). Lowering seats below the number used is accepted: the org is `over_limit`, new seats are refused, and nobody is disabled. |
 | `POST /orgs/{id}/suspend` | `orgs:write` | `{reason: payment\|abuse, revision}`. Semantics below. |
-| `POST /orgs/{id}/resume` | `orgs:write` | From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
+| `POST /orgs/{id}/resume` | `orgs:write` | `{revision}`. From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
 | `POST /orgs/{id}/schedule-deletion` | `orgs:write` | `{grace_days 7–90, revision}`. Suspends the org and sets `delete_after`. The account holder can still sign in to a restricted, export-only session (the `active_principals` exception under Views). |
-| `DELETE /orgs/{id}` | `orgs:delete` | Only for `deletion_scheduled` once `delete_after` has passed, otherwise `409`. Deletes every org-owned and derived row in one transaction and leaves the tombstone. That includes the org's `audit_events`. This is a second, named audit-deletion path beside `DeleteAuditEventsOlderThan`, and the audit retention contract in `AGENTS.md` must be amended to say so. The org's audit is in the account holder's export. In the same transaction, a platform audit row (`org_id` NULL), `platform.org_deleted`, records the org ID, the token and row counts per table, with no content. If it cannot be written, nothing is deleted (fail closed). A test proves both. |
+| `DELETE /orgs/{id}` | `orgs:delete` | No `revision`: the state gate replaces it. Only for `deletion_scheduled` once `delete_after` has passed, otherwise `409`, so a late `DELETE` after a resume does nothing. Deletes every org-owned and derived row in one transaction and leaves the tombstone. That includes the org's `audit_events`. This is a second, named audit-deletion path beside `DeleteAuditEventsOlderThan`, and the audit retention contract in `AGENTS.md` must be amended to say so. The org's audit is in the account holder's export. In the same transaction, a platform audit row (`org_id` NULL), `platform.org_deleted`, records the org ID, the token and row counts per table, with no content. If it cannot be written, nothing is deleted (fail closed). A test proves both. |
 
 **Member endpoints.** A household still invites and removes its people, and resends
 invites. With no org admin (decision 6), the billing service's customer portal does it for
@@ -520,10 +520,17 @@ backends:
   because `users.org_id` references `orgs(id)` (the Postgres FK, or the SQLite existence
   trigger).
 - `orgs` `BEFORE UPDATE` of `account_holder_user_id`: the new value must be a live user of
-  the same org. Changing a set pointer to NULL is refused, except by org deletion.
+  the same org. Changing a set pointer to NULL is refused unless the same `UPDATE` moves
+  the org from `deletion_scheduled` to `deleted`. That is, the predicate for NULL is
+  `OLD.status = 'deletion_scheduled' AND NEW.status = 'deleted'`.
+- `orgs` `BEFORE UPDATE` of `status`: `deleted` can only be entered from
+  `deletion_scheduled` with `delete_after` at or before the database's current time
+  (`unixepoch()` on SQLite, `extract(epoch from now())` on Postgres). It is terminal: a
+  `deleted` row never changes status again. So the NULL exception cannot be reached from
+  any other path, or before the grace period ends.
 - `POST /orgs`, in one transaction: insert the org with a NULL pointer, create the pending
   user in it, then set the pointer. The NULL never commits.
-- Org deletion clears the pointer first, then deletes the users, in one transaction.
+- Org deletion, in one transaction: one `UPDATE orgs SET status='deleted', name='', account_holder_user_id=NULL`, then the users and every other org row are deleted.
 
 A pending holder whose activation token expires is not deleted. The open question 3 cleanup
 skips any account named as holder. The org stays `active` with `holder_activated: false`, and
@@ -691,6 +698,11 @@ tests.
      - Every sign-in path refuses a suspended org. Interactive sign-in gives the
        wrong-password answer for a wrong credential, and `org_suspended` only after every
        required factor has passed, with no session created.
+     - Clearing the account holder pointer is refused on an `active`, `suspended` or
+       `deletion_scheduled` org, and in a move to `deleted` before `delete_after`. It is
+       allowed only in the deleting `UPDATE`. A `deleted` org's status cannot change.
+     - A late `PATCH` or `resume` under a new key, with a revision at or below the stored
+       one, is `stale_revision` and changes nothing.
      - A pending holder activates through `RedeemAccountToken` despite the guard.
        `POST /orgs` with a pending holder succeeds.
      - Delete removes every org row, checked against the table classification.
