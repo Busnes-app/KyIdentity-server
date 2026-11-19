@@ -418,8 +418,16 @@ After that:
   with `ky-primitives/syncauth`, using a secret sealed at rest and set by
   `kyidentity platform-events set-secret`.
 - Types: `org.created`, `org.owner_activated`, `org.seats_changed` (at most one per org a
-  minute), `org.over_limit`, `org.suspended`, `org.resumed`, `org.deletion_scheduled`,
-  `org.deleted`.
+  minute), `org.over_limit` and `org.within_limit`, `org.suspended`, `org.resumed`,
+  `org.deletion_scheduled`, `org.deleted`.
+- `over_limit` is **derived**: `seats_used > max_seats`, with `max_seats > 0`. It is not
+  stored, and it is not an `orgs.status` value.
+  - A transaction that changes either side (a `PATCH` of `max_seats`, a disable, a
+    delete) computes the flag before and after. When it flips, it queues
+    `org.over_limit` or `org.within_limit` in the same transaction.
+  - Seat-adding transitions are refused while the org is at or over the limit, so they
+    never flip it.
+  - `GET /orgs/{id}` returns the derived `over_limit`.
 - Body: `{event_id, type, org_id, billing_ref, revision, status, seats_used, at}`. No
   personal data.
 - Delivery is at least once and unordered. Billing de-duplicates by `event_id` and orders
@@ -475,11 +483,15 @@ Why a suite API pull:
 ## Phased build plan
 
 Each PR is shippable on its own, with single-tenant behaviour unchanged. `KYIDENTITY_TENANCY=multi`
-is refused at startup until PR 4 lands.
+is refused at startup until PR 6 lands. Before then, an org could have an owner who cannot
+administer it, or a plan whose seats are not enforced. Until PR 6, multi-tenant code runs
+only in tests.
 
 1. **Org model and default-org migration.**
    - Adds schema version 6 on both backends: the tables, columns, triggers and views above,
      and `tenancy_mode`.
+   - It also widens the `admin_delegations.kind` CHECK (`delegations.go:29`) to admit
+     `owner` and `admin`, so no later schema change is needed for them.
    - Tests:
      - An upgrade test from a version 5 database on both backends (`upgrade_test.go`
        style). Every view returns the same rows before and after.
@@ -499,7 +511,9 @@ is refused at startup until PR 4 lands.
      `exp`. Multi-org suite tests. A `ky-primitives/suitedir` `Orgs` method.
 4. **Platform provisioning API.** The listener, tokens and CLI, idempotency, revision,
    create, update, suspend, resume, deletion and owner recovery, the events outbox and
-   `active_principals`. Multi-tenant mode becomes startable.
+   `active_principals`. The `owner` and `admin` delegations take effect here, mapped to
+   `Access.Admin` and kept off `platform` routes, so an activated owner can administer
+   the org. The per-org last-owner rule also lands here.
    - Tests:
      - Replay, conflict and stale-revision cases.
      - Suspension ends every grant: a table of every credential type, like
@@ -510,7 +524,7 @@ is refused at startup until PR 4 lands.
        credentials are refused on the platform listener.
      - Events are signed and retried.
 5. **Org owner and admin UI.**
-   - Adds the owner and admin delegations, per-org last-owner and last-admin rules, a seats
+   - Adds the UI for owner and admin delegations, per-org last-admin rules, a seats
      display, the export, the scheduled-deletion banner, and per-org enrollment policy UI.
    - Tests: the extended permission matrix, the existing UI verification flow
      (`UI-VERIFICATION.md`), and the export's content proven to hold no other org's rows.
