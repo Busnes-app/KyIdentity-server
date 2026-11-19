@@ -181,6 +181,23 @@ Views (`app_access.go:58-65`, `pg_schema.go:510-545`):
     That function is also the only place the export-only exception below is made.
   - `TestOrgSQLNamesOrgID`'s allowlist names the `credential_principals` call sites. A new
     one fails the build until it is listed with a reason.
+  - The account flows outside sign-in all use `active_principals`. None of them is on the
+    allowlist:
+
+    | Flow | Predicate | In an org that is not `active` |
+    |---|---|---|
+    | Account-token issuance (`IssueAccountToken`: invite, resend-invite, reset) | `active_principals` | Refused. The member endpoints answer `409 org_not_active`. |
+    | Forgot-password | `active_principals` | The usual identical answer, and no mail is sent |
+    | Activation and reset redemption (`RedeemAccountToken`) | `active_principals`, re-read in its transaction | Refused like an expired link. Nobody activates, sets a password or clears a lockout. |
+    | Step-up | `active_principals` | Refused. The export-only session cannot step up, because it reaches no route that needs it. |
+
+    - Suspension and schedule-deletion also expire the org's outstanding account tokens,
+      in the same transaction (as `revokeUserAccessTx` does). The redemption check is the
+      backstop.
+    - After a resume, pending members need a new invite (`resend-invite`).
+    - An account holder who cannot sign in while the org is `deletion_scheduled` gets no
+      reset. Staff export on request instead (open question 9, (c)). This keeps the
+      export-only exception to one place, session creation.
 - One exception is outside `active_principals`. While its org is `deletion_scheduled`,
   the org's account holder may sign in with password and second factor.
   - The session is marked restricted. It works like today's `enrollment_only` sessions
@@ -543,7 +560,7 @@ request (open question 9, (c)).
 
 1. Set `orgs.status`.
 2. Revoke every session and token grant of the org's users (`revokeSessionGrantsTx`). This
-   ends forward sessions too.
+   ends forward sessions too. Expire their outstanding account tokens (invites and resets).
 3. Queue back-channel logouts for every client session.
 4. Queue `org.suspended`.
 
@@ -695,6 +712,9 @@ tests.
        reaches the second factor and gets `org_suspended` only from session creation.
      - Suspension ends every grant: a table of every credential type, like
        `TestForwardRevocationWithin30Seconds`.
+     - In a suspended or `deletion_scheduled` org, each account flow in the Views table
+       refuses: issuance, forgot-password (no mail), redemption of a link issued before the
+       suspension, and step-up. A pending member cannot activate.
      - Every sign-in path refuses a suspended org. Interactive sign-in gives the
        wrong-password answer for a wrong credential, and `org_suspended` only after every
        required factor has passed, with no session created.
