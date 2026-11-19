@@ -160,6 +160,9 @@ type agent struct {
 	roots    *x509.CertPool
 	http     *http.Client
 	state    map[string]int64
+	// unsaved: state holds a sequence the state file does not, so nothing more is
+	// acknowledged until it is saved; a restart would otherwise forget it.
+	unsaved bool
 }
 
 func newAgent(path string) (*agent, error) {
@@ -266,6 +269,12 @@ type entry struct {
 // pass handles every entry the server holds now. A directory outage stops the pass, so
 // the backoff applies; each entry's own problem is reported and the pass goes on.
 func (a *agent) pass(ctx context.Context) error {
+	if a.unsaved {
+		if err := a.saveState(); err != nil {
+			return fmt.Errorf("state file not saved: %w", err)
+		}
+		a.unsaved = false
+	}
 	var page struct {
 		ConnectorID string  `json:"connectorId"`
 		Entries     []entry `json:"entries"`
@@ -358,6 +367,7 @@ func (a *agent) apply(conn *ldap.Conn, e entry) (outcome, reason string, stop bo
 	}
 	a.state[e.UserID] = e.Seq
 	if err := a.saveState(); err != nil {
+		a.unsaved = true
 		log.Printf("state file not saved: %v", err)
 		return "retry", "directory_error", true
 	}

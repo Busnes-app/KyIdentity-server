@@ -344,3 +344,39 @@ func TestDirectoryPasswordStatusShowsTheLock(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 }
+
+func TestDirectoryPasswordsAfterARestore(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	_, app := adStoreFixture(t, s, "ad-1")
+	u := createTestUser(t, s)
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Capsule-pass-1"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyRestoredState(time.Now().UTC(), nil); err != nil {
+		t.Fatal(err)
+	}
+	var ct string
+	if err := s.db.QueryRow(`SELECT ciphertext FROM ad_passwords WHERE user_id=?`, u.ID).Scan(&ct); err != nil || ct != "" {
+		t.Fatal("a capsule's sealed password survived the restore", err)
+	}
+	if st, _ := s.ADPasswordStatuses("ad-1"); st[0].State != "missing" || st[0].LastError != "restored" {
+		t.Fatalf("status %+v", st)
+	}
+	// A password changed after the restore waits for the operator to lift the hold.
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("After-restore-2"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	if e, err := s.PendingADPasswords("ad-1", time.Now(), 10); err != nil || len(e) != 0 {
+		t.Fatal("the agent was given work while the connector is held", e, err)
+	}
+	if _, err := s.db.Exec(`UPDATE paired_systems SET provisioning_hold=FALSE WHERE id='ad-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := s.PendingADPasswords("ad-1", time.Now(), 10); len(e) != 1 {
+		t.Fatal("released connector got no work", e)
+	}
+}

@@ -261,10 +261,12 @@ type ADPasswordEntry struct {
 }
 
 // PendingADPasswords returns a connector's live entries, least-tried first, then oldest, so
-// entries the agent keeps retrying cannot hold newer ones off the page.
+// entries the agent keeps retrying cannot hold newer ones off the page. A connector under a
+// restore hold gets none until an operator releases it.
 func (s *Store) PendingADPasswords(systemID string, now time.Time, limit int) ([]ADPasswordEntry, error) {
 	now = now.UTC()
-	rows, err := s.db.Query(`SELECT user_id,seq,expires_at,ciphertext,signature FROM ad_passwords WHERE system_id=? AND ciphertext<>'' AND expires_at>? ORDER BY attempts,seq LIMIT ?`, systemID, now, limit)
+	rows, err := s.db.Query(`SELECT a.user_id,a.seq,a.expires_at,a.ciphertext,a.signature FROM ad_passwords a JOIN paired_systems p ON p.id=a.system_id
+ WHERE a.system_id=? AND NOT p.provisioning_hold AND a.ciphertext<>'' AND a.expires_at>? ORDER BY a.attempts,a.seq LIMIT ?`, systemID, now, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +416,7 @@ func (s *Store) ADPasswordStatuses(systemID string) ([]ADPasswordStatus, error) 
 			st.State = "locked"
 		case delivered > 0 && delivered == seq && hash != "" && tag == passwordTag(hash):
 			st.State = "current"
-		case st.LastError != "" && st.LastError != "expired" && st.LastError != "agent_key_replaced":
+		case st.LastError != "" && st.LastError != "expired" && st.LastError != "agent_key_replaced" && st.LastError != "restored":
 			st.State = "rejected"
 		case delivered > 0:
 			st.State = "stale"

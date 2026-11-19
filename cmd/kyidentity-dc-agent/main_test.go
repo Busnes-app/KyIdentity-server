@@ -307,3 +307,37 @@ func TestRunRefusesAMissingKey(t *testing.T) {
 		t.Fatal("run created a key file", err)
 	}
 }
+
+func TestAgentAcknowledgesNothingUntilItsStateIsSaved(t *testing.T) {
+	f := newFixture(t)
+	f.account("alice")
+	saved := f.agent.cfg.StateFile
+	f.agent.cfg.StateFile = filepath.Join(f.dir, "missing", "state.json")
+	e := f.seal(t, "alice", 10, "First-Pass-1")
+	f.queue.mu.Lock()
+	f.queue.entries, f.queue.results = []entry{e}, map[string]map[string]string{}
+	f.queue.mu.Unlock()
+	if err := f.agent.pass(context.Background()); err == nil {
+		t.Fatal("a pass whose state was not saved succeeded")
+	}
+	if r := f.result("alice", 10); r["outcome"] != "retry" {
+		t.Fatal("unsaved state was acknowledged", r)
+	}
+	// The server serves the entry again: while the state is still unsaved, nothing is
+	// acknowledged, including the equal sequence the agent holds in memory.
+	f.queue.mu.Lock()
+	f.queue.results = map[string]map[string]string{}
+	f.queue.mu.Unlock()
+	if err := f.agent.pass(context.Background()); err == nil || len(f.queue.results) != 0 {
+		t.Fatal("acknowledged work with the state unsaved", err, f.queue.results)
+	}
+	f.agent.cfg.StateFile = saved
+	f.run(t, e)
+	if r := f.result("alice", 10); r["outcome"] != "applied" {
+		t.Fatal(r)
+	}
+	again, err := newAgent(filepath.Join(f.dir, "config.json"))
+	if err != nil || again.state["alice"] != 10 {
+		t.Fatal("an acknowledged sequence did not survive a restart", again, err)
+	}
+}

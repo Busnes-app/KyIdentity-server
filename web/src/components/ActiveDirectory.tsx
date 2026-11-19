@@ -26,6 +26,7 @@ const errorWords: Record<string, string> = {
   directory_error: 'Directory error',
   expired: 'Expired before the agent applied it',
   agent_key_replaced: 'Agent key replaced',
+  restored: 'Discarded by a restore',
 };
 
 /** The users who cannot sign in to a domain PC with their KyIdentity password yet. */

@@ -181,6 +181,15 @@ func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEven
 			return err
 		}
 		report.QueuedDeliveries = int(n)
+		// Sealed directory passwords in the capsule are old passwords: none may reach AD.
+		res, err = tx.Exec(`UPDATE ad_passwords SET ciphertext='',signature='',expires_at=NULL,last_error='restored' WHERE ciphertext<>''`)
+		if err != nil {
+			return err
+		}
+		if n, err = res.RowsAffected(); err != nil {
+			return err
+		}
+		report.QueuedDeliveries += int(n)
 
 		rows, err := tx.Query(`SELECT name FROM paired_systems WHERE status<>'disabled' ORDER BY name`)
 		if err != nil {
