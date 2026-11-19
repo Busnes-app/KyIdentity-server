@@ -26,7 +26,7 @@ func queueDirectoryPassword(keys store.ADKeys, s *store.Store, l *audit.Logger, 
 	var queued []*audit.Pending
 	_, err := s.QueueDirectoryPassword(keys, userID, hash, []byte(plaintext), func(systemID string, seq int64, superseded bool) *store.AuditEvent {
 		p := l.Prepare("directory.password_queued", actorID, actorName, userID, "user", m.ClientIP(r), r.UserAgent(), "success",
-			map[string]any{"systemId": systemID, "seq": seq, "superseded": superseded, "temporary": temporary})
+			map[string]any{"systemId": systemID, "seq": seq, "superseded": superseded})
 		queued = append(queued, p)
 		return p.Row
 	})
