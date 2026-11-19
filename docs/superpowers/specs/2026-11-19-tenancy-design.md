@@ -62,7 +62,7 @@ check in code.
 | Replayed or reordered billing calls (Stripe retries, out-of-order webhooks) | Undo a suspension, or apply an old plan | Every mutating call has an `Idempotency-Key`, and every org lifecycle call a per-org `revision`. The same key and body returns the stored answer. The same key with a different body is `422`. A `revision` at or below the stored one is `409 stale_revision`. |
 | User of a suspended or deleted org | Keep working | Suspension revokes every session, refresh family, issued token and forward session in one transaction (`revokeSessionGrantsTx`, `sessions.go:136`), and queues back-channel logouts. Every sign-in path checks one `active_principals` view (user active and org active). Access tokens live 15 minutes at most (`oauth.go:22`). `/oauth/userinfo` refuses at once. Apps see `status: suspended` within one poll (≤ 60 s). |
 | Customer of org A, adding members through the billing portal | Take over a person's identity by creating an account with their email (email squatting) | Emails are globally unique, so whoever creates an address first holds it. A pending account cannot sign in, and resets go only to a verified address (`onboarding_handlers.go:209`). A pending, never-activated account gives up its email when its activation token expires (open question 3). Nobody in another org can edit, reset or claim that account. |
-| Anyone at the sign-in page | Find out whether an email exists, or which org it is in | Unknown, inactive, locked and suspended-org accounts all answer like a wrong password, after the same Argon2 cost (`auth_handlers.go:100-104`, `loginRefusal` at `:296`). Forgot-password always answers the same way (`onboarding_handlers.go:178-197`). No sign-in or recovery answer names an org. |
+| Anyone at the sign-in page | Find out whether an email exists, or which org it is in | Unknown, inactive and locked accounts all answer like a wrong password, after the same Argon2 cost (`auth_handlers.go:100-104`, `loginRefusal` at `:296`). A suspended org's account gives the same answers until every factor has passed. Only then does it get `org_suspended` (owner answer 4, see Suspension), which only a holder of valid credentials can reach. Forgot-password always answers the same way (`onboarding_handlers.go:178-197`). No sign-in or recovery answer names an org. |
 | Customer of org A, adding members through the billing portal | Find out whether an email exists in another org, from a `409` on add | Unavoidable with global uniqueness (D5). The answer is `409 email_in_use`, never "in another org". Adds are rate limited per org. Residual risk. |
 | Operator restoring one org's backup | Load org A's data into org B, or roll every org back | v1 has no per-org restore or import. A capsule is the whole install (`internal/backup`, `store.go:2984`). The per-org export is read-only JSON. Any future import must assign the target org from the org staff selected and new IDs, never from the file. |
 
@@ -453,7 +453,7 @@ holder's name and email on create.
 |---|---|---|
 | `POST /orgs` | `orgs:write` | `{name, kind: person\|household, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, billing_ref, revision}`. Creates the org and a pending account holder, and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere. |
 | `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `over_limit`, `holder_activated`, `delete_after`, `revision`. No names or emails of users. |
-| `PATCH /orgs/{id}` | `orgs:write` | Plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (an active member of the org). Lowering seats below the number used is accepted: the org is `over_limit`, new seats are refused, and nobody is disabled. |
+| `PATCH /orgs/{id}` | `orgs:write` | Plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). Lowering seats below the number used is accepted: the org is `over_limit`, new seats are refused, and nobody is disabled. |
 | `POST /orgs/{id}/suspend` | `orgs:write` | `{reason: payment\|abuse, revision}`. Semantics below. |
 | `POST /orgs/{id}/resume` | `orgs:write` | From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
 | `POST /orgs/{id}/schedule-deletion` | `orgs:write` | `{grace_days 7–90, revision}`. Suspends the org and sets `delete_after`. The account holder can still sign in to a restricted, export-only session (the `active_principals` exception under Views). |
@@ -474,21 +474,30 @@ member is an everyday account (`role='user'`), and the endpoints reach no other 
 
 - The account holder cannot be disabled or deleted here (`409 account_holder`). Billing
   first moves the role with `PATCH /orgs/{id}`.
+- Every member write is audited in the org's log, queues `org.member_changed`, and mails a
+  notice to the account holder (new mail text, no link).
 
 **Account holder guard.** The pointer is guarded in the database, so every path is covered:
 the member endpoints, the staff admin UI, `disable-user`, expiry (`RunDueExpiries`,
-`expiry.go:97`) and the pending-account cleanup of open question 3. Triggers on both
+`expiry.go:97`) and the pending-account cleanup of open question 3.
+
+A pending account is stored `status='disabled'`, `pending=TRUE`, and activation sets it
+`active` and not pending (`AGENTS.md:173`, `onboarding.go:113`). So the guard is not
+"status is active". It is one predicate, a **live holder**:
+`(pending OR status='active') AND ends_at IS NULL`. Pending and activated holders are both
+live. A disabled activated account, or one with an end date, is not. Triggers on both
 backends:
 
-- `users` `BEFORE DELETE`, and `BEFORE UPDATE` of `status`, `ends_at` or `org_id`: refused
-  while an `orgs` row names the user as account holder. The store maps the error to
-  `ErrAccountHolder` (`409 account_holder` in the API, the same message in the admin UI).
-  Expiry therefore cannot be set on the holder. A holder row already due when the trigger
+- `users` `BEFORE DELETE`: refused while an `orgs` row names the user as account holder.
+- `users` `BEFORE UPDATE`: refused when an `orgs` row names the user, and the new row is not
+  live or has a different `org_id`. Activation (pending to active) keeps the row live, so it
+  passes. Disabling an activated holder or setting an end date fails.
+- The store maps both refusals to `ErrAccountHolder` (`409 account_holder` in the API, the
+  same message in the admin UI). A holder row already due for expiry when the trigger
   lands is skipped and audited by `RunDueExpiries`, like its other per-account failures.
-- `orgs` `BEFORE UPDATE` of `account_holder_user_id`: the new value must be a user of the
-  same org with `status='active'` (pending or activated, `users.pending`) and no
-  `ends_at`. NULL is refused once set, except by
-  org deletion.
+- `orgs` `BEFORE INSERT` and `BEFORE UPDATE` of `account_holder_user_id`: the value must be a
+  live user of the same org. `POST /orgs` creates the user first, then sets the pointer, in
+  one transaction. NULL is refused once set, except by org deletion.
 - Org deletion clears the pointer first, then deletes the users, in one transaction.
 
 A pending holder whose activation token expires is not deleted. The open question 3 cleanup
@@ -497,8 +506,6 @@ a new `org.holder_invite_expired` event tells billing. Billing then calls `resen
 (the holder is still pending) or names another member with `PATCH /orgs/{id}`. If such an
 org reaches scheduled deletion, nobody can open the export session, so staff export on
 request (open question 9, (c)).
-- Every member write is audited in the org's log, queues `org.member_changed`, and mails a
-  notice to the account holder (new mail text, no link).
 
 **Suspension**, in one transaction with its audit row:
 
@@ -510,8 +517,20 @@ request (open question 9, (c)).
 
 After that:
 
-- Sign-in, refresh, device sign-on and code exchange are refused, because
-  `active_principals` excludes the org. Answers are generic.
+- Refresh, device sign-on and code exchange are refused with their generic answers, because
+  `active_principals` excludes the org.
+- Interactive sign-in (owner answer 4, option (b)):
+  - The password and second-factor steps run as for any active account. They take the same
+    Argon2 cost, give the same wrong-password answer, and apply the same lockout. A wrong
+    credential never reveals the org's state.
+  - Only after every factor the account requires has passed does sign-in answer
+    `org_suspended` ("Your organisation is suspended"), instead of creating a session. It
+    issues no session, code or token.
+  - The factors required are whatever the platform-wide enrollment policy (D10) requires
+    of that account. Where it requires a second factor, the answer needs both. A member it
+    leaves with a password only sees the answer after a correct password.
+  - Unknown, pending, disabled and locked accounts are unchanged: they get the
+    wrong-password answer.
 - Userinfo is refused.
 - Suite people, groups and apps for the org's `sub`s return empty lists.
 - `/api/suite/orgs` shows `suspended`.
@@ -636,7 +655,11 @@ tests.
      - Replay, conflict and stale-revision cases.
      - Suspension ends every grant: a table of every credential type, like
        `TestForwardRevocationWithin30Seconds`.
-     - Every sign-in path refuses a suspended org.
+     - Every sign-in path refuses a suspended org. Interactive sign-in gives the
+       wrong-password answer for a wrong credential, and `org_suspended` only after every
+       required factor has passed, with no session created.
+     - A pending holder activates through `RedeemAccountToken` despite the guard.
+       `POST /orgs` with a pending holder succeeds.
      - Delete removes every org row, checked against the table classification.
      - Platform tokens are refused on the public listener, and browser and SCIM
        credentials are refused on the platform listener. A `members:*` token is refused on
