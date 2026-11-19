@@ -92,9 +92,11 @@ func TestSambaADEndToEnd(t *testing.T) {
 	if json.Unmarshal(rr.Body.Bytes(), &issued) != nil || issued.AgentToken == "" {
 		t.Fatal("agent token", rr.Body.String())
 	}
+	var shown struct{ EntrySigningKey string }
+	_ = json.Unmarshal(adminRequest(t, srv, "GET", "/api/admin/systems/"+id+"/active-directory", cookie, "").Body.Bytes(), &shown)
 	_ = os.WriteFile(filepath.Join(work, "token"), []byte(issued.AgentToken), 0o600)
 	_ = os.WriteFile(filepath.Join(work, "bind"), []byte(read(env["E2E_DC_AGENT_PWFILE"])), 0o600)
-	cfg, _ := json.Marshal(map[string]string{"kyidentityUrl": ts.URL, "connectorId": id, "tokenFile": filepath.Join(work, "token"),
+	cfg, _ := json.Marshal(map[string]string{"kyidentityUrl": ts.URL, "kyidentitySigningKey": shown.EntrySigningKey, "connectorId": id, "tokenFile": filepath.Join(work, "token"),
 		"keyFile": filepath.Join(work, "agent.key"), "stateFile": filepath.Join(work, "state.json"), "ldapsUrl": env["E2E_DC_LDAPS_URL"],
 		"caFile": env["E2E_DC_CA"], "bindDn": env["E2E_DC_AGENT_DN"], "bindPasswordFile": filepath.Join(work, "bind"), "baseDn": env["E2E_DC_OU"]})
 	_ = os.WriteFile(filepath.Join(work, "agent.json"), cfg, 0o600)

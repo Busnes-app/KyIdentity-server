@@ -18,9 +18,9 @@ import (
 // queueDirectoryPassword seals a just-set password for every Active Directory connector
 // holding the user. Only ciphertext is stored; a failure leaves the user's directory
 // password stale, which the admin view shows. Never logs the password.
-func queueDirectoryPassword(s *store.Store, l *audit.Logger, m *MiddlewareManager, r *http.Request, actorID, actorName, userID, hash, plaintext string) {
+func queueDirectoryPassword(keys store.ADKeys, s *store.Store, l *audit.Logger, m *MiddlewareManager, r *http.Request, actorID, actorName, userID, hash, plaintext string) {
 	var queued []*audit.Pending
-	_, err := s.QueueDirectoryPassword(userID, hash, []byte(plaintext), func(systemID string, seq int64, superseded bool) *store.AuditEvent {
+	_, err := s.QueueDirectoryPassword(keys, userID, hash, []byte(plaintext), func(systemID string, seq int64, superseded bool) *store.AuditEvent {
 		p := l.Prepare("directory.password_queued", actorID, actorName, userID, "user", m.ClientIP(r), r.UserAgent(), "success",
 			map[string]any{"systemId": systemID, "seq": seq, "superseded": superseded})
 		queued = append(queued, p)
@@ -69,7 +69,8 @@ func (h *AdminHandler) GetActiveDirectory(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ldapsUrl": sys.CallbackURL, "settings": settings, "passwords": passwords})
+	writeJSON(w, http.StatusOK, map[string]any{"ldapsUrl": sys.CallbackURL, "settings": settings, "passwords": passwords,
+		"entrySigningKey": h.syncEngine.DirectoryKeys().SigningPublicKey()})
 }
 
 // PutActiveDirectory replaces a directory connector's settings. bindPassword, when given,

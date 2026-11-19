@@ -133,7 +133,7 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	created.Committed()
 	if user.PasswordHash != "" {
-		queueDirectoryPassword(h.store, h.audit, h.middleware, r, admin.ID, admin.Username, user.ID, user.PasswordHash, req.Password)
+		queueDirectoryPassword(h.syncEngine.DirectoryKeys(), h.store, h.audit, h.middleware, r, admin.ID, admin.Username, user.ID, user.PasswordHash, req.Password)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -276,7 +276,7 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	updated.Committed()
 	if passHash != "" {
-		queueDirectoryPassword(h.store, h.audit, h.middleware, r, admin.ID, admin.Username, user.ID, passHash, req.Password)
+		queueDirectoryPassword(h.syncEngine.DirectoryKeys(), h.store, h.audit, h.middleware, r, admin.ID, admin.Username, user.ID, passHash, req.Password)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -150,6 +150,12 @@ func TestActiveDirectoryPasswordQueueEndToEnd(t *testing.T) {
 		t.Fatalf("queue: %d %s", rr.Code, rr.Body.String())
 	}
 	e := page.Entries[0]
+	var settings struct{ EntrySigningKey string }
+	_ = json.Unmarshal(adminRequest(t, srv, "GET", "/api/admin/systems/"+sys1+"/active-directory", cookie, "").Body.Bytes(), &settings)
+	signer, err := adpass.ParseSigningKey(settings.EntrySigningKey)
+	if err != nil || !adpass.VerifyEntry(signer, sys1, user.ID, e.Seq, e.ExpiresAt, e.Ciphertext, e.Signature) {
+		t.Fatal("entry not signed with the key the settings page shows", err)
+	}
 	plain, err := adpass.Open(key, sys1, user.ID, e.Seq, e.Ciphertext)
 	if err != nil || string(plain) != "Known-Test-Pass-93" {
 		t.Fatal("the agent cannot open the newest password", err)

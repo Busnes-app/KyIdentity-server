@@ -124,6 +124,7 @@ func (e *Engine) CreateADSystem(req *CreateSystemRequest, audit func(*store.Pair
 	if name == "" {
 		name = "Active Directory"
 	}
+	c.AgentKeyMAC = e.DirectoryKeys().KeyMAC(id, c.AgentPublicKey)
 	ps := &store.PairedSystem{ID: id, Name: name, SystemType: adSystemType, Description: req.Description,
 		CallbackURL: req.CallbackURL, HMACSecretEncrypted: sealed, Status: "active"}
 	var row *store.AuditEvent
@@ -143,6 +144,7 @@ func (e *Engine) ConfigureAD(sys *store.PairedSystem, ldapsURL, bindPassword str
 	if err != nil {
 		return err
 	}
+	c.AgentKeyMAC = e.DirectoryKeys().KeyMAC(sys.ID, c.AgentPublicKey)
 	sealed := ""
 	if bindPassword != "" {
 		if sealed, err = crypto.Seal(e.encryptionKey, store.SealConnector, sys.ID, []byte(bindPassword)); err != nil {
@@ -151,6 +153,9 @@ func (e *Engine) ConfigureAD(sys *store.PairedSystem, ldapsURL, bindPassword str
 	}
 	return e.store.ConfigureADSystem(sys.ID, ldapsURL, sealed, c, audit)
 }
+
+// DirectoryKeys authenticate agent keys and sign queue entries.
+func (e *Engine) DirectoryKeys() store.ADKeys { return store.NewADKeys(e.encryptionKey) }
 
 // adConn binds to the directory over LDAPS with the pinned trust, through netguard's dialer.
 func (e *Engine) adConn(sys *store.PairedSystem, c *store.ADConnector, password string) (*ldap.Conn, error) {

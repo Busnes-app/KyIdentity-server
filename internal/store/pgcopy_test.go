@@ -137,7 +137,7 @@ func copyFixture(t *testing.T, s *Store) {
 		t.Fatal(err)
 	}
 	must(s.CreateADSystem(&PairedSystem{ID: "ad-1", Name: "Directory", SystemType: "active_directory", CallbackURL: "ldaps://dc.example.test", HMACSecretEncrypted: "sealed", Status: "active"},
-		&ADConnector{BindDN: "CN=sync,DC=example,DC=test", BaseDN: "OU=KyIdentity,DC=example,DC=test", CAPEM: "pem", AgentPublicKey: "x25519:key", PasswordTTLMinutes: 60}, nil))
+		&ADConnector{BindDN: "CN=sync,DC=example,DC=test", BaseDN: "OU=KyIdentity,DC=example,DC=test", CAPEM: "pem", AgentPublicKey: "x25519:key", AgentKeyMAC: "mac", PasswordTTLMinutes: 60}, nil))
 	must(s.SetADAgentToken("ad-1", "kyad_fixture", nil))
 	// The rest have no method that writes them outside a longer flow.
 	for _, q := range []struct {
@@ -150,7 +150,7 @@ func copyFixture(t *testing.T, s *Store) {
 		{`INSERT INTO enrollment_deadlines(user_id,scope,due_at) SELECT ?, scope, 1700000000 FROM enrollment_policies LIMIT 1`, []any{user.ID}},
 		{`INSERT INTO scim_connector_tokens(id,connector_id,token_hash,scope,created_at) VALUES('sct-1',?,'th','write',?)`, []any{inbound.ID, now}},
 		{`INSERT INTO access_requests(id,app_id,user_id,reason,status,created_at,expires_at) VALUES('ar-1',?,?,'need it','pending',?,1900000000)`, []any{app, user.ID, now}},
-		{`INSERT INTO ad_passwords(system_id,user_id,seq,ciphertext,expires_at,password_tag,delivered_seq,delivered_at) VALUES('ad-1',?,5,'ct',?,'tag',4,?)`, []any{user.ID, now.Add(time.Hour), now}},
+		{`INSERT INTO ad_passwords(system_id,user_id,seq,ciphertext,signature,expires_at,password_tag,delivered_seq,delivered_at) VALUES('ad-1',?,5,'ct','sig',?,'tag',4,?)`, []any{user.ID, now.Add(time.Hour), now}},
 		{`INSERT INTO installer_setup_resources(kind,name,setup_id,object_id,contract) VALUES('group','Ops','setup-1','obj-1','c')`, nil},
 	} {
 		if _, err := s.db.Exec(q.sql, q.args...); err != nil {

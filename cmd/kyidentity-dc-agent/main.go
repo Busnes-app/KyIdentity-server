@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -37,6 +38,8 @@ const privatePrefix = "x25519-private:"
 type config struct {
 	KyIdentityURL    string `json:"kyidentityUrl"`
 	KyIdentityCAFile string `json:"kyidentityCaFile"`
+	// SigningKey is KyIdentity's entry-signing key from the connector's settings page.
+	SigningKey       string `json:"kyidentitySigningKey"`
 	ConnectorID      string `json:"connectorId"`
 	TokenFile        string `json:"tokenFile"`
 	KeyFile          string `json:"keyFile"`
@@ -143,6 +146,7 @@ func loadOrCreateKey(path string) (*ecdh.PrivateKey, error) {
 type agent struct {
 	cfg      config
 	key      *ecdh.PrivateKey
+	signing  ed25519.PublicKey
 	token    string
 	password string
 	roots    *x509.CertPool
@@ -171,6 +175,9 @@ func newAgent(path string) (*agent, error) {
 	}
 	if l, err := url.Parse(c.LDAPSURL); err != nil || l.Scheme != "ldaps" || l.Host == "" {
 		return nil, errors.New("ldapsUrl must be ldaps://host[:port]")
+	}
+	if a.signing, err = adpass.ParseSigningKey(c.SigningKey); err != nil {
+		return nil, fmt.Errorf("kyidentitySigningKey: %w", err)
 	}
 	if a.key, err = loadOrCreateKey(c.KeyFile); err != nil {
 		return nil, err
@@ -241,7 +248,9 @@ func (a *agent) loop(ctx context.Context) {
 type entry struct {
 	UserID     string `json:"userId"`
 	Seq        int64  `json:"seq"`
+	ExpiresAt  int64  `json:"expiresAt"`
 	Ciphertext string `json:"ciphertext"`
+	Signature  string `json:"signature"`
 }
 
 // pass handles every entry the server holds now. A directory outage stops the pass, so
@@ -299,6 +308,13 @@ func (a *agent) dial() (*ldap.Conn, error) {
 
 // apply sets one password. stop reports a connection failure that ends the pass.
 func (a *agent) apply(conn *ldap.Conn, e entry) (outcome, reason string, stop bool) {
+	// Anyone can encrypt to the public key; only KyIdentity's signature says it sent this.
+	if !adpass.VerifyEntry(a.signing, a.cfg.ConnectorID, e.UserID, e.Seq, e.ExpiresAt, e.Ciphertext, e.Signature) {
+		return "rejected", "signature_invalid", false
+	}
+	if time.Now().Unix() >= e.ExpiresAt {
+		return "rejected", "expired", false
+	}
 	last := a.state[e.UserID]
 	if e.Seq < last {
 		return "rejected", "replay_refused", false

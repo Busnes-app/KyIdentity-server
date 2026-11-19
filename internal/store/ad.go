@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/adpass"
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/google/uuid"
 )
 
@@ -19,13 +22,13 @@ import (
 const adSchemaSQL = `CREATE TABLE IF NOT EXISTS ad_connectors (
  system_id TEXT PRIMARY KEY REFERENCES paired_systems(id) ON DELETE CASCADE,
  bind_dn TEXT NOT NULL, base_dn TEXT NOT NULL, ca_pem TEXT NOT NULL,
- agent_public_key TEXT NOT NULL DEFAULT '', agent_token_hash TEXT NOT NULL DEFAULT '',
+ agent_public_key TEXT NOT NULL DEFAULT '', agent_key_mac TEXT NOT NULL DEFAULT '', agent_token_hash TEXT NOT NULL DEFAULT '',
  password_ttl_minutes %[1]s NOT NULL DEFAULT 1440 CHECK(password_ttl_minutes BETWEEN 10 AND 1440));
  CREATE UNIQUE INDEX IF NOT EXISTS ad_connectors_token ON ad_connectors(agent_token_hash) WHERE agent_token_hash<>'';
  CREATE TABLE IF NOT EXISTS ad_passwords (
  system_id TEXT NOT NULL REFERENCES paired_systems(id) ON DELETE CASCADE,
  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
- seq %[1]s NOT NULL, ciphertext TEXT NOT NULL DEFAULT '', expires_at %[2]s,
+ seq %[1]s NOT NULL, ciphertext TEXT NOT NULL DEFAULT '', signature TEXT NOT NULL DEFAULT '', expires_at %[2]s,
  attempts %[1]s NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '',
  password_tag TEXT NOT NULL DEFAULT '', delivered_seq %[1]s NOT NULL DEFAULT 0, delivered_at %[2]s,
  PRIMARY KEY(system_id,user_id));
@@ -41,6 +44,31 @@ func migrateADPostgres(tx *sql.Tx) error {
 	return err
 }
 
+// ADKeys are derived from the deployment encryption key, which never lives in the
+// database: a database writer can neither swap an agent key unnoticed nor forge an entry.
+type ADKeys struct {
+	mac  []byte
+	sign ed25519.PrivateKey
+}
+
+// NewADKeys derives the agent-key MAC key and the entry-signing key.
+func NewADKeys(encryptionKey []byte) ADKeys {
+	return ADKeys{mac: crypto.DeriveKey(encryptionKey, "kyidentity:ad-agent-key-mac"),
+		sign: ed25519.NewKeyFromSeed(crypto.DeriveKey(encryptionKey, "kyidentity:ad-entry-signing"))}
+}
+
+// KeyMAC binds an agent public key to its connector.
+func (k ADKeys) KeyMAC(systemID, publicKey string) string {
+	h := hmac.New(sha256.New, k.mac)
+	h.Write([]byte(systemID + "\x00" + publicKey))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// SigningPublicKey is what the agent pins to verify entries.
+func (k ADKeys) SigningPublicKey() string {
+	return adpass.EncodeSigningKey(k.sign.Public().(ed25519.PublicKey))
+}
+
 // ADConnector is an Active Directory connector's settings. The LDAPS URL is the paired
 // system's callback URL and the bind password its sealed secret; neither is here.
 type ADConnector struct {
@@ -49,6 +77,7 @@ type ADConnector struct {
 	BaseDN             string `json:"baseDn"`
 	CAPEM              string `json:"caPem"`
 	AgentPublicKey     string `json:"agentPublicKey"`
+	AgentKeyMAC        string `json:"-"`
 	AgentTokenSet      bool   `json:"agentTokenSet"`
 	PasswordTTLMinutes int    `json:"passwordTtlMinutes"`
 }
@@ -73,8 +102,8 @@ func (s *Store) CreateADSystem(ps *PairedSystem, c *ADConnector, audit *AuditEve
 			ps.ID, ps.Name, ps.SystemType, ps.Description, ps.IconURL, ps.CallbackURL, ps.HMACSecretEncrypted, ps.Status, ps.CreatedAt); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO ad_connectors (system_id,bind_dn,base_dn,ca_pem,agent_public_key,password_ttl_minutes) VALUES (?,?,?,?,?,?)`,
-			ps.ID, c.BindDN, c.BaseDN, c.CAPEM, c.AgentPublicKey, c.PasswordTTLMinutes)
+		_, err := tx.Exec(`INSERT INTO ad_connectors (system_id,bind_dn,base_dn,ca_pem,agent_public_key,agent_key_mac,password_ttl_minutes) VALUES (?,?,?,?,?,?,?)`,
+			ps.ID, c.BindDN, c.BaseDN, c.CAPEM, c.AgentPublicKey, c.AgentKeyMAC, c.PasswordTTLMinutes)
 		return err
 	})
 }
@@ -92,12 +121,12 @@ func (s *Store) ConfigureADSystem(systemID, callbackURL, encrypted string, c *AD
 		if n, err := r.RowsAffected(); err != nil || n != 1 {
 			return errors.Join(err, ErrNotFound)
 		}
-		if _, err := tx.Exec(`UPDATE ad_passwords SET ciphertext='',expires_at=NULL,last_error='agent_key_replaced' WHERE system_id=? AND ciphertext<>''
+		if _, err := tx.Exec(`UPDATE ad_passwords SET ciphertext='',signature='',expires_at=NULL,last_error='agent_key_replaced' WHERE system_id=? AND ciphertext<>''
  AND (SELECT agent_public_key FROM ad_connectors WHERE system_id=?)<>?`, systemID, systemID, c.AgentPublicKey); err != nil {
 			return err
 		}
-		_, err = tx.Exec(`UPDATE ad_connectors SET bind_dn=?,base_dn=?,ca_pem=?,agent_public_key=?,password_ttl_minutes=? WHERE system_id=?`,
-			c.BindDN, c.BaseDN, c.CAPEM, c.AgentPublicKey, c.PasswordTTLMinutes, systemID)
+		_, err = tx.Exec(`UPDATE ad_connectors SET bind_dn=?,base_dn=?,ca_pem=?,agent_public_key=?,agent_key_mac=?,password_ttl_minutes=? WHERE system_id=?`,
+			c.BindDN, c.BaseDN, c.CAPEM, c.AgentPublicKey, c.AgentKeyMAC, c.PasswordTTLMinutes, systemID)
 		return err
 	})
 }
@@ -146,7 +175,7 @@ func passwordTag(hash string) string {
 // an agent key, replacing any undelivered entry. It queues only while passwordHash is still
 // the user's current hash, so of two racing changes only the current one is queued, and
 // with the higher sequence number. audit builds one row per queued entry.
-func (s *Store) QueueDirectoryPassword(userID, passwordHash string, plaintext []byte, audit func(systemID string, seq int64, superseded bool) *AuditEvent) (int, error) {
+func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string, plaintext []byte, audit func(systemID string, seq int64, superseded bool) *AuditEvent) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -159,12 +188,12 @@ func (s *Store) QueueDirectoryPassword(userID, passwordHash string, plaintext []
 		return 0, err
 	}
 	type target struct {
-		id, key string
-		ttl     int
-		last    int64
-		pending bool
+		id, key, mac string
+		ttl          int
+		last         int64
+		pending      bool
 	}
-	rows, err := tx.Query(`SELECT c.system_id,c.agent_public_key,c.password_ttl_minutes,COALESCE(p.seq,0),COALESCE(p.ciphertext,'')<>''
+	rows, err := tx.Query(`SELECT c.system_id,c.agent_public_key,c.agent_key_mac,c.password_ttl_minutes,COALESCE(p.seq,0),COALESCE(p.ciphertext,'')<>''
  FROM ad_connectors c JOIN paired_systems s ON s.id=c.system_id
  JOIN sync_resource_state st ON st.system_id=c.system_id AND st.resource_id=? AND st.kind='user' AND st.active
  LEFT JOIN ad_passwords p ON p.system_id=c.system_id AND p.user_id=?
@@ -175,7 +204,7 @@ func (s *Store) QueueDirectoryPassword(userID, passwordHash string, plaintext []
 	var targets []target
 	for rows.Next() {
 		var t target
-		if err := rows.Scan(&t.id, &t.key, &t.ttl, &t.last, &t.pending); err != nil {
+		if err := rows.Scan(&t.id, &t.key, &t.mac, &t.ttl, &t.last, &t.pending); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -189,14 +218,20 @@ func (s *Store) QueueDirectoryPassword(userID, passwordHash string, plaintext []
 		// Time-based, so a database restored from an older backup still issues numbers
 		// above anything the agent has applied.
 		seq := max(t.last+1, now.UnixMilli())
+		// A key the database holds but this server never approved gets nothing.
+		if !hmac.Equal([]byte(t.mac), []byte(keys.KeyMAC(t.id, t.key))) {
+			return 0, ErrAgentKeyTampered
+		}
 		ct, err := adpass.Seal(t.key, t.id, userID, seq, plaintext)
 		if err != nil {
 			return 0, err
 		}
-		if _, err := tx.Exec(`INSERT INTO ad_passwords (system_id,user_id,seq,ciphertext,expires_at,password_tag) VALUES (?,?,?,?,?,?)
- ON CONFLICT(system_id,user_id) DO UPDATE SET seq=excluded.seq,ciphertext=excluded.ciphertext,expires_at=excluded.expires_at,
+		expires := now.Add(time.Duration(t.ttl) * time.Minute).Truncate(time.Second)
+		sig := adpass.SignEntry(keys.sign, t.id, userID, seq, expires.Unix(), ct)
+		if _, err := tx.Exec(`INSERT INTO ad_passwords (system_id,user_id,seq,ciphertext,signature,expires_at,password_tag) VALUES (?,?,?,?,?,?,?)
+ ON CONFLICT(system_id,user_id) DO UPDATE SET seq=excluded.seq,ciphertext=excluded.ciphertext,signature=excluded.signature,expires_at=excluded.expires_at,
  attempts=0,last_error='',password_tag=excluded.password_tag`,
-			t.id, userID, seq, ct, now.Add(time.Duration(t.ttl)*time.Minute), passwordTag(passwordHash)); err != nil {
+			t.id, userID, seq, ct, sig, expires, passwordTag(passwordHash)); err != nil {
 			return 0, err
 		}
 		if audit != nil {
@@ -208,17 +243,22 @@ func (s *Store) QueueDirectoryPassword(userID, passwordHash string, plaintext []
 	return len(targets), tx.Commit()
 }
 
-// ADPasswordEntry is one queued ciphertext as the agent receives it.
+// ErrAgentKeyTampered is an agent public key whose MAC does not verify.
+var ErrAgentKeyTampered = errors.New("agent public key failed its integrity check; set it again")
+
+// ADPasswordEntry is one queued ciphertext as the agent receives it, signed by KyIdentity.
 type ADPasswordEntry struct {
 	UserID     string `json:"userId"`
 	Seq        int64  `json:"seq"`
+	ExpiresAt  int64  `json:"expiresAt"`
 	Ciphertext string `json:"ciphertext"`
+	Signature  string `json:"signature"`
 }
 
 // PendingADPasswords returns a connector's live entries, oldest first.
 func (s *Store) PendingADPasswords(systemID string, now time.Time, limit int) ([]ADPasswordEntry, error) {
 	now = now.UTC()
-	rows, err := s.db.Query(`SELECT user_id,seq,ciphertext FROM ad_passwords WHERE system_id=? AND ciphertext<>'' AND expires_at>? ORDER BY seq LIMIT ?`, systemID, now, limit)
+	rows, err := s.db.Query(`SELECT user_id,seq,expires_at,ciphertext,signature FROM ad_passwords WHERE system_id=? AND ciphertext<>'' AND expires_at>? ORDER BY seq LIMIT ?`, systemID, now, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -226,9 +266,11 @@ func (s *Store) PendingADPasswords(systemID string, now time.Time, limit int) ([
 	out := []ADPasswordEntry{}
 	for rows.Next() {
 		var e ADPasswordEntry
-		if err := rows.Scan(&e.UserID, &e.Seq, &e.Ciphertext); err != nil {
+		var expires time.Time
+		if err := rows.Scan(&e.UserID, &e.Seq, &expires, &e.Ciphertext, &e.Signature); err != nil {
 			return nil, err
 		}
+		e.ExpiresAt = expires.Unix()
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -242,7 +284,7 @@ func (s *Store) ExpireADPasswords(now time.Time) (int, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`UPDATE ad_passwords SET ciphertext='',expires_at=NULL,last_error='expired' WHERE ciphertext<>'' AND expires_at<=? RETURNING system_id,user_id,seq`, now)
+	rows, err := tx.Query(`UPDATE ad_passwords SET ciphertext='',signature='',expires_at=NULL,last_error='expired' WHERE ciphertext<>'' AND expires_at<=? RETURNING system_id,user_id,seq`, now)
 	if err != nil {
 		return 0, err
 	}
@@ -279,7 +321,7 @@ func directoryAudit(action, userID, systemID string, seq int64, reason string) *
 }
 
 // ADPasswordReasons are the only reasons an agent may report.
-var ADPasswordReasons = map[string]bool{"password_policy": true, "user_not_found": true, "decrypt_failed": true, "replay_refused": true, "directory_error": true}
+var ADPasswordReasons = map[string]bool{"signature_invalid": true, "expired": true, "password_policy": true, "user_not_found": true, "decrypt_failed": true, "replay_refused": true, "directory_error": true}
 
 // FinishADPassword records the agent's result for the entry the agent was given. Applied
 // and rejected clear the ciphertext; retry counts an attempt. An entry a newer password
@@ -298,9 +340,9 @@ func (s *Store) FinishADPassword(systemID, userID string, seq int64, outcome, re
 	match := ` WHERE system_id=? AND user_id=? AND seq=? AND ciphertext<>''`
 	switch outcome {
 	case "applied":
-		r, err = tx.Exec(`UPDATE ad_passwords SET ciphertext='',expires_at=NULL,last_error='',delivered_seq=seq,delivered_at=?`+match, now, systemID, userID, seq)
+		r, err = tx.Exec(`UPDATE ad_passwords SET ciphertext='',signature='',expires_at=NULL,last_error='',delivered_seq=seq,delivered_at=?`+match, now, systemID, userID, seq)
 	case "rejected":
-		r, err = tx.Exec(`UPDATE ad_passwords SET ciphertext='',expires_at=NULL,last_error=?`+match, reason, systemID, userID, seq)
+		r, err = tx.Exec(`UPDATE ad_passwords SET ciphertext='',signature='',expires_at=NULL,last_error=?`+match, reason, systemID, userID, seq)
 	case "retry":
 		r, err = tx.Exec(`UPDATE ad_passwords SET attempts=attempts+1,last_error=?`+match, reason, systemID, userID, seq)
 	default:

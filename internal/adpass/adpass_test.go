@@ -2,6 +2,7 @@ package adpass
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"testing"
 )
 
@@ -52,5 +53,31 @@ func TestParsePublicKeyRefusesMalformedKeys(t *testing.T) {
 	}
 	if _, err := Seal("x25519:AAAA", "s", "u", 1, []byte("p")); err == nil {
 		t.Error("sealed to a malformed key")
+	}
+}
+
+func TestEntrySignatureCoversEveryField(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	sig := SignEntry(priv, "s", "u", 5, 100, "ct")
+	if !VerifyEntry(pub, "s", "u", 5, 100, "ct", sig) {
+		t.Fatal("valid signature refused")
+	}
+	for name, ok := range map[string]bool{
+		"connector":  VerifyEntry(pub, "x", "u", 5, 100, "ct", sig),
+		"user":       VerifyEntry(pub, "s", "x", 5, 100, "ct", sig),
+		"seq":        VerifyEntry(pub, "s", "u", 6, 100, "ct", sig),
+		"expiry":     VerifyEntry(pub, "s", "u", 5, 101, "ct", sig),
+		"ciphertext": VerifyEntry(pub, "s", "u", 5, 100, "cu", sig),
+		"no sig":     VerifyEntry(pub, "s", "u", 5, 100, "ct", ""),
+	} {
+		if ok {
+			t.Errorf("signature accepted with a changed %s", name)
+		}
+	}
+	if got, err := ParseSigningKey(EncodeSigningKey(pub)); err != nil || !got.Equal(pub) {
+		t.Fatal("signing key round trip", err)
+	}
+	if _, err := ParseSigningKey("ed25519:AAAA"); err == nil {
+		t.Fatal("short signing key accepted")
 	}
 }

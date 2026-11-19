@@ -92,6 +92,7 @@ passwords the old key sealed.
 ```json
 {
   "kyidentityUrl": "https://id.example.org",
+  "kyidentitySigningKey": "ed25519:<KyIdentity signing key from the connector panel>",
   "connectorId": "<connector ID from Suite sync>",
   "tokenFile": "/etc/kyidentity-dc-agent/token",
   "keyFile": "/var/lib/kyidentity-dc-agent/agent.key",
@@ -111,7 +112,10 @@ KyIdentity behind a private CA. Plain `http` is accepted only to loopback.
 kyidentity-dc-agent run -config /etc/kyidentity-dc-agent.json
 ```
 
-It polls every 30 seconds (backing off to 5 minutes while KyIdentity or the DC is down),
+The agent checks KyIdentity's signature on every entry before decrypting it. Encrypting to
+the agent key needs only the public key, so the signature (made with a key derived from the
+deployment encryption key, never stored in the database) is what proves KyIdentity queued
+it. It polls every 30 seconds (backing off to 5 minutes while KyIdentity or the DC is down),
 decrypts each entry, finds the account by its marker in the OU, sets `unicodePwd` and
 reports the result. It logs user IDs, sequence numbers and outcomes, never a password. It
 keeps the highest sequence number it applied per user in `stateFile` and refuses anything
@@ -124,7 +128,9 @@ older, so an old ciphertext cannot be replayed. Build it with
   reset link is redeemed, and when a user changes their own password. Only users the
   connector currently holds are queued.
 - Each entry is HPKE (X25519, HKDF-SHA256, AES-256-GCM) sealed to the agent key, bound to
-  the connector, the user and a sequence number. A newer password replaces an older one
+  the connector, the user and a sequence number, and signed (Ed25519) over all of these and
+  its expiry. The stored agent public key carries an HMAC under a key derived from the
+  encryption key, so a key swapped in the database is refused before anything is sealed. A newer password replaces an older one
   that has not been delivered.
 - Entries are cleared when the agent acknowledges them and expire after the password
   lifetime.

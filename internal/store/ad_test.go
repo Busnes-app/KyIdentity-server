@@ -18,7 +18,8 @@ func adStoreFixture(t *testing.T, s *Store, id string) (*ecdh.PrivateKey, string
 		t.Fatal(err)
 	}
 	ps := &PairedSystem{ID: id, Name: id, SystemType: "active_directory", CallbackURL: "ldaps://dc.example.test", HMACSecretEncrypted: "sealed", Status: "active"}
-	if err := s.CreateADSystem(ps, &ADConnector{BindDN: "CN=b", BaseDN: "OU=K,DC=example,DC=test", CAPEM: "pem", AgentPublicKey: adpass.EncodePublicKey(k.PublicKey()), PasswordTTLMinutes: 1440}, nil); err != nil {
+	pub := adpass.EncodePublicKey(k.PublicKey())
+	if err := s.CreateADSystem(ps, &ADConnector{BindDN: "CN=b", BaseDN: "OU=K,DC=example,DC=test", CAPEM: "pem", AgentPublicKey: pub, AgentKeyMAC: testKeys.KeyMAC(id, pub), PasswordTTLMinutes: 1440}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var app string
@@ -27,6 +28,8 @@ func adStoreFixture(t *testing.T, s *Store, id string) (*ecdh.PrivateKey, string
 	}
 	return k, app
 }
+
+var testKeys = NewADKeys(make([]byte, 32))
 
 func queueAudits(t *testing.T, s *Store, action string) int {
 	t.Helper()
@@ -49,17 +52,17 @@ func TestDirectoryPasswordQueueSealsForManagedUsersOnly(t *testing.T) {
 	if err := s.SetAppAssignment(app, "users", managed.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := s.QueueDirectoryPassword(outsider.ID, outsider.PasswordHash, []byte("Outsider-pass-1"), queuedAudit); err != nil || n != 0 {
+	if n, err := s.QueueDirectoryPassword(testKeys, outsider.ID, outsider.PasswordHash, []byte("Outsider-pass-1"), queuedAudit); err != nil || n != 0 {
 		t.Fatal("queued for a user the connector does not hold", n, err)
 	}
-	if n, err := s.QueueDirectoryPassword(managed.ID, "not-the-current-hash", []byte("Stale-pass-1"), queuedAudit); err != nil || n != 0 {
+	if n, err := s.QueueDirectoryPassword(testKeys, managed.ID, "not-the-current-hash", []byte("Stale-pass-1"), queuedAudit); err != nil || n != 0 {
 		t.Fatal("queued a password that is no longer current", n, err)
 	}
-	if n, err := s.QueueDirectoryPassword(managed.ID, managed.PasswordHash, []byte("First-pass-1"), queuedAudit); err != nil || n != 1 {
+	if n, err := s.QueueDirectoryPassword(testKeys, managed.ID, managed.PasswordHash, []byte("First-pass-1"), queuedAudit); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}
 	firstEntries, _ := s.PendingADPasswords("ad-1", time.Now(), 10)
-	if n, err := s.QueueDirectoryPassword(managed.ID, managed.PasswordHash, []byte("Second-pass-2"), queuedAudit); err != nil || n != 1 {
+	if n, err := s.QueueDirectoryPassword(testKeys, managed.ID, managed.PasswordHash, []byte("Second-pass-2"), queuedAudit); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}
 	entries, err := s.PendingADPasswords("ad-1", time.Now(), 10)
@@ -120,7 +123,7 @@ func TestDirectoryPasswordQueueExpiresAndRejects(t *testing.T) {
 	if st, _ := s.ADPasswordStatuses("ad-1"); st[0].State != "missing" {
 		t.Fatalf("a user with no delivered password: %+v", st)
 	}
-	if _, err := s.QueueDirectoryPassword(u.ID, u.PasswordHash, []byte("Expiring-pass-1"), queuedAudit); err != nil {
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Expiring-pass-1"), queuedAudit); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := s.ExpireADPasswords(time.Now()); err != nil || n != 0 {
@@ -139,17 +142,18 @@ func TestDirectoryPasswordQueueExpiresAndRejects(t *testing.T) {
 	// An admin-lowered lifetime applies to the next entry.
 	c, _ := s.ADConnector("ad-1")
 	c.PasswordTTLMinutes = 10
+	c.AgentKeyMAC = testKeys.KeyMAC("ad-1", c.AgentPublicKey)
 	if err := s.ConfigureADSystem("ad-1", "ldaps://dc.example.test", "", c, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.QueueDirectoryPassword(u.ID, u.PasswordHash, []byte("Short-lived-1"), queuedAudit); err != nil {
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Short-lived-1"), queuedAudit); err != nil {
 		t.Fatal(err)
 	}
 	if n, _ := s.ExpireADPasswords(time.Now().Add(11 * time.Minute)); n != 1 {
 		t.Fatal("lowered lifetime not applied")
 	}
 
-	if _, err := s.QueueDirectoryPassword(u.ID, u.PasswordHash, []byte("Too-simple"), queuedAudit); err != nil {
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Too-simple"), queuedAudit); err != nil {
 		t.Fatal(err)
 	}
 	e, _ := s.PendingADPasswords("ad-1", time.Now(), 10)
@@ -200,7 +204,7 @@ func TestDirectoryAgentTokensAndKeysAreScopedToOneConnector(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT agent_token_hash FROM ad_connectors WHERE system_id='ad-1'`).Scan(&stored); err != nil || stored == "kyad_one" {
 		t.Fatal("agent token stored in the clear")
 	}
-	if _, err := s.QueueDirectoryPassword(u.ID, u.PasswordHash, []byte("Scoped-pass-1"), queuedAudit); err != nil {
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Scoped-pass-1"), queuedAudit); err != nil {
 		t.Fatal(err)
 	}
 	if e, _ := s.PendingADPasswords("ad-2", time.Now(), 10); len(e) != 0 {
@@ -220,6 +224,7 @@ func TestDirectoryAgentTokensAndKeysAreScopedToOneConnector(t *testing.T) {
 	k2, _ := adpass.GenerateKey()
 	c, _ := s.ADConnector("ad-1")
 	c.AgentPublicKey = adpass.EncodePublicKey(k2.PublicKey())
+	c.AgentKeyMAC = testKeys.KeyMAC("ad-1", c.AgentPublicKey)
 	if err := s.ConfigureADSystem("ad-1", "ldaps://dc.example.test", "", c, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -232,5 +237,39 @@ func TestDirectoryAgentTokensAndKeysAreScopedToOneConnector(t *testing.T) {
 	}
 	if _, err := s.ADSystemForAgentToken("kyad_new"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("disabled connector's token accepted")
+	}
+}
+
+func TestDirectoryPasswordQueueRefusesATamperedAgentKeyAndSignsEntries(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	_, app := adStoreFixture(t, s, "ad-1")
+	u := createTestUser(t, s)
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Signed-pass-1"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	e, _ := s.PendingADPasswords("ad-1", time.Now(), 10)
+	pub, _ := adpass.ParseSigningKey(testKeys.SigningPublicKey())
+	if len(e) != 1 || !adpass.VerifyEntry(pub, "ad-1", u.ID, e[0].Seq, e[0].ExpiresAt, e[0].Ciphertext, e[0].Signature) {
+		t.Fatal("entry not signed by the server key", e)
+	}
+	// A database writer swaps in their own key: nothing is sealed to it.
+	attacker, _ := adpass.GenerateKey()
+	if _, err := s.db.Exec(`UPDATE ad_connectors SET agent_public_key=? WHERE system_id='ad-1'`, adpass.EncodePublicKey(attacker.PublicKey())); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Signed-pass-2"), queuedAudit); !errors.Is(err, ErrAgentKeyTampered) {
+		t.Fatal("sealed to a tampered key:", err)
+	}
+	after, _ := s.PendingADPasswords("ad-1", time.Now(), 10)
+	if len(after) != 1 || after[0].Seq != e[0].Seq || after[0].Ciphertext != e[0].Ciphertext {
+		t.Fatal("a tampered key changed the queue")
+	}
+	// Another deployment's keys produce a MAC this one refuses.
+	if _, err := s.QueueDirectoryPassword(NewADKeys([]byte("another-deployment-key-0123456789")), u.ID, u.PasswordHash, []byte("x"), queuedAudit); !errors.Is(err, ErrAgentKeyTampered) {
+		t.Fatal("another key accepted:", err)
 	}
 }

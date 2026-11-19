@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/adpass"
 	"github.com/Busnes-app/kyidentity-server/internal/ldaptest"
@@ -51,6 +53,7 @@ func (q *fakeQueue) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type fixture struct {
+	sign  ed25519.PrivateKey
 	agent *agent
 	dc    *ldaptest.Server
 	queue *fakeQueue
@@ -78,7 +81,8 @@ func newFixture(t *testing.T) *fixture {
 	if err := os.WriteFile(filepath.Join(dir, "ca.pem"), []byte(dc.CAPEM), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{KyIdentityURL: srv.URL, ConnectorID: connector, TokenFile: filepath.Join(dir, "token"), KeyFile: filepath.Join(dir, "agent.key"),
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	cfg := config{KyIdentityURL: srv.URL, SigningKey: adpass.EncodeSigningKey(pub), ConnectorID: connector, TokenFile: filepath.Join(dir, "token"), KeyFile: filepath.Join(dir, "agent.key"),
 		StateFile: filepath.Join(dir, "state.json"), LDAPSURL: dc.URL, CAFile: filepath.Join(dir, "ca.pem"), BindDN: testBindDN,
 		BindPasswordFile: filepath.Join(dir, "bind"), BaseDN: testOU}
 	raw, _ := json.Marshal(cfg)
@@ -92,7 +96,7 @@ func newFixture(t *testing.T) *fixture {
 	logs := &bytes.Buffer{}
 	log.SetOutput(logs)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-	return &fixture{agent: a, dc: dc, queue: q, logs: logs, dir: dir}
+	return &fixture{sign: priv, agent: a, dc: dc, queue: q, logs: logs, dir: dir}
 }
 
 func (f *fixture) account(userID string) string {
@@ -107,7 +111,9 @@ func (f *fixture) seal(t *testing.T, userID string, seq int64, password string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return entry{UserID: userID, Seq: seq, Ciphertext: ct}
+	e := entry{UserID: userID, Seq: seq, ExpiresAt: time.Now().Add(time.Hour).Unix(), Ciphertext: ct}
+	e.Signature = adpass.SignEntry(f.sign, connector, userID, seq, e.ExpiresAt, ct)
+	return e
 }
 
 func (f *fixture) run(t *testing.T, entries ...entry) {
@@ -171,6 +177,12 @@ func TestAgentRefusesCiphertextMovedToAnotherUser(t *testing.T) {
 	moved := f.seal(t, "alice", 10, "Alice-Pass-1")
 	moved.UserID = "bob"
 	f.run(t, moved)
+	if r := f.result("bob", 10); r["outcome"] != "rejected" || r["reason"] != "signature_invalid" {
+		t.Fatal("moved entry kept its signature", r)
+	}
+	// Even signed for bob, alice's ciphertext does not open as bob's.
+	moved.Signature = adpass.SignEntry(f.sign, connector, "bob", 10, moved.ExpiresAt, moved.Ciphertext)
+	f.run(t, moved)
 	if r := f.result("bob", 10); r["outcome"] != "rejected" || r["reason"] != "decrypt_failed" {
 		t.Fatal("replayed onto another user", r)
 	}
@@ -181,7 +193,8 @@ func TestAgentRefusesCiphertextMovedToAnotherUser(t *testing.T) {
 	}
 	other, _ := adpass.GenerateKey()
 	foreign, _ := adpass.Seal(adpass.EncodePublicKey(other.PublicKey()), connector, "alice", 11, []byte("x"))
-	f.run(t, entry{UserID: "alice", Seq: 11, Ciphertext: foreign})
+	exp := time.Now().Add(time.Hour).Unix()
+	f.run(t, entry{UserID: "alice", Seq: 11, ExpiresAt: exp, Ciphertext: foreign, Signature: adpass.SignEntry(f.sign, connector, "alice", 11, exp, foreign)})
 	if r := f.result("alice", 11); r["reason"] != "decrypt_failed" {
 		t.Fatal("ciphertext for another key", r)
 	}
@@ -227,6 +240,31 @@ func TestAgentRefusesAnotherConnectorsTokenAndPlainHTTP(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(f.dir, "config.json"), raw, 0o644)
 	if _, err := newAgent(filepath.Join(f.dir, "config.json")); err == nil {
 		t.Fatal("plain http to a remote host accepted")
+	}
+}
+
+func TestAgentRefusesUnsignedAndExpiredEntries(t *testing.T) {
+	f := newFixture(t)
+	dn := f.account("alice")
+	// Anyone with the public key can encrypt; a database writer cannot sign.
+	forged := f.seal(t, "alice", 10, "Forged-Pass-1")
+	_, attacker, _ := ed25519.GenerateKey(nil)
+	forged.Signature = adpass.SignEntry(attacker, connector, "alice", 10, forged.ExpiresAt, forged.Ciphertext)
+	unsigned := f.seal(t, "alice", 11, "Unsigned-Pass-1")
+	unsigned.Signature = ""
+	stretched := f.seal(t, "alice", 12, "Stretched-Pass-1")
+	stretched.ExpiresAt += 3600
+	expired := f.seal(t, "alice", 13, "Expired-Pass-1")
+	expired.ExpiresAt = time.Now().Add(-time.Minute).Unix()
+	expired.Signature = adpass.SignEntry(f.sign, connector, "alice", 13, expired.ExpiresAt, expired.Ciphertext)
+	f.run(t, forged, unsigned, stretched, expired)
+	for seq, want := range map[int64]string{10: "signature_invalid", 11: "signature_invalid", 12: "signature_invalid", 13: "expired"} {
+		if r := f.result("alice", seq); r["outcome"] != "rejected" || r["reason"] != want {
+			t.Errorf("seq %d: %v", seq, r)
+		}
+	}
+	if len(f.dc.Get(dn).Attrs["unicodePwd"]) != 0 || f.agent.state["alice"] != 0 {
+		t.Fatal("an unauthenticated entry changed the directory password")
 	}
 }
 

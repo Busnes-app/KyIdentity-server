@@ -6,6 +6,7 @@ package adpass
 
 import (
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"crypto/hpke"
 	"crypto/rand"
 	"encoding/base64"
@@ -94,4 +95,40 @@ func UnicodePwd(password string) string {
 		binary.LittleEndian.PutUint16(out[2*i:], u)
 	}
 	return string(out)
+}
+
+const signingPrefix = "ed25519:"
+
+// ErrSigningKey is a KyIdentity entry-signing key that is not ed25519: and 32 bytes.
+var ErrSigningKey = errors.New("KyIdentity signing key must be ed25519: followed by 32 bytes of base64")
+
+func entryMessage(systemID, userID string, seq, expires int64, ciphertext string) []byte {
+	return []byte("kyidentity-ad-entry/1\x00" + systemID + "\x00" + userID + "\x00" + strconv.FormatInt(seq, 10) + "\x00" + strconv.FormatInt(expires, 10) + "\x00" + ciphertext)
+}
+
+// SignEntry signs a queue entry with KyIdentity's key, which lives outside the database:
+// HPKE alone proves nothing about who encrypted, so the agent checks this first.
+func SignEntry(k ed25519.PrivateKey, systemID, userID string, seq, expires int64, ciphertext string) string {
+	return base64.StdEncoding.EncodeToString(ed25519.Sign(k, entryMessage(systemID, userID, seq, expires, ciphertext)))
+}
+
+// VerifyEntry reports whether sig is KyIdentity's signature over exactly this entry.
+func VerifyEntry(pub ed25519.PublicKey, systemID, userID string, seq, expires int64, ciphertext, sig string) bool {
+	raw, err := base64.StdEncoding.DecodeString(sig)
+	return err == nil && ed25519.Verify(pub, entryMessage(systemID, userID, seq, expires, ciphertext), raw)
+}
+
+// EncodeSigningKey is the text the admin copies into the agent configuration.
+func EncodeSigningKey(pub ed25519.PublicKey) string {
+	return signingPrefix + base64.StdEncoding.EncodeToString(pub)
+}
+
+// ParseSigningKey reads the form EncodeSigningKey writes.
+func ParseSigningKey(s string) (ed25519.PublicKey, error) {
+	s = strings.TrimSpace(s)
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(s, signingPrefix))
+	if err != nil || !strings.HasPrefix(s, signingPrefix) || len(raw) != ed25519.PublicKeySize {
+		return nil, ErrSigningKey
+	}
+	return ed25519.PublicKey(raw), nil
 }

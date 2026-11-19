@@ -171,7 +171,7 @@ func (h *OnboardingHandler) Redeem(kind string) http.HandlerFunc {
 		}
 		pending.Row.ActorID, pending.Row.ActorUsername, pending.Row.TargetID = u.ID, u.Username, u.ID
 		pending.Committed()
-		queueDirectoryPassword(h.store, h.audit, h.middleware, r, u.ID, u.Username, u.ID, hash, req.Password)
+		queueDirectoryPassword(store.NewADKeys(h.encryptionKey), h.store, h.audit, h.middleware, r, u.ID, u.Username, u.ID, hash, req.Password)
 		writeGroupJSON(w, map[string]any{"success": true, "username": u.Username})
 	}
 }
@@ -300,7 +300,7 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	pending.Committed()
-	queueDirectoryPassword(h.store, h.audit, h.middleware, r, user.ID, user.Username, user.ID, hash, req.NewPassword)
+	queueDirectoryPassword(store.NewADKeys(h.encryptionKey), h.store, h.audit, h.middleware, r, user.ID, user.Username, user.ID, hash, req.NewPassword)
 	writeSuccess(w)
 }
 
