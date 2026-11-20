@@ -49,7 +49,7 @@ its local password until XCreds next reaches KyIdentity and its refresh fails.
 
 ## Data and protection at rest
 
-Migration 9 `workstation_password`, on both backends:
+Migration 10 `workstation_password`, on both backends:
 
 ```
 workstation_apps.require_password BOOLEAN NOT NULL DEFAULT FALSE
