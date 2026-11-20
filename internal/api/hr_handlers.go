@@ -52,7 +52,10 @@ func (s *Server) configureHR(w http.ResponseWriter, r *http.Request) {
 func (s *Server) hrStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// Another org's connector answers as a missing one does.
-	if conn, err := orgStore(r).GetSCIMConnector(id); err != nil || conn == nil {
+	if conn, err := orgStore(r).GetSCIMConnector(id); err != nil {
+		writeInputError(w, "internal_error", err)
+		return
+	} else if conn == nil {
 		http.NotFound(w, r)
 		return
 	}

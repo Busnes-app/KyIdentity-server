@@ -263,11 +263,13 @@ func migrateStaffOrgPostgres(tx *sql.Tx) error {
 // ones today's code raises as platform alerts (NULL) move there first, or the next pass
 // would not find them, open a second alert and mail it again: delivery outages, and the
 // login and access-removal alerts whose key names no user or group (a source address, the
-// shared key, an application or the directory: their audit row has no org). Connector
-// credential alerts keep the default org: their org is the actor's, which the alert does
-// not record, and an administrator actor is in the default org.
-// The move is the one org_id change allowed, so it runs with alerts_org_immutable lifted.
+// shared key, an application or the directory: their audit row has no org), and the
+// credential alerts of outbound systems and the mail relay (platform settings, raised as
+// NULL whoever changes them). Inbound SCIM credential alerts stay: that connector is the
+// org's. The move is the one org_id change allowed, so it runs with alerts_org_immutable
+// lifted.
 const platformAlertsSQL = `UPDATE alerts SET org_id=NULL WHERE org_id='` + DefaultOrgID + `' AND (rule IN ('provisioning_outage','logout_outage')
+ OR (rule='connector_credentials' AND key NOT IN (SELECT id FROM scim_connectors))
  OR (rule IN ('login_failures','access_removal_failed') AND key NOT IN (SELECT id FROM users) AND key NOT IN (SELECT id FROM directory_groups)));
 `
 

@@ -275,7 +275,13 @@ func (s *Store) evaluateBatch(now time.Time, settings AlertSettings) (int, error
 			return 0, err
 		}
 		if spec.rule != "" {
-			if err := raiseAlertTx(tx, now, spec, settings.Recipients, e.org); err != nil {
+			org := e.org
+			// Outbound systems and the mail relay are platform settings: one alert whoever
+			// changed them, an administrator or the CLI.
+			if e.action == "admin.system_created" || e.action == "admin.system_configured" || e.action == "admin.mail_configured" {
+				org = sql.NullString{}
+			}
+			if err := raiseAlertTx(tx, now, spec, settings.Recipients, org); err != nil {
 				return 0, err
 			}
 		}

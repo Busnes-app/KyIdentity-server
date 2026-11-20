@@ -645,6 +645,7 @@ func TestUpgradeKeepsOnePlatformAlert(t *testing.T) {
 		t.Fatal(err)
 	}
 	auditedFrom(t, s, "203.0.113.9", "auth.login", "", "", "", "failure", "")
+	audited(t, s, "admin.mail_configured", "root", "", "", "success", "")
 	evaluate(t, s)
 	// What the code before this version wrote: every alert in the default org.
 	stamp := `DROP TRIGGER alerts_org_immutable; UPDATE alerts SET org_id='` + DefaultOrgID + `'; ` +
@@ -657,8 +658,8 @@ func TestUpgradeKeepsOnePlatformAlert(t *testing.T) {
 	}
 	const live = `SELECT COUNT(*) FROM alerts WHERE status<>'resolved'`
 	const mail = `SELECT COUNT(*) FROM alert_deliveries`
-	if n := countRows(t, s, live); n != 2 {
-		t.Fatalf("%d live alerts before the upgrade, want the outage and the login alert", n)
+	if n := countRows(t, s, live); n != 3 {
+		t.Fatalf("%d live alerts before the upgrade, want the outage, the login and the mail relay alert", n)
 	}
 	mailed := countRows(t, s, mail)
 	if err := s.Close(); err != nil {
@@ -672,14 +673,19 @@ func TestUpgradeKeepsOnePlatformAlert(t *testing.T) {
 	}
 	defer s.Close()
 	auditedFrom(t, s, "203.0.113.9", "auth.login", "", "", "", "failure", "")
+	audited(t, s, "admin.mail_configured", "kyidentity-cli", "", "", "success", "")
+	// An administrator's change is in the default org's audit; its alert is still the platform's.
+	if err := s.RecordAuditEvent(&AuditEvent{ID: uuid.NewString(), ActorID: admin.ID, ActorUsername: admin.Username, Action: "admin.mail_configured", Outcome: "success", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	evaluate(t, s)
-	if n := countRows(t, s, live); n != 2 {
-		t.Fatalf("%d live alerts after the upgrade, want the same two", n)
+	if n := countRows(t, s, live); n != 3 {
+		t.Fatalf("%d live alerts after the upgrade, want the same three", n)
 	}
 	if n := countRows(t, s, mail); n != mailed {
 		t.Fatalf("%d alert mails after the upgrade, want the %d from before", n, mailed)
 	}
-	if n := countRows(t, s, `SELECT COUNT(*) FROM alerts WHERE org_id IS NULL`); n != 2 {
-		t.Fatalf("%d platform alerts, want both moved out of the default org", n)
+	if n := countRows(t, s, `SELECT COUNT(*) FROM alerts WHERE org_id IS NULL`); n != 3 {
+		t.Fatalf("%d platform alerts, want all three moved out of the default org", n)
 	}
 }
