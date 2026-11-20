@@ -103,6 +103,16 @@ accepted, and the page's Content-Security-Policy is unchanged. `GET /api/brandin
 `{"name","logoUrl"}` without sign-in, for the sign-in page; other suite products could
 read it there too, but none does yet.
 
+**Suite settings.** Administration → Suite settings holds two platform-wide values every suite
+app reads (contract: `docs/SUITE-DIRECTORY.md`). *Mail domains* lists the domains users'
+addresses use (for example `example.com`; IDNs are stored in punycode, at most 50, no
+duplicates); changing it asks for step-up, is audited as `admin.suite_email_domains_changed`
+and reaches apps only through the authenticated `GET /api/suite/email-domains`. KyIdentity
+does not refuse addresses outside the list. *Default theme* picks the theme every app applies
+until a user picks their own; the user's choice always wins. It is display only, so no
+step-up is asked; it is audited as `admin.suite_default_theme_changed` and public at
+`GET /api/appearance`, which the sign-in page reads.
+
 ## Directory groups
 
 Administrators can create, rename and delete groups under **Groups**, manage each group's

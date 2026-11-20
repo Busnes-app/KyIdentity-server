@@ -19,6 +19,7 @@ import { AdminAudit } from './components/AdminAudit';
 import { AdminBackup } from './components/AdminBackup';
 import { AdminMail } from './components/AdminMail';
 import { AdminBranding } from './components/AdminBranding';
+import { AdminSuiteSettings } from './components/AdminSuiteSettings';
 import { AdminSCIM } from './components/AdminSCIM';
 import { AdminAccessRequests } from './components/AdminAccessRequests';
 import { AdminAlerts } from './components/AdminAlerts';
@@ -170,6 +171,7 @@ export const App: React.FC = () => {
             {activeTab === 'admin-backup' && <AdminBackup />}
             {activeTab === 'admin-mail' && <AdminMail />}
             {activeTab === 'admin-branding' && <AdminBranding />}
+            {activeTab === 'admin-suite' && <AdminSuiteSettings />}
             {activeTab === 'admin-scim' && <AdminSCIM />}
             {activeTab === 'admin-requests' && <AdminAccessRequests />}
             {activeTab === 'admin-alerts' && <AdminAlerts access={currentUser.access} />}

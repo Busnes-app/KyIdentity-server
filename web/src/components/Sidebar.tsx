@@ -2,7 +2,7 @@ import React, { Fragment, useEffect, useState } from 'react';
 import { Access, User } from '../types';
 import { LicenseFooter } from './LicenseFooter';
 import { useBranding } from '../branding';
-import { Shield, LayoutGrid, Settings, Users, UsersRound, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox, Bell, ChevronRight, AppWindow, Palette } from 'lucide-react';
+import { Shield, LayoutGrid, Settings, Users, UsersRound, RefreshCw, Key, FileText, Archive, LogOut, Mail, Database, Inbox, Bell, ChevronRight, AppWindow, Palette, Globe } from 'lucide-react';
 
 interface SidebarProps {
   user: User;
@@ -41,6 +41,7 @@ export const ADMIN: Section[] = [
     ['admin-backup', 'Disaster recovery', Archive],
     ['admin-mail', 'Mail delivery', Mail],
     ['admin-branding', 'Branding', Palette],
+    ['admin-suite', 'Suite settings', Globe],
   ]],
 ];
 

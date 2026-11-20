@@ -242,6 +242,10 @@ func (s *Server) routes() *http.ServeMux {
 	brandingH := &BrandingHandler{store: s.store, audit: s.audit, middleware: s.middleware}
 	mux.Handle("GET /api/branding", s.middleware.RateLimit("branding", 120, 2)(http.HandlerFunc(brandingH.Get)))
 	mux.Handle("GET /api/branding/logo", s.middleware.RateLimit("branding", 120, 2)(http.HandlerFunc(brandingH.Logo)))
+	// Suite settings: the default theme is public like branding; the domains are suite-only.
+	suiteSettingsH := &SuiteSettingsHandler{store: s.store, audit: s.audit, middleware: s.middleware}
+	mux.Handle("GET /api/appearance", s.middleware.RateLimit("branding", 120, 2)(http.HandlerFunc(suiteSettingsH.Appearance)))
+	mux.Handle("GET /api/suite/email-domains", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.EmailDomains)))
 
 	// Admin routes: every one names its permission and whether it spends a step-up grant.
 	//
@@ -351,6 +355,9 @@ func (s *Server) routes() *http.ServeMux {
 		{"PUT", "/api/admin/branding/name", permAdmin, platformRoute, false, http.HandlerFunc(brandingH.PutName)},
 		{"PUT", "/api/admin/branding/logo", permAdmin, platformRoute, false, s.middleware.RateLimit("icon_upload", 20, 0.1)(http.HandlerFunc(brandingH.PutLogo))},
 		{"DELETE", "/api/admin/branding/logo", permAdmin, platformRoute, false, http.HandlerFunc(brandingH.DeleteLogo)},
+		{"GET", "/api/admin/suite-settings", permRead, platformRoute, false, http.HandlerFunc(suiteSettingsH.Get)},
+		{"PUT", "/api/admin/suite-settings/email-domains", permAdmin, platformRoute, true, http.HandlerFunc(suiteSettingsH.PutEmailDomains)},
+		{"PUT", "/api/admin/suite-settings/default-theme", permAdmin, platformRoute, false, http.HandlerFunc(suiteSettingsH.PutDefaultTheme)},
 		{"GET", "/api/admin/session-settings", permRead, platformRoute, false, http.HandlerFunc(sessionSettingsH.Get)},
 		{"PUT", "/api/admin/session-settings", permAdmin, platformRoute, true, http.HandlerFunc(sessionSettingsH.Put)},
 		{"GET", "/api/admin/rate-limit-networks", permAdmin, platformRoute, false, http.HandlerFunc(networksH.Get)},

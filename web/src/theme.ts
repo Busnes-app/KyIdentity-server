@@ -14,13 +14,55 @@ export const THEME_CHOICES = THEME_PAIRS.map(pair => ({
   ],
 }));
 
-export function storedTheme(): string {
+// The suite default theme (Administration › Suite settings, public `GET /api/appearance`)
+// applies until this browser saves a choice; a saved choice, Match system included, wins.
+// The last default seen is kept under its own key so the next load paints it at once.
+// ponytail: this mirrors ky-ui 0.12.0 `setServerDefaultTheme`/`chooseTheme`; switch to them
+// at the next ky-ui sync.
+export const SUITE_DEFAULT_KEY = 'kyidentity-theme-default';
+const known = (value: string | null | undefined): string | null =>
+  findPair(value)?.id ?? findTheme(value)?.id ?? null;
+
+function readKnown(key: string): string | null {
   try {
-    const saved = readChoice(THEME_KEY);
-    return findPair(saved)?.id ?? findTheme(saved)?.id ?? SYSTEM_THEME.id;
+    return known(readChoice(key));
   } catch {
-    return SYSTEM_THEME.id;
+    return null;
   }
+}
+
+let suiteDefault = readKnown(SUITE_DEFAULT_KEY);
+
+/** The choice saved in this browser, or null when none is. */
+export const savedTheme = (): string | null => readKnown(THEME_KEY);
+
+/** The choice to apply: the saved one, else the suite default, else Match system. */
+export function storedTheme(): string {
+  return savedTheme() ?? suiteDefault ?? SYSTEM_THEME.id;
+}
+
+/** Records the suite default (unknown values clear it) and re-applies when nothing is saved. */
+export function setSuiteDefaultTheme(value: unknown): void {
+  const id = typeof value === 'string' ? known(value) : null;
+  if (id === suiteDefault) return;
+  suiteDefault = id;
+  try {
+    saveChoice(SUITE_DEFAULT_KEY, id ?? '');
+  } catch {
+    // Storage off: the default still applies for this page.
+  }
+  if (typeof document !== 'undefined') applyTheme(storedTheme());
+}
+
+/** Reads the suite default from the server; on any failure the cached one stays. */
+export function loadSuiteDefaultTheme(): Promise<void> {
+  return fetch('/api/appearance')
+    .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+    .then((body: unknown) => {
+      const theme = typeof body === 'object' && body !== null ? (body as { defaultTheme?: unknown }).defaultTheme : undefined;
+      if (typeof theme === 'string') setSuiteDefaultTheme(theme);
+    })
+    .catch(() => undefined);
 }
 
 const media = typeof window !== 'undefined' ? window.matchMedia?.('(prefers-color-scheme: dark)') : undefined;

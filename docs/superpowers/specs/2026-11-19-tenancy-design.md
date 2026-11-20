@@ -661,6 +661,7 @@ Customer orgs are people and households. Business features stay in single-tenant
 | Forward-auth proxy apps | Disabled | Hosts and edge secrets are install-wide (`2026-11-15-forward-auth-design.md`) |
 | Custom launcher cards (`applications`) | Disabled for orgs | Platform cards only |
 | Branding (`branding_org_name`, `branding_logo`) | Platform only | The sign-in page comes before the org is known. The org name shows after sign-in (open question 5). |
+| Suite mail domains and default theme (`suite_email_domains`, `suite_default_theme`) | Platform only | Owner decision 2026-11-20: one list and one default for the install or hosted platform, set by staff there. |
 | Session limits, mail, alerts settings, attestation, rate-limit exemptions, push relays | Platform | `system_settings` keys (`session_limits.go:13`, `sealed.go:30`) |
 | Installer setup (`apply-setup`, `proxy-app`) | Refused | The installer channel is single-tenant |
 | Backups, restore, drill | Platform | Whole install |
