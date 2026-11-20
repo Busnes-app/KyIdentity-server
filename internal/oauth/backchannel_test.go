@@ -44,7 +44,7 @@ func TestLogoutTokenShapeAndSeparationFromLoginTokens(t *testing.T) {
 	u := testUser(t, db)
 	testClient(t, db, "app", "public", []string{"https://app/cb"}, []string{"openid"})
 
-	token, err := e.SignLogoutToken("app", u.ID, "sid-1")
+	token, err := e.SignLogoutToken("app", u.ID, "sid-1", store.DefaultOrgID)
 	if err != nil {
 		t.Fatal(err)
 	}

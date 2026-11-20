@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,15 @@ func tenancyTokens(t *testing.T, e *Engine, db *store.Store, org *store.OrgStore
 		t.Fatal(err)
 	}
 	client := testClient(t, db, "golden-app", "public", []string{"https://golden.example/cb"}, []string{"openid", "profile", "email"})
+	if org.ID().String() != store.DefaultOrgID {
+		apps, _, err := db.ListAppRecords(client.ID, 1, 0)
+		if err != nil || len(apps) != 1 {
+			t.Fatal(apps, err)
+		}
+		if err := store.EnableOrgAppForTest(db, org.ID(), apps[0].ID, "{}"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	out := map[string]string{}
 
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -146,5 +156,35 @@ func TestSingleTenantTokensAreUnchanged(t *testing.T) {
 		if text != string(want) {
 			t.Errorf("%s changed:\n got %s\nwant %s", name, text, want)
 		}
+	}
+}
+
+var orgClaim = regexp.MustCompile(`"org_id":"([^"]*)",`)
+
+// In multi-tenant mode every token, UserInfo and the logout token carry the user's org as
+// org_id, read from the user row, and nothing else changes; discovery lists the claim.
+func TestMultiTenantTokensCarryTheOrg(t *testing.T) {
+	e, db, cleanup := setupTestOAuthEngine(t)
+	defer cleanup()
+	e.SetMultiTenant(true)
+	org, err := store.CreateOrgForTest(db, "household")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range tenancyTokens(t, e, db, db.Org(org)) {
+		found := orgClaim.FindAllStringSubmatch(text, -1)
+		if len(found) != 1 || found[0][1] != org.String() {
+			t.Errorf("%s: org_id %v, want once %s: %s", name, found, org, text)
+		}
+		want, err := os.ReadFile(filepath.Join("testdata", "tenancy-golden", name+".txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := orgClaim.ReplaceAllString(text, ""); got != string(want) {
+			t.Errorf("%s: more than org_id changed:\n got %s\nwant %s", name, got, want)
+		}
+	}
+	if supported := e.GetOIDCConfiguration().ClaimsSupported; !slices.Contains(supported, "org_id") {
+		t.Fatalf("claims_supported %v", supported)
 	}
 }

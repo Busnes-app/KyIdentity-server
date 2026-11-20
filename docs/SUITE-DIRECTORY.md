@@ -2,7 +2,9 @@
 
 KyIdentity tells suite apps about each other, so cross-app features work without an
 operator copying URLs or secrets between servers. Four read-only service endpoints, called
-server to server by a registered app with its own OAuth client credentials. The people route
+server to server by a registered app with its own OAuth client credentials. A multi-tenant
+install adds a fifth, `/api/suite/orgs`, and scopes people and groups by organisation (see
+Multi-tenant installs). The people route
 is contract A2 of the wave-1 suite integrations (`ky-redesign/integrations/suite-integrations-contracts.md`);
 this file is the durable copy.
 
@@ -113,9 +115,59 @@ limit and `no-store`. No parameters. Design and threat model:
   turned on and never reused, so a recreated namesake gets `sales-2`. `name` follows renames.
 - At most 200 groups can be on at once. Ordered by `id`. Not audited.
 
+In a multi-tenant install `org_id` (a UUID from `/api/suite/orgs`) is required, and the
+list holds that organisation's groups only. Without it the answer is
+`400 {"error":"invalid_request"}`; an organisation the caller is not told about by
+`/api/suite/orgs` is `404 {"error":"unknown_org"}`. A single-tenant install ignores it.
+
 Apps reconcile, keyed on `id` only: poll about every 60 s; on an error change nothing; for
 an `active` group ensure one resource (create, or un-archive), set its name, and set its
 members to exactly the listed subjects that have a local SSO account; for an `archived`
 group with a resource, archive it (read-only, no members, kept for administrators). Never
 delete, and never archive because a group is absent from a response. Client:
 `ky-primitives/suitedir` `Groups`.
+
+## Multi-tenant installs
+
+A multi-tenant install (design `docs/superpowers/specs/2026-11-19-tenancy-design.md`) holds
+many organisations under one issuer. The caller is a global client, so the organisation
+always comes from KyIdentity's data, never from the calling app:
+
+- `/api/suite/apps?sub=` and `/api/suite/people?sub=` answer for the `sub` user's
+  organisation: people lists only its users, and apps only the apps its plan enables. `/apps`
+  without `sub` stays global.
+- `/api/suite/groups` requires `org_id` (above).
+- Tokens and UserInfo carry `org_id`, and so does the body of every signed suite webhook,
+  inside the `ky-primitives/syncauth` signature.
+
+### `GET /api/suite/orgs`
+
+The organisations the calling app serves. Same authentication, rate limit and `no-store`.
+`404 {"error":"not_found"}` in a single-tenant install.
+
+- Listed: every organisation that has (or had) the calling app enabled, with `enabled`
+  `false` once its plan turns the app off, and every deleted organisation (a tombstone, never
+  reused). Others are absent.
+- `revision` rises across the whole install with each change to an organisation or its
+  apps, so a poll asks only for what changed: `since=<revision>` lists what changed after it.
+- Ordered by `revision`, then `id`. `limit` 1 to 500, default 100. A full page carries
+  `next`; pass it back as `cursor` (instead of `since`) for the next page.
+- `enabled` and `quotas` (the plan's opaque object) are the calling app's only, read from
+  the organisation's `org_apps` row. The platform API writes those rows in tenancy build plan
+  PR 6; until then a multi-tenant install is refused at startup, so nothing serves this.
+
+```json
+{"orgs": [{"id": "…", "status": "active", "revision": 42, "enabled": true, "quotas": {"storage_gb": 5}}],
+ "next": "42.…"}
+```
+
+`status` is `active`, `suspended`, `deletion_scheduled` or `deleted`. Apps poll about every
+60 s. Remember the highest `revision` seen once a pass ends without `next`, and start the
+next poll from it. An error changes nothing.
+
+Downstream contract, for every app run as a shared multi-tenant install: refuse a token
+without `org_id`; key every row by `org_id`; bind a local account to `(sub, org_id)` and
+refuse a known `sub` arriving with another `org_id`; take the org only from a verified token,
+a signed webhook or a suite answer, never a URL, form or header; stop serving an
+organisation whose status is not `active`, and drop its data only at `deleted`; enforce
+your own quotas from this list. Client: `ky-primitives/suitedir` `Orgs`.

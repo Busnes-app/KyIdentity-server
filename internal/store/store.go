@@ -1406,7 +1406,7 @@ func (s *Store) DeletePairedSystem(systemID string, audit *AuditEvent) (bool, er
 	return true, tx.Commit()
 }
 
-const syncEventColumns = `id, user_id, system_id, event_type, payload_json, attempts, status, last_error, next_attempt_at, created_at, updated_at, claim_token, revision, delivery_revision`
+const syncEventColumns = `id, user_id, system_id, event_type, payload_json, attempts, status, last_error, next_attempt_at, created_at, updated_at, claim_token, revision, delivery_revision, org_id`
 
 func scanSyncEvents(rows *sql.Rows) ([]AccountSyncEvent, error) {
 	defer rows.Close()
@@ -1416,7 +1416,7 @@ func scanSyncEvents(rows *sql.Rows) ([]AccountSyncEvent, error) {
 		var lastErr sql.NullString
 		var next sql.NullTime
 		if err := rows.Scan(&ev.ID, &ev.UserID, &ev.SystemID, &ev.EventType, &ev.PayloadJSON,
-			&ev.Attempts, &ev.Status, &lastErr, &next, &ev.CreatedAt, &ev.UpdatedAt, &ev.ClaimToken, &ev.Revision, &ev.DeliveryRevision); err != nil {
+			&ev.Attempts, &ev.Status, &lastErr, &next, &ev.CreatedAt, &ev.UpdatedAt, &ev.ClaimToken, &ev.Revision, &ev.DeliveryRevision, &ev.OrgID); err != nil {
 			return nil, err
 		}
 		if lastErr.Valid {

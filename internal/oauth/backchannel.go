@@ -25,9 +25,10 @@ const backchannelLogoutEvent = "http://schemas.openid.net/event/backchannel-logo
 // SignLogoutToken mints an OpenID Connect Back-Channel Logout token for one client and
 // one login. The `logout+jwt` type, the events claim and the absence of both `nonce` and
 // `token_use` keep it from ever passing as an ID or access token here or downstream.
-func (e *Engine) SignLogoutToken(clientID, subject, sid string) (string, error) {
+// org is the logged-out user's org, carried as org_id in multi-tenant mode only.
+func (e *Engine) SignLogoutToken(clientID, subject, sid, org string) (string, error) {
 	now := time.Now().UTC()
-	return e.keyManager.SignJWTWithType("logout+jwt", map[string]any{
+	claims := map[string]any{
 		"iss":    e.issuerURL,
 		"sub":    subject,
 		"aud":    clientID,
@@ -36,7 +37,9 @@ func (e *Engine) SignLogoutToken(clientID, subject, sid string) (string, error) 
 		"jti":    uuid.NewString(),
 		"sid":    sid,
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
-	})
+	}
+	e.addOrg(claims, org)
+	return e.keyManager.SignJWTWithType("logout+jwt", claims)
 }
 
 // deliveryLease bounds one attempt. The HTTP timeout is shorter, so a lapsed lease means
@@ -50,18 +53,18 @@ func (e *Engine) DeliverPendingLogout(ctx context.Context) (bool, error) {
 	if err != nil || d == nil {
 		return false, err
 	}
-	attemptErr := e.postLogout(ctx, d.BackchannelLogoutURI, d.ClientID, d.UserID, d.SID)
+	attemptErr := e.postLogout(ctx, d.BackchannelLogoutURI, d.ClientID, d.UserID, d.SID, d.OrgID)
 	if err := e.store.Platform().FinishLogoutDelivery(d, attemptErr); err != nil {
 		return true, err
 	}
 	return true, nil
 }
 
-func (e *Engine) postLogout(ctx context.Context, target, clientID, subject, sid string) error {
+func (e *Engine) postLogout(ctx context.Context, target, clientID, subject, sid, org string) error {
 	if err := netguard.ValidateURL(target, "backchannel_logout_uri"); err != nil {
 		return err
 	}
-	token, err := e.SignLogoutToken(clientID, subject, sid)
+	token, err := e.SignLogoutToken(clientID, subject, sid, org)
 	if err != nil {
 		return err
 	}

@@ -50,6 +50,11 @@ func webhookBodies(t *testing.T, e *Engine, s *store.Store, org *store.OrgStore)
 		t.Fatal(err)
 	}
 	app := appRecordFor(t, s, sys.ID)
+	if org.ID().String() != store.DefaultOrgID {
+		if err := store.EnableOrgAppForTest(s, org.ID(), app.ID, "{}"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := org.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -85,5 +90,31 @@ func TestSingleTenantWebhookBodiesAreUnchanged(t *testing.T) {
 	}
 	if got != string(want) {
 		t.Errorf("webhook bodies changed:\n got %s\nwant %s", got, want)
+	}
+}
+
+// In multi-tenant mode a signed suite webhook body carries the user's org as org_id,
+// covered by the syncauth signature the receiver checks, and nothing else changes.
+func TestMultiTenantWebhookCarriesTheOrg(t *testing.T) {
+	e, s, _, cleanup := setupTestSyncEngine(t)
+	defer cleanup()
+	e.SetMultiTenant(true)
+	org, err := store.CreateOrgForTest(s, "household")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "tenancy-golden", "webhook.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := regexp.MustCompile(`,"org_id":"([^"]*)"`)
+	bodies := webhookBodies(t, e, s, s.Org(org))
+	for _, b := range bodies {
+		if m := claim.FindAllStringSubmatch(b, -1); len(m) != 1 || m[0][1] != org.String() {
+			t.Errorf("org_id %v, want %s: %s", m, org, b)
+		}
+	}
+	if got := claim.ReplaceAllString(strings.Join(bodies, "\n")+"\n", ""); got != string(want) {
+		t.Errorf("more than org_id changed:\n got %s\nwant %s", got, want)
 	}
 }

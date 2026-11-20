@@ -114,7 +114,9 @@ assign it to dedicated administrators before upgrading those receivers. See
 authentication claims and `roles`. The ID token and UserInfo apply the same rules to the
 same granted scope, so neither can widen the other. Allowed scopes on a client are drawn
 from `openid`, `profile` and `email`; an unknown scope is refused at registration, not
-silently accepted. If the roles and groups mapped for a user do not fit in a token
+silently accepted. A multi-tenant install also puts `org_id`, the user's organisation as an
+opaque UUID, in every access, ID and logout token and in UserInfo; a single-tenant install
+never does, so an absent `org_id` means single-tenant. If the roles and groups mapped for a user do not fit in a token
 (4 KiB of identity claims), the token request fails with `invalid_request` naming the
 counts rather than truncating a permission set.
 

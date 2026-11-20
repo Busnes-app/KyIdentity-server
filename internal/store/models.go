@@ -97,13 +97,16 @@ type AccountSyncEvent struct {
 	// Revision is the resource's monotonic desired-state counter when this event was queued.
 	Revision int `json:"revision"`
 	// DeliveryRevision orders wire effects independently of desired-state supersession.
-	DeliveryRevision int        `json:"-"`
-	Attempts         int        `json:"attempts"`
-	Status           string     `json:"status"` // "pending", "delivered", "failed"
-	LastError        string     `json:"lastError,omitempty"`
-	NextAttempt      *time.Time `json:"nextAttemptAt,omitempty"`
-	CreatedAt        time.Time  `json:"createdAt"`
-	UpdatedAt        time.Time  `json:"updatedAt"`
+	DeliveryRevision int `json:"-"`
+	// OrgID is the org of the event's user or group, carried in signed suite webhooks in
+	// multi-tenant mode.
+	OrgID       string     `json:"-"`
+	Attempts    int        `json:"attempts"`
+	Status      string     `json:"status"` // "pending", "delivered", "failed"
+	LastError   string     `json:"lastError,omitempty"`
+	NextAttempt *time.Time `json:"nextAttemptAt,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 // Push transports a device can register.
