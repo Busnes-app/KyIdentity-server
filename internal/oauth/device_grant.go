@@ -158,6 +158,10 @@ func (e *Engine) DecideDeviceCode(d *store.DeviceCode, user *store.User, sess *s
 	if ws == nil || !ws.Enabled || !ws.DeviceGrantEnabled {
 		return ErrDeviceGrantNotAvailable
 	}
+	// The /device screen carries no interaction to prove a password was typed for this code.
+	if ws.RequirePassword {
+		return ErrDeviceApprovalSignIn
+	}
 	if allowed, err := e.store.ClientAccessAllowed(user.ID, d.ClientID); err != nil {
 		return err
 	} else if !allowed {
@@ -229,26 +233,11 @@ func (e *Engine) PollDeviceCode(raw, clientID, ip, userAgent string) (*TokenResp
 	if user == nil || user.Status != "active" {
 		return nil, d, ErrDeviceGrantInvalid
 	}
-	// No refresh token: the session only needs to outlive its access token.
-	sessionEnd := now.Add(AccessTokenTTL)
-	if ws.OfflineWindow > 0 {
-		sessionEnd = now.Add(time.Duration(ws.OfflineWindow) * time.Second)
-	}
-	if end, err := e.store.AccessEndsAt(user.ID, clientID); err != nil {
+	sessionEnd, err := e.workstationSessionEnd(ws, user.ID, d.AuthenticationEvidence, now)
+	if errors.Is(err, store.ErrAppAuthentication) {
+		return nil, d, ErrDeviceGrantInvalid
+	} else if err != nil {
 		return nil, d, err
-	} else if end != nil && end.Before(sessionEnd) {
-		sessionEnd = *end
-	}
-	// The app's re-authentication deadline (max_age, factor age) bounds the session too.
-	if policy, err := e.store.ClientAuthenticationPolicy(clientID); err != nil {
-		return nil, d, err
-	} else if at := policy.Deadline(d.AuthenticationEvidence); at != nil {
-		if !at.After(now) {
-			return nil, d, ErrDeviceGrantInvalid
-		}
-		if at.Before(sessionEnd) {
-			sessionEnd = *at
-		}
 	}
 	exp := now.Add(AccessTokenTTL)
 	if sessionEnd.Before(exp) {

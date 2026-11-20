@@ -26,6 +26,8 @@ type wsFixture struct {
 	admin    string
 	clientID string
 	appID    string
+	// Mac sign-in and require-password, sent with every settings call.
+	macSignIn, requirePassword bool
 }
 
 func newWSFixture(t *testing.T) (*wsFixture, func()) {
@@ -49,7 +51,7 @@ func newWSFixture(t *testing.T) (*wsFixture, func()) {
 
 func (f *wsFixture) settings(grant bool, ttl, window int) *httptest.ResponseRecorder {
 	f.t.Helper()
-	rr := adminRequest(f.t, f.srv, "PUT", "/api/admin/workstation-apps/"+f.clientID, f.admin, fmt.Sprintf(`{"deviceGrantEnabled":%t,"deviceCodeTtl":%d,"offlineWindow":%d}`, grant, ttl, window))
+	rr := adminRequest(f.t, f.srv, "PUT", "/api/admin/workstation-apps/"+f.clientID, f.admin, fmt.Sprintf(`{"deviceGrantEnabled":%t,"deviceCodeTtl":%d,"offlineWindow":%d,"requirePassword":%t,"macSignIn":%t}`, grant, ttl, window, f.requirePassword, f.macSignIn))
 	if rr.Code != http.StatusOK && rr.Code != http.StatusBadRequest {
 		f.t.Fatalf("settings: %d %s", rr.Code, rr.Body.String())
 	}
@@ -455,22 +457,34 @@ func TestWorkstationSessionsEndWithAccess(t *testing.T) {
 		},
 	}
 	for name, end := range cases {
-		t.Run(name, func(t *testing.T) {
-			f, done := newWSFixture(t)
-			defer done()
-			u, cookie := f.assignedUser()
-			tokens := f.login(cookie)
-			end(f, u, cookie)
-			if status, body := f.refresh(tokens["refresh_token"].(string)); status != 400 || body["error"] != "invalid_grant" {
-				t.Fatalf("refresh after %s: %d %v", name, status, body)
-			}
-			if code, _ := userinfo(t, f.srv, tokens["access_token"].(string)); code != http.StatusUnauthorized {
-				t.Fatalf("access token after %s: %d", name, code)
-			}
-			if f.workstationSessions(u.ID) != 0 {
-				t.Fatalf("workstation session survived %s", name)
-			}
-		})
+		for _, flow := range []string{"device", "code"} {
+			t.Run(flow+"/"+name, func(t *testing.T) {
+				f, done := newWSFixture(t)
+				defer done()
+				u, cookie := f.assignedUser()
+				var tokens map[string]any
+				if flow == "code" {
+					f.macSignIn = true
+					f.settings(true, 300, 604800)
+					tokens = f.codeLogin(cookie)
+				} else {
+					tokens = f.login(cookie)
+				}
+				if f.workstationSessions(u.ID) != 1 {
+					t.Fatal("no workstation session")
+				}
+				end(f, u, cookie)
+				if status, body := f.refresh(tokens["refresh_token"].(string)); status != 400 || body["error"] != "invalid_grant" {
+					t.Fatalf("refresh after %s: %d %v", name, status, body)
+				}
+				if code, _ := userinfo(t, f.srv, tokens["access_token"].(string)); code != http.StatusUnauthorized {
+					t.Fatalf("access token after %s: %d", name, code)
+				}
+				if f.workstationSessions(u.ID) != 0 {
+					t.Fatalf("workstation session survived %s", name)
+				}
+			})
+		}
 	}
 }
 

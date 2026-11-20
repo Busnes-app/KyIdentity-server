@@ -259,15 +259,18 @@ func (h *AdminHandler) UpdateWorkstationApp(w http.ResponseWriter, r *http.Reque
 		DeviceGrantEnabled *bool `json:"deviceGrantEnabled"`
 		DeviceCodeTTL      *int  `json:"deviceCodeTtl"`
 		OfflineWindow      *int  `json:"offlineWindow"`
+		RequireTypedSignIn *bool `json:"requirePassword"`
+		MacSignIn          *bool `json:"macSignIn"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceGrantEnabled == nil || req.DeviceCodeTTL == nil || req.OfflineWindow == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "deviceGrantEnabled, deviceCodeTtl and offlineWindow are required")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceGrantEnabled == nil || req.DeviceCodeTTL == nil || req.OfflineWindow == nil || req.RequireTypedSignIn == nil || req.MacSignIn == nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "deviceGrantEnabled, deviceCodeTtl, offlineWindow, requirePassword and macSignIn are required")
 		return
 	}
 	id := r.PathValue("id")
+	set := store.WorkstationSettings{DeviceGrant: *req.DeviceGrantEnabled, DeviceCodeTTL: *req.DeviceCodeTTL, OfflineWindow: *req.OfflineWindow, RequireTypedSignIn: *req.RequireTypedSignIn, MacSignIn: *req.MacSignIn}
 	event := h.audit.Prepare("admin.workstation_app_updated", admin.ID, admin.Username, id, "client", h.middleware.ClientIP(r), r.UserAgent(), "success",
-		map[string]any{"deviceGrantEnabled": *req.DeviceGrantEnabled, "deviceCodeTtl": *req.DeviceCodeTTL, "offlineWindow": *req.OfflineWindow})
-	err := h.store.UpdateWorkstationApp(id, *req.DeviceGrantEnabled, *req.DeviceCodeTTL, *req.OfflineWindow, event.Row)
+		map[string]any{"deviceGrantEnabled": set.DeviceGrant, "deviceCodeTtl": set.DeviceCodeTTL, "offlineWindow": set.OfflineWindow, "requirePassword": set.RequireTypedSignIn, "macSignIn": set.MacSignIn})
+	err := h.store.UpdateWorkstationApp(id, set, event.Row)
 	var input store.InputError
 	switch {
 	case errors.As(err, &input):

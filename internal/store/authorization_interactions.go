@@ -128,3 +128,30 @@ func (s *Store) CancelAuthorizationInteraction(hash, browserHash string) error {
 	_, err := s.db.Exec(`DELETE FROM authorization_interactions WHERE hash=? AND browser_hash=?`, hash, browserHash)
 	return err
 }
+
+// RecordInteractionPassword notes that userID's password verified during this interaction,
+// before any session completed it, and binds the interaction to that user. Only a
+// require-password workstation app needs it; for one, a step it cannot record (the
+// per-account cap of live interactions is reached) is ErrAuthorizationInteraction, so the
+// login says to restart instead of failing later at the code.
+func (s *Store) RecordInteractionPassword(hash, browserHash, userID string, at time.Time) error {
+	now := time.Now().UTC()
+	res, err := s.db.Exec(`UPDATE authorization_interactions SET password_at=?, user_id=? WHERE hash=? AND browser_hash=? AND session_id='' AND expires_at>? AND (user_id='' OR user_id=?)
+ AND EXISTS(SELECT 1 FROM workstation_apps w WHERE w.client_id=authorization_interactions.client_id AND w.require_password)
+ AND (SELECT COUNT(*) FROM authorization_interactions o WHERE o.user_id=? AND o.hash<>? AND o.expires_at>?)<10`,
+		at, userID, hash, browserHash, now, userID, userID, hash, now)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 1 {
+		return err
+	}
+	var required bool
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM authorization_interactions i JOIN workstation_apps w ON w.client_id=i.client_id WHERE i.hash=? AND w.require_password)`, hash).Scan(&required); err != nil {
+		return err
+	}
+	if required {
+		return ErrAuthorizationInteraction
+	}
+	return nil
+}

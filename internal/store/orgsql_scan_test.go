@@ -221,7 +221,7 @@ var orgSQLAllowlist = map[string]string{
 	"Store.QueueDirectoryPassword":                  "platform: the AD connector (ad_connectors is platform) and its agent, over every org",
 	"Store.ReconcileDrift":                          "platform: the provisioning worker and its admin views (platform routes), over every org; their rows carry org_id",
 	"Store.RedeemAccountToken":                      "pre-org: an account token found by its hash names the user",
-	"Store.RedeemDeviceCode":                        "principal: keyed by the user a session, code, token or verified credential names (PR 4 names these checks credential_principals/active_principals)",
+	"startWorkstationSessionTx":                     "principal: keyed by the user a session, code, token or verified credential names (PR 4 names these checks credential_principals/active_principals)",
 	"Store.RejectSCIMCreate":                        "platform: the provisioning worker and its admin views (platform routes), over every org; their rows carry org_id",
 	"Store.ReleaseSyncEventLease":                   "platform: the provisioning worker and its admin views (platform routes), over every org; their rows carry org_id",
 	"Store.ReplaceUpstreamGroup":                    "connector: keyed by the inbound connector its token names, whose org owns the rows (inbound SCIM and HR are off in multi-tenant v1)",

@@ -39,9 +39,28 @@ type WorkstationApp struct {
 	DeviceGrantEnabled bool   `json:"deviceGrantEnabled"`
 	DeviceCodeTTL      int    `json:"deviceCodeTtl"`
 	OfflineWindow      int    `json:"offlineWindow"`
-	AppID              string `json:"appId"`
+	// RequirePassword refuses a sign-in for the app unless a password was typed in it.
+	RequirePassword bool `json:"requirePassword"`
+	// MacSignIn: the app's only redirect URI is XCredsRedirectURI.
+	MacSignIn bool   `json:"macSignIn"`
+	AppID     string `json:"appId"`
 	// Groups are the names of the directory groups assigned to the app.
 	Groups []string `json:"groups"`
+}
+
+// XCredsRedirectURI is the loopback redirect XCreds' web view intercepts; nothing listens there.
+const XCredsRedirectURI = "http://127.0.0.1/xcreds"
+
+const xcredsRedirectsJSON = `["` + XCredsRedirectURI + `"]`
+
+// WorkstationSettings are the admin-set values of a workstation app.
+type WorkstationSettings struct {
+	DeviceGrant   bool
+	DeviceCodeTTL int
+	OfflineWindow int
+	// RequireTypedSignIn is the require-password rule (named so for code scanning: a flag, not a secret).
+	RequireTypedSignIn bool
+	MacSignIn          bool
 }
 
 // ValidWorkstationSettings reports whether the admin-set values are in range.
@@ -68,6 +87,32 @@ func migrateWorkstationLoginPostgres(tx *sql.Tx) error {
 		return err
 	}
 	_, err := tx.Exec(workstationTablesSQL(`TIMESTAMPTZ`, `BIGINT`))
+	return err
+}
+
+// migrateWorkstationPassword adds the require-password rule and the interaction's
+// record of its password step (design: 2026-11-19-workstation-macos-design.md).
+func migrateWorkstationPassword(tx *sql.Tx) error {
+	for _, c := range []struct{ table, column, ddl string }{
+		{"workstation_apps", "require_password", `ALTER TABLE workstation_apps ADD COLUMN require_password BOOLEAN NOT NULL DEFAULT FALSE`},
+		{"authorization_interactions", "password_at", `ALTER TABLE authorization_interactions ADD COLUMN password_at DATETIME`},
+	} {
+		var n int
+		if err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name=?`, c.table, c.column).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := tx.Exec(c.ddl); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func migrateWorkstationPasswordPostgres(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE workstation_apps ADD COLUMN IF NOT EXISTS require_password BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE authorization_interactions ADD COLUMN IF NOT EXISTS password_at TIMESTAMPTZ`)
 	return err
 }
 
@@ -105,11 +150,11 @@ CREATE TABLE IF NOT EXISTS device_codes (
 CREATE INDEX IF NOT EXISTS idx_device_codes_client ON device_codes(client_id, status);`
 }
 
-const workstationAppSelect = `SELECT c.id,c.client_name,c.enabled,w.device_grant_enabled,w.device_code_ttl,w.offline_window,COALESCE(a.id,'') FROM workstation_apps w JOIN oauth_clients c ON c.id=w.client_id LEFT JOIN app_registry a ON a.client_id=c.id`
+const workstationAppSelect = `SELECT c.id,c.client_name,c.enabled,w.device_grant_enabled,w.device_code_ttl,w.offline_window,w.require_password,c.redirect_uris_json='` + xcredsRedirectsJSON + `',COALESCE(a.id,'') FROM workstation_apps w JOIN oauth_clients c ON c.id=w.client_id LEFT JOIN app_registry a ON a.client_id=c.id`
 
 func scanWorkstationApp(sc interface{ Scan(...any) error }) (*WorkstationApp, error) {
 	w := &WorkstationApp{Groups: []string{}}
-	err := sc.Scan(&w.ClientID, &w.ClientName, &w.Enabled, &w.DeviceGrantEnabled, &w.DeviceCodeTTL, &w.OfflineWindow, &w.AppID)
+	err := sc.Scan(&w.ClientID, &w.ClientName, &w.Enabled, &w.DeviceGrantEnabled, &w.DeviceCodeTTL, &w.OfflineWindow, &w.RequirePassword, &w.MacSignIn, &w.AppID)
 	return w, err
 }
 
@@ -186,18 +231,38 @@ func (s *Store) CreateWorkstationApp(c *OAuthClient, audit *AuditEvent) error {
 }
 
 // UpdateWorkstationApp changes the settings. A shorter offline window clamps the app's
-// live workstation sessions and refresh tokens now; 0 ends them.
-func (s *Store) UpdateWorkstationApp(clientID string, grant bool, ttl, window int, audit *AuditEvent) error {
+// live workstation sessions and refresh tokens now; 0 ends them. Mac sign-in sets the
+// client's redirect URIs to exactly the XCreds one, or none.
+func (s *Store) UpdateWorkstationApp(clientID string, set WorkstationSettings, audit *AuditEvent) error {
+	grant, ttl, window := set.DeviceGrant, set.DeviceCodeTTL, set.OfflineWindow
 	if !ValidWorkstationSettings(ttl, window) {
 		return InputError("device code lifetime or offline window out of range")
 	}
+	redirects := "[]"
+	if set.MacSignIn {
+		redirects = xcredsRedirectsJSON
+	}
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE workstation_apps SET device_grant_enabled=?, device_code_ttl=?, offline_window=? WHERE client_id=?`, grant, ttl, window, clientID)
+		var was bool
+		if err := tx.QueryRow(`SELECT require_password FROM workstation_apps WHERE client_id=?`, clientID).Scan(&was); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		res, err := tx.Exec(`UPDATE workstation_apps SET device_grant_enabled=?, device_code_ttl=?, offline_window=?, require_password=? WHERE client_id=?`, grant, ttl, window, set.RequireTypedSignIn, clientID)
 		if err != nil {
 			return err
 		}
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return ErrNotFound
+		}
+		if was != set.RequireTypedSignIn {
+			if err = invalidateAppGrantsTx(tx, clientID); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.Exec(`UPDATE oauth_clients SET redirect_uris_json=? WHERE id=?`, redirects, clientID); err != nil {
+			return err
 		}
 		now := time.Now().UTC()
 		if !grant {
@@ -221,6 +286,37 @@ func (s *Store) UpdateWorkstationApp(clientID string, grant bool, ttl, window in
 		_, err = tx.Exec(`UPDATE refresh_tokens SET expires_at=? WHERE expires_at>? AND family_jti IN (SELECT jti FROM issued_tokens WHERE session_id IN (`+live+`))`, end, end, clientID)
 		return err
 	})
+}
+
+// invalidateAppGrantsTx is a policy edit's revocation for a workstation app: a new policy
+// revision (which every code, approval and refresh family binds), and nothing issued or
+// approved under the old rule survives. It ends the client's access, so the client is told
+// to log out every login it saw. Changing it back revives nothing.
+func invalidateAppGrantsTx(tx *sql.Tx, clientID string) error {
+	now := time.Now().UTC()
+	for _, q := range []string{
+		`UPDATE app_registry SET auth_revision=auth_revision+1, revision=revision+1 WHERE client_id=?`,
+		`DELETE FROM authorization_interactions WHERE client_id=?`,
+		`DELETE FROM authorization_codes WHERE client_id=? AND used_at IS NULL`,
+		`UPDATE device_codes SET status='denied' WHERE client_id=? AND status='pending'`,
+	} {
+		if _, err := tx.Exec(q, clientID); err != nil {
+			return err
+		}
+	}
+	if err := revokeClientTokensTx(tx, clientID, now); err != nil {
+		return err
+	}
+	// Queued before the sid mapping goes, as every client-access revocation does; the
+	// workstation sessions below then find none of this client's left to queue twice.
+	if err := enqueueLogoutTx(tx, now, `cs.client_id=?`, clientID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM oidc_client_sessions WHERE client_id=?`, clientID); err != nil {
+		return err
+	}
+	_, err := revokeSessionsTx(tx, now, `workstation_client_id=?`, clientID)
+	return err
 }
 
 // DeviceCode is one RFC 8628 grant. Only hashes of the codes are stored.
@@ -360,8 +456,17 @@ func (s *Store) RedeemDeviceCode(d *DeviceCode, sess *Session, access *IssuedTok
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return ErrAppAccessDenied
 	}
-	res, err = tx.Exec(`INSERT INTO sessions (id,user_id,session_token_hash,ip_address,user_agent,expires_at,created_at,last_active_at,primary_authenticated_at,factor_authenticated_at,factor_method,workstation_client_id) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')`,
-		sess.ID, d.UserID, sess.SessionTokenHash, sess.IPAddress, sess.UserAgent, sess.ExpiresAt, now, now, d.PrimaryAuthenticatedAt, d.FactorAuthenticatedAt, d.FactorMethod, d.ClientID, d.UserID)
+	if err = startWorkstationSessionTx(tx, sess, d.UserID, d.ClientID, d.AuthenticationEvidence, d.Policy, access, family, refreshHash, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// startWorkstationSessionTx creates a workstation session for an active user and
+// registers its access token and, when family is set, the refresh family and first token.
+func startWorkstationSessionTx(tx *sql.Tx, sess *Session, userID, clientID string, ev AuthenticationEvidence, policy AppPolicyBinding, access *IssuedToken, family *RefreshFamily, refreshHash string, now time.Time) error {
+	res, err := tx.Exec(`INSERT INTO sessions (id,user_id,session_token_hash,ip_address,user_agent,expires_at,created_at,last_active_at,primary_authenticated_at,factor_authenticated_at,factor_method,workstation_client_id) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')`,
+		sess.ID, userID, sess.SessionTokenHash, sess.IPAddress, sess.UserAgent, sess.ExpiresAt, now, now, ev.PrimaryAuthenticatedAt, ev.FactorAuthenticatedAt, ev.FactorMethod, clientID, userID)
 	if err != nil {
 		return err
 	}
@@ -371,22 +476,48 @@ func (s *Store) RedeemDeviceCode(d *DeviceCode, sess *Session, access *IssuedTok
 	if _, err = tx.Exec(`UPDATE sessions SET enrollment_only=NOT (SELECT allowed FROM mfa_session_access WHERE id=?) WHERE id=?`, sess.ID, sess.ID); err != nil {
 		return err
 	}
-	access.SessionID, access.Policy = sess.ID, d.Policy
+	access.SessionID, access.Policy = sess.ID, policy
 	if err = recordIssuedTokenTx(tx, access); err != nil {
 		return err
 	}
-	if family != nil {
-		family.SessionID = sess.ID
-		if err = recordIssuedTokenTx(tx, &IssuedToken{JTI: family.JTI, UserID: family.UserID, ClientID: family.ClientID, SessionID: sess.ID, ExpiresAt: family.ExpiresAt, Policy: d.Policy}); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(`INSERT INTO refresh_families(jti,scope,primary_authenticated_at,factor_authenticated_at,factor_method,auth_app_id,auth_revision,role_revision,idle_seconds) VALUES(?,?,?,?,?,?,?,?,?)`,
-			family.JTI, family.Scope, family.PrimaryAuthenticatedAt, family.FactorAuthenticatedAt, family.FactorMethod, family.Policy.AppID, family.Policy.AuthRevision, family.Policy.RoleRevision, int64(family.Idle/time.Second)); err != nil {
-			return err
-		}
-		if err = insertRefreshTokenTx(tx, family, refreshHash, now); err != nil {
-			return err
-		}
+	if family == nil {
+		return nil
+	}
+	family.SessionID = sess.ID
+	if err = recordIssuedTokenTx(tx, &IssuedToken{JTI: family.JTI, UserID: family.UserID, ClientID: family.ClientID, SessionID: sess.ID, ExpiresAt: family.ExpiresAt, Policy: policy}); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`INSERT INTO refresh_families(jti,scope,primary_authenticated_at,factor_authenticated_at,factor_method,auth_app_id,auth_revision,role_revision,idle_seconds) VALUES(?,?,?,?,?,?,?,?,?)`,
+		family.JTI, family.Scope, family.PrimaryAuthenticatedAt, family.FactorAuthenticatedAt, family.FactorMethod, family.Policy.AppID, family.Policy.AuthRevision, family.Policy.RoleRevision, int64(family.Idle/time.Second)); err != nil {
+		return err
+	}
+	return insertRefreshTokenTx(tx, family, refreshHash, now)
+}
+
+// StartCodeWorkstationSession is the authorization-code counterpart of RedeemDeviceCode,
+// for a code ExchangeAuthorizationCode has just spent. The code's browser session must
+// still be live and its policy binding current.
+func (s *Store) StartCodeWorkstationSession(code *AuthorizationCode, sess *Session, access *IssuedToken, family *RefreshFamily, refreshHash string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	var ok bool
+	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM authorization_codes ac
+ JOIN app_registry policy ON policy.client_id=ac.client_id AND policy.id=ac.auth_app_id AND policy.auth_revision=ac.auth_policy_revision AND policy.role_revision=ac.role_revision
+ JOIN sessions b ON b.id=ac.session_id AND b.user_id=ac.user_id AND b.expires_at>? AND b.workstation_client_id IS NULL
+ WHERE ac.id=? AND ac.client_id=? AND ac.used_at IS NOT NULL AND ac.expires_at>? AND (ac.authentication_expires_at IS NULL OR ac.authentication_expires_at>=?))`,
+		now, code.ID, code.ClientID, now, now).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return ErrAppAccessDenied
+	}
+	policy := AppPolicyBinding{AppID: code.AuthenticationAppID, AuthRevision: code.AuthenticationPolicyRevision, RoleRevision: code.RoleRevision}
+	if err = startWorkstationSessionTx(tx, sess, code.UserID, code.ClientID, code.AuthenticationEvidence, policy, access, family, refreshHash, now); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

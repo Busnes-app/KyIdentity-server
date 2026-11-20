@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { himmelblauConf, unusableGroups } from './workstation';
+import { himmelblauConf, unusableGroups, xcredsProfile } from './workstation';
 
-const app = { clientId: 'c-1', clientName: 'Office\nPCs', appId: 'a', enabled: true, deviceGrantEnabled: true, deviceCodeTtl: 300, offlineWindow: 604800, groups: ['linux-users', 'ops:admins', 'eng'] };
+const app = { clientId: 'c-1', clientName: 'Office\nPCs', appId: 'a', enabled: true, deviceGrantEnabled: true, deviceCodeTtl: 300, offlineWindow: 604800, groups: ['linux-users', 'ops:admins', 'eng'], requirePassword: true, macSignIn: true };
 
 describe('himmelblauConf', () => {
   it('names the issuer, the client and only the usable groups', () => {
@@ -17,5 +17,27 @@ describe('himmelblauConf', () => {
   });
   it('flags names Himmelblau cannot match', () => {
     expect(unusableGroups(['a:b', 'a,b', ' a', 'ok'])).toEqual(['a:b', 'a,b', ' a']);
+  });
+});
+
+describe('xcredsProfile', () => {
+  const ids = { profile: 'A0000000-0000-4000-8000-000000000001', payload: 'A0000000-0000-4000-8000-000000000002' };
+  const profile = xcredsProfile('https://id.example.com:8443', { ...app, clientName: 'Macs & <iPads>' }, ids);
+  const value = (key: string) => profile.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`))?.[1];
+  it('sets the XCreds keys for KyIdentity', () => {
+    expect(value('discoveryURL')).toBe('https://id.example.com:8443/.well-known/openid-configuration');
+    expect(value('clientID')).toBe('c-1');
+    expect(value('redirectURI')).toBe('http://127.0.0.1/xcreds');
+    expect(value('scopes')).toBe('openid profile email offline_access');
+    expect(value('passwordElementID')).toBe('password');
+    expect(value('idpHostName')).toBe('id.example.com');
+    expect(value('map_username')).toBe('preferred_username');
+    expect(value('PayloadType')).toBe('com.twocanoes.xcreds');
+  });
+  it('has no secret or password grant and escapes the name', () => {
+    expect(profile).not.toMatch(/clientSecret|ROPG/);
+    expect(profile).toContain('KyIdentity sign-in: Macs &amp; &lt;iPads&gt;');
+    expect(profile).toContain(ids.profile);
+    expect(profile).toContain(ids.payload);
   });
 });

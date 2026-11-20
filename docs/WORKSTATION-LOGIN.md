@@ -1,4 +1,8 @@
-# Workstation login (Linux desktops)
+# Workstation login (Linux desktops and Macs)
+
+Linux desktops use Himmelblau and the device grant (below). Macs use XCreds and the sign-in
+page ([Macs](#macs-xcreds)). Both use the same workstation app, sessions and offline window.
+[Screen lock](#screen-lock-every-os) applies to every OS.
 
 People sign in to Linux desktops with their KyIdentity account through
 [Himmelblau](https://github.com/himmelblau-idm/himmelblau)'s generic OIDC mode. The desktop
@@ -7,6 +11,7 @@ in as usual (password, MFA, push or passkey), checks what is asking, and approve
 desktop then signs in and, by default, sets up a Hello PIN for later sign-ins.
 
 Design and the Himmelblau source review: `docs/superpowers/specs/2026-11-19-workstation-login-design.md`.
+Macs: `docs/superpowers/specs/2026-11-19-workstation-macos-design.md`.
 
 ## Set up
 
@@ -18,8 +23,14 @@ Design and the Himmelblau source review: `docs/superpowers/specs/2026-11-19-work
    `pam_allow_groups`, so a desktop also refuses everyone else.
 3. **Edit settings.** Turn on **Allow device sign-in**. Choose the code lifetime (2-15 minutes,
    default 5) and the offline window (0-30 days, default 7).
-4. **On each desktop**, install Himmelblau 4.0 or later (`himmelblau`, `nss-himmelblau`,
-   `pam-himmelblau`) and copy the generated file to `/etc/himmelblau/himmelblau.conf`:
+4. **On each desktop**, install Himmelblau 5.0 or a nightly build (`himmelblau`,
+   `nss-himmelblau`, `pam-himmelblau`). Stable 4.0.x, through 4.0.9, lacks the fix
+   [#1886](https://github.com/himmelblau-idm/himmelblau/pull/1886) for
+   [#1874](https://github.com/himmelblau-idm/himmelblau/issues/1874): a PIN sign-in after a
+   background refresh presents the spent sealed token, and KyIdentity's reuse detection
+   then ends the session. #1886 is on `main` only.
+
+   Copy the generated file to `/etc/himmelblau/himmelblau.conf`:
 
    ```ini
    [global]
@@ -118,8 +129,105 @@ person must approve a new code. Nothing is exposed; the cost is a device-code si
 a restart that follows a background refresh.
 
 Fixing it needs a Himmelblau change: re-seal the refresh token after a background refresh
-(or persist the latest copy). KyIdentity keeps strict reuse detection; a grace period for
+(or persist the latest copy). Reported upstream as
+[himmelblau#2041](https://github.com/himmelblau-idm/himmelblau/issues/2041) (open). KyIdentity keeps strict reuse detection; a grace period for
 the previous token would weaken replay detection for every workstation.
+
+## Macs (XCreds)
+
+[XCreds](https://github.com/twocanoes/xcreds) (5.9 or later) replaces the Mac login window
+with the KyIdentity sign-in page. The person signs in with their password (and MFA, if
+they have it). XCreds creates or updates the local Mac account and sets its password to
+the one just typed, so the Mac also signs in offline with that password.
+
+1. **App connections → Workstation login.** Use a separate app for Macs, so the Linux app
+   keeps its device sign-in. **Manage access**: assign the groups that may sign in to Macs.
+2. **Edit settings.** Turn on **Allow Mac sign-in (XCreds)**. This registers the redirect
+   `http://127.0.0.1/xcreds` (XCreds intercepts it; nothing listens there). Turn on
+   **Require a password at sign-in**.
+3. **Copy the XCreds profile** shown under Macs and install it on each Mac with your MDM, or
+   by opening it in System Settings → Privacy & Security → Profiles. It sets:
+
+   | Key | Value | Why |
+   |---|---|---|
+   | `discoveryURL` | `<issuer>/.well-known/openid-configuration` | |
+   | `clientID` | the app's client ID | public client: no `clientSecret` |
+   | `redirectURI` | `http://127.0.0.1/xcreds` | |
+   | `scopes` | `openid profile email offline_access` | a refresh token keeps the Mac's check going |
+   | `idpHostName` | the issuer's host name | XCreds reads the typed password only on this host |
+   | `passwordElementID` | `password` | the password field of the sign-in page |
+   | `map_username` | `preferred_username` | the Mac account is named after the KyIdentity username |
+
+   Leave every ROPG (`shouldUseROPG…`) key off: KyIdentity has no password grant.
+4. **Install XCreds** (the signed release `.pkg` from its GitHub releases; check it with
+   `pkgutil --check-signature`). The Mac must trust KyIdentity's TLS certificate.
+
+**Why require a password.** XCreds takes the Mac password from the password field of our
+sign-in page. With the rule on, every sign-in to the app types a password in that
+authorization, even in a web view that is already signed in; MFA after the password still
+works. A sign-in that types none (a passkey-only or push-only sign-in, an existing session,
+KyAuth phone sign-on) is refused, so XCreds never ends up with no password to set. The rule
+also refuses device-code approvals for that app, which is why Linux desktops need their own
+app. Turning the rule on or off ends the app's open sessions and withdraws sign-ins in
+progress, as any change to an app's sign-in policy does; everyone signs in again.
+
+**Sessions.** A Mac sign-in creates a workstation session, as a device code does, with a
+refresh token that rotates on each use and slides by the offline window. Everything in
+[Sessions, refresh and the offline window](#sessions-refresh-and-the-offline-window)
+applies. XCreds re-checks with the refresh token every 3 hours by default (`refreshRateHours`, read
+from the 5.9 package's defaults). What it shows when KyIdentity refuses the refresh is not
+yet observed. Turning Mac sign-in off stops new sign-ins; open
+sessions keep refreshing until revoked.
+
+**Offline.** XCreds signs in with the local password when it cannot reach KyIdentity. A
+disabled person's Mac account keeps working offline, and their password stays in it, until
+the Mac next reaches KyIdentity and the refresh fails. Remove the local account through
+your MDM when someone leaves.
+
+**Break-glass.** Keep one local administrator account with a password on every Mac.
+XCreds shows a button for the standard Mac login window (`shouldShowMacLoginButton`, on by
+default). XCreds' log: `sudo log show --last 30m --predicate '(message contains "XCREDS" or
+message contains "OIDCLITE")'`.
+
+Tested: `TestXCredsFlow` runs XCreds' exact flow against the server (code with PKCE S256, a
+72-character verifier of two UUIDs, the loopback redirect, the exchange with `client_id` in
+the body and no secret, then refresh). A live test of the XCreds login window against
+KyIdentity has not been run yet. It is prepared on a VM (XCreds 5.9 installed and active at
+the login window). macOS 26 needs a click to trust a CA and to install a profile, so those
+steps are left for a person.
+
+## Screen lock (every OS)
+
+Owner, 2026-11-19: "Users should be logging in every time they sit at their desk." Set
+every PC to lock after a short idle time (5 minutes or less) and to require a sign-in to
+unlock.
+
+| OS | Setting |
+|---|---|
+| Linux (GNOME) | Settings → Privacy & Security → Screen Lock: **Automatic Screen Lock** on, **Blank Screen Delay** 5 minutes, **Automatic Screen Lock Delay** "Screen Turns Off". Fleet-wide: dconf `org.gnome.desktop.session idle-delay=uint32 300`, `org.gnome.desktop.screensaver lock-enabled=true`, `lock-delay=uint32 0`, locked with a dconf lock file. |
+| macOS | System Settings → Lock Screen: **Start Screen Saver when inactive** 5 minutes or less, **Require password after screen saver begins or display is turned off** Immediately. MDM: the `com.apple.screensaver` payload (`idleTime` 300, `askForPassword` true, `askForPasswordDelay` 0). |
+| Windows | GPO Computer Configuration → Windows Settings → Security Settings → Local Policies → Security Options: **Interactive logon: Machine inactivity limit** 300 seconds. To make an unlock check the DC whenever one is reachable: **Interactive logon: Require Domain Controller authentication to unlock workstation** Enabled. |
+
+What an unlock checks:
+
+- **Linux (Himmelblau), online:** every unlock is a PIN sign-in through PAM, and every online
+  PIN sign-in redeems the refresh token at KyIdentity (measured above: one refresh per
+  sign-in). A disabled or revoked person is refused at their next unlock.
+- **Mac (XCreds):** the unlock checks the local password, which macOS holds. It does not ask
+  KyIdentity. XCreds' background refresh is what notices a revocation.
+- **Windows:** the unlock checks the AD password. With the DC policy above it asks the DC
+  whenever one is reachable, so an account the connector disabled in AD is refused there.
+
+**The offline window slides and has no absolute cap, on purpose** (owner decision). A PC that
+reaches KyIdentity at least once a window keeps its session, and every refresh re-checks
+the account, its access to the app, the app's sign-in policy and the session itself, so
+a long-lived session is checked again and again, not trusted once.
+
+What an offline PC can still do: unlock and sign in with what it has cached (the Hello PIN on
+Linux, the local password on a Mac, cached domain credentials on Windows), for as long as it
+stays offline. It cannot get new tokens. The first unlock or sign-in after it reaches
+KyIdentity again is refused if the person was disabled, deprovisioned, unassigned or had
+their sessions revoked in the meantime.
 
 ## Endpoints
 
@@ -128,9 +236,12 @@ the previous token would weaken replay detection for every workstation.
 | `POST /oauth/device_authorization` | the desktop (`client_id` of a workstation app; no secret) |
 | `POST /oauth/token`, `grant_type=urn:ietf:params:oauth:grant-type:device_code` | the desktop |
 | `POST /oauth/token`, `grant_type=refresh_token` | the desktop (workstation apps are the only public clients that may refresh) |
+| `GET /oauth/authorize`, `POST /oauth/token` `grant_type=authorization_code` | the Mac (XCreds; PKCE S256, `client_id` in the body, no secret) |
 | `GET /device`, `POST /api/device/lookup`, `POST /api/device/decision` | the signed-in person |
 | `GET/POST /api/admin/workstation-apps`, `PUT /api/admin/workstation-apps/{id}` | administrators (changes need step-up) |
 
 Audit actions: `device_grant.issued`, `.code_rejected`, `.approved`, `.denied`,
-`.redeemed`, `.replayed`, `admin.workstation_app_created`, `admin.workstation_app_updated`.
+`.redeemed`, `.replayed`, `admin.workstation_app_created`, `admin.workstation_app_updated`
+(which records the Mac sign-in and require-password switches). Mac sign-ins are the usual
+`oauth.authorize`, `oauth.token_exchange` and `oauth.token_refresh`.
 No code, token or address is written to the audit details.
