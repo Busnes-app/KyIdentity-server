@@ -29,7 +29,7 @@ The harness is lab-only, and it must not weaken the shared host or leak anything
   reads back: files the VM writes to the shared folder, and QEMU screendumps the host takes
   itself.
 - **The command channel** is a SYSTEM scheduled task that runs `.ps1` files the host drops
-  in the shared folder. That share is the container's own Samba on the container-internal
+  in the shared folder (reached by address, so Windows uses NTLM to the guest share). That share is the container's own Samba on the container-internal
   bridge, reachable only from the VM; anything in the VM could write to it, which is local
   privilege escalation inside a throwaway lab VM. Accepted; documented. No WinRM listener is
   opened, so the VM exposes no remote-management port at all.
@@ -77,23 +77,43 @@ No new KyIdentity route. Listeners the run opens:
 
 KyIdentity and the agent are driven from `TestWin11DomainEndToEnd` (skipped unless the
 script runs it), which calls back into the script's `win_*` helpers, the same pattern as
-`TestSambaADEndToEnd`'s `dc` helper. Evidence is the session file a logon task writes from
-the user's own session (`whoami /upn`, `klist`, the policy value), Security-log 4625 status
-codes for refusals, and screendumps.
+`TestSambaADEndToEnd`'s `dc` helper. Whether a logon happened is decided only from SYSTEM's
+view after the reboot: Security-log 4624 (logon type 2 online, 11 cached credentials), 4625
+with its substatus, and `query user`. The user's own session adds a report (`whoami /upn`,
+`klist`, the policy value), written locally and relayed by the poller, because a disabled or
+offline user may not reach the share and `whoami /upn` blocks while the DC is unreachable.
+Screendumps are evidence for a reader, not for the assertions.
 
 1. Join: `Add-Computer` as the domain administrator, reboot, then `Test-ComputerSecureChannel`.
 2. Interactive logon: AutoAdminLogon once as `KYWS\winuser` with the password the user set
-   in KyIdentity; the session file must show the UPN and a `krbtgt/KYWS.TEST` ticket.
+   in KyIdentity; an online (type 2) logon, and the session reports the UPN and a
+   `krbtgt/KYWS.TEST` ticket.
 3. Password change in KyIdentity, agent delivery: autologon with the old password is refused
-   (4625, `0xC000006A`), the new one logs on.
-4. Disable in KyIdentity, sync: autologon is refused (4625, `0xC0000072`).
-5. Cached logon: the DC is paused (`docker pause`), then the same user logs on again.
-   Measured both for an active user and for a user disabled in KyIdentity after their last
-   online logon (the gap a fleet admin needs to know about).
-6. GPO: `samba-tool gpo create`/`load`/`setlink` with `DisableChangePassword=1` (user
-   policy, linked at the domain root); after `gpupdate` and a logon, the policy value is in
-   the user's hive and the Ctrl-Alt-Del screen has no "Change a password". Screenshots of
-   that screen before and after.
+   (4625, `0xC000006A`), the new one logs on online.
+4. Disable in KyIdentity, sync. Measured under Windows' default policy, then asserted under
+   the baseline GPO: refused (4625, `0xC0000072`) with no logon at all, cached or not.
+5. Cached logon, measured: the DC is made unreachable from the PC (a DROP rule in the VM
+   container, which routes the VM), then the user logs on again; once for an active user and
+   once for a user disabled in KyIdentity after their last online logon.
+6. Baseline GPO (`samba-tool gpo create`/`load`/`setlink`, linked at the domain root):
+   Remove Change Password (user) and Always wait for the network at computer startup and
+   logon (computer). After `gpupdate` and a logon the user hive holds
+   `DisableChangePassword=1`; screenshots of Ctrl-Alt-Del before and after.
+
+### Found while building it
+
+- Under Windows' default policy a user disabled in AD, with the DC **reachable**, still got a
+  desktop at boot from cached credentials (4624 type 11); the background check failed with
+  `0xC0000072` and the session stayed. Seen on every try (three). "Always wait for the network
+  at computer startup and logon" makes Windows check the DC first, and the logon is refused.
+  It joins the documented baseline.
+- `docker pause` is no way to take a DC down: the frozen container's kernel still completes
+  TCP handshakes, so Windows hangs instead of failing over. The DROP rule behaves like a DC
+  that is off or a laptop off site.
+- By name, SYSTEM's SMB client tried Kerberos for `cifs/host.lan` and its share writes
+  blocked while the DC was unreachable; the poller reaches the share by address (NTLM).
+- The host writes into the share behind Samba, so no lease break refreshes Windows' cached
+  directory listing; the VM setup turns the SMB client's caches off.
 
 ## Defaults
 
