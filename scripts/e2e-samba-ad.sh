@@ -6,15 +6,17 @@
 # Source for helpers only:
 #   E2E_SOURCE_ONLY=1 source scripts/e2e-samba-ad.sh; dc_up; ...; dc_down
 #
-# Every docker object is named kyws-windows-*; nothing else is touched.
+# Every docker object is named $E2E_DC_PREFIX-* (default kyws-windows-*); nothing else is touched.
 # See scripts/e2e-samba-ad/NOTES.md for the password-policy findings.
 # Container-side `sh -c '...'` snippets expand their own positional args.
 # shellcheck disable=SC2016
 set -euo pipefail
 
-E2E_DC_IMAGE=kyws-windows-samba-dc:local
-E2E_DC_CONTAINER=kyws-windows-dc
-E2E_DC_NETWORK=kyws-windows-net
+# E2E_DC_PREFIX names every docker object; scripts/e2e-win11-domain.sh sets kyws-win11.
+E2E_DC_PREFIX=${E2E_DC_PREFIX:-kyws-windows}
+E2E_DC_IMAGE=$E2E_DC_PREFIX-samba-dc:local
+E2E_DC_CONTAINER=$E2E_DC_PREFIX-dc
+E2E_DC_NETWORK=$E2E_DC_PREFIX-net
 E2E_DC_REALM=KYWS.TEST
 E2E_DC_DOMAIN=KYWS
 E2E_DC_HOSTNAME=dc.kyws.test
@@ -26,7 +28,7 @@ E2E_DC_SYNC_DN="CN=kyidentity-sync,CN=Users,${E2E_DC_BASE_DN}"
 E2E_DC_AGENT_DN="CN=kyidentity-agent,CN=Users,${E2E_DC_BASE_DN}"
 E2E_DC_OUTSIDER_DN="CN=outsider,${E2E_DC_OUTSIDE_OU}"
 E2E_DC_SQUATTER_DN="CN=squatter,${E2E_DC_OU}"
-export E2E_DC_IMAGE E2E_DC_CONTAINER E2E_DC_NETWORK E2E_DC_REALM E2E_DC_DOMAIN \
+export E2E_DC_PREFIX E2E_DC_IMAGE E2E_DC_CONTAINER E2E_DC_NETWORK E2E_DC_REALM E2E_DC_DOMAIN \
 	E2E_DC_HOSTNAME E2E_DC_BASE_DN E2E_DC_OU E2E_DC_OUTSIDE_OU E2E_DC_ADMIN_DN \
 	E2E_DC_SYNC_DN E2E_DC_AGENT_DN E2E_DC_OUTSIDER_DN E2E_DC_SQUATTER_DN
 
@@ -289,7 +291,7 @@ dc_up() {
 	echo "$E2E_DC_LDAPS_URL"
 }
 
-# Removes the kyws-windows-* container and network and the work dir.
+# Removes the $E2E_DC_PREFIX-* container and network and the work dir.
 dc_down() {
 	_dc_remove_objects
 	if [[ -n ${E2E_DC_WORKDIR:-} && -d $E2E_DC_WORKDIR && $E2E_DC_WORKDIR == */kyws-windows-dc.* ]]; then

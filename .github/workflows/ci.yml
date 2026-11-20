@@ -213,7 +213,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: shellcheck -x scripts/e2e-samba-ad.sh scripts/e2e-samba-ad-kyidentity.sh
+      # e2e-win11-domain.sh is a manual release check (docs/ACTIVE-DIRECTORY.md); CI only lints it.
+      - run: shellcheck -x scripts/e2e-samba-ad.sh scripts/e2e-samba-ad-kyidentity.sh scripts/e2e-win11-domain.sh
       - run: scripts/e2e-samba-ad-kyidentity.sh
 
   docker:
