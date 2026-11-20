@@ -1,0 +1,2 @@
+{"alg":"RS256","kid":"*","typ":"JWT"}
+{"acr":"urn:kysignon:acr:password","amr":["pwd"],"aud":"golden-app","auth_time":"*","email":"golden@example.com","email_verified":false,"exp":"*","iat":"*","iss":"http://localhost:5867","jti":"*","name":"Golden","preferred_username":"golden","roles":[],"sid":"*","sub":"golden-user","token_use":"id_token","username":"golden"}

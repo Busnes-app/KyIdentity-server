@@ -1,0 +1,1 @@
+{"people":[{"sub":"st-me","name":"Al Me","email":"st-me@example.test"},{"sub":"st-other","name":"Al Other","email":"st-other@example.test"}]}
