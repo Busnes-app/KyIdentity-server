@@ -23,8 +23,12 @@ Macs: `docs/superpowers/specs/2026-11-19-workstation-macos-design.md`.
    `pam_allow_groups`, so a desktop also refuses everyone else.
 3. **Edit settings.** Turn on **Allow device sign-in**. Choose the code lifetime (2-15 minutes,
    default 5) and the offline window (0-30 days, default 7).
-4. **On each desktop**, install Himmelblau 4.0 or later (`himmelblau`, `nss-himmelblau`,
-   `pam-himmelblau`) and copy the generated file to `/etc/himmelblau/himmelblau.conf`:
+4. **On each desktop**, install Himmelblau 5.0 or a nightly build (`himmelblau`,
+   `nss-himmelblau`, `pam-himmelblau`). Stable 4.0.x, through 4.0.9, lacks the fix
+   [#1886](https://github.com/himmelblau-idm/himmelblau/pull/1886) for
+   [#1874](https://github.com/himmelblau-idm/himmelblau/issues/1874): a PIN sign-in after a
+   background refresh presents the spent sealed token, and KyIdentity's reuse detection
+   then ends the session. #1886 is on `main` only. and copy the generated file to `/etc/himmelblau/himmelblau.conf`:
 
    ```ini
    [global]
@@ -123,7 +127,8 @@ person must approve a new code. Nothing is exposed; the cost is a device-code si
 a restart that follows a background refresh.
 
 Fixing it needs a Himmelblau change: re-seal the refresh token after a background refresh
-(or persist the latest copy). KyIdentity keeps strict reuse detection; a grace period for
+(or persist the latest copy). Reported upstream as
+[himmelblau#2041](https://github.com/himmelblau-idm/himmelblau/issues/2041) (open). KyIdentity keeps strict reuse detection; a grace period for
 the previous token would weaken replay detection for every workstation.
 
 ## Macs (XCreds)
