@@ -125,12 +125,16 @@ func (s *Store) CreateUpstreamGroup(g *Group, members []string, audit *AuditEven
 		if err := membersOwnedTx(tx, g.SourceConnectorID, members); err != nil {
 			return err
 		}
+		org, err := connectorOrgTx(tx, g.SourceConnectorID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`INSERT INTO directory_groups(id,name,description,source_connector_id,external_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`,
 			g.ID, g.Name, g.Description, g.SourceConnectorID, nullIfEmpty(g.ExternalID), now, now); err != nil {
 			return groupWriteError(err)
 		}
 		for _, uid := range members {
-			if _, _, err := applyGroupMembershipTx(tx, g.ID, uid, true, nil, ""); err != nil {
+			if _, _, err := applyGroupMembershipTx(tx, org, g.ID, uid, true, nil, ""); err != nil {
 				return err
 			}
 		}
@@ -311,6 +315,10 @@ func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, 
 		if err := membersOwnedTx(tx, connectorID, added); err != nil {
 			return err
 		}
+		org, err := connectorOrgTx(tx, connectorID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`UPDATE directory_groups SET name=?, external_id=?, updated_at=? WHERE id=?`, g.Name, nullIfEmpty(g.ExternalID), now, g.ID); err != nil {
 			return groupWriteError(err)
 		}
@@ -321,7 +329,7 @@ func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, 
 		changed := false
 		for _, uid := range have {
 			if !want[uid] {
-				if _, _, err := applyGroupMembershipTx(tx, g.ID, uid, false, nil, ""); err != nil {
+				if _, _, err := applyGroupMembershipTx(tx, org, g.ID, uid, false, nil, ""); err != nil {
 					return err
 				}
 				changed = true
@@ -329,7 +337,7 @@ func (s *Store) ReplaceUpstreamGroup(connectorID, id string, audit *AuditEvent, 
 			delete(want, uid)
 		}
 		for uid := range want {
-			if _, _, err := applyGroupMembershipTx(tx, g.ID, uid, true, nil, ""); err != nil {
+			if _, _, err := applyGroupMembershipTx(tx, org, g.ID, uid, true, nil, ""); err != nil {
 				return err
 			}
 			changed = true
@@ -361,7 +369,11 @@ func (s *Store) DeleteUpstreamGroup(connectorID, id string, expect *time.Time, a
 		if expect != nil && !updated.Equal(*expect) {
 			return ErrGroupVersionStale
 		}
-		name, err := deleteGroupTx(tx, id, "")
+		org, err := connectorOrgTx(tx, connectorID)
+		if err != nil {
+			return err
+		}
+		name, err := deleteGroupTx(tx, org, id, "")
 		if err != nil {
 			return err
 		}

@@ -19,7 +19,7 @@ func (s *Store) CreateAccountSyncEvent(event *AccountSyncEvent) error {
 // password, pending, role, status, override, end date) through updateUser, the transaction
 // EditUser uses, and copies the stored row back into u.
 func (s *Store) UpdateUserWithSyncEvents(u *User, revokeAccess bool, audit *AuditEvent) error {
-	stored, err := s.updateUser(u.ID, audit, func(_ *sql.Tx, next *User) (bool, error) {
+	stored, err := s.DefaultOrg().updateUser(u.ID, audit, func(_ *sql.Tx, next *User) (bool, error) {
 		if next.SourceConnectorID == "" {
 			next.Username, next.DisplayName, next.Email = u.Username, u.DisplayName, u.Email
 		}

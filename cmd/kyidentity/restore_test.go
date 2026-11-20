@@ -21,7 +21,7 @@ func restoredDataDir(t *testing.T) (string, *store.Store) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	u := &store.User{ID: "u1", Username: "root", DisplayName: "Root", Email: "root@test.invalid", PasswordHash: "x", Role: "admin", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateSession(&store.Session{ID: "s1", UserID: u.ID, SessionTokenHash: "token-from-the-capsule", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {

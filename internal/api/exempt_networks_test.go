@@ -314,7 +314,7 @@ func TestExemptNetworksAreAdminOnly(t *testing.T) {
 	exp := time.Now().UTC().Add(time.Hour)
 	user := newSession(t, db, newUser(t, db, "user"), exp)
 	auditor := newUser(t, db, "user")
-	if err := db.SetDelegations(auditor.ID, store.Delegations{Auditor: true, Helpdesk: true}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(auditor.ID, store.Delegations{Auditor: true, Helpdesk: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	delegated := newSession(t, db, auditor, exp)

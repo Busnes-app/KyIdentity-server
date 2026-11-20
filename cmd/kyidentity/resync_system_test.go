@@ -43,7 +43,7 @@ func TestResyncSystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := &store.User{ID: uuid.NewString(), Username: "leaver", DisplayName: "Leaver", Email: "leaver@example.test", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	deliver := func() {

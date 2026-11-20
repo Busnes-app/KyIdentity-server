@@ -65,7 +65,7 @@ func TestConcurrentFirstStartsCreateOneAdministrator(t *testing.T) {
 					t.Fatalf("start %d failed: %v", i, err)
 				}
 			}
-			if n, err := stores[0].CountAdmins(); err != nil || n != 1 {
+			if n, err := stores[0].Platform().CountAdmins(); err != nil || n != 1 {
 				t.Fatalf("administrators = %d (%v), want 1", n, err)
 			}
 			password := configured
@@ -95,7 +95,7 @@ func TestReplicaRefusesToGenerateTheFirstPassword(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "BOOTSTRAP_ADMIN_PASS") {
 		t.Fatalf("err = %v", err)
 	}
-	if n, _ := db.CountAdmins(); n != 0 {
+	if n, _ := db.Platform().CountAdmins(); n != 0 {
 		t.Fatal("an administrator was created anyway")
 	}
 	if left, _ := os.ReadDir(dir); len(left) != 0 {

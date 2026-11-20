@@ -263,7 +263,7 @@ func TestProofAccountTokenIsRedeemedOnce(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := &User{ID: uuid.NewString(), Username: "invited", DisplayName: "invited", Email: "invited@example.test", Role: "user", Status: "disabled", Pending: true}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	link, err := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
@@ -318,7 +318,7 @@ func TestProofNamesCollideOnASCIICaseOnly(t *testing.T) {
 	stores := replicasOf(t, s, proofHandles)
 	user := func(name, email string) func(int, *Store) once {
 		return func(_ int, s *Store) once {
-			err := s.CreateUser(&User{ID: uuid.NewString(), Username: name, DisplayName: name, Email: email, PasswordHash: "x", Role: "user", Status: "active"})
+			err := s.DefaultOrg().CreateUser(&User{ID: uuid.NewString(), Username: name, DisplayName: name, Email: email, PasswordHash: "x", Role: "user", Status: "active"})
 			return once{ok: err == nil}
 		}
 	}
@@ -339,7 +339,7 @@ func TestProofNamesCollideOnASCIICaseOnly(t *testing.T) {
 		}
 	}
 	group := func(s *Store, name string) once {
-		err := s.CreateGroup(&Group{ID: uuid.NewString(), Name: name}, nil)
+		err := s.DefaultOrg().CreateGroup(&Group{ID: uuid.NewString(), Name: name}, nil)
 		return once{ok: err == nil}
 	}
 	groups := []string{"Staff", "STAFF", "staff"}
@@ -358,14 +358,14 @@ func TestProofLastAdministratorSurvivesConcurrentRemovals(t *testing.T) {
 		var admins []*User
 		for i := range 4 {
 			u := createTestUserNamed(t, s, fmt.Sprintf("admin-%d-%d", round, i))
-			if _, err := s.EditUser(u.ID, nil, func(u *User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
+			if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(u *User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
 				t.Fatal(err)
 			}
 			admins = append(admins, u)
 		}
 		// Demote or delete every administrator of earlier rounds first, so these four are all there are.
 		for _, row := range rows(t, s, `SELECT id FROM users WHERE role='admin' AND username NOT LIKE ?`, fmt.Sprintf("admin-%d-%%", round)) {
-			if err := s.DeleteUserWithSyncEvents(row, nil); err != nil {
+			if err := s.DefaultOrg().DeleteUserWithSyncEvents(row, nil); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -373,9 +373,9 @@ func TestProofLastAdministratorSurvivesConcurrentRemovals(t *testing.T) {
 		race(stores, 1, func(i int, s *Store) error {
 			var err error
 			if i%2 == 0 {
-				err = s.DeleteUserWithSyncEvents(admins[i].ID, nil)
+				err = s.DefaultOrg().DeleteUserWithSyncEvents(admins[i].ID, nil)
 			} else {
-				_, err = s.EditUser(admins[i].ID, nil, func(u *User) (bool, error) { u.Role = "user"; return false, nil })
+				_, err = s.DefaultOrg().EditUser(admins[i].ID, nil, func(u *User) (bool, error) { u.Role = "user"; return false, nil })
 			}
 			if errors.Is(err, ErrLastActiveAdmin) {
 				refused.Add(1)

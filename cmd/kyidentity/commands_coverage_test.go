@@ -708,7 +708,7 @@ func TestDisableUserReportsAnUnreadableFirstRunPassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"bootstrap", "owner", "third"} {
-		if err := s.CreateUser(&store.User{ID: name, Username: name, DisplayName: name, Email: name + "@example.test", PasswordHash: "x", Role: "admin", Status: "active"}); err != nil {
+		if err := s.DefaultOrg().CreateUser(&store.User{ID: name, Username: name, DisplayName: name, Email: name + "@example.test", PasswordHash: "x", Role: "admin", Status: "active"}); err != nil {
 			t.Fatal(err)
 		}
 	}

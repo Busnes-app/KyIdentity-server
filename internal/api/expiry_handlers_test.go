@@ -22,7 +22,7 @@ func TestExpiringAccessAdminAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	apps, _, _ := db.ListAppRecords("app-a", 1, 0)
-	if err := db.CreateGroup(&store.Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+	if err := db.DefaultOrg().CreateGroup(&store.Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	future := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
@@ -96,14 +96,14 @@ func TestExpiringAccessAdminAPI(t *testing.T) {
 		t.Fatalf("near end date: %d %s", res.Code, res.Body.String())
 	}
 	time.Sleep(time.Until(soon) + 1500*time.Millisecond)
-	ended, _ := db.GetUserByID(u.ID)
+	ended, _ := db.DefaultOrg().GetUserByID(u.ID)
 	if ended.Status != "disabled" {
 		t.Fatalf("account past its end still reads %s", ended.Status)
 	}
 	if res := adminRequest(t, srv, "PUT", userPath, admin, `{"displayName":"Ended","email":"`+u.Email+`","role":"user","status":"disabled","endsAt":"`+stored+`"}`); res.Code != http.StatusOK {
 		t.Fatalf("editing an ended account with its stored instant: %d %s", res.Code, res.Body.String())
 	}
-	if after, _ := db.GetUserByID(u.ID); after.DisplayName != "Ended" || after.EndsAt == nil || !after.EndsAt.Equal(*ended.EndsAt) {
+	if after, _ := db.DefaultOrg().GetUserByID(u.ID); after.DisplayName != "Ended" || after.EndsAt == nil || !after.EndsAt.Equal(*ended.EndsAt) {
 		t.Fatalf("edit changed the stored instant: %+v", after)
 	}
 	if res := adminRequest(t, srv, "PUT", userPath, admin, `{"displayName":"Ended","email":"`+u.Email+`","role":"user","status":"disabled","endsAt":"`+past+`"}`); res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "expiry_in_past") {

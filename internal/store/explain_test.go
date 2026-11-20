@@ -36,13 +36,13 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 	if len(e.Grants) != 1 || e.Grants[0].Kind != "direct" || !e.Grants[0].Live || e.Grants[0].ExpiresAt == nil || e.AccessEndsAt == nil || !e.AccessEndsAt.Equal(*until) {
 		t.Fatalf("direct explanation = %+v", e)
 	}
-	if err := s.CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("staff", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("staff", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, _ := s.CreateAppRole(a.ID, "operator", "", nil)
@@ -50,10 +50,10 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A role mapped through a group that is not assigned to the app names no group.
-	if err := s.CreateGroup(&Group{ID: "hidden", Name: "Hidden Project"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "hidden", Name: "Hidden Project"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("hidden", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("hidden", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "hidden", true, nil); err != nil {
@@ -69,7 +69,7 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "hidden", false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("hidden", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("hidden", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The direct grant expires: the group still carries access and the lapsed grant is shown as such.
@@ -81,7 +81,7 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 		t.Fatalf("liveness = %+v", e.Grants)
 	}
 	// Every grant expired: denied, and the reason says so rather than "not assigned".
-	if err := s.SetGroupMembership("staff", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("staff", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	e = check("expired only", false, "grants_expired")
@@ -93,7 +93,7 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("re-granted", true, "direct_assignment")
-	disabled, _ := s.GetUserByID(u.ID)
+	disabled, _ := s.DefaultOrg().GetUserByID(u.ID)
 	disabled.Status = "disabled"
 	if err := s.UpdateUserWithSyncEvents(disabled, true, nil); err != nil {
 		t.Fatal(err)

@@ -151,17 +151,17 @@ func (h *AccessRequestHandler) Decide(approve bool) http.HandlerFunc {
 			return
 		}
 		pending.Committed()
-		h.notify(decided)
+		h.notify(orgStore(r), decided)
 		writeGroupJSON(w, map[string]any{"request": decided})
 	}
 }
 
-func (h *AccessRequestHandler) notify(req *store.AccessRequest) {
+func (h *AccessRequestHandler) notify(org *store.OrgStore, req *store.AccessRequest) {
 	settings, err := mail.Load(h.store, h.encryptionKey)
 	if err != nil || settings == nil {
 		return
 	}
-	u, err := h.store.GetUserByID(req.UserID)
+	u, err := org.GetUserByID(req.UserID)
 	if err != nil || u == nil || u.Email == "" {
 		return
 	}

@@ -299,7 +299,7 @@ func covGroupSystem(t *testing.T, handle func(w http.ResponseWriter, r *http.Req
 	t.Helper()
 	e, s, _, sys, target := covSCIMSystem(t, "/scim/v2", handle)
 	group := &store.Group{ID: uuid.NewString(), Name: "staff"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	return e, s, sys, group, target
@@ -515,7 +515,7 @@ func TestGroupLostCreateResponseRecoveredByLookup(t *testing.T) {
 	before, _, _ := s.SCIMLink(sysID, "group", group.ID)
 	execRaw(t, s, `DELETE FROM scim_user_links WHERE kind='group'`)
 	group.Name = "renamed"
-	if err := s.UpdateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().UpdateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -540,7 +540,7 @@ func TestGroupAmbiguousLookupLeavesEventPending(t *testing.T) {
 	remote.groups["dup"] = scimGroup{ID: "dup", ExternalID: group.ID, DisplayName: "copy"}
 	remote.mu.Unlock()
 	group.Name = "renamed"
-	if err := s.UpdateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().UpdateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -571,7 +571,7 @@ func TestGroupUnresolvedCreateMarkerBlocksSecondCreate(t *testing.T) {
 	remote.groups = map[string]scimGroup{}
 	remote.mu.Unlock()
 	group.Name = "renamed"
-	if err := s.UpdateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().UpdateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)

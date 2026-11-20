@@ -26,7 +26,7 @@ func legacyStore(t *testing.T, key []byte) *Store {
 		return c
 	}
 	for _, id := range []string{"u1", "u2"} {
-		if err := s.CreateUser(&User{ID: id, Username: id, DisplayName: id, Email: id + "@example.test", PasswordHash: "h", Role: "user", Status: "active"}); err != nil {
+		if err := s.DefaultOrg().CreateUser(&User{ID: id, Username: id, DisplayName: id, Email: id + "@example.test", PasswordHash: "h", Role: "user", Status: "active"}); err != nil {
 			t.Fatal(err)
 		}
 	}

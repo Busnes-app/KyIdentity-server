@@ -46,10 +46,10 @@ func TestAppAccessUnionAndRevocation(t *testing.T) {
 		t.Fatal("admin bypassed assignment")
 	}
 	for _, id := range []string{"a", "b"} {
-		if err := s.CreateGroup(&Group{ID: id, Name: id}, nil); err != nil {
+		if err := s.DefaultOrg().CreateGroup(&Group{ID: id, Name: id}, nil); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.SetGroupMembership(id, u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetGroupMembership(id, u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.SetAppAssignment(a.ID, "groups", id, true, nil); err != nil {
@@ -67,10 +67,10 @@ func TestAppAccessUnionAndRevocation(t *testing.T) {
 	if err := s.RecordIssuedToken(accessToken(u, "token", "spent")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("a", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("a", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteGroup("b", nil); err != nil {
+	if err := s.DefaultOrg().DeleteGroup("b", nil); err != nil {
 		t.Fatal(err)
 	}
 	if revoked, err := s.IsTokenRevoked("token"); err != nil || revoked {
@@ -240,10 +240,10 @@ func TestAppAccessMigrationAndLinkSafety(t *testing.T) {
 
 func TestAppAccessGroupDeletionRevokesSoleGrant(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.CreateGroup(&Group{ID: "c", Name: "Only grant"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "c", Name: "Only grant"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("c", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("c", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(a.ID, "groups", "c", true, nil); err != nil {
@@ -257,7 +257,7 @@ func TestAppAccessGroupDeletionRevokesSoleGrant(t *testing.T) {
 	if err := s.RecordIssuedToken(accessToken(u, "token", "spent")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteGroup("c", nil); err != nil {
+	if err := s.DefaultOrg().DeleteGroup("c", nil); err != nil {
 		t.Fatal(err)
 	}
 	if revoked, err := s.IsTokenRevoked("token"); err != nil || !revoked {

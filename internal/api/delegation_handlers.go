@@ -10,7 +10,7 @@ import (
 
 // GetDelegations reads one user's delegated permissions. Global administrators only.
 func (h *AdminHandler) GetDelegations(w http.ResponseWriter, r *http.Request) {
-	user, err := h.store.GetUserByID(r.PathValue("id"))
+	user, err := orgStore(r).GetUserByID(r.PathValue("id"))
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -19,7 +19,7 @@ func (h *AdminHandler) GetDelegations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
 		return
 	}
-	d, err := h.store.Delegations(user.ID)
+	d, err := orgStore(r).Delegations(user.ID)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -45,7 +45,7 @@ func (h *AdminHandler) SetDelegations(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("id")
 	pending := h.audit.Prepare("admin.delegations_updated", admin.ID, admin.Username, userID, "user",
 		h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	err := h.store.SetDelegations(userID, d, pending.Row)
+	err := orgStore(r).SetDelegations(userID, d, pending.Row)
 	switch {
 	case errors.Is(err, store.ErrUserMissing):
 		http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
@@ -61,7 +61,7 @@ func (h *AdminHandler) SetDelegations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending.Committed()
-	saved, err := h.store.Delegations(userID)
+	saved, err := orgStore(r).Delegations(userID)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

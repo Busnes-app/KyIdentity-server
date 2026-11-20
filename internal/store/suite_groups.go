@@ -102,8 +102,8 @@ func suiteGroupAppsTx(tx *sql.Tx, groupID string) ([]SuiteGroupApp, error) {
 }
 
 // GetSuiteGroup returns a live group's suite settings.
-func (s *Store) GetSuiteGroup(groupID string) (SuiteGroupSettings, error) {
-	tx, err := s.rdb.Begin()
+func (o *OrgStore) GetSuiteGroup(groupID string) (SuiteGroupSettings, error) {
+	tx, err := o.s.rdb.Begin()
 	if err != nil {
 		return SuiteGroupSettings{}, err
 	}
@@ -111,7 +111,7 @@ func (s *Store) GetSuiteGroup(groupID string) (SuiteGroupSettings, error) {
 	var settings SuiteGroupSettings
 	var slug sql.NullString
 	var enabled sql.NullBool
-	err = tx.QueryRow(`SELECT s.slug,s.enabled FROM directory_groups g LEFT JOIN suite_groups s ON s.group_id=g.id WHERE g.id=?`, groupID).Scan(&slug, &enabled)
+	err = tx.QueryRow(`SELECT s.slug,s.enabled FROM directory_groups g LEFT JOIN suite_groups s ON s.group_id=g.id WHERE g.org_id=? AND g.id=?`, o.org, groupID).Scan(&slug, &enabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return settings, ErrGroupTargetMissing
 	}
@@ -127,19 +127,19 @@ func (s *Store) GetSuiteGroup(groupID string) (SuiteGroupSettings, error) {
 
 // SetSuiteGroup turns a live group's shared resources on or off and records per-app
 // choices (apps not named keep theirs), committing audit with the change.
-func (s *Store) SetSuiteGroup(groupID string, enabled bool, apps map[string]bool, audit *AuditEvent) (SuiteGroupSettings, error) {
+func (o *OrgStore) SetSuiteGroup(groupID string, enabled bool, apps map[string]bool, audit *AuditEvent) (SuiteGroupSettings, error) {
 	for id := range apps {
 		if _, ok := suiteGroupDefault(id); !ok {
 			return SuiteGroupSettings{}, InputError("unknown suite group app " + id)
 		}
 	}
-	tx, err := s.db.Begin()
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return SuiteGroupSettings{}, err
 	}
 	defer tx.Rollback()
 	var name string
-	if err = tx.QueryRow(`SELECT name FROM directory_groups WHERE id=?`, groupID).Scan(&name); errors.Is(err, sql.ErrNoRows) {
+	if err = tx.QueryRow(`SELECT name FROM directory_groups WHERE org_id=? AND id=?`, o.org, groupID).Scan(&name); errors.Is(err, sql.ErrNoRows) {
 		return SuiteGroupSettings{}, ErrGroupTargetMissing
 	} else if err != nil {
 		return SuiteGroupSettings{}, err
@@ -147,7 +147,7 @@ func (s *Store) SetSuiteGroup(groupID string, enabled bool, apps map[string]bool
 	now := time.Now().Unix()
 	var slug string
 	var was bool
-	err = tx.QueryRow(`SELECT slug,enabled FROM suite_groups WHERE group_id=?`, groupID).Scan(&slug, &was)
+	err = tx.QueryRow(`SELECT slug,enabled FROM suite_groups WHERE org_id=? AND group_id=?`, o.org, groupID).Scan(&slug, &was)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if !enabled && len(apps) == 0 {
@@ -159,19 +159,19 @@ func (s *Store) SetSuiteGroup(groupID string, enabled bool, apps map[string]bool
 		if slug, err = uniqueSuiteSlugTx(tx, name); err != nil {
 			return SuiteGroupSettings{}, err
 		}
-		if _, err = tx.Exec(`INSERT INTO suite_groups(group_id,slug,name,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)`, groupID, slug, name, enabled, now, now); err != nil {
+		if _, err = tx.Exec(`INSERT INTO suite_groups(org_id,group_id,slug,name,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, o.org, groupID, slug, name, enabled, now, now); err != nil {
 			return SuiteGroupSettings{}, err
 		}
 	case err != nil:
 		return SuiteGroupSettings{}, err
 	default:
-		if _, err = tx.Exec(`UPDATE suite_groups SET enabled=?,name=?,updated_at=? WHERE group_id=?`, enabled, name, now, groupID); err != nil {
+		if _, err = tx.Exec(`UPDATE suite_groups SET enabled=?,name=?,updated_at=? WHERE org_id=? AND group_id=?`, enabled, name, now, o.org, groupID); err != nil {
 			return SuiteGroupSettings{}, err
 		}
 	}
 	if enabled && !was {
 		var n int
-		if err = tx.QueryRow(`SELECT COUNT(*) FROM suite_groups WHERE enabled`).Scan(&n); err != nil {
+		if err = tx.QueryRow(`SELECT COUNT(*) FROM suite_groups WHERE org_id=? AND enabled`, o.org).Scan(&n); err != nil {
 			return SuiteGroupSettings{}, err
 		}
 		if n > MaxSuiteGroups {
@@ -236,9 +236,9 @@ func uniqueSuiteSlugTx(tx *sql.Tx, name string) (string, error) {
 }
 
 // tombstoneSuiteGroupTx archives a group's suite row as the group is deleted.
-func tombstoneSuiteGroupTx(tx *sql.Tx, groupID, name string) error {
+func tombstoneSuiteGroupTx(tx *sql.Tx, org, groupID, name string) error {
 	now := time.Now().Unix()
-	_, err := tx.Exec(`UPDATE suite_groups SET enabled=FALSE,name=?,deleted_at=?,updated_at=? WHERE group_id=?`, name, now, now, groupID)
+	_, err := tx.Exec(`UPDATE suite_groups SET enabled=FALSE,name=?,deleted_at=?,updated_at=? WHERE org_id=? AND group_id=?`, name, now, now, org, groupID)
 	return err
 }
 

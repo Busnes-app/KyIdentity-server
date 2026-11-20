@@ -123,7 +123,7 @@ func TestDrillAndRestoreOfALegacyCapsule(t *testing.T) {
 		}
 		return c
 	}
-	if err := st.CreateUser(&store.User{ID: "u1", Username: "u1", DisplayName: "U", Email: "u1@example.test", PasswordHash: "x", Role: "user", Status: "active"}); err != nil {
+	if err := st.DefaultOrg().CreateUser(&store.User{ID: "u1", Username: "u1", DisplayName: "U", Email: "u1@example.test", PasswordHash: "x", Role: "user", Status: "active"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SetMFAMethod(&store.MFAMethod{ID: "m1", UserID: "u1", MethodType: "totp", EncryptedSecret: legacy("JBSWY3DPEHPK3PXP")}, nil); err != nil {

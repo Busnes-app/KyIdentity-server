@@ -57,7 +57,7 @@ func first(e *ldaptest.Entry, attr string) string {
 func TestADConnectorFollowsAssignments(t *testing.T) {
 	e, s, _, dc, sys := adFixture(t)
 	u := &store.User{ID: uuid.NewString(), Username: "alice", DisplayName: "Alice", Email: "alice@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.TestSystem(context.Background(), sys); err != nil {
@@ -66,10 +66,10 @@ func TestADConnectorFollowsAssignments(t *testing.T) {
 	outsiderBefore := dc.Get("CN=outsider,OU=Outside,DC=kyws,DC=test")
 	app := appRecordFor(t, s, sys.ID)
 	group := &store.Group{ID: uuid.NewString(), Name: "pc-users"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
@@ -87,14 +87,14 @@ func TestADConnectorFollowsAssignments(t *testing.T) {
 	}
 
 	// Disabling locally disables in AD; nothing is deleted.
-	if _, err := s.EditUser(u.ID, nil, func(x *store.User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(x *store.User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
 	if got := adUser(t, dc, sys.ID, u.ID); first(got, "userAccountControl") != "514" {
 		t.Fatal("disabled user still enabled in AD", got.Attrs)
 	}
-	if _, err := s.EditUser(u.ID, nil, func(x *store.User) (bool, error) { x.Status = "active"; return false, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(x *store.User) (bool, error) { x.Status = "active"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -120,7 +120,7 @@ func TestADConnectorFollowsAssignments(t *testing.T) {
 func TestADConnectorLeavesForeignObjectsAlone(t *testing.T) {
 	e, s, _, dc, sys := adFixture(t)
 	squatter := &store.User{ID: uuid.NewString(), Username: "squatter", DisplayName: "S", Email: "s@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(squatter); err != nil {
+	if err := s.DefaultOrg().CreateUser(squatter); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", squatter.ID, true, nil); err != nil {
@@ -247,7 +247,7 @@ func adEnableWaitsForReset(t *testing.T, ackFirst bool) {
 		t.Fatal(err)
 	}
 	u := &store.User{ID: uuid.NewString(), Username: "bob", DisplayName: "Bob", Email: "bob@example.com", PasswordHash: "first-hash", Role: "user", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
@@ -272,7 +272,7 @@ func adEnableWaitsForReset(t *testing.T, ackFirst bool) {
 	}
 	edit := func(f func(*store.User)) {
 		t.Helper()
-		if _, err := s.EditUser(u.ID, nil, func(x *store.User) (bool, error) { f(x); return true, nil }); err != nil {
+		if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(x *store.User) (bool, error) { f(x); return true, nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -311,14 +311,14 @@ func adEnableWaitsForReset(t *testing.T, ackFirst bool) {
 func TestADRenameFollowsKyIdentity(t *testing.T) {
 	e, s, _, dc, sys := adFixture(t)
 	u := &store.User{ID: uuid.NewString(), Username: "alice", DisplayName: "Alice", Email: "alice@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	group := &store.Group{ID: uuid.NewString(), Name: "pc-users"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "groups", group.ID, true, nil); err != nil {
@@ -327,7 +327,7 @@ func TestADRenameFollowsKyIdentity(t *testing.T) {
 	drain(t, e)
 	rename := func(name string) {
 		t.Helper()
-		if _, err := s.EditUser(u.ID, nil, func(x *store.User) (bool, error) { x.Username = name; return false, nil }); err != nil {
+		if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(x *store.User) (bool, error) { x.Username = name; return false, nil }); err != nil {
 			t.Fatal(err)
 		}
 		drain(t, e)
@@ -366,7 +366,7 @@ func TestADRenameFollowsKyIdentity(t *testing.T) {
 	}
 
 	group.Name = "pc-staff"
-	if err := s.UpdateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().UpdateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -379,7 +379,7 @@ func TestADRenameFollowsKyIdentity(t *testing.T) {
 func TestADDeliveryEndsWithItsContext(t *testing.T) {
 	e, s, _, dc, sys := adFixture(t)
 	u := &store.User{ID: uuid.NewString(), Username: "carol", DisplayName: "Carol", Email: "carol@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {

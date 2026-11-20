@@ -34,7 +34,7 @@ func setupSync(t *testing.T) (*Engine, *store.Store, *store.User, func()) {
 		DisplayName: "A", Email: uuid.New().String()[:6] + "@x.test",
 		PasswordHash: "x", Role: "admin", Status: "active",
 	}
-	if err := db.CreateUser(admin); err != nil {
+	if err := db.DefaultOrg().CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
 	// These tests point callbacks at httptest servers on loopback.
@@ -141,7 +141,7 @@ func TestUndeliverableEventStaysQueued(t *testing.T) {
 		ID: uuid.New().String(), Username: "leaver", DisplayName: "L", Email: "l@x.test",
 		PasswordHash: "x", Role: "user", Status: "active",
 	}
-	if err := db.CreateUser(u); err != nil {
+	if err := db.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	if err := func() error { queueForAll(t, e, u.ID, "user.deleted", map[string]any{"id": u.ID}); return nil }(); err != nil {
@@ -185,7 +185,7 @@ func TestFailedDeliveryBacksOff(t *testing.T) {
 		ID: uuid.New().String(), Username: "x", DisplayName: "X", Email: "x2@x.test",
 		PasswordHash: "x", Role: "user", Status: "active",
 	}
-	if err := db.CreateUser(u); err != nil {
+	if err := db.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	insertSyncEvent(t, db, store.AccountSyncEvent{

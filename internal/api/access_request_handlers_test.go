@@ -28,7 +28,7 @@ func TestAccessRequestsEndToEnd(t *testing.T) {
 	}
 	open, _, _ := db.ListAppRecords("open-app", 1, 0)
 	private, _, _ := db.ListAppRecords("private-app", 1, 0)
-	if err := db.SetDelegations(owner.ID, store.Delegations{AppOwner: []string{open[0].ID}}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(owner.ID, store.Delegations{AppOwner: []string{open[0].ID}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Only a global administrator opens an app to requests; the owner cannot.
@@ -84,7 +84,7 @@ func TestAccessRequestsEndToEnd(t *testing.T) {
 	// A second owner of a different app is refused by the store's recheck.
 	other := newUser(t, db, "user")
 	otherCookie := newSession(t, db, other, exp)
-	if err := db.SetDelegations(other.ID, store.Delegations{AppOwner: []string{private[0].ID}}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(other.ID, store.Delegations{AppOwner: []string{private[0].ID}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if res := adminRequest(t, srv, "POST", approve, otherCookie, `{}`); res.Code != http.StatusForbidden {

@@ -67,7 +67,7 @@ func accessFor(s *store.Store, user *store.User) (Access, error) {
 	if user.Role == "admin" {
 		return Access{Admin: true, AppOwner: []string{}}, nil
 	}
-	d, err := s.Delegations(user.ID)
+	d, err := s.Org(user.Org()).Delegations(user.ID)
 	if err != nil {
 		return Access{}, err
 	}
@@ -100,7 +100,7 @@ func (s *Server) require(p permission, stepUp bool, h http.Handler) http.Handler
 			return
 		}
 		if p.protectAdmins && !a.Admin {
-			target, err := s.store.GetUserByID(r.PathValue("id"))
+			target, err := orgStore(r).GetUserByID(r.PathValue("id"))
 			if err != nil {
 				http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 				return
@@ -110,7 +110,7 @@ func (s *Server) require(p permission, stepUp bool, h http.Handler) http.Handler
 				return
 			}
 			if target != nil {
-				d, err := s.store.Delegations(target.ID)
+				d, err := orgStore(r).Delegations(target.ID)
 				if err != nil {
 					http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 					return

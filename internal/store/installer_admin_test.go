@@ -22,7 +22,7 @@ func TestInstallerSetupAdministratorFollowsOwnership(t *testing.T) {
 		t.Fatal("unknown setup named an administrator")
 	}
 	other := &User{ID: "other-admin", Username: "other-admin", DisplayName: "Other", Email: "other@example.test", PasswordHash: "x", Role: "admin", Status: "active"}
-	if err := s.CreateUser(other); err != nil {
+	if err := s.DefaultOrg().CreateUser(other); err != nil {
 		t.Fatal(err)
 	}
 	exec := func(q string, args ...any) {

@@ -436,7 +436,7 @@ func TestDirectoryPasswordReachesADisabledAccount(t *testing.T) {
 	if behind, err := s.ADPasswordBehind("ad-1", u.ID); err != nil || behind {
 		t.Fatal("an applied password reads as behind", behind, err)
 	}
-	if _, err := s.EditUser(u.ID, nil, func(x *User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(x *User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	var active bool
@@ -528,7 +528,7 @@ func TestDirectoryPasswordsFollowCurrentAccess(t *testing.T) {
 	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.EditUser(u.ID, nil, func(x *User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(x *User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	setHash("while-disabled")

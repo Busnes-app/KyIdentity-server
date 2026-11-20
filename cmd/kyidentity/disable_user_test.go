@@ -27,7 +27,7 @@ func TestDisableUser(t *testing.T) {
 	user := func(name, role string) *store.User {
 		t.Helper()
 		u := &store.User{ID: uuid.NewString(), Username: name, DisplayName: name, Email: name + "@example.test", PasswordHash: "hash-" + name, Role: role, Status: "active"}
-		if err := s.CreateUser(u); err != nil {
+		if err := s.DefaultOrg().CreateUser(u); err != nil {
 			t.Fatal(err)
 		}
 		return u
@@ -79,7 +79,7 @@ func TestDisableUser(t *testing.T) {
 	}
 	status := func(u *store.User) string {
 		t.Helper()
-		got, err := s.GetUserByID(u.ID)
+		got, err := s.DefaultOrg().GetUserByID(u.ID)
 		if err != nil || got == nil {
 			t.Fatal(err)
 		}
@@ -126,7 +126,7 @@ func TestDisableUser(t *testing.T) {
 	if status(bootstrap) != "disabled" || status(owner) != "active" || status(everyday) != "active" {
 		t.Fatal("wrong accounts changed")
 	}
-	got, _ := s.GetUserByID(bootstrap.ID)
+	got, _ := s.DefaultOrg().GetUserByID(bootstrap.ID)
 	if got.Role != "admin" || got.PasswordHash != "hash-kyq-bootstrap" {
 		t.Fatal("disable changed role or password")
 	}
@@ -195,7 +195,7 @@ func TestDisableUser(t *testing.T) {
 	// A pending invitation is already "disabled", but its live activation link must not
 	// outlive the retirement.
 	invited := &store.User{ID: uuid.NewString(), Username: "invited", DisplayName: "invited", Email: "invited@example.test", Role: "user", Status: "disabled", Pending: true}
-	if err := s.CreateUser(invited); err != nil {
+	if err := s.DefaultOrg().CreateUser(invited); err != nil {
 		t.Fatal(err)
 	}
 	link, err := s.IssueAccountToken(invited.ID, "activation", "manual", time.Hour, nil)

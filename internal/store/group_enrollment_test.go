@@ -10,7 +10,7 @@ import (
 
 func testEnrollmentGroup(t *testing.T, s *Store, id string) EnrollmentPolicy {
 	t.Helper()
-	if err := s.CreateGroup(&Group{ID: id, Name: id}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: id, Name: id}, nil); err != nil {
 		t.Fatal(err)
 	}
 	p, err := s.GroupEnrollmentPolicy(id)
@@ -24,7 +24,7 @@ func testEnrollmentGroup(t *testing.T, s *Store, id string) EnrollmentPolicy {
 }
 func testEnrollmentMember(t *testing.T, s *Store, group, user string, member bool) {
 	t.Helper()
-	if err := s.SetGroupMembershipForSession(group, user, member, "admin-session", nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembershipForSession(group, user, member, "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -113,17 +113,17 @@ func TestGroupEnrollmentMembershipConflictAndAdministrator(t *testing.T) {
 		}
 	}
 	testEnrollmentMember(t, s, "a", u.ID, true)
-	if err := s.SetGroupMembershipForSession("b", u.ID, true, "admin-session", nil); !errors.Is(err, ErrEnrollmentPolicy) {
+	if err := s.DefaultOrg().SetGroupMembershipForSession("b", u.ID, true, "admin-session", nil); !errors.Is(err, ErrEnrollmentPolicy) {
 		t.Fatal("conflicting membership", err)
 	}
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM group_memberships WHERE user_id=? AND group_id='b'`, u.ID).Scan(&count); err != nil || count != 0 {
 		t.Fatal("membership persisted", err, count)
 	}
-	if err := s.SetGroupMembershipForSession("b", admin.ID, true, "admin-session", nil); !errors.Is(err, ErrEmergencyAdministrator) {
+	if err := s.DefaultOrg().SetGroupMembershipForSession("b", admin.ID, true, "admin-session", nil); !errors.Is(err, ErrEmergencyAdministrator) {
 		t.Fatal("administrator locked out", err)
 	}
-	if err := s.SetGroupMembership("b", admin.ID, true, nil); !errors.Is(err, ErrEmergencyAdministrator) {
+	if err := s.DefaultOrg().SetGroupMembership("b", admin.ID, true, nil); !errors.Is(err, ErrEmergencyAdministrator) {
 		t.Fatal("missing administrator session accepted", err)
 	}
 	// Group requirements also intersect the administrator-only requirement on promotion.
@@ -171,7 +171,7 @@ func TestGroupEnrollmentMutationRevokesAndNeverRevives(t *testing.T) {
 			if remove == "membership" {
 				testEnrollmentMember(t, s, "a", u.ID, false)
 			} else {
-				if err := s.DeleteGroupForSession("a", "admin-session", nil); err != nil {
+				if err := s.DefaultOrg().DeleteGroupForSession("a", "admin-session", nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -206,7 +206,7 @@ func TestGroupEnrollmentConcurrentConflictingMembership(t *testing.T) {
 		go func(id string) {
 			defer wg.Done()
 			<-start
-			results <- s.SetGroupMembershipForSession(id, u.ID, true, "admin-session", nil)
+			results <- s.DefaultOrg().SetGroupMembershipForSession(id, u.ID, true, "admin-session", nil)
 		}(id)
 	}
 	close(start)
@@ -280,7 +280,7 @@ func TestGroupEnrollmentMembershipAuditRollback(t *testing.T) {
 	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER reject_group_enrollment_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit failed'); END`)); err != nil {
 		t.Fatal(err)
 	}
-	err := s.SetGroupMembershipForSession("a", u.ID, true, "admin-session", &AuditEvent{ID: "failed", Action: "test", Outcome: "success", CreatedAt: time.Now().UTC()})
+	err := s.DefaultOrg().SetGroupMembershipForSession("a", u.ID, true, "admin-session", &AuditEvent{ID: "failed", Action: "test", Outcome: "success", CreatedAt: time.Now().UTC()})
 	if err == nil {
 		t.Fatal("unaudited membership committed")
 	}
@@ -312,7 +312,10 @@ func TestGroupEnrollmentMembershipTokenRace(t *testing.T) {
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	go func() { <-start; results <- s.RecordIssuedToken(accessToken(u, "racing-token", "racing-code")) }()
-	go func() { <-start; results <- s.SetGroupMembershipForSession("a", u.ID, true, "admin-session", nil) }()
+	go func() {
+		<-start
+		results <- s.DefaultOrg().SetGroupMembershipForSession("a", u.ID, true, "admin-session", nil)
+	}()
 	close(start)
 	for i := 0; i < 2; i++ {
 		err := <-results
@@ -352,7 +355,7 @@ func TestGroupEnrollmentDeletionRequiresLogin(t *testing.T) {
 	if err := s.SetEnrollmentPolicy(p, "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteGroup("delete-proof", nil); !errors.Is(err, ErrEmergencyAdministrator) {
+	if err := s.DefaultOrg().DeleteGroup("delete-proof", nil); !errors.Is(err, ErrEmergencyAdministrator) {
 		t.Fatalf("deletion without login proof: %v", err)
 	}
 	if err := s.SetEnrollmentPolicy(enrollmentPolicy("organization", 3600), "admin-session", nil); err != nil {
@@ -362,7 +365,7 @@ func TestGroupEnrollmentDeletionRequiresLogin(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE sessions SET primary_authenticated_at=?,factor_authenticated_at=? WHERE id='admin-session'`, stale, stale); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteGroupForSession("delete-proof", "admin-session", nil); !errors.Is(err, ErrEmergencyAdministrator) {
+	if err := s.DefaultOrg().DeleteGroupForSession("delete-proof", "admin-session", nil); !errors.Is(err, ErrEmergencyAdministrator) {
 		t.Fatalf("stale login accepted: %v", err)
 	}
 	var count int
@@ -373,7 +376,7 @@ func TestGroupEnrollmentDeletionRequiresLogin(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE sessions SET primary_authenticated_at=?,factor_authenticated_at=? WHERE id='admin-session'`, now, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteGroupForSession("delete-proof", "admin-session", nil); err != nil {
+	if err := s.DefaultOrg().DeleteGroupForSession("delete-proof", "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
 }

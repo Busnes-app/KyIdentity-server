@@ -22,7 +22,7 @@ func TestSnapshotToCapturesCommittedWALWrites(t *testing.T) {
 
 	u := &User{ID: uuid.New().String(), Username: "wal-user", DisplayName: "W",
 		Email: "wal@x.test", PasswordHash: "x", Role: "admin", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 

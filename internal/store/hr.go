@@ -203,7 +203,11 @@ func (s *Store) ImportHR(connectorID string, in HRInput, audit *AuditEvent) (*HR
 }
 
 func updateHRUserTx(tx *sql.Tx, w *HRWorker) error {
-	_, err := updateUserTx(tx, w.ID, nil, func(_ *sql.Tx, u *User) (bool, error) {
+	org, err := connectorOrgTx(tx, w.ConnectorID)
+	if err != nil {
+		return err
+	}
+	_, err = updateUserTx(tx, org, w.ID, nil, func(_ *sql.Tx, u *User) (bool, error) {
 		if u.SourceConnectorID != w.ConnectorID || u.ExternalID != w.SourceUID || u.Email != w.Email {
 			return false, ErrHRConflict
 		}

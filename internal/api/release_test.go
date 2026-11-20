@@ -26,13 +26,13 @@ func TestReleaseRestoreScenario(t *testing.T) {
 
 	// Ownership and policy an operator set up before the snapshot.
 	group := &store.Group{ID: "g-team", Name: "Team"}
-	if err := db.CreateGroup(group, nil); err != nil {
+	if err := db.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetGroupMembership(group.ID, staff.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetGroupMembership(group.ID, staff.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetDelegations(staff.ID, store.Delegations{Auditor: true}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(staff.ID, store.Delegations{Auditor: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 

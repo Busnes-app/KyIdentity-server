@@ -49,7 +49,7 @@ func TestReconcileJobListsAndRepairsGenericSCIM(t *testing.T) {
 	others := []*store.User{}
 	for _, name := range []string{"second", "third", "fourth"} {
 		o := &store.User{ID: uuid.NewString(), Username: name, DisplayName: name, Email: name + "@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-		if err := s.CreateUser(o); err != nil {
+		if err := s.DefaultOrg().CreateUser(o); err != nil {
 			t.Fatal(err)
 		}
 		others = append(others, o)
@@ -152,7 +152,7 @@ func TestReconcileJobDoesNotBlockDelivery(t *testing.T) {
 	app := appRecordFor(t, s, sys.ID)
 	for i := 0; i < 6; i++ {
 		o := &store.User{ID: uuid.NewString(), Username: "u" + uuid.NewString()[:6], DisplayName: "x", Email: uuid.NewString() + "@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-		if err := s.CreateUser(o); err != nil {
+		if err := s.DefaultOrg().CreateUser(o); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.SetAppAssignment(app.ID, "users", o.ID, true, nil); err != nil {
@@ -238,7 +238,7 @@ func TestReconcileJobRejectsOverlongRemoteIDs(t *testing.T) {
 	revoked := &store.User{ID: uuid.NewString(), Username: "revoked", DisplayName: "revoked", Email: "revoked@example.com", PasswordHash: "x", Role: "user", Status: "active"}
 	adopted := &store.User{ID: uuid.NewString(), Username: "adopted", DisplayName: "adopted", Email: "adopted@example.com", PasswordHash: "x", Role: "user", Status: "active"}
 	for _, x := range []*store.User{revoked, adopted} {
-		if err := s.CreateUser(x); err != nil {
+		if err := s.DefaultOrg().CreateUser(x); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -309,14 +309,14 @@ func TestRepairReprovisionsWipedTarget(t *testing.T) {
 	}
 	app := appRecordFor(t, s, sys.ID)
 	direct := &store.User{ID: uuid.NewString(), Username: "sam", DisplayName: "Sam", Email: "sam@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(direct); err != nil {
+	if err := s.DefaultOrg().CreateUser(direct); err != nil {
 		t.Fatal(err)
 	}
 	group := &store.Group{ID: uuid.NewString(), Name: "Studio"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
@@ -373,10 +373,10 @@ func TestRepairedGroupGetsItsMemberOnceTheMemberIsCreated(t *testing.T) {
 	}
 	app := appRecordFor(t, s, sys.ID)
 	group := &store.Group{ID: uuid.NewString(), Name: "Studio"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
@@ -425,7 +425,7 @@ func TestGroupWriteChecksTheMappingOfAMemberItAdds(t *testing.T) {
 	}
 	app := appRecordFor(t, s, sys.ID)
 	group := &store.Group{ID: uuid.NewString(), Name: "Admins"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
@@ -445,7 +445,7 @@ func TestGroupWriteChecksTheMappingOfAMemberItAdds(t *testing.T) {
 	remote.users[alice.ID] = bob
 	remote.mu.Unlock()
 
-	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -472,7 +472,7 @@ func TestLargeGroupAdditionCompletesAndSkipsAReassignedMember(t *testing.T) {
 	}
 	app := appRecordFor(t, s, sys.ID)
 	group := &store.Group{ID: uuid.NewString(), Name: "Everyone"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
@@ -481,7 +481,7 @@ func TestLargeGroupAdditionCompletesAndSkipsAReassignedMember(t *testing.T) {
 	var users []*store.User
 	for i := range 60 {
 		u := &store.User{ID: uuid.NewString(), Username: fmt.Sprintf("m%02d", i), DisplayName: "M", Email: fmt.Sprintf("m%02d@example.com", i), PasswordHash: "x", Role: "user", Status: "active"}
-		if err := s.CreateUser(u); err != nil {
+		if err := s.DefaultOrg().CreateUser(u); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
@@ -504,7 +504,7 @@ func TestLargeGroupAdditionCompletesAndSkipsAReassignedMember(t *testing.T) {
 	remote.userGetDelay = 400 * time.Millisecond
 	remote.mu.Unlock()
 	for _, u := range users {
-		if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -535,7 +535,7 @@ func TestRepairCountsAReusedRemoteID(t *testing.T) {
 	}
 	app := appRecordFor(t, s, sys.ID)
 	other := &store.User{ID: uuid.NewString(), Username: "sam", DisplayName: "Sam", Email: "sam@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(other); err != nil {
+	if err := s.DefaultOrg().CreateUser(other); err != nil {
 		t.Fatal(err)
 	}
 	for _, x := range []*store.User{u, other} {

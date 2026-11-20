@@ -36,7 +36,7 @@ func newStepUpFixture(t *testing.T) (*stepUpFixture, func()) {
 		DisplayName: "Step Up", Email: uuid.New().String()[:8] + "@stepup.test",
 		PasswordHash: hash, Role: "user", Status: "active",
 	}
-	if err := dbStore.CreateUser(user); err != nil {
+	if err := dbStore.DefaultOrg().CreateUser(user); err != nil {
 		t.Fatal(err)
 	}
 

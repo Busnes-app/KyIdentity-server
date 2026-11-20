@@ -54,7 +54,7 @@ func instance(t *testing.T) (*config.Config, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.CreateUser(&store.User{ID: uuid.NewString(), Username: "admin", DisplayName: "Admin", Email: "admin@example.test",
+	if err := st.DefaultOrg().CreateUser(&store.User{ID: uuid.NewString(), Username: "admin", DisplayName: "Admin", Email: "admin@example.test",
 		PasswordHash: "x", Role: "admin", Status: "active"}); err != nil {
 		t.Fatal(err)
 	}

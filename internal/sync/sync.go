@@ -56,8 +56,8 @@ func (e *Engine) SigningSecret(sys *store.PairedSystem) (string, error) {
 
 // The store computes each connector's desired state from effective access inside the
 // mutation transaction; these wrappers exist so handlers keep one entry point.
-func (e *Engine) CreateUserAndQueueSyncEvents(user *store.User, audit *store.AuditEvent) error {
-	return e.store.CreateUserWithSyncEvents(user, audit)
+func (e *Engine) CreateUserAndQueueSyncEvents(org *store.OrgStore, user *store.User, audit *store.AuditEvent) error {
+	return org.CreateUserWithSyncEvents(user, audit)
 }
 
 // ResetUserMFAAndRevoke atomically strips every factor, revokes everything those factors
@@ -68,8 +68,8 @@ func (e *Engine) ResetUserMFAAndRevoke(userID string, audit *store.AuditEvent) e
 
 // DeleteUserAndQueueSyncEvents removes a user and queues its deletion atomically, so a
 // downstream product cannot retain an account when the source deletion succeeds.
-func (e *Engine) DeleteUserAndQueueSyncEvents(userID string, audit *store.AuditEvent) error {
-	return e.store.DeleteUserWithSyncEvents(userID, audit)
+func (e *Engine) DeleteUserAndQueueSyncEvents(org *store.OrgStore, userID string, audit *store.AuditEvent) error {
+	return org.DeleteUserWithSyncEvents(userID, audit)
 }
 
 // SCIM Schema URIs and standard types (RFC 7643 / RFC 7644)

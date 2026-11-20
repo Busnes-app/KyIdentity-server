@@ -18,7 +18,7 @@ func requestFixture(t *testing.T) (*Store, *User, *User, *User, AppRecord) {
 		t.Fatal(err)
 	}
 	owner := createTestUserNamed(t, s, "owner")
-	if err := s.SetDelegations(owner.ID, Delegations{AppOwner: []string{a.ID}}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(owner.ID, Delegations{AppOwner: []string{a.ID}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	a, _ = s.GetAppRecord(a.ID)
@@ -119,13 +119,13 @@ func TestAccessRequestDecisionsAreRecheckedUnderTheLock(t *testing.T) {
 		t.Fatalf("bystander decided: %v", err)
 	}
 	// Ownership withdrawn between form and submit: the stale form grants nothing.
-	if err := s.SetDelegations(owner.ID, Delegations{}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(owner.ID, Delegations{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DecideAccessRequest(req.ID, owner.ID, true, "", nil); !errors.Is(err, ErrCannotDecide) {
 		t.Fatalf("former owner decided: %v", err)
 	}
-	if err := s.SetDelegations(owner.ID, Delegations{AppOwner: []string{a.ID}}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(owner.ID, Delegations{AppOwner: []string{a.ID}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The app closed to requests since: approval is refused, denial still works later.

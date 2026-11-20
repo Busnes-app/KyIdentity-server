@@ -412,7 +412,7 @@ func (h *AuthHandler) resolveMFAToken(w http.ResponseWriter, r *http.Request, ra
 		return nil, nil, false
 	}
 
-	user, err := h.store.GetUserByID(token.UserID)
+	user, err := h.store.PrincipalByID(token.UserID)
 	if err != nil || user == nil || user.Status != "active" {
 		http.Error(w, `{"error":"invalid_user"}`, http.StatusUnauthorized)
 		return nil, nil, false

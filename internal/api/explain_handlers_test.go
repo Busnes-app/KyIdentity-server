@@ -28,16 +28,16 @@ func TestExplanationsFollowViewerPermissions(t *testing.T) {
 	appB, _, _ := db.ListAppRecords("app-b", 1, 0)
 	ownerB := newUser(t, db, "user")
 	ownerBCookie := newSession(t, db, ownerB, exp)
-	if err := db.SetDelegations(ownerB.ID, store.Delegations{AppOwner: []string{appB[0].ID}}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(ownerB.ID, store.Delegations{AppOwner: []string{appB[0].ID}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateGroup(&store.Group{ID: "secret", Name: "Secret Project"}, nil); err != nil {
+	if err := db.DefaultOrg().CreateGroup(&store.Group{ID: "secret", Name: "Secret Project"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetAppAssignment(appA[0].ID, "groups", "secret", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetGroupMembership("secret", u.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetGroupMembership("secret", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	explainA := "/api/admin/app-registry/" + appA[0].ID + "/access-users/" + u.ID + "/explain"

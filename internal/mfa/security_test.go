@@ -25,7 +25,7 @@ func mfaUser(t *testing.T, db *store.Store) *store.User {
 		DisplayName: "U", Email: uuid.New().String()[:8] + "@x.test",
 		PasswordHash: "x", Role: "user", Status: "active",
 	}
-	if err := db.CreateUser(u); err != nil {
+	if err := db.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	return u

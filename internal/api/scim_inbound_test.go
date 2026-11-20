@@ -91,7 +91,7 @@ func TestInboundSCIMUserLifecycle(t *testing.T) {
 	if id == "" || res["userName"] != "alice" || res["externalId"] != "ext-1" || res["active"] != true || res["displayName"] != "Alice Adams" {
 		t.Fatalf("created resource: %+v", res)
 	}
-	u, _ := db.GetUserByID(id)
+	u, _ := db.DefaultOrg().GetUserByID(id)
 	if !u.Pending || u.Status != "active" && u.Status != "disabled" || u.Status != "disabled" || u.PasswordHash != "" || u.Role != "user" {
 		t.Fatalf("stored upstream account: %+v", u)
 	}
@@ -146,14 +146,14 @@ func TestInboundSCIMUserLifecycle(t *testing.T) {
 	if got := scimCall(t, srv, token, "PATCH", "/scim/v2/Users/"+id, `{"Operations":[{"op":"replace","value":{"active":true,"displayName":"Alice Back"}}]}`); got.Code != http.StatusOK || scimUser(t, got.Body.Bytes())["active"] != true {
 		t.Fatalf("path-less patch: %d %s", got.Code, got.Body.String())
 	}
-	if u, _ = db.GetUserByID(id); u.Status != "active" || u.DisplayName != "Alice Back" {
+	if u, _ = db.DefaultOrg().GetUserByID(id); u.Status != "active" || u.DisplayName != "Alice Back" {
 		t.Fatalf("after reactivation: %+v", u)
 	}
 
 	if got := scimCall(t, srv, token, "DELETE", "/scim/v2/Users/"+id, ""); got.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", got.Code, got.Body.String())
 	}
-	if u, _ = db.GetUserByID(id); u == nil || u.Status != "disabled" || u.SourceActive {
+	if u, _ = db.DefaultOrg().GetUserByID(id); u == nil || u.Status != "disabled" || u.SourceActive {
 		t.Fatalf("delete should deactivate, not erase: %+v", u)
 	}
 	if got := scimCall(t, srv, token, "GET", "/scim/v2/Users/"+id, ""); got.Code != http.StatusOK || scimUser(t, got.Body.Bytes())["active"] != false {
@@ -177,7 +177,7 @@ func TestInboundSCIMCannotTakeOverAPromotedAdmin(t *testing.T) {
 		return id
 	}
 	promoted := mustUser(t, db, create("ext-a", "dana"))
-	if _, err := db.EditUser(promoted.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
+	if _, err := db.DefaultOrg().EditUser(promoted.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	plain := create("ext-b", "erin")
@@ -213,7 +213,7 @@ func TestInboundSCIMCannotTakeOverAPromotedAdmin(t *testing.T) {
 
 func mustUser(t *testing.T, db *store.Store, id string) *store.User {
 	t.Helper()
-	u, err := db.GetUserByID(id)
+	u, err := db.DefaultOrg().GetUserByID(id)
 	if err != nil || u == nil {
 		t.Fatalf("user %s: %v", id, err)
 	}

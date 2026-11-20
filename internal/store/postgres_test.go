@@ -223,7 +223,7 @@ func TestNameLookupsFoldASCIICaseOnly(t *testing.T) {
 	defer cleanup()
 	for _, name := range []string{"alice", "Zed", "émile", "bob"} {
 		u := &User{ID: "id-" + name, Username: name, DisplayName: name, Email: name + "@Example.com", PasswordHash: "x", Role: "user", Status: "active"}
-		if err := s.CreateUser(u); err != nil {
+		if err := s.DefaultOrg().CreateUser(u); err != nil {
 			t.Fatal(err)
 		}
 	}

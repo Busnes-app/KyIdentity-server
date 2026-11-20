@@ -52,7 +52,7 @@ func syncTarget(t *testing.T, dbPath, callback string) (*store.Store, *sync.Engi
 func assignUser(t *testing.T, s *store.Store, appID, name string) {
 	t.Helper()
 	u := &store.User{ID: uuid.NewString(), Username: name, DisplayName: name, Email: name + "@example.test", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(appID, "users", u.ID, true, nil); err != nil {

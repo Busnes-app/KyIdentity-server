@@ -85,7 +85,7 @@ func TestSetInstallerLauncherSettings(t *testing.T) {
 func TestLauncherAdminClientsFallsBackToGlobalAdmin(t *testing.T) {
 	s, u, _ := appAccessFixture(t)
 	admin := &User{ID: uuid.NewString(), Username: "boss", Email: "boss@x.test", Role: "admin", Status: "active"}
-	if err := s.CreateUser(admin); err != nil {
+	if err := s.DefaultOrg().CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := s.LauncherAdminClients(admin.ID); err != nil || !got["client"] {

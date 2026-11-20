@@ -339,7 +339,7 @@ func TestHeldWriteHoldsRemoval(t *testing.T) {
 			flaky.mu.Lock()
 			flaky.script = []int{500, 500, 500, 500}
 			flaky.mu.Unlock()
-			if _, err := s.EditUser(u.ID, nil, func(next *store.User) (bool, error) { next.DisplayName = "Pat Renamed"; return true, nil }); err != nil {
+			if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(next *store.User) (bool, error) { next.DisplayName = "Pat Renamed"; return true, nil }); err != nil {
 				t.Fatal(err)
 			}
 			dispatch(t, e)

@@ -436,7 +436,7 @@ func startSyncWorker(ctx context.Context, e *sync.Engine) (wait func(context.Con
 // bootstrapOnStart creates the first administrator when none exists, from
 // BOOTSTRAP_ADMIN_PASS or a generated password written to first-run-password.txt.
 func bootstrapOnStart(dbStore *store.Store, username, password, dataDir string, replicated bool) error {
-	adminCount, err := dbStore.CountAdmins()
+	adminCount, err := dbStore.Platform().CountAdmins()
 	if err != nil {
 		return fmt.Errorf("failed to count administrators: %w", err)
 	}
@@ -598,7 +598,8 @@ func ensureBootstrapAdmin(dbStore *store.Store, username, email, password, via s
 	}
 	event := audit.NewLogger(dbStore).Prepare("admin.user_created", "", "bootstrap", admin.ID, "user", "", via, "success",
 		map[string]any{"username": admin.Username, "role": admin.Role, "pending": false, "passwordChangeRequired": true})
-	if err := dbStore.CreateUserWithSyncEvents(admin, event.Row); err != nil {
+	// Single-tenant: the default org (multi-tenant creates the staff org, build plan PR 6).
+	if err := dbStore.DefaultOrg().CreateUserWithSyncEvents(admin, event.Row); err != nil {
 		// Two first starts on one database both see no administrator; the name is unique,
 		// so one insert fails, and its account is the one the other just created.
 		if won, rerr := dbStore.GetUserByUsername(username); rerr == nil && won != nil && won.Role == "admin" && won.Status == "active" {

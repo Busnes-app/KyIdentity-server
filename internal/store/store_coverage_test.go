@@ -220,13 +220,13 @@ func TestResetUserMFARemovesEveryFactor(t *testing.T) {
 // cannot be deleted, and a deletion queues user.deleted for every live connector.
 func TestDeleteUserWithSyncEventsRules(t *testing.T) {
 	s, admin := newStoreWithUser(t, "admin")
-	if err := s.DeleteUserWithSyncEvents("missing", nil); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents("missing", nil); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("missing account", err)
 	}
-	if err := s.DeleteUserWithSyncEvents(admin.ID, nil); !errors.Is(err, ErrLastActiveAdmin) {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(admin.ID, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatal("last admin deleted", err)
 	}
-	if u, _ := s.GetUserByID(admin.ID); u == nil {
+	if u, _ := s.DefaultOrg().GetUserByID(admin.ID); u == nil {
 		t.Fatal("refused deletion removed the admin")
 	}
 	if err := s.CreatePairedSystem(&PairedSystem{ID: "sys", Name: "Sys", SystemType: "scim", CallbackURL: "https://sys.example/scim", HMACSecretEncrypted: "x", Status: "active"}, nil); err != nil {
@@ -236,10 +236,10 @@ func TestDeleteUserWithSyncEventsRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := createTestUser(t, s)
-	if err := s.DeleteUserWithSyncEvents(u.ID, &AuditEvent{ID: "del", Action: "admin.user_deleted", TargetID: u.ID, Outcome: "success", CreatedAt: time.Now().UTC()}); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, &AuditEvent{ID: "del", Action: "admin.user_deleted", TargetID: u.ID, Outcome: "success", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetUserByID(u.ID); got != nil {
+	if got, _ := s.DefaultOrg().GetUserByID(u.ID); got != nil {
 		t.Fatal("user not deleted")
 	}
 	if count(t, s, `SELECT COUNT(*) FROM account_sync_events WHERE system_id='sys' AND event_type='user.deleted' AND user_id=?`, u.ID) != 1 {
@@ -290,7 +290,7 @@ func TestListUsersApplicationsAndPairedSystemsOrdering(t *testing.T) {
 	s, _ := newStoreWithUser(t, "user")
 	createTestUserNamed(t, s, "zed")
 	createTestUserNamed(t, s, "bob")
-	users, err := s.ListUsers()
+	users, err := s.DefaultOrg().ListUsers()
 	if err != nil || len(users) != 3 || users[0].Username != "ada" || users[1].Username != "bob" || users[2].Username != "zed" {
 		t.Fatalf("users not ordered by name: %+v %v", users, err)
 	}
@@ -361,7 +361,7 @@ func TestListAppAccessGroups(t *testing.T) {
 		t.Fatal("missing app", err)
 	}
 	for _, g := range []string{"Sales", "Support", "Engineering"} {
-		if err := s.CreateGroup(&Group{ID: g, Name: g}, nil); err != nil {
+		if err := s.DefaultOrg().CreateGroup(&Group{ID: g, Name: g}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

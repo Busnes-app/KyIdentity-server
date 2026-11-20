@@ -298,7 +298,7 @@ func newSignOnFixture(t *testing.T) *signOnFixture {
 	}
 	engine := NewEngine(db, km, "http://localhost:5867")
 	user := &store.User{ID: uuid.NewString(), Username: "alice", DisplayName: "Alice", Email: "alice@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := db.CreateUser(user); err != nil {
+	if err := db.DefaultOrg().CreateUser(user); err != nil {
 		t.Fatal(err)
 	}
 	client := &store.OAuthClient{ID: uuid.NewString(), ClientName: "KyPost", ClientType: "public",
@@ -362,7 +362,7 @@ func TestExchangeDeviceAssertionIssuesIDToken(t *testing.T) {
 func (f *signOnFixture) requireOrganizationMFA(t *testing.T, methods []string, grace int64) {
 	t.Helper()
 	admin := &store.User{ID: uuid.NewString(), Username: "admin", Email: "admin@example.com", PasswordHash: "x", Role: "admin", Status: "active"}
-	if err := f.db.CreateUser(admin); err != nil {
+	if err := f.db.DefaultOrg().CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.db.SetMFAMethod(&store.MFAMethod{ID: uuid.NewString(), UserID: admin.ID, MethodType: "totp", EncryptedSecret: "x"}, nil); err != nil {
@@ -491,7 +491,7 @@ func (f *signOnFixture) secondClient(t *testing.T) *store.OAuthClient {
 func (f *signOnFixture) secondUser(t *testing.T) *store.User {
 	t.Helper()
 	u := &store.User{ID: uuid.NewString(), Username: "bob", DisplayName: "Bob", Email: "bob@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := f.db.CreateUser(u); err != nil {
+	if err := f.db.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	return u
@@ -567,7 +567,7 @@ func TestExchangeDeviceAssertionSignOnDisabled(t *testing.T) {
 
 func TestExchangeDeviceAssertionInactiveUser(t *testing.T) {
 	f := newSignOnFixture(t)
-	if _, err := f.db.EditUser(f.user.ID, nil, func(u *store.User) (bool, error) {
+	if _, err := f.db.DefaultOrg().EditUser(f.user.ID, nil, func(u *store.User) (bool, error) {
 		u.Status = "disabled"
 		return false, nil
 	}); err != nil {

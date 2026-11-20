@@ -16,7 +16,7 @@ func TestHousekeepingPurgesExpiredStepUpGrants(t *testing.T) {
 	}
 	defer s.Close()
 	u := &store.User{ID: "u", Username: "ada", Email: "ada@example.test", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUserWithSyncEvents(u, nil); err != nil {
+	if err := s.DefaultOrg().CreateUserWithSyncEvents(u, nil); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

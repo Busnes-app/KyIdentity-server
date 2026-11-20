@@ -39,10 +39,10 @@ func rolesFixture(t *testing.T) (*Store, *User, AppRecord, AppRecord) {
 // A group mapped to one app's role grants that role there and nothing anywhere else.
 func TestAppRolesAreScopedToTheirApp(t *testing.T) {
 	s, u, billing, hr := rolesFixture(t)
-	if err := s.CreateGroup(&Group{ID: "finance", Name: "Finance"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "finance", Name: "Finance"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("finance", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("finance", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, err := s.CreateAppRole(billing.ID, "billing.admin", "Runs invoices", nil)
@@ -187,10 +187,10 @@ func TestAppRolesReachProvisioningAndDeletingARoleRevokesIt(t *testing.T) {
 	defer cleanup()
 	appID := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
-	if err := s.CreateGroup(&Group{ID: "ops", Name: "Ops"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "ops", Name: "Ops"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("ops", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("ops", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(appID, "groups", "ops", true, nil); err != nil {
@@ -249,20 +249,20 @@ func TestLeavingAMappedGroupRevokesTheRoleDownstream(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := createTestUser(t, s)
-	if err := s.CreateGroup(&Group{ID: "ops", Name: "Ops"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "ops", Name: "Ops"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, _ := s.CreateAppRole(appID, "operator", "", nil)
 	if err := s.SetAppRoleAssignment(appID, role.ID, "groups", "ops", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("ops", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("ops", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
 	app, _ := s.GetAppRecord(appID)
 	revisionBefore := app.RoleRevision
-	if err := s.SetGroupMembership("ops", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("ops", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	var payload string
@@ -276,11 +276,11 @@ func TestLeavingAMappedGroupRevokesTheRoleDownstream(t *testing.T) {
 		t.Fatalf("role revision not bumped by a membership change: %d -> %d", revisionBefore, app.RoleRevision)
 	}
 	// Deleting a mapped group does the same for every member.
-	if err := s.SetGroupMembership("ops", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("ops", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
-	if err := s.DeleteGroup("ops", nil); err != nil {
+	if err := s.DefaultOrg().DeleteGroup("ops", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.QueryRow(`SELECT payload_json FROM account_sync_events WHERE user_id=? AND status='pending' ORDER BY rowid DESC LIMIT 1`, u.ID).Scan(&payload); err != nil || strings.Contains(payload, `"operator"`) {
@@ -412,7 +412,7 @@ func TestRetryAndRepairSendAppRoles(t *testing.T) {
 		t.Fatalf("retry sent the wrong roles: %s", p)
 	}
 	deliverAll(t, s)
-	fresh, err := s.GetUserByID(u.ID)
+	fresh, err := s.DefaultOrg().GetUserByID(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

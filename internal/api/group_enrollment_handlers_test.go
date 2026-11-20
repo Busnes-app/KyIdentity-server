@@ -21,7 +21,7 @@ func TestGroupEnrollmentAdminAndRestrictedAccess(t *testing.T) {
 	u := newUser(t, db, "user")
 	cookie := newSession(t, db, u, time.Now().UTC().Add(time.Hour))
 	for _, id := range []string{"a", "b"} {
-		if err := db.CreateGroup(&store.Group{ID: id, Name: id}, nil); err != nil {
+		if err := db.DefaultOrg().CreateGroup(&store.Group{ID: id, Name: id}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

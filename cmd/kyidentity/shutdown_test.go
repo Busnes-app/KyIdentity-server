@@ -101,7 +101,7 @@ func newAdminClient(t *testing.T, s *store.Store, base string) *adminClient {
 	t.Helper()
 	hash, _ := auth.HashPassword("shutdown-test-password")
 	u := &store.User{ID: uuid.NewString(), Username: "operator", DisplayName: "Operator", Email: "operator@shutdown.test", PasswordHash: hash, Role: "admin", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	token, _ := crypto.GenerateRandomHex(32)

@@ -11,7 +11,7 @@ func enrollmentFixture(t *testing.T) (*Store, *User, *User) {
 	t.Helper()
 	s, u, _ := appAccessFixture(t)
 	admin := &User{ID: "emergency", Username: "emergency", Email: "emergency@example.com", PasswordHash: "test", Role: "admin", Status: "active"}
-	if err := s.CreateUser(admin); err != nil {
+	if err := s.DefaultOrg().CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetMFAMethod(&MFAMethod{ID: "admin-totp", UserID: admin.ID, MethodType: "totp", EncryptedSecret: "test"}, nil); err != nil {
@@ -89,7 +89,7 @@ func TestEnrollmentGracePersistsAndExpiresWithoutWorker(t *testing.T) {
 	}
 	// Newly-created users get a persisted deadline at creation, not at first login.
 	next := &User{ID: "new", Username: "new", Email: "new@example.com", PasswordHash: "test", Role: "user", Status: "active"}
-	if err := s.CreateUser(next); err != nil {
+	if err := s.DefaultOrg().CreateUser(next); err != nil {
 		t.Fatal(err)
 	}
 	status, err = s.SessionEnrollmentStatus(next.ID, "")

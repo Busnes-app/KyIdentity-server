@@ -71,7 +71,7 @@ func TestLauncherPrefsRoundTripTrimAndCascade(t *testing.T) {
 		t.Fatalf("round trip = %+v, %v", got, err)
 	}
 
-	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	var n int

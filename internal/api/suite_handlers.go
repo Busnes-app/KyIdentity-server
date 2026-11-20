@@ -135,7 +135,7 @@ func (h *SuiteHandler) People(w http.ResponseWriter, r *http.Request, caller *st
 		return
 	}
 	out := []suitePerson{}
-	user, err := h.store.GetUserByID(sub)
+	user, err := h.store.PrincipalByID(sub)
 	allowed := false
 	if err == nil && user != nil && user.Role == "user" {
 		allowed, err = h.store.ClientAccessAllowed(sub, caller.ID)

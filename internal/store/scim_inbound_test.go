@@ -101,7 +101,7 @@ func TestUpstreamUsersAreKeyedByConnectorAndExternalID(t *testing.T) {
 	b, _ := s.CreateSCIMConnector("B", nil)
 	local := createTestUser(t, s)
 	u := upstream(t, s, a.ID, "ext-1", "alice")
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if !stored.Pending || stored.Status != "active" && stored.Status != "disabled" || stored.Status != "disabled" || stored.PasswordHash != "" || stored.Role != "user" {
 		t.Fatalf("upstream account: %+v", stored)
 	}
@@ -125,7 +125,7 @@ func TestUpstreamUsersAreKeyedByConnectorAndExternalID(t *testing.T) {
 	if err := s.CreateUpstreamUser(&User{Username: "shadow", Email: local.Username, SourceConnectorID: a.ID, ExternalID: "ext-5", SourceActive: true}, nil); !errors.Is(err, ErrUserConflict) {
 		t.Fatalf("email equal to a local username accepted: %v", err)
 	}
-	renamed, _ := s.GetUserByID(u.ID)
+	renamed, _ := s.DefaultOrg().GetUserByID(u.ID)
 	renamed.Username = local.Email
 	if err := upstreamWrite(s, renamed); !errors.Is(err, ErrUserConflict) {
 		t.Fatalf("rename onto a local email accepted: %v", err)
@@ -166,7 +166,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	seedSession(t, s, u.ID, now.Add(time.Hour), now)
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if stored.Status != "active" {
 		t.Fatalf("after activation: %+v", stored)
 	}
@@ -175,7 +175,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	if err := upstreamWrite(s, stored); err != nil {
 		t.Fatal(err)
 	}
-	stored, _ = s.GetUserByID(u.ID)
+	stored, _ = s.DefaultOrg().GetUserByID(u.ID)
 	if stored.Status != "active" && stored.Status != "disabled" || stored.Status != "disabled" {
 		t.Fatalf("upstream deactivation: %+v", stored)
 	}
@@ -186,7 +186,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	if err := upstreamWrite(s, stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored, _ = s.GetUserByID(u.ID); stored.Status != "active" {
+	if stored, _ = s.DefaultOrg().GetUserByID(u.ID); stored.Status != "active" {
 		t.Fatalf("upstream reactivation: %+v", stored)
 	}
 
@@ -196,13 +196,13 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(stored, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	stored, _ = s.GetUserByID(u.ID)
+	stored, _ = s.DefaultOrg().GetUserByID(u.ID)
 	stored.SourceActive = true
 	stored.DisplayName = "Alice Renamed"
 	if err := upstreamWrite(s, stored); err != nil {
 		t.Fatal(err)
 	}
-	stored, _ = s.GetUserByID(u.ID)
+	stored, _ = s.DefaultOrg().GetUserByID(u.ID)
 	if stored.Status != "disabled" || !stored.LocallyDisabled || stored.DisplayName != "Alice Renamed" {
 		t.Fatalf("upstream undid a local override or lost the profile edit: %+v", stored)
 	}
@@ -211,7 +211,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(stored, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if stored, _ = s.GetUserByID(u.ID); stored.Status != "active" {
+	if stored, _ = s.DefaultOrg().GetUserByID(u.ID); stored.Status != "active" {
 		t.Fatalf("lifting the override: %+v", stored)
 	}
 
@@ -220,12 +220,12 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	if err := upstreamWrite(s, stored); err == nil {
 		t.Fatal("external id changed")
 	}
-	stored, _ = s.GetUserByID(u.ID)
+	stored, _ = s.DefaultOrg().GetUserByID(u.ID)
 	stored.Role = "admin"
 	if err := upstreamWrite(s, stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored, _ = s.GetUserByID(u.ID); stored.Role != "user" {
+	if stored, _ = s.DefaultOrg().GetUserByID(u.ID); stored.Role != "user" {
 		t.Fatal("upstream granted a local role")
 	}
 }
@@ -251,7 +251,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("transfer: %d %v", n, err)
 	}
-	after, _ := s.GetUserByID(k.ID)
+	after, _ := s.DefaultOrg().GetUserByID(k.ID)
 	if after.SourceConnectorID != "" || after.ExternalID != "" || after.Status != "active" {
 		t.Fatalf("transferred account: %+v", after)
 	}
@@ -260,7 +260,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	}
 
 	// Disabling the owned accounts may not remove the last active administrator.
-	promoted, _ := s.GetUserByID(d.ID)
+	promoted, _ := s.DefaultOrg().GetUserByID(d.ID)
 	promoted.Role = "admin"
 	if err := s.UpdateUserWithSyncEvents(promoted, false, nil); err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	if _, err := s.DeleteSCIMConnector(drop.ID, true, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatalf("disconnect disabled the last administrator: %v", err)
 	}
-	if still, _ := s.GetUserByID(d.ID); still.Status != "active" || still.SourceConnectorID != drop.ID {
+	if still, _ := s.DefaultOrg().GetUserByID(d.ID); still.Status != "active" || still.SourceConnectorID != drop.ID {
 		t.Fatalf("refused disconnect changed the account: %+v", still)
 	}
 	localAdmin := createTestUser(t, s)
@@ -280,7 +280,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("deactivate: %d %v", n, err)
 	}
-	after, _ = s.GetUserByID(d.ID)
+	after, _ = s.DefaultOrg().GetUserByID(d.ID)
 	if after.SourceConnectorID != "" || after.Status != "disabled" {
 		t.Fatalf("deactivated account: %+v", after)
 	}
@@ -300,8 +300,8 @@ func TestLocalOverrideSurvivesAConcurrentUpstreamWrite(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	fromUpstream, _ := s.GetUserByID(u.ID)
-	fromAdmin, _ := s.GetUserByID(u.ID)
+	fromUpstream, _ := s.DefaultOrg().GetUserByID(u.ID)
+	fromAdmin, _ := s.DefaultOrg().GetUserByID(u.ID)
 	fromUpstream.SourceActive, fromUpstream.DisplayName = true, "Alice Upstream"
 	fromAdmin.LocallyDisabled = true
 	fromAdmin.ApplySourceState()
@@ -328,7 +328,7 @@ func TestLocalOverrideSurvivesAConcurrentUpstreamWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	after, _ := s.GetUserByID(u.ID)
+	after, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if !after.LocallyDisabled || after.Status != "disabled" {
 		t.Fatalf("override lost to a concurrent upstream write: %+v", after)
 	}
@@ -351,8 +351,8 @@ func TestUpstreamDeactivationSurvivesAConcurrentLocalEdit(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	fromUpstream, _ := s.GetUserByID(u.ID)
-	fromAdmin, _ := s.GetUserByID(u.ID)
+	fromUpstream, _ := s.DefaultOrg().GetUserByID(u.ID)
+	fromAdmin, _ := s.DefaultOrg().GetUserByID(u.ID)
 	fromUpstream.SourceActive = false
 	fromAdmin.Role = "admin"
 
@@ -378,7 +378,7 @@ func TestUpstreamDeactivationSurvivesAConcurrentLocalEdit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	after, _ := s.GetUserByID(u.ID)
+	after, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if after.SourceActive || after.Status != "disabled" || after.Role != "admin" {
 		t.Fatalf("upstream deactivation lost to a concurrent local edit: %+v", after)
 	}
@@ -400,8 +400,8 @@ func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	fromUpstream, _ := s.GetUserByID(u.ID)
-	fromAdmin, _ := s.GetUserByID(u.ID)
+	fromUpstream, _ := s.DefaultOrg().GetUserByID(u.ID)
+	fromAdmin, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if fromAdmin.EmailVerifiedAt == nil {
 		t.Fatal("mailed activation did not verify the address")
 	}
@@ -433,7 +433,7 @@ func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	after, _ := s.GetUserByID(u.ID)
+	after, _ := s.DefaultOrg().GetUserByID(u.ID)
 	// Promotion first refuses the rename outright; the rename first is kept.
 	want := fromUpstream
 	if refused {
@@ -456,7 +456,7 @@ func TestUpstreamCannotChangePrivilegedIdentifiers(t *testing.T) {
 		t.Fatal(err)
 	}
 	helpdesk := upstream(t, s, c.ID, "ext-2", "bob")
-	if err := s.SetDelegations(helpdesk.ID, Delegations{Helpdesk: true}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(helpdesk.ID, Delegations{Helpdesk: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	plain := upstream(t, s, c.ID, "ext-3", "carol")
@@ -466,29 +466,29 @@ func TestUpstreamCannotChangePrivilegedIdentifiers(t *testing.T) {
 			func(n *User) { n.Email = "attacker@evil.test" },
 			func(n *User) { n.Username = "renamed" },
 		} {
-			next, _ := s.GetUserByID(u.ID)
+			next, _ := s.DefaultOrg().GetUserByID(u.ID)
 			change(next)
 			if err := upstreamWrite(s, next); !errors.Is(err, ErrPrivilegedIdentity) {
 				t.Fatalf("%s: err = %v, want ErrPrivilegedIdentity", u.Username, err)
 			}
-			if got, _ := s.GetUserByID(u.ID); got.Email != u.Email || got.Username != u.Username {
+			if got, _ := s.DefaultOrg().GetUserByID(u.ID); got.Email != u.Email || got.Username != u.Username {
 				t.Fatalf("%s changed anyway: %+v", u.Username, got)
 			}
 		}
 		// Other upstream fields still flow.
-		next, _ := s.GetUserByID(u.ID)
+		next, _ := s.DefaultOrg().GetUserByID(u.ID)
 		next.DisplayName = "Renamed Display"
 		if err := upstreamWrite(s, next); err != nil {
 			t.Fatalf("%s display name: %v", u.Username, err)
 		}
 	}
 
-	next, _ := s.GetUserByID(plain.ID)
+	next, _ := s.DefaultOrg().GetUserByID(plain.ID)
 	next.Email, next.Username = "carol.new@up.test", "carol.new"
 	if err := upstreamWrite(s, next); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetUserByID(plain.ID); got.Email != "carol.new@up.test" || got.Username != "carol.new" {
+	if got, _ := s.DefaultOrg().GetUserByID(plain.ID); got.Email != "carol.new@up.test" || got.Username != "carol.new" {
 		t.Fatalf("ordinary account not updated: %+v", got)
 	}
 }
@@ -521,7 +521,7 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.GetUserByID(flipped.ID)
+	got, _ := s.DefaultOrg().GetUserByID(flipped.ID)
 	if got.Pending || got.Status != "disabled" || got.PasswordHash != "hash" {
 		t.Fatalf("activation outranked the upstream's inactive flag: %+v", got)
 	}
@@ -535,7 +535,7 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ = s.GetUserByID(held.ID); got.Pending || got.Status != "disabled" || !got.LocallyDisabled {
+	if got, _ = s.DefaultOrg().GetUserByID(held.ID); got.Pending || got.Status != "disabled" || !got.LocallyDisabled {
 		t.Fatalf("activation outranked a local override: %+v", got)
 	}
 	if _, err := s.IssueAccountToken(held.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
@@ -544,13 +544,13 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 
 	// Lifting the override or the upstream flag later makes the account active with the
 	// password that was set.
-	got, _ = s.GetUserByID(held.ID)
+	got, _ = s.DefaultOrg().GetUserByID(held.ID)
 	got.LocallyDisabled = false
 	got.ApplySourceState()
 	if err := s.UpdateUserWithSyncEvents(got, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ = s.GetUserByID(held.ID); got.Status != "active" {
+	if got, _ = s.DefaultOrg().GetUserByID(held.ID); got.Status != "active" {
 		t.Fatalf("lifting the override after activation: %+v", got)
 	}
 }
@@ -576,7 +576,7 @@ func TestDisconnectExpiresLinksOfShutOutInvitees(t *testing.T) {
 		if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err == nil {
 			t.Fatalf("disable=%v: a deactivated invitee activated after the disconnect", disable)
 		}
-		if got, _ := s.GetUserByID(u.ID); got == nil || got.Status == "active" {
+		if got, _ := s.DefaultOrg().GetUserByID(u.ID); got == nil || got.Status == "active" {
 			t.Fatalf("disable=%v: account %+v", disable, got)
 		}
 		cleanup()

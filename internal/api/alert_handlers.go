@@ -80,7 +80,7 @@ func (h *AlertHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	recipients := []alertRecipient{}
 	for _, id := range settings.Recipients {
-		if u, err := h.store.GetUserByID(id); err == nil && u != nil {
+		if u, err := orgStore(r).GetUserByID(id); err == nil && u != nil {
 			recipients = append(recipients, alertRecipient{u.ID, u.Username})
 		}
 	}
@@ -105,7 +105,7 @@ func (h *AlertHandler) PutSettings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
 			return
 		}
-		if u == nil {
+		if u == nil || u.Org() != orgStore(r).ID() {
 			http.Error(w, `{"error":"alert_recipient","error_description":"Recipients must be administrators or auditors"}`, http.StatusBadRequest)
 			return
 		}

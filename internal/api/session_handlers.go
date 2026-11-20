@@ -144,7 +144,7 @@ func (h *SessionHandler) RevokeOthers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SessionHandler) AdminList(w http.ResponseWriter, r *http.Request) {
-	if !h.userExists(w, r.PathValue("id")) {
+	if !h.userExists(w, r, r.PathValue("id")) {
 		return
 	}
 	h.writeInventory(w, r.PathValue("id"), "", true)
@@ -162,7 +162,7 @@ func (h *SessionHandler) AdminRevokeSession(w http.ResponseWriter, r *http.Reque
 func (h *SessionHandler) AdminRevokeApp(w http.ResponseWriter, r *http.Request) {
 	admin := GetUserFromContext(r.Context())
 	userID, clientID := r.PathValue("id"), r.PathValue("clientId")
-	if !h.userExists(w, userID) {
+	if !h.userExists(w, r, userID) {
 		return
 	}
 	pending := h.audit.Prepare("admin.app_access_revoked", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"clientId": clientID})
@@ -189,8 +189,8 @@ func (h *SessionHandler) revoke(w http.ResponseWriter, r *http.Request, pending 
 	return false
 }
 
-func (h *SessionHandler) userExists(w http.ResponseWriter, userID string) bool {
-	u, err := h.store.GetUserByID(userID)
+func (h *SessionHandler) userExists(w http.ResponseWriter, r *http.Request, userID string) bool {
+	u, err := orgStore(r).GetUserByID(userID)
 	if err != nil || u == nil {
 		http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
 		return false

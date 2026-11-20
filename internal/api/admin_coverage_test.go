@@ -114,7 +114,7 @@ func TestAdminUserNotFoundAndLastAdmin(t *testing.T) {
 	covRefused(t, adminRequest(t, srv, "POST", "/api/admin/users/ghost/reset-mfa", admin, ""), 404, "user_not_found")
 	covRefused(t, adminRequest(t, srv, "DELETE", "/api/admin/users/ghost", admin, ""), 404, "user_not_found")
 	covRefused(t, adminRequest(t, srv, "DELETE", "/api/admin/users/"+adminUser.ID, admin, ""), 400, "cannot_delete_last_admin")
-	if u, _ := db.GetUserByID(adminUser.ID); u == nil {
+	if u, _ := db.DefaultOrg().GetUserByID(adminUser.ID); u == nil {
 		t.Fatal("the last administrator was deleted")
 	}
 	if n := countAudit(t, db, "admin.user_deleted"); n != 0 {
@@ -354,7 +354,7 @@ func TestAdminSetDelegationsValidation(t *testing.T) {
 	}
 	covRefused(t, adminRequest(t, srv, "PUT", path, admin, `{"helpdesk":true,"appOwner":["no-such-app"]}`), 400, "unknown_app")
 	covRefused(t, adminRequest(t, srv, "PUT", "/api/admin/users/ghost/delegations", admin, `{"helpdesk":true}`), 404, "user_not_found")
-	if d, err := db.Delegations(target.ID); err != nil || d.Helpdesk || len(d.AppOwner) != 0 {
+	if d, err := db.DefaultOrg().Delegations(target.ID); err != nil || d.Helpdesk || len(d.AppOwner) != 0 {
 		t.Fatalf("a refused delegation edit applied: %+v %v", d, err)
 	}
 	if n := countAudit(t, db, "admin.delegations_updated"); n != 0 {

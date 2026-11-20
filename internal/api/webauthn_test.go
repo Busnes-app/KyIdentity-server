@@ -405,7 +405,7 @@ func TestPasskeyLoginRejectsAnotherUsersCredential(t *testing.T) {
 		DisplayName: "Attacker", Email: uuid.New().String()[:8] + "@attacker.test",
 		PasswordHash: hash, Role: "user", Status: "active",
 	}
-	if err := f.store.CreateUser(attacker); err != nil {
+	if err := f.store.DefaultOrg().CreateUser(attacker); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	attackerAuth := newTestAuthenticator(t, "Y3JlZC1hdHRhY2tlcg")

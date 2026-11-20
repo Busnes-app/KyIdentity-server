@@ -36,6 +36,8 @@ type User struct {
 	EndsAt    *time.Time `json:"endsAt,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
+	// orgID is set only by the store, so Org cannot name an org a caller chose.
+	orgID string
 }
 
 // AuthenticationEvidence records server-verified login facts. Nil timestamps mean

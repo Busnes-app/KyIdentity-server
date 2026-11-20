@@ -86,7 +86,7 @@ func TestPasswordChangeMigrationFlagsUnchangedBootstrapAdminOnce(t *testing.T) {
 	check := func(s *Store) {
 		t.Helper()
 		for id, flagged := range want {
-			u, err := s.GetUserByID(id)
+			u, err := s.DefaultOrg().GetUserByID(id)
 			if err != nil || u == nil {
 				t.Fatal(id, err)
 			}
@@ -121,10 +121,10 @@ func TestChoosingAPasswordClearsTheFlag(t *testing.T) {
 	defer cleanup()
 	for _, viaLink := range []bool{false, true} {
 		u := &User{ID: uuid.NewString(), Username: "f" + uuid.NewString()[:8], DisplayName: "F", Email: uuid.NewString()[:8] + "@x.test", PasswordHash: "old", Role: "admin", Status: "active", PasswordChangeRequired: true}
-		if err := s.CreateUserWithSyncEvents(u, nil); err != nil {
+		if err := s.DefaultOrg().CreateUserWithSyncEvents(u, nil); err != nil {
 			t.Fatal(err)
 		}
-		if got, _ := s.GetUserByID(u.ID); !got.PasswordChangeRequired {
+		if got, _ := s.DefaultOrg().GetUserByID(u.ID); !got.PasswordChangeRequired {
 			t.Fatal("flag not stored at creation")
 		}
 		if viaLink {
@@ -143,7 +143,7 @@ func TestChoosingAPasswordClearsTheFlag(t *testing.T) {
 		} else if err := s.ChangePassword(u.ID, seedSession(t, s, u.ID, time.Now().UTC().Add(time.Hour), time.Now().UTC()), "new", nil); err != nil {
 			t.Fatal(err)
 		}
-		got, _ := s.GetUserByID(u.ID)
+		got, _ := s.DefaultOrg().GetUserByID(u.ID)
 		if got.PasswordChangeRequired || got.PasswordHash != "new" {
 			t.Fatalf("viaLink=%v: flag=%v hash=%q", viaLink, got.PasswordChangeRequired, got.PasswordHash)
 		}

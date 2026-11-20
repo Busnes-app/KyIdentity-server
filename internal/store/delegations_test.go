@@ -18,16 +18,16 @@ func TestDelegationsFollowUserAndApp(t *testing.T) {
 	rows, _, _ := s.ListAppRecords("billing", 25, 0)
 	app := rows[0]
 
-	if err := s.SetDelegations(u.ID, Delegations{Helpdesk: true, AppOwner: []string{"missing-app"}}, nil); !errors.Is(err, ErrAppRecordMissing) {
+	if err := s.DefaultOrg().SetDelegations(u.ID, Delegations{Helpdesk: true, AppOwner: []string{"missing-app"}}, nil); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatalf("unknown app accepted: %v", err)
 	}
-	if err := s.SetDelegations("missing-user", Delegations{Auditor: true}, nil); !errors.Is(err, ErrUserMissing) {
+	if err := s.DefaultOrg().SetDelegations("missing-user", Delegations{Auditor: true}, nil); !errors.Is(err, ErrUserMissing) {
 		t.Fatalf("unknown user accepted: %v", err)
 	}
-	if err := s.SetDelegations(u.ID, Delegations{Helpdesk: true, Auditor: true, AppOwner: []string{app.ID, app.ID}}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(u.ID, Delegations{Helpdesk: true, Auditor: true, AppOwner: []string{app.ID, app.ID}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	d, err := s.Delegations(u.ID)
+	d, err := s.DefaultOrg().Delegations(u.ID)
 	if err != nil || !d.Helpdesk || !d.Auditor || len(d.AppOwner) != 1 || d.AppOwner[0] != app.ID {
 		t.Fatalf("delegations = %+v %v", d, err)
 	}
@@ -41,21 +41,21 @@ func TestDelegationsFollowUserAndApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	audit := &AuditEvent{ID: "audit", Action: "admin.delegations_updated", Outcome: "success", CreatedAt: time.Now().UTC()}
-	if err := s.SetDelegations(u.ID, Delegations{}, audit); err == nil {
+	if err := s.DefaultOrg().SetDelegations(u.ID, Delegations{}, audit); err == nil {
 		t.Fatal("change committed without its audit row")
 	}
 	if _, err := s.db.Exec(dialect(s, `DROP TRIGGER fail_delegation_audit`)); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ = s.Delegations(u.ID); !d.Helpdesk {
+	if d, _ = s.DefaultOrg().Delegations(u.ID); !d.Helpdesk {
 		t.Fatal("failed audit lost the delegation")
 	}
 
 	// Replacing the set is exact: only what the caller states remains.
-	if err := s.SetDelegations(u.ID, Delegations{Auditor: true}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(u.ID, Delegations{Auditor: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ = s.Delegations(u.ID); d.Helpdesk || !d.Auditor || len(d.AppOwner) != 0 {
+	if d, _ = s.DefaultOrg().Delegations(u.ID); d.Helpdesk || !d.Auditor || len(d.AppOwner) != 0 {
 		t.Fatalf("replace left stale rows: %+v", d)
 	}
 	if _, total, _ = s.ListAppRecordsOwnedBy(u.ID, "", 25, 0); total != 0 {
@@ -63,16 +63,16 @@ func TestDelegationsFollowUserAndApp(t *testing.T) {
 	}
 
 	// Deleting the app or the user removes the rows that named them.
-	if err := s.SetDelegations(u.ID, Delegations{AppOwner: []string{app.ID}}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(u.ID, Delegations{AppOwner: []string{app.ID}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DeleteOAuthClient("billing", nil); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ = s.Delegations(u.ID); len(d.AppOwner) != 0 {
+	if d, _ = s.DefaultOrg().Delegations(u.ID); len(d.AppOwner) != 0 {
 		t.Fatalf("ownership outlived the app: %+v", d)
 	}
-	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -92,14 +92,14 @@ func TestDelegatesFallUnderTheAdministratorPolicy(t *testing.T) {
 	if err != nil || status.Required {
 		t.Fatalf("ordinary user under the administrator policy: %+v %v", status, err)
 	}
-	if err := s.SetDelegations(u.ID, Delegations{Helpdesk: true}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(u.ID, Delegations{Helpdesk: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	status, err = s.SessionEnrollmentStatus(u.ID, "session")
 	if err != nil || !status.Required || !status.Restricted {
 		t.Fatalf("delegate escaped the administrator policy: %+v %v", status, err)
 	}
-	if err := s.SetDelegations(u.ID, Delegations{}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(u.ID, Delegations{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if status, _ = s.SessionEnrollmentStatus(u.ID, "session"); status.Required {
@@ -117,7 +117,7 @@ func TestDelegatesFallUnderTheAdministratorPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	group := &Group{ID: "key-only", Name: "Key only"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	gp := enrollmentPolicy("group:key-only", 0)
@@ -125,13 +125,13 @@ func TestDelegatesFallUnderTheAdministratorPolicy(t *testing.T) {
 	if err := s.SetEnrollmentPolicy(gp, "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembershipForSession("key-only", u.ID, true, "admin-session", nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembershipForSession("key-only", u.ID, true, "admin-session", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetDelegations(u.ID, Delegations{Auditor: true}, nil); !errors.Is(err, ErrEnrollmentPolicy) {
+	if err := s.DefaultOrg().SetDelegations(u.ID, Delegations{Auditor: true}, nil); !errors.Is(err, ErrEnrollmentPolicy) {
 		t.Fatalf("conflicting policies accepted: %v", err)
 	}
-	if d, _ := s.Delegations(u.ID); d.Auditor {
+	if d, _ := s.DefaultOrg().Delegations(u.ID); d.Auditor {
 		t.Fatal("refused delegation persisted")
 	}
 }

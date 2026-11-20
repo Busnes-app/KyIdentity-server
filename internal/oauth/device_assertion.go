@@ -268,7 +268,7 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	if !fresh {
 		return nil, who, errAssertionReplay
 	}
-	user, err := e.store.GetUserByID(a.Subject)
+	user, err := e.store.PrincipalByID(a.Subject)
 	if err != nil {
 		return nil, who, err
 	}

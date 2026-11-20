@@ -222,7 +222,7 @@ func (e *Engine) PollDeviceCode(raw, clientID, ip, userAgent string) (*TokenResp
 	case "denied":
 		return nil, d, ErrAccessDenied
 	}
-	user, err := e.store.GetUserByID(d.UserID)
+	user, err := e.store.PrincipalByID(d.UserID)
 	if err != nil {
 		return nil, d, err
 	}

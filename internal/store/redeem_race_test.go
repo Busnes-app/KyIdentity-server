@@ -14,7 +14,7 @@ func TestRedemptionQueuedBehindRevocationFails(t *testing.T) {
 	s, close := setupTestStore(t)
 	defer close()
 	u := &User{ID: uuid.NewString(), Username: "invited", DisplayName: "invited", Email: "invited@example.test", Role: "user", Status: "disabled", Pending: true}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	link, err := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
@@ -44,7 +44,7 @@ func TestRedemptionQueuedBehindRevocationFails(t *testing.T) {
 	if err := <-done; !errors.Is(err, ErrNotFound) {
 		t.Fatalf("queued redemption: %v", err)
 	}
-	got, err := s.GetUserByID(u.ID)
+	got, err := s.DefaultOrg().GetUserByID(u.ID)
 	if err != nil || got.Status != "disabled" || !got.Pending {
 		t.Fatalf("account after revocation: %+v %v", got, err)
 	}

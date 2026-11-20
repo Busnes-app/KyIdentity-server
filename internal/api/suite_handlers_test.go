@@ -202,7 +202,7 @@ func TestSuiteAppsFiltersPerUser(t *testing.T) {
 
 	// A disabled user sees nothing, and an app whose access policy is off leaves the
 	// no-sub list.
-	if _, err := db.EditUser(both.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
+	if _, err := db.DefaultOrg().EditUser(both.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if got := suiteApps(t, srv, "?sub="+both.ID, "kycalendar", "cal-secret"); len(got) != 0 {
@@ -495,7 +495,7 @@ func TestSuitePeerNewPairs(t *testing.T) {
 func person(t *testing.T, db *store.Store, role, name, username, email string) *store.User {
 	t.Helper()
 	u := newUser(t, db, role)
-	if _, err := db.EditUser(u.ID, nil, func(row *store.User) (bool, error) {
+	if _, err := db.DefaultOrg().EditUser(u.ID, nil, func(row *store.User) (bool, error) {
 		row.DisplayName, row.Username, row.Email = name, username, email
 		return false, nil
 	}); err != nil {
@@ -537,7 +537,7 @@ func TestSuitePeople(t *testing.T) {
 		assignApp(t, db, "kycalendar", u.ID)
 	}
 	assignApp(t, db, "kypost", postOnly.ID)
-	if _, err := db.EditUser(gone.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
+	if _, err := db.DefaultOrg().EditUser(gone.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	s := "sub=" + url.QueryEscape(me.ID)

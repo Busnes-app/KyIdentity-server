@@ -41,7 +41,7 @@ func TestHRAPIAuthenticationOwnershipAndVersioning(t *testing.T) {
 	if worker.State != "mailbox_pending" || worker.Email != "" {
 		t.Fatal(worker)
 	}
-	if u, _ := db.GetUserByID(worker.ID); u != nil {
+	if u, _ := db.DefaultOrg().GetUserByID(worker.ID); u != nil {
 		t.Fatal("premature SSO identity")
 	}
 	for _, bad := range []string{strings.Replace(body, `"active":true`, `"active":true,"email":"takeover@example.test"`, 1), strings.Replace(body, `"active":true`, `"active":true,"role":"admin"`, 1), strings.Replace(body, `,"active":true`, "", 1), body + `{}`} {
