@@ -94,7 +94,7 @@ func TestDeleteUserWithSyncEventsMigratesLegacyForeignKey(t *testing.T) {
 	if err := s.CreatePairedSystem(&PairedSystem{ID: "system", Name: "system", SystemType: "scim", CallbackURL: "https://example.com/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision) VALUES('system','deleted-user',TRUE,TRUE,1)`); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(org_id, system_id,resource_id,active,provisioned,revision) VALUES('00000000-0000-0000-0000-000000000001', 'system','deleted-user',TRUE,TRUE,1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().DeleteUserWithSyncEvents("deleted-user", nil); err != nil {
@@ -248,7 +248,7 @@ func TestListAuditEventsPagination(t *testing.T) {
 	}
 
 	// Page 1 with limit 5
-	events, total, err := s.ListAuditEvents(5, 0)
+	events, total, err := s.DefaultOrg().ListAuditEvents(5, 0)
 	if err != nil {
 		t.Fatalf("ListAuditEvents failed: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestListAuditEventsPagination(t *testing.T) {
 	}
 
 	// Page 2 with limit 5 offset 5
-	events2, total2, err := s.ListAuditEvents(5, 5)
+	events2, total2, err := s.DefaultOrg().ListAuditEvents(5, 5)
 	if err != nil {
 		t.Fatalf("ListAuditEvents page 2 failed: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestListAuditEventsPagination(t *testing.T) {
 	}
 
 	// Page 4 with limit 5 offset 15 (empty)
-	events4, total4, err := s.ListAuditEvents(5, 15)
+	events4, total4, err := s.DefaultOrg().ListAuditEvents(5, 15)
 	if err != nil {
 		t.Fatalf("ListAuditEvents page 4 failed: %v", err)
 	}

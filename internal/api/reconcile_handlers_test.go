@@ -85,7 +85,7 @@ func TestReconciliationAdministration(t *testing.T) {
 	if rr = adminRequest(t, srv, "PUT", base+"/connection", cookie, `{"systemType":"scim","reconcileHours":9999}`); rr.Code != 400 {
 		t.Fatalf("absurd schedule accepted: %d", rr.Code)
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

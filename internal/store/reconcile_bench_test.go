@@ -28,7 +28,7 @@ func BenchmarkMutationReconcile(b *testing.B) {
 		b.Fatal(err)
 	}
 	for i := range 3000 {
-		if _, err := tx.Exec(`INSERT INTO users(id,username,display_name,email,password_hash,role,status) VALUES(?,?,?,?,'x','user','active')`, fmt.Sprint("u", i), fmt.Sprint("user", i), "U", fmt.Sprint("u", i, "@test.invalid")); err != nil {
+		if _, err := tx.Exec(`INSERT INTO users(org_id, id,username,display_name,email,password_hash,role,status) VALUES('00000000-0000-0000-0000-000000000001', ?,?,?,?,'x','user','active')`, fmt.Sprint("u", i), fmt.Sprint("user", i), "U", fmt.Sprint("u", i, "@test.invalid")); err != nil {
 			b.Fatal(err)
 		}
 	}

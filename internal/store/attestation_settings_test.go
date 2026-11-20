@@ -20,7 +20,7 @@ func TestAttestationSettingsRoundTrip(t *testing.T) {
 	if got, err = s.AttestationSettings(); err != nil || !got.RequireLockedBootloader {
 		t.Fatalf("after set: %+v %v", got, err)
 	}
-	rows, _, err := s.SearchAuditEvents(AuditFilter{Action: "admin.attestation_configured", Limit: 10})
+	rows, _, err := s.DefaultOrg().SearchAuditEvents(AuditFilter{Action: "admin.attestation_configured", Limit: 10})
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("audit rows: %d %v", len(rows), err)
 	}

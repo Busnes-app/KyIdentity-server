@@ -176,10 +176,14 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 		_, err := tx.Exec(`DELETE FROM sync_resource_state WHERE system_id=? AND resource_id=?`, d.systemID, d.resourceID)
 		return err
 	}
+	org, err := resourceOrgTx(tx, d.resourceID)
+	if err != nil {
+		return err
+	}
 	var revision int
-	if err := tx.QueryRow(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,revision,members) VALUES(?,?,?,?,1,?)
+	if err := tx.QueryRow(`INSERT INTO sync_resource_state(org_id,system_id,resource_id,kind,active,revision,members) VALUES(?,?,?,?,?,1,?)
  ON CONFLICT(system_id,resource_id) DO UPDATE SET active=excluded.active,revision=sync_resource_state.revision+1,members=excluded.members,offboarded_at=NULL RETURNING revision`,
-		d.systemID, d.resourceID, d.kind, d.active, d.members).Scan(&revision); err != nil {
+		org, d.systemID, d.resourceID, d.kind, d.active, d.members).Scan(&revision); err != nil {
 		return err
 	}
 	eventType := "user.updated"
@@ -197,8 +201,8 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 		return err
 	}
 	for _, r := range resets {
-		if _, err := tx.Exec(`INSERT INTO account_sync_events (`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			r.ID, r.UserID, r.SystemID, r.EventType, string(d.payload), r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision, 0); err != nil {
+		if _, err := tx.Exec(`INSERT INTO account_sync_events (org_id,`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			org, r.ID, r.UserID, r.SystemID, r.EventType, string(d.payload), r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision, 0); err != nil {
 			return err
 		}
 	}
@@ -206,8 +210,12 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 }
 
 func insertResourceEventTx(tx *sql.Tx, systemID, resourceID, eventType string, payload []byte, revision int, now time.Time) error {
-	_, err := tx.Exec(`INSERT INTO account_sync_events (id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES (?, ?, ?, ?, ?, 0, 'pending', ?, ?, ?)`,
-		uuid.New().String(), resourceID, systemID, eventType, string(payload), now, now, revision)
+	org, err := resourceOrgTx(tx, resourceID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO account_sync_events (org_id, id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?, ?)`,
+		org, uuid.New().String(), resourceID, systemID, eventType, string(payload), now, now, revision)
 	return err
 }
 
@@ -507,8 +515,8 @@ func (s *Store) ResyncSystem(systemID string, audit *AuditEvent) error {
 	// account: every out-of-scope account the connector was ever meant to hold, through a
 	// state row or a remote mapping, delivered or not. The replay is an inactive update,
 	// never a deletion, so a repeat supersedes it.
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision)
- SELECT l.system_id,l.local_id,'user',FALSE,TRUE,0 FROM scim_user_links l WHERE l.system_id=? AND l.kind='user' AND l.remote_id<>''
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(org_id,system_id,resource_id,kind,active,provisioned,revision)
+ SELECT l.org_id,l.system_id,l.local_id,'user',FALSE,TRUE,0 FROM scim_user_links l WHERE l.system_id=? AND l.kind='user' AND l.remote_id<>''
  AND NOT EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id WHERE a.system_id=l.system_id AND e.user_id=l.local_id)`, systemID); err != nil {
 		return err
 	}

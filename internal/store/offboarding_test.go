@@ -207,7 +207,7 @@ func TestLogoutCompletionCountsEveryDelivery(t *testing.T) {
 		if i == 0 {
 			status = "queued"
 		}
-		if _, err := s.db.Exec(`INSERT INTO logout_deliveries (id,client_id,user_id,sid,status,attempts,next_attempt_at,created_at,updated_at) VALUES (?,'app',?,?,?,1,?,?,?)`,
+		if _, err := s.db.Exec(`INSERT INTO logout_deliveries (org_id, id,client_id,user_id,sid,status,attempts,next_attempt_at,created_at,updated_at) VALUES ('00000000-0000-0000-0000-000000000001', ?,'app',?,?,?,1,?,?,?)`,
 			uuid.NewString(), u.ID, "sid-"+uuid.NewString(), status, base, base.Add(time.Duration(i)*time.Second), base); err != nil {
 			t.Fatal(err)
 		}

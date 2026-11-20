@@ -11,8 +11,8 @@ import (
 func TestListUpstreamGroupsFiltersAndPaging(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, _ := s.CreateSCIMConnector("A", nil)
-	b, _ := s.CreateSCIMConnector("B", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
+	b, _ := s.DefaultOrg().CreateSCIMConnector("B", nil)
 	alice := activated(t, s, a.ID, "ext-a", "alice")
 	g1 := &Group{Name: "Engineering", SourceConnectorID: a.ID, ExternalID: "grp-1"}
 	g2 := &Group{Name: "Sales", SourceConnectorID: a.ID, ExternalID: "grp-2"}

@@ -14,14 +14,14 @@ func hrFixture(t *testing.T) (*Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	c, err := s.CreateSCIMConnector("HR", nil)
+	c, err := s.DefaultOrg().CreateSCIMConnector("HR", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreatePairedSystem(&PairedSystem{ID: "post", Name: "KyPost", SystemType: "kypost", CallbackURL: "https://post.example/api/sync/webhook", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfigureHR(HRConnection{ConnectorID: c.ID, SystemID: "post", Domain: "example.test", WritebackURL: "https://hr.example/writeback", WritebackSecret: "encrypted"}, nil); err != nil {
+	if err := s.DefaultOrg().ConfigureHR(HRConnection{ConnectorID: c.ID, SystemID: "post", Domain: "example.test", WritebackURL: "https://hr.example/writeback", WritebackSecret: "encrypted"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	return s, c.ID

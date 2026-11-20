@@ -383,7 +383,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 		}
 		id = uuid.NewString()
 		// The installer owns these identities and took the address from the owner's plan.
-		if _, err := tx.Exec(`INSERT INTO users(id,username,display_name,email,password_hash,role,status,pending,email_verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,'active',FALSE,?,?,?)`, id, u.Username, u.Username, u.Email, u.PasswordHash, u.Role, now, now, now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO users(org_id,id,username,display_name,email,password_hash,role,status,pending,email_verified_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'active',FALSE,?,?,?)`, DefaultOrgID, id, u.Username, u.Username, u.Email, u.PasswordHash, u.Role, now, now, now); err != nil {
 			return nil, errors.New("installer account creation conflicts with an existing account")
 		}
 		if err := remember("user", u.Username, id, contract); err != nil {

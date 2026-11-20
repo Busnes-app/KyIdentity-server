@@ -80,7 +80,7 @@ func (h *AdminHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
-	events, total, err := h.store.SearchAuditEventsContext(r.Context(), f)
+	events, total, err := orgStore(r).SearchAuditEventsContext(r.Context(), f)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -157,7 +157,7 @@ func (h *AdminHandler) ExportAuditEvents(w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), auditExportTimeout)
 	defer cancel()
-	total, err := h.store.CountAuditEvents(ctx, f)
+	total, err := orgStore(r).CountAuditEvents(ctx, f)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -184,7 +184,7 @@ func (h *AdminHandler) ExportAuditEvents(w http.ResponseWriter, r *http.Request)
 	// never written, only noted. A count taken earlier is advisory, since rows keep
 	// arriving (the export's own intent row among them).
 	limited, rows := false, 0
-	_, streamErr := h.store.StreamAuditEvents(ctx, f, auditExportMaxRows+1, func(e store.AuditEvent) error {
+	_, streamErr := orgStore(r).StreamAuditEvents(ctx, f, auditExportMaxRows+1, func(e store.AuditEvent) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

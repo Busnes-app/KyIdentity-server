@@ -33,7 +33,11 @@ func (s *Store) SCIMUserLink(systemID, localID string) (remoteID string, started
 }
 
 func (s *Store) StartSCIMCreate(systemID, kind, localID string) (bool, error) {
-	r, err := s.db.Exec(`INSERT INTO scim_user_links(system_id,local_id,kind) VALUES(?,?,?) ON CONFLICT(system_id,local_id) DO NOTHING`, systemID, localID, kind)
+	org, err := resourceOrgTx(s.db, localID)
+	if err != nil {
+		return false, err
+	}
+	r, err := s.db.Exec(`INSERT INTO scim_user_links(org_id,system_id,local_id,kind) VALUES(?,?,?,?) ON CONFLICT(system_id,local_id) DO NOTHING`, org, systemID, localID, kind)
 	if err != nil {
 		return false, err
 	}
@@ -45,8 +49,12 @@ func (s *Store) SaveSCIMLink(systemID, kind, localID, remoteID string) error {
 	if remoteID == "" || remoteID == "." || remoteID == ".." {
 		return errors.New("invalid remote ID")
 	}
-	r, err := s.db.Exec(`INSERT INTO scim_user_links(system_id,local_id,kind,remote_id) VALUES(?,?,?,?)
- ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE scim_user_links.kind=excluded.kind AND (scim_user_links.remote_id='' OR scim_user_links.remote_id=excluded.remote_id)`, systemID, localID, kind, remoteID)
+	org, err := resourceOrgTx(s.db, localID)
+	if err != nil {
+		return err
+	}
+	r, err := s.db.Exec(`INSERT INTO scim_user_links(org_id,system_id,local_id,kind,remote_id) VALUES(?,?,?,?,?)
+ ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE scim_user_links.kind=excluded.kind AND (scim_user_links.remote_id='' OR scim_user_links.remote_id=excluded.remote_id)`, org, systemID, localID, kind, remoteID)
 	if err != nil {
 		return err
 	}

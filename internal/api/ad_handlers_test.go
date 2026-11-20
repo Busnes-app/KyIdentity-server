@@ -180,7 +180,7 @@ func TestActiveDirectoryPasswordQueueEndToEnd(t *testing.T) {
 
 	// No plaintext anywhere: the database file and its WAL, audit rows, logs.
 	var audits strings.Builder
-	rows, _, err := db.ListAuditEvents(1000, 0)
+	rows, _, err := db.DefaultOrg().ListAuditEvents(1000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

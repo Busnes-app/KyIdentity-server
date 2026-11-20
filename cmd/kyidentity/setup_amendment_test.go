@@ -79,7 +79,7 @@ func TestSetupAmendmentAddsClientAndScopesExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	_, audits, _ := s.ListAuditEvents(1, 0)
+	_, audits, _ := s.DefaultOrg().ListAuditEvents(1, 0)
 	owner, _ := s.GetUserByUsername(parent.Admin.Username)
 	frame, err := exportFrame(t, file, db, "recovery")
 	secret, _ := readSetupFile(filepath.Join(filepath.Dir(file), "client-recovery.secret"), 43)
@@ -103,7 +103,7 @@ func TestSetupAmendmentAddsClientAndScopesExport(t *testing.T) {
 			t.Fatalf("rerun %v: %s %v", args, report.Bytes(), err)
 		}
 	}
-	if _, after, _ := s.ListAuditEvents(1, 0); after != audits {
+	if _, after, _ := s.DefaultOrg().ListAuditEvents(1, 0); after != audits {
 		t.Fatal("rerun or export wrote audits")
 	}
 	for _, check := range []bool{true, false} {

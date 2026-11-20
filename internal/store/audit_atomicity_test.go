@@ -232,7 +232,7 @@ func TestSuccessfulMutationsCommitTheirAuditRow(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(u, false, audit); err != nil {
 		t.Fatal(err)
 	}
-	events, total, err := s.ListAuditEvents(10, 0)
+	events, total, err := s.DefaultOrg().ListAuditEvents(10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

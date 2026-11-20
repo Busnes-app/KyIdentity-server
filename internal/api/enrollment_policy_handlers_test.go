@@ -72,7 +72,7 @@ func TestEnrollmentPolicyAdminBoundaries(t *testing.T) {
 	if r := adminRequest(t, srv, "PUT", path, admin, body); r.Code != 409 {
 		t.Fatal("stale policy overwrite", r.Code)
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestEnrollmentPolicyDenialAuditAndPreviewFailure(t *testing.T) {
 		if r.Code != tc.code {
 			t.Fatal(r.Code, r.Body.String())
 		}
-		events, _, err := db.ListAuditEvents(100, 0)
+		events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

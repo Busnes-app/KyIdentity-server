@@ -68,8 +68,10 @@ func (s *Store) migratePasswordChangeRequired() error {
 		if _, err := tx.Exec(`UPDATE users SET password_change_required=1 WHERE id=?`, a.id); err != nil {
 			return err
 		}
-		if err := recordAuditTx(tx, &AuditEvent{ID: uuid.NewString(), ActorUsername: "kyidentity-migration", Action: "system.password_change_required",
-			TargetID: a.id, TargetType: "user", Outcome: "success", DetailsJSON: string(details), CreatedAt: now}); err != nil {
+		// A legacy migration: audit_events has no org_id yet, so the row takes the column
+		// default (the default org) if a later migration adds it.
+		if _, err := tx.Exec(`INSERT INTO audit_events (id, actor_id, actor_username, action, target_id, target_type, ip_address, user_agent, outcome, details_json, created_at) VALUES (?, '', 'kyidentity-migration', 'system.password_change_required', ?, 'user', '', '', 'success', ?, ?)`,
+			uuid.NewString(), a.id, string(details), now); err != nil {
 			return err
 		}
 	}

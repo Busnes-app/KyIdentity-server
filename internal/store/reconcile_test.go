@@ -98,7 +98,7 @@ func TestScheduleReconcileJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A scheduled repair leaves a durable trace of its request and its outcome.
-	events, _, err := s.ListAuditEvents(50, 0)
+	events, _, err := s.DefaultOrg().ListAuditEvents(50, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

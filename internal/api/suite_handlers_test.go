@@ -262,7 +262,7 @@ func TestSuitePeerSharedSecret(t *testing.T) {
 		t.Fatal("secret does not depend on the encryption key")
 	}
 
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestSuitePeerRefusals(t *testing.T) {
 	if code, _ := suitePeer(t, srv, "kycalendar", "cal-secret", "kypost"); code != http.StatusNotFound {
 		t.Errorf("disabled peer: %d, want 404", code)
 	}
-	if events, _, _ := db.ListAuditEvents(100, 0); len(events) > 0 {
+	if events, _, _ := db.DefaultOrg().ListAuditEvents(100, 0); len(events) > 0 {
 		for _, e := range events {
 			if e.Action == "suite.peer.issue" {
 				t.Fatal("a refused peer request was audited as issued")

@@ -103,3 +103,34 @@ func requireOrgUserTx(tx *sql.Tx, org, userID string) error {
 	}
 	return nil
 }
+
+// resourceOrgTx is the org of a provisioned user or group: its own row, or for one already
+// deleted the org its earlier provisioning rows recorded. A resource known nowhere is in
+// the default org when the install has one (single-tenant); a multi-tenant install has
+// none, so it is an error there.
+func resourceOrgTx(q interface {
+	QueryRow(string, ...any) *sql.Row
+}, resourceID string) (string, error) {
+	var org sql.NullString
+	if err := q.QueryRow(`SELECT COALESCE((SELECT org_id FROM users WHERE id=?),(SELECT org_id FROM directory_groups WHERE id=?),
+ (SELECT org_id FROM sync_resource_state WHERE resource_id=? LIMIT 1),(SELECT org_id FROM account_sync_events WHERE user_id=? LIMIT 1),
+ (SELECT org_id FROM scim_user_links WHERE local_id=? LIMIT 1),(SELECT id FROM orgs WHERE id='`+DefaultOrgID+`'))`, resourceID, resourceID, resourceID, resourceID, resourceID).Scan(&org); err != nil {
+		return "", err
+	}
+	if !org.Valid {
+		return "", errors.New("store: no org for resource " + resourceID)
+	}
+	return org.String, nil
+}
+
+// requireOrgConnectorTx is ErrNotFound unless the inbound SCIM connector is the org's.
+func requireOrgConnectorTx(tx *sql.Tx, org, connectorID string) error {
+	var ok bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM scim_connectors WHERE org_id=? AND id=?)`, org, connectorID).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	return nil
+}

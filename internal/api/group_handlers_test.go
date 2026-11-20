@@ -105,7 +105,7 @@ func TestGroupAdminAPI(t *testing.T) {
 	if r := adminRequestNoStepUp(t, srv, "GET", path+"/members", cookie, ""); r.Code != 404 {
 		t.Fatal("deleted group visible")
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

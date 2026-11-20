@@ -253,3 +253,26 @@ func migrateStaffOrgPostgres(tx *sql.Tx) error {
 	_, err := tx.Exec(b.String())
 	return err
 }
+
+// Once every store insert names org_id (build plan PR 2), Postgres drops the backfill
+// default, so an insert that forgets the org fails instead of landing in the default org.
+// SQLite keeps it: ALTER TABLE cannot drop a column default there. On both, one live alert
+// per rule and key becomes one per org (NULL, a platform alert, counts as one org).
+const alertsLivePerOrgSQL = `DROP INDEX IF EXISTS alerts_live;
+CREATE UNIQUE INDEX alerts_live ON alerts(COALESCE(org_id,''), rule, key) WHERE status<>'resolved';
+`
+
+func migrateOrgIDRequired(tx *sql.Tx) error {
+	_, err := tx.Exec(alertsLivePerOrgSQL)
+	return err
+}
+
+func migrateOrgIDRequiredPostgres(tx *sql.Tx) error {
+	var b strings.Builder
+	b.WriteString(alertsLivePerOrgSQL)
+	for _, t := range orgColumnTables {
+		fmt.Fprintf(&b, "ALTER TABLE %s ALTER COLUMN org_id DROP DEFAULT;\n", t)
+	}
+	_, err := tx.Exec(b.String())
+	return err
+}

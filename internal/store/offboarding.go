@@ -27,7 +27,7 @@ func offboardUserTx(tx *sql.Tx, u *User, deleted bool, now time.Time) error {
 		}
 		// A remote mapping proves the target holds the account even when no grant was ever
 		// tracked, so it is deactivated rather than forgotten as an undelivered ghost.
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',TRUE,TRUE,0)`, sys, u.ID); err != nil {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(org_id,system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,'user',TRUE,TRUE,0)`, u.orgID, sys, u.ID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`UPDATE sync_resource_state SET provisioned=TRUE WHERE system_id=? AND resource_id=? AND NOT provisioned

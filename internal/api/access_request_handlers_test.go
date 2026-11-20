@@ -115,7 +115,7 @@ func TestAccessRequestsEndToEnd(t *testing.T) {
 	if res := call(t, srv, userCookie, "DELETE", "/api/user/access-requests/"+out.Request.ID); res.Code != http.StatusConflict {
 		t.Fatalf("cancel after decision: %d", res.Code)
 	}
-	events, _, _ := db.ListAuditEvents(20, 0)
+	events, _, _ := db.DefaultOrg().ListAuditEvents(20, 0)
 	seen := map[string]bool{}
 	for _, e := range events {
 		seen[e.Action] = true

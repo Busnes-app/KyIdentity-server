@@ -57,7 +57,7 @@ func evaluate(t *testing.T, s *Store) {
 
 func openAlerts(t *testing.T, s *Store) map[string]Alert {
 	t.Helper()
-	all, _, err := s.ListAlerts("all", 100, 0)
+	all, _, err := s.DefaultOrg().ListAlerts("all", 100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,13 +406,13 @@ func TestAlertAcknowledgeAndReopen(t *testing.T) {
 	audited(t, s, "admin.delegations_updated", "root", u.ID, "user", "success", "")
 	evaluate(t, s)
 	a := openAlerts(t, s)["privilege_change/"+u.ID]
-	if err := s.AcknowledgeAlert(a.ID, admin.ID, nil); err != nil {
+	if err := s.DefaultOrg().AcknowledgeAlert(a.ID, admin.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AcknowledgeAlert(a.ID, admin.ID, nil); !errors.Is(err, ErrAlertNotOpen) {
+	if err := s.DefaultOrg().AcknowledgeAlert(a.ID, admin.ID, nil); !errors.Is(err, ErrAlertNotOpen) {
 		t.Fatal("second acknowledgement", err)
 	}
-	if err := s.AcknowledgeAlert("nope", admin.ID, nil); !errors.Is(err, ErrAlertMissing) {
+	if err := s.DefaultOrg().AcknowledgeAlert("nope", admin.ID, nil); !errors.Is(err, ErrAlertMissing) {
 		t.Fatal("missing alert", err)
 	}
 	if got := openAlerts(t, s)["privilege_change/"+u.ID]; got.Status != "acknowledged" || got.AcknowledgedBy != "root" || got.AcknowledgedAt == nil {
@@ -447,13 +447,13 @@ func TestProvisioningOutageOpensOnceAndResolves(t *testing.T) {
 	if len(openAlerts(t, s)) != 0 {
 		t.Fatal("recovered connector should resolve the alert")
 	}
-	all, _, err := s.ListAlerts("resolved", 10, 0)
+	all, _, err := s.DefaultOrg().ListAlerts("resolved", 10, 0)
 	if err != nil || len(all) != 1 || all[0].ResolvedAt == nil {
 		t.Fatal("resolved history", all, err)
 	}
 	set("failing")
 	evaluate(t, s)
-	if all, total, _ := s.ListAlerts("all", 10, 0); total != 2 || all[0].Status != "open" {
+	if all, total, _ := s.DefaultOrg().ListAlerts("all", 10, 0); total != 2 || all[0].Status != "open" {
 		t.Fatal("a new outage after resolution is a new alert", all)
 	}
 	set("disabled")
@@ -550,7 +550,7 @@ func TestAlertDeliveriesRetryAndRecheckRecipients(t *testing.T) {
 	if !strings.HasPrefix(last, admin.Email+"|") || !strings.Contains(last, "victim") || strings.Contains(last, "RECOVERY-CODE-VALUE") {
 		t.Fatal("mail content", last)
 	}
-	if err := s.AcknowledgeAlert(a.ID, admin.ID, nil); err != nil {
+	if err := s.DefaultOrg().AcknowledgeAlert(a.ID, admin.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if a := openAlerts(t, s)["recovery_use/"+u.ID]; a.Delivery.Pending != 0 {

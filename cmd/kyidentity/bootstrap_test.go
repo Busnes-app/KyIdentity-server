@@ -116,7 +116,7 @@ func TestBootstrapHonoursEmailAndAudits(t *testing.T) {
 	if err != nil || u == nil || u.Email != "root@example.test" {
 		t.Fatalf("email not honoured: %+v %v", u, err)
 	}
-	events, _, err := db.SearchAuditEvents(store.AuditFilter{Action: "admin.user_created", Limit: 5})
+	events, _, err := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.user_created", Limit: 5})
 	if err != nil || len(events) != 1 || events[0].TargetID != u.ID || !strings.Contains(events[0].DetailsJSON, `"role":"admin"`) {
 		t.Fatalf("admin.user_created audit: %+v %v", events, err)
 	}

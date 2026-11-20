@@ -184,6 +184,7 @@ func alertText(s string) string {
 
 type queuedEvent struct {
 	id, actor, action, target, targetType, ip, outcome string
+	org                                                sql.NullString // the event's org; NULL is a platform event
 	created                                            time.Time
 	details                                            map[string]any
 }
@@ -245,7 +246,7 @@ func (s *Store) evaluateBatch(now time.Time, settings AlertSettings) (int, error
 		return 0, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT e.id, e.actor_username, e.action, COALESCE(e.target_id,''), COALESCE(e.target_type,''), e.ip_address, e.outcome, COALESCE(e.details_json,''), e.created_at
+	rows, err := tx.Query(`SELECT e.id, e.actor_username, e.action, COALESCE(e.target_id,''), COALESCE(e.target_type,''), e.ip_address, e.outcome, COALESCE(e.details_json,''), e.created_at, e.org_id
  FROM alert_queue q JOIN audit_events e ON e.id=q.event_id ORDER BY q.created_at, q.event_id LIMIT ?`, alertBatch)
 	if err != nil {
 		return 0, err
@@ -254,7 +255,7 @@ func (s *Store) evaluateBatch(now time.Time, settings AlertSettings) (int, error
 	for rows.Next() {
 		var e queuedEvent
 		var actor, details sql.NullString
-		if err := rows.Scan(&e.id, &actor, &e.action, &e.target, &e.targetType, &e.ip, &e.outcome, &details, &e.created); err != nil {
+		if err := rows.Scan(&e.id, &actor, &e.action, &e.target, &e.targetType, &e.ip, &e.outcome, &details, &e.created, &e.org); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -274,7 +275,7 @@ func (s *Store) evaluateBatch(now time.Time, settings AlertSettings) (int, error
 			return 0, err
 		}
 		if spec.rule != "" {
-			if err := raiseAlertTx(tx, now, spec, settings.Recipients); err != nil {
+			if err := raiseAlertTx(tx, now, spec, settings.Recipients, e.org); err != nil {
 				return 0, err
 			}
 		}
@@ -404,16 +405,16 @@ func classifyTx(tx *sql.Tx, e queuedEvent, settings AlertSettings, now time.Time
 	return alertSpec{}, nil
 }
 
-// raiseAlertTx folds the occurrence into the live alert for its rule and key, or opens
-// one. An acknowledged alert reopens and is mailed again; an open one only counts.
-func raiseAlertTx(tx *sql.Tx, now time.Time, spec alertSpec, recipients []string) error {
+// raiseAlertTx folds the occurrence into the live alert for its rule, key and org, or
+// opens one. An acknowledged alert reopens and is mailed again; an open one only counts.
+func raiseAlertTx(tx *sql.Tx, now time.Time, spec alertSpec, recipients []string, org sql.NullString) error {
 	var id, status string
-	err := tx.QueryRow(`SELECT id, status FROM alerts WHERE rule=? AND key=? AND status<>'resolved'`, spec.rule, spec.key).Scan(&id, &status)
+	err := tx.QueryRow(`SELECT id, status FROM alerts WHERE org_id IS NOT DISTINCT FROM ? AND rule=? AND key=? AND status<>'resolved'`, org, spec.rule, spec.key).Scan(&id, &status)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		id = uuid.NewString()
-		if _, err := tx.Exec(`INSERT INTO alerts(id,rule,key,severity,title,summary,status,count,first_seen,last_seen) VALUES(?,?,?,?,?,?,'open',?,?,?)`,
-			id, spec.rule, spec.key, spec.severity, spec.title, spec.summary, spec.count, now, now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO alerts(org_id,id,rule,key,severity,title,summary,status,count,first_seen,last_seen) VALUES(?,?,?,?,?,?,?,'open',?,?,?)`,
+			org, id, spec.rule, spec.key, spec.severity, spec.title, spec.summary, spec.count, now, now); err != nil {
 			return err
 		}
 		// Login failures are the one rule an unauthenticated client drives, so their
@@ -503,11 +504,12 @@ func (s *Store) evaluateOutages(now time.Time, settings AlertSettings) error {
 	for _, o := range live {
 		keep[o.rule+"/"+o.key] = true
 		var id string
-		err := tx.QueryRow(`SELECT id FROM alerts WHERE rule=? AND key=? AND status<>'resolved'`, o.rule, o.key).Scan(&id)
+		// Delivery outages are the platform's: NULL org.
+		err := tx.QueryRow(`SELECT id FROM alerts WHERE org_id IS NULL AND rule=? AND key=? AND status<>'resolved'`, o.rule, o.key).Scan(&id)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			id = uuid.NewString()
-			if _, err := tx.Exec(`INSERT INTO alerts(id,rule,key,severity,title,summary,status,count,first_seen,last_seen) VALUES(?,?,?,'critical',?,?,'open',1,?,?)`, id, o.rule, o.key, o.title, o.summary, now, now); err != nil {
+			if _, err := tx.Exec(`INSERT INTO alerts(org_id,id,rule,key,severity,title,summary,status,count,first_seen,last_seen) VALUES(NULL,?,?,?,'critical',?,?,'open',1,?,?)`, id, o.rule, o.key, o.title, o.summary, now, now); err != nil {
 				return err
 			}
 			if err := queueDeliveriesTx(tx, now, id, "opened", settings.Recipients); err != nil {
@@ -551,6 +553,8 @@ func (s *Store) evaluateOutages(now time.Time, settings AlertSettings) error {
 	return tx.Commit()
 }
 
+const alertVisibleSQL = `(a.org_id=? OR a.org_id IS NULL AND EXISTS(SELECT 1 FROM orgs o WHERE o.id=? AND o.kind IN ('default','staff')))`
+
 const alertSelect = `SELECT a.id, a.rule, a.key, a.severity, a.title, a.summary, a.status, a.count, a.first_seen, a.last_seen, a.acknowledged_at, COALESCE(a.acknowledged_by,''), a.resolved_at,
  (SELECT COUNT(*) FROM alert_deliveries d WHERE d.alert_id=a.id AND d.status='pending'),
  (SELECT COUNT(*) FROM alert_deliveries d WHERE d.alert_id=a.id AND d.status='delivered'),
@@ -576,10 +580,13 @@ func scanAlert(rows *sql.Rows) (Alert, error) {
 }
 
 // ListAlerts pages alerts newest first; status is open, acknowledged, resolved or all.
-func (s *Store) ListAlerts(status string, limit, offset int) ([]Alert, int, error) {
-	where, args := ` WHERE 1=1`, []any{}
+// ListAlerts pages the org's alerts, and platform alerts for the org that administers the
+// install (the default or staff org).
+func (o *OrgStore) ListAlerts(status string, limit, offset int) ([]Alert, int, error) {
+	s := o.s
+	where, args := ` WHERE `+alertVisibleSQL, []any{o.org, o.org}
 	if status != "all" {
-		where, args = ` WHERE a.status=?`, []any{status}
+		where, args = where+` AND a.status=?`, append(args, status)
 	}
 	var total int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM alerts a`+where, args...).Scan(&total); err != nil {
@@ -601,10 +608,11 @@ func (s *Store) ListAlerts(status string, limit, offset int) ([]Alert, int, erro
 	return out, total, rows.Err()
 }
 
-func (s *Store) AcknowledgeAlert(id, actorID string, audit *AuditEvent) error {
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+// Another org's alert is ErrAlertMissing, like a missing one.
+func (o *OrgStore) AcknowledgeAlert(id, actorID string, audit *AuditEvent) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
 		var status string
-		if err := tx.QueryRow(`SELECT status FROM alerts WHERE id=?`, id).Scan(&status); errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRow(`SELECT a.status FROM alerts a WHERE a.id=? AND `+alertVisibleSQL, id, o.org, o.org).Scan(&status); errors.Is(err, sql.ErrNoRows) {
 			return ErrAlertMissing
 		} else if err != nil {
 			return err

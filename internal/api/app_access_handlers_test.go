@@ -130,7 +130,7 @@ func TestAppAssignmentOAuthAndLauncherEnforcement(t *testing.T) {
 	if r := adminRequestNoStepUp(t, srv, "GET", base+"/access-users?mode=bogus", adminCookie, ""); r.Code != 400 {
 		t.Fatal("invalid preview allowed")
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

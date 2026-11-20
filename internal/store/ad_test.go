@@ -454,7 +454,7 @@ func TestDirectoryPasswordReachesADisabledAccount(t *testing.T) {
 		t.Fatal("the directory's old password is not reported as behind")
 	}
 	// An enable waiting on it is re-pended the moment the agent applies it.
-	if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,status,revision,last_error,next_attempt_at) VALUES('ev-enable',?,'ad-1','user.updated','{}','pending',1,?,?)`,
+	if _, err := s.db.Exec(`INSERT INTO account_sync_events(org_id, id,user_id,system_id,event_type,payload_json,status,revision,last_error,next_attempt_at) VALUES('00000000-0000-0000-0000-000000000001', 'ev-enable',?,'ad-1','user.updated','{}','pending',1,?,?)`,
 		u.ID, ADEnableWaitsForPassword, time.Now().Add(time.Hour).UTC()); err != nil {
 		t.Fatal(err)
 	}

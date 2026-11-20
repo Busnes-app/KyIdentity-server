@@ -39,7 +39,7 @@ func TestSetupClientExportScopeAndReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	before, count, err := s.ListAuditEvents(100, 0)
+	before, count, err := s.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestSetupClientExportScopeAndReadOnly(t *testing.T) {
 		}
 		retained = append([]byte(nil), out.Bytes()...)
 	}
-	after, afterCount, err := s.ListAuditEvents(100, 0)
+	after, afterCount, err := s.DefaultOrg().ListAuditEvents(100, 0)
 	beforeJSON, _ := json.Marshal(before)
 	afterJSON, _ := json.Marshal(after)
 	if err != nil || count != afterCount || !bytes.Equal(beforeJSON, afterJSON) {

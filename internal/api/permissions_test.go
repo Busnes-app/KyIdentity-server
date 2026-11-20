@@ -152,7 +152,7 @@ func TestDelegationsAdminAPI(t *testing.T) {
 	if res := adminRequestWithStepUp(t, srv, "GET", path, admin, "", ""); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), apps[0].ID) {
 		t.Fatalf("get: %d %s", res.Code, res.Body.String())
 	}
-	events, _, _ := db.ListAuditEvents(50, 0)
+	events, _, _ := db.DefaultOrg().ListAuditEvents(50, 0)
 	audited := 0
 	for _, e := range events {
 		if e.Action == "admin.delegations_updated" && e.TargetID == u.ID {

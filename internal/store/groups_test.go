@@ -172,7 +172,7 @@ func TestGroupMutationsRollbackWithAuditFailure(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(g.ID, u.ID, false, audit); err != nil {
 		t.Fatal(err)
 	}
-	events, count, err := s.ListAuditEvents(25, 0)
+	events, count, err := s.DefaultOrg().ListAuditEvents(25, 0)
 	if err != nil || count != 1 || len(events) != 1 {
 		t.Fatalf("missing committed audit: %d %v", count, err)
 	}

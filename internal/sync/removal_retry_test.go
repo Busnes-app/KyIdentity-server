@@ -70,7 +70,7 @@ func outageOpen(t *testing.T, s *store.Store, systemID string) bool {
 	if err := s.EvaluateAlerts(time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	alerts, _, err := s.ListAlerts("all", 100, 0)
+	alerts, _, err := s.DefaultOrg().ListAlerts("all", 100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

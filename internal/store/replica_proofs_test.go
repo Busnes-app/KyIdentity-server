@@ -172,7 +172,7 @@ func TestProofLogoutDeliveriesAreClaimedOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		for d := range 3 {
-			if _, err := s.db.Exec(`INSERT INTO logout_deliveries(id,client_id,user_id,sid,status,attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,'queued',0,?,?,?)`,
+			if _, err := s.db.Exec(`INSERT INTO logout_deliveries(org_id, id,client_id,user_id,sid,status,attempts,next_attempt_at,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000001', ?,?,?,?,'queued',0,?,?,?)`,
 				fmt.Sprintf("%s-%d", client, d), client, u.ID, uuid.NewString(), now, now, now); err != nil {
 				t.Fatal(err)
 			}

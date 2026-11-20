@@ -29,12 +29,12 @@ func TestInstallerSetupRefusesManagedDrift(t *testing.T) {
 		"open to everyone":      {nil, `UPDATE app_registry SET access_mode='all_active_users' WHERE client_id='kydrive'`, "access assignments differ"},
 		"admin gained access":   {nil, `INSERT INTO app_user_assignments(app_id,user_id) SELECT a.id,u.id FROM app_registry a, users u WHERE a.client_id='kydrive' AND u.username='owner-admin'`, "administrator access differs from its declared role"},
 		"admin assignment lost": {roles("owner:admin", "editor"), `DELETE FROM app_user_assignments WHERE user_id=(SELECT id FROM users WHERE username='owner-admin')`, "administrator access differs"},
-		"admin access via group": {roles("owner:admin", "editor"), `INSERT INTO directory_groups(id,name,description,created_at,updated_at) VALUES('side','Side','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
- INSERT INTO group_memberships(group_id,user_id) SELECT 'side',id FROM users WHERE username='owner-admin';
+		"admin access via group": {roles("owner:admin", "editor"), `INSERT INTO directory_groups(org_id, id,name,description,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000001', 'side','Side','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+ INSERT INTO group_memberships(org_id,group_id,user_id) SELECT org_id,'side',id FROM users WHERE username='owner-admin';
  INSERT INTO app_group_assignments(app_id,group_id) SELECT id,'side' FROM app_registry WHERE client_id='kydrive';
  DELETE FROM app_user_assignments WHERE user_id=(SELECT id FROM users WHERE username='owner-admin')`, "owned administrator assignment drift"},
-		"everyday in management-only": {roles("owner:admin", ""), `INSERT INTO directory_groups(id,name,description,created_at,updated_at) VALUES('side','Side','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
- INSERT INTO group_memberships(group_id,user_id) SELECT 'side',id FROM users WHERE username='owner';
+		"everyday in management-only": {roles("owner:admin", ""), `INSERT INTO directory_groups(org_id, id,name,description,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000001', 'side','Side','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+ INSERT INTO group_memberships(org_id,group_id,user_id) SELECT org_id,'side',id FROM users WHERE username='owner';
  INSERT INTO app_group_assignments(app_id,group_id) SELECT id,'side' FROM app_registry WHERE client_id='kydrive'`, "everyday identity has management-only application access"},
 		"undeclared role": {roles("owner:admin", "editor"), `INSERT INTO app_roles(id,app_id,name,description,created_at) SELECT 'extra',id,'extra','',CURRENT_TIMESTAMP FROM app_registry WHERE client_id='kydrive'`, "app has undeclared roles"},
 		"role renamed":    {roles("owner:admin", "editor"), `UPDATE app_roles SET description='changed' WHERE name='editor'`, "owned app role or assignment drift"},

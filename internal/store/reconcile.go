@@ -458,8 +458,12 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM scim_user_links WHERE system_id=? AND kind=? AND remote_id=? AND local_id<>?)`, systemID, kind, remoteID, localID).Scan(&taken); err != nil || taken {
 			return false, err
 		}
-		r, err := tx.Exec(`INSERT INTO scim_user_links(system_id,local_id,kind,remote_id) VALUES(?,?,?,?)
- ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE scim_user_links.kind=excluded.kind AND scim_user_links.remote_id IN ('',?)`, systemID, localID, kind, remoteID, stored)
+		org, err := resourceOrgTx(tx, localID)
+		if err != nil {
+			return false, err
+		}
+		r, err := tx.Exec(`INSERT INTO scim_user_links(org_id,system_id,local_id,kind,remote_id) VALUES(?,?,?,?,?)
+ ON CONFLICT(system_id,local_id) DO UPDATE SET remote_id=excluded.remote_id WHERE scim_user_links.kind=excluded.kind AND scim_user_links.remote_id IN ('',?)`, org, systemID, localID, kind, remoteID, stored)
 		if err != nil {
 			return false, err
 		}
@@ -473,7 +477,11 @@ func (s *Store) ReconcileDrift(systemID string, listing RemoteListing, repair bo
 	// A managed account with no desired-state row (pre-upgrade delivery, or a resource
 	// found only at the target) is recorded as held so a disable can be queued for it.
 	hold := func(kind, id string) error {
-		_, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,TRUE,TRUE,0) ON CONFLICT(system_id,resource_id) DO UPDATE SET provisioned=TRUE`, systemID, id, kind)
+		org, err := resourceOrgTx(tx, id)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO sync_resource_state(org_id,system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,?,TRUE,TRUE,0) ON CONFLICT(system_id,resource_id) DO UPDATE SET provisioned=TRUE`, org, systemID, id, kind)
 		return err
 	}
 	seen := map[string]bool{}

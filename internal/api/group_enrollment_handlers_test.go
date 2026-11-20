@@ -79,7 +79,7 @@ func TestGroupEnrollmentAdminAndRestrictedAccess(t *testing.T) {
 	if r := adminRequest(t, srv, "PUT", "/api/admin/groups/b/members/"+adminSession.UserID, admin, ""); r.Code != 409 {
 		t.Fatal("administrator lockout", r.Code, r.Body.String())
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestGroupEnrollmentDeniedScope(t *testing.T) {
 	if r.Code != 400 {
 		t.Fatal(r.Code, r.Body.String())
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

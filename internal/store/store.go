@@ -1117,7 +1117,7 @@ func (o *OrgStore) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) er
 	// The bare deletion is recorded as a target too, so the completion view cannot claim
 	// every connector is done while it is still queued.
 	for _, sys := range strangers {
-		if _, err := tx.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,'user',FALSE,FALSE,0)`, sys, userID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO sync_resource_state(org_id,system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,'user',FALSE,FALSE,0)`, o.org, sys, userID); err != nil {
 			return err
 		}
 		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", scimInactivePayload(userID), 0, now); err != nil {
@@ -2877,10 +2877,16 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-const insertAuditEventSQL = `INSERT INTO audit_events (id, actor_id, actor_username, action, target_id, target_type, ip_address, user_agent, outcome, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+// An audit row is in the org of its target user or group, else of its actor; NULL is a
+// platform row (the CLI, a worker, a global setting with no user actor). A target deleted
+// in the same transaction falls back to the actor.
+const insertAuditEventSQL = `INSERT INTO audit_events (org_id, id, actor_id, actor_username, action, target_id, target_type, ip_address, user_agent, outcome, details_json, created_at) VALUES (
+ (SELECT COALESCE(CASE WHEN ?='user' THEN (SELECT org_id FROM users WHERE id=?) END, CASE WHEN ?='group' THEN (SELECT org_id FROM directory_groups WHERE id=?) END, (SELECT org_id FROM users WHERE id=?))),
+ ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 func insertAuditEvent(q execer, e *AuditEvent) (sql.Result, error) {
-	return q.Exec(insertAuditEventSQL, e.ID, e.ActorID, e.ActorUsername, e.Action, e.TargetID, e.TargetType, e.IPAddress, e.UserAgent, e.Outcome, e.DetailsJSON, e.CreatedAt)
+	return q.Exec(insertAuditEventSQL, e.TargetType, e.TargetID, e.TargetType, e.TargetID, e.ActorID,
+		e.ID, e.ActorID, e.ActorUsername, e.Action, e.TargetID, e.TargetType, e.IPAddress, e.UserAgent, e.Outcome, e.DetailsJSON, e.CreatedAt)
 }
 
 // recordAuditTx writes the audit row for a mutation inside that mutation's transaction.

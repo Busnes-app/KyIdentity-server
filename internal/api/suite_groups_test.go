@@ -160,7 +160,7 @@ func TestSuiteGroupLifecycle(t *testing.T) {
 	}
 
 	// Audit: every change committed its row.
-	events, _, err := db.SearchAuditEvents(store.AuditFilter{Action: "admin.group_suite_updated", Limit: 100})
+	events, _, err := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.group_suite_updated", Limit: 100})
 	if err != nil || len(events) != 7 {
 		t.Fatalf("audit rows %d %v", len(events), err)
 	}

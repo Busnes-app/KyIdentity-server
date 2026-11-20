@@ -174,7 +174,7 @@ func TestScheduledBackupOnAReplicaWithoutTheKeyFile(t *testing.T) {
 	}
 	failures := func() int {
 		t.Helper()
-		_, n, err := s.SearchAuditEvents(store.AuditFilter{Action: "admin.backup_run", Outcome: "failure", Limit: 1})
+		_, n, err := s.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.backup_run", Outcome: "failure", Limit: 1})
 		if err != nil {
 			t.Fatal(err)
 		}

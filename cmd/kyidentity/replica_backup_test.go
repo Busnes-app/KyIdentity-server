@@ -211,7 +211,7 @@ func TestLocalBackupDirectoryLayouts(t *testing.T) {
 				t.Fatalf("round %d: %d capsules, want %d", round, n, min(round, cfg.BackupKeep))
 			}
 		}
-		_, runs, err := stores[0].SearchAuditEvents(store.AuditFilter{Action: "admin.backup_run", Outcome: "success", Limit: 1})
+		_, runs, err := stores[0].DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.backup_run", Outcome: "success", Limit: 1})
 		if err != nil || runs != 4 {
 			t.Fatalf("%d successful runs for four due runs: %v", runs, err)
 		}

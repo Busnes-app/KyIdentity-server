@@ -96,7 +96,7 @@ func TestPasswordChangeRequiredRestrictsTheSessionUntilChanged(t *testing.T) {
 	if r := call(t, srv, sessionCookie(other).Value, "GET", "/api/auth/me"); r.Code != http.StatusUnauthorized {
 		t.Fatalf("other session survived the change: %d", r.Code)
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

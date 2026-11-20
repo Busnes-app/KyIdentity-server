@@ -239,7 +239,7 @@ func TestRestoreIntoPostgres(t *testing.T) {
 			if sys, err := pg.GetPairedSystemByID("hr"); err != nil || sys == nil || !sys.ProvisioningHold {
 				t.Fatalf("connector not held: %+v %v", sys, err)
 			}
-			events, _, err := pg.SearchAuditEvents(store.AuditFilter{Action: "system.restored", Limit: 5})
+			events, _, err := pg.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "system.restored", Limit: 5})
 			if err != nil || len(events) != 1 || !strings.Contains(events[0].DetailsJSON, `"authenticated":true`) || !strings.Contains(events[0].DetailsJSON, "credentialsInvalidated") {
 				t.Fatalf("restore audit: %+v %v", events, err)
 			}
@@ -251,7 +251,7 @@ func TestRestoreIntoPostgres(t *testing.T) {
 			if out, err := run(filepath.Join(t.TempDir(), "replace"), "-replace-database"); err != nil {
 				t.Fatal(err, out)
 			}
-			events, _, err = pg.SearchAuditEvents(store.AuditFilter{Action: "system.restored", Limit: 5})
+			events, _, err = pg.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "system.restored", Limit: 5})
 			if err != nil || len(events) != 1 {
 				t.Fatalf("after a replace the database holds the capsule's rows and one restore: %d %v", len(events), err)
 			}

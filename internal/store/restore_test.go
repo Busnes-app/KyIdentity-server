@@ -42,7 +42,7 @@ func seedEphemeral(t *testing.T, s *Store, userID, clientID string) {
 		{`INSERT INTO proxy_apps(application_id,host,secret_hash,login_header,session_seconds,created_at) VALUES('fwd-app','proxied.test','sh','X-Ky-User',43200,1)`, nil},
 		{`INSERT INTO forward_codes(hash,application_id,host,session_id,user_id,nonce_hash,path,expires_at) VALUES('fc-1','fwd-app','proxied.test','sess-1',?,'nh','/',?)`, []any{userID, soon.Unix()}},
 		{`INSERT INTO forward_sessions(hash,application_id,host,user_id,session_id,created_at,expires_at) VALUES('fs-1','fwd-app','proxied.test',?,'sess-1',1,?)`, []any{userID, soon.Unix()}},
-		{`INSERT INTO logout_deliveries(id,client_id,user_id,sid,status,next_attempt_at,created_at,updated_at) VALUES('ld-1',?,?,'sid-1','queued',?,?,?)`, []any{clientID, userID, now, now, now}},
+		{`INSERT INTO logout_deliveries(org_id, id,client_id,user_id,sid,status,next_attempt_at,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000001', 'ld-1',?,?,'sid-1','queued',?,?,?)`, []any{clientID, userID, now, now, now}},
 	} {
 		if _, err := s.db.Exec(seed.query, seed.args...); err != nil {
 			t.Fatalf("seed %s: %v", seed.query[:40], err)
@@ -70,7 +70,7 @@ func restoreFixture(t *testing.T) (*Store, func()) {
 	if err := s.db.QueryRow(`SELECT revision FROM sync_resource_state WHERE system_id='hr' AND resource_id=?`, u.ID).Scan(&revision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,status,revision) VALUES('ev-old',?,'hr','user.created','{}','pending',?)`, u.ID, revision); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO account_sync_events(org_id, id,user_id,system_id,event_type,payload_json,status,revision) VALUES('00000000-0000-0000-0000-000000000001', 'ev-old',?,'hr','user.created','{}','pending',?)`, u.ID, revision); err != nil {
 		t.Fatal(err)
 	}
 	// Last, so that setting up access does not revoke one of them on the way past: a
@@ -263,7 +263,7 @@ func TestProvisioningHoldCanBeResumedDeliberately(t *testing.T) {
 	if sys, _ := s.GetPairedSystemByID("hr"); sys == nil || sys.ProvisioningHold {
 		t.Fatal("the hold survived a deliberate resume")
 	}
-	events, _, err := s.SearchAuditEvents(AuditFilter{Action: "admin.provisioning_resumed", Limit: 5})
+	events, _, err := s.DefaultOrg().SearchAuditEvents(AuditFilter{Action: "admin.provisioning_resumed", Limit: 5})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("resume audit: %d %v", len(events), err)
 	}
@@ -301,7 +301,7 @@ func TestRestoreHoldsAConnectorThatWasDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := createTestUserNamed(t, s, "left-since")
-	if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,status) VALUES('ev-disabled',?,'old','user.created','{}','pending')`, u.ID); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO account_sync_events(org_id, id,user_id,system_id,event_type,payload_json,status) VALUES('00000000-0000-0000-0000-000000000001', 'ev-disabled',?,'old','user.created','{}','pending')`, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	report, err := s.ApplyRestoredState(time.Now().UTC(), nil)
