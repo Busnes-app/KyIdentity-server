@@ -154,7 +154,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		interactionHash = crypto.HashSHA256(req.Interaction)
 		i, err := h.store.GetAuthorizationInteraction(interactionHash, h.middleware.authorizationBrowserHash(r))
 		if err != nil || i.SessionID != "" || (i.UserID != "" && i.UserID != user.ID) {
-			http.Error(w, `{"error":"invalid_interaction","error_description":"Restart authorization with the original account and browser"}`, 400)
+			writeAPIError(w, http.StatusBadRequest, "invalid_interaction", "Restart authorization with the original account and browser")
 			return
 		}
 		interaction = i
@@ -166,10 +166,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// A require-password workstation app accepts only an interaction that saw this step.
 	if interaction != nil {
 		if err := h.store.RecordInteractionPassword(interactionHash, h.middleware.authorizationBrowserHash(r), user.ID, primaryAt); errors.Is(err, store.ErrAuthorizationInteraction) {
-			http.Error(w, `{"error":"invalid_interaction","error_description":"Restart authorization with the original account and browser"}`, 400)
+			writeAPIError(w, http.StatusBadRequest, "invalid_interaction", "Restart authorization with the original account and browser")
 			return
 		} else if err != nil {
-			stepUpInternalError(w)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
 			return
 		}
 	}

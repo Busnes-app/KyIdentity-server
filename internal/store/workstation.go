@@ -290,20 +290,29 @@ func (s *Store) UpdateWorkstationApp(clientID string, set WorkstationSettings, a
 
 // invalidateAppGrantsTx is a policy edit's revocation for a workstation app: a new policy
 // revision (which every code, approval and refresh family binds), and nothing issued or
-// approved under the old rule survives. Changing it back revives nothing.
+// approved under the old rule survives. It ends the client's access, so the client is told
+// to log out every login it saw. Changing it back revives nothing.
 func invalidateAppGrantsTx(tx *sql.Tx, clientID string) error {
 	now := time.Now().UTC()
 	for _, q := range []string{
 		`UPDATE app_registry SET auth_revision=auth_revision+1, revision=revision+1 WHERE client_id=?`,
 		`DELETE FROM authorization_interactions WHERE client_id=?`,
 		`DELETE FROM authorization_codes WHERE client_id=? AND used_at IS NULL`,
-		`UPDATE device_codes SET status='denied' WHERE client_id=? AND status IN ('pending','approved') AND redeemed_at IS NULL`,
+		`UPDATE device_codes SET status='denied' WHERE client_id=? AND status='pending'`,
 	} {
 		if _, err := tx.Exec(q, clientID); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE issued_tokens SET revoked_at=? WHERE client_id=? AND revoked_at IS NULL`, now, clientID); err != nil {
+	if err := revokeClientTokensTx(tx, clientID, now); err != nil {
+		return err
+	}
+	// Queued before the sid mapping goes, as every client-access revocation does; the
+	// workstation sessions below then find none of this client's left to queue twice.
+	if err := enqueueLogoutTx(tx, now, `cs.client_id=?`, clientID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM oidc_client_sessions WHERE client_id=?`, clientID); err != nil {
 		return err
 	}
 	_, err := revokeSessionsTx(tx, now, `workstation_client_id=?`, clientID)

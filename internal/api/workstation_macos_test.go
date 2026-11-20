@@ -270,6 +270,34 @@ func TestInteractionPasswordScopeAndCap(t *testing.T) {
 	}
 }
 
+// Toggling require-password ends the client's access: a registered receiver is told once
+// about each login it saw, and the sid mapping goes with it.
+func TestRequirePasswordToggleQueuesBackchannelLogout(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	f.macSignIn = true
+	f.settings(true, 300, 604800)
+	u, cookie := f.assignedUser()
+	c, _ := f.db.GetOAuthClientByID(f.clientID)
+	c.BackchannelLogoutURI = "https://mac.example.com/backchannel"
+	if err := f.db.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := f.db.EnsureClientSession(f.clientID, sessionIDFor(t, f.db, cookie), u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.requirePassword = true
+	f.settings(true, 300, 604800)
+	rows, err := f.db.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
+	if err != nil || len(rows) != 1 || rows[0].ClientID != f.clientID || rows[0].SID != sid || rows[0].Status != "queued" {
+		t.Fatalf("deliveries after the toggle = %+v %v", rows, err)
+	}
+	if cs, err := f.db.GetClientSession(sid); err != nil || cs != nil {
+		t.Fatalf("sid mapping survived: %+v %v", cs, err)
+	}
+}
+
 // Refresh stays a workstation-only exception for public clients, on the code path too.
 func TestPublicClientRefreshStillRefused(t *testing.T) {
 	f, done := newWSFixture(t)
