@@ -242,15 +242,15 @@ func tombstoneSuiteGroupTx(tx *sql.Tx, org, groupID, name string) error {
 	return err
 }
 
-// SuiteGroupsFor lists every suite group for the calling client: active with its
+// SuiteGroupsFor lists every suite group of the org for the calling client: active with its
 // members when on for that client, else archived. Clients outside SuiteGroupApps get none.
 // Members are active everyday accounts with live membership and access to the client.
-func (s *Store) SuiteGroupsFor(clientID string) ([]SuiteGroup, error) {
+func (o *OrgStore) SuiteGroupsFor(clientID string) ([]SuiteGroup, error) {
 	def, ok := suiteGroupDefault(clientID)
 	if !ok {
 		return []SuiteGroup{}, nil
 	}
-	tx, err := s.rdb.Begin()
+	tx, err := o.s.rdb.Begin()
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +259,7 @@ func (s *Store) SuiteGroupsFor(clientID string) ([]SuiteGroup, error) {
  (s.enabled AND s.deleted_at IS NULL AND g.id IS NOT NULL AND COALESCE(a.enabled,?))
  FROM suite_groups s LEFT JOIN directory_groups g ON g.id=s.group_id
  LEFT JOIN suite_group_apps a ON a.group_id=s.group_id AND a.client_id=?
- ORDER BY s.group_id`, def, clientID)
+ WHERE s.org_id=? ORDER BY s.group_id`, def, clientID, o.org)
 	if err != nil {
 		return nil, err
 	}
@@ -287,8 +287,8 @@ func (s *Store) SuiteGroupsFor(clientID string) ([]SuiteGroup, error) {
 			continue
 		}
 		members, err := scanStrings(tx.Query(`SELECT m.user_id FROM live_group_memberships m JOIN users u ON u.id=m.user_id
- WHERE m.group_id=? AND u.role='user' AND NOT u.pending
- AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry r ON r.id=e.app_id JOIN oauth_clients c ON c.id=r.client_id WHERE e.user_id=u.id AND c.id=? AND c.enabled)`, out[i].ID, clientID))
+ WHERE m.group_id=? AND u.org_id=? AND u.role='user' AND NOT u.pending
+ AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry r ON r.id=e.app_id JOIN oauth_clients c ON c.id=r.client_id WHERE e.user_id=u.id AND c.id=? AND c.enabled)`, out[i].ID, o.org, clientID))
 		if err != nil {
 			return nil, err
 		}

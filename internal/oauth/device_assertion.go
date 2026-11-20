@@ -353,10 +353,12 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	} else if err != nil {
 		return nil, who, fmt.Errorf("failed to record issued token: %w", err)
 	}
-	accessToken, err := e.keyManager.SignJWT(map[string]any{
+	access := map[string]any{
 		"iss": e.issuerURL, "sub": user.ID, "aud": clientID, "exp": exp.Unix(), "iat": now.Unix(),
 		"jti": accessJTI, "scope": scope, "token_use": "access_token",
-	})
+	}
+	e.addOrg(access, user.Org().String())
+	accessToken, err := e.keyManager.SignJWT(access)
 	if err != nil {
 		return nil, who, fmt.Errorf("failed to sign access token: %w", err)
 	}

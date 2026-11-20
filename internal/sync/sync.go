@@ -26,7 +26,12 @@ type Engine struct {
 	store         *store.Store
 	httpClient    *http.Client
 	encryptionKey []byte
+	// multiTenant adds org_id to signed suite webhook bodies; see SetMultiTenant.
+	multiTenant bool
 }
+
+// SetMultiTenant turns on org_id in signed suite webhook bodies. Call it before the worker.
+func (e *Engine) SetMultiTenant(on bool) { e.multiTenant = on }
 
 func NewEngine(s *store.Store, encryptionKey []byte) *Engine {
 	return &Engine{
@@ -115,6 +120,8 @@ type SCIMUserResource struct {
 	Roles       []SCIMRole  `json:"roles"`
 	Active      bool        `json:"active"`
 	Meta        *SCIMMeta   `json:"meta,omitempty"`
+	// OrgID is set on signed suite webhooks in multi-tenant mode only (tenancy design D4).
+	OrgID string `json:"org_id,omitempty"`
 }
 
 // UserToSCIMResource converts an internal KySignOn user into a standard SCIM 2.0 User resource.
@@ -455,6 +462,10 @@ func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncE
 			// "No roles" is an assertion the receiver must see, never a missing field.
 			if scimUser.Roles == nil {
 				scimUser.Roles = []SCIMRole{}
+			}
+			// The event row's org, from its user when queued; syncauth.Sign covers the body.
+			if e.multiTenant && sys.SystemType != "scim" && sys.SystemType != adSystemType {
+				scimUser.OrgID = ev.OrgID
 			}
 			payloadBytes, merr = json.Marshal(scimUser)
 		} else {

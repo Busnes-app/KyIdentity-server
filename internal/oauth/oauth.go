@@ -30,6 +30,19 @@ type Engine struct {
 	issuerURL  string
 	// userCodeKey hashes device-grant user codes; see SetUserCodeKey.
 	userCodeKey []byte
+	// multiTenant adds org_id to every token (tenancy design D4); see SetMultiTenant.
+	multiTenant bool
+}
+
+// SetMultiTenant turns on the org_id claim. Call it before serving.
+func (e *Engine) SetMultiTenant(on bool) { e.multiTenant = on }
+
+// addOrg sets org_id, the org's opaque ID read from the user row, in multi-tenant mode
+// only: a single-tenant relying party sees no new claim.
+func (e *Engine) addOrg(claims map[string]any, org string) {
+	if e.multiTenant {
+		claims["org_id"] = org
+	}
 }
 
 func NewEngine(s *store.Store, km *crypto.JWTKeyManager, issuerURL string) *Engine {
@@ -88,6 +101,9 @@ func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 		BackchannelLogoutSessionSupported: true,
 		ClaimsSupported: []string{"sub", "iss", "aud", "exp", "iat", "jti", "nonce", "auth_time", "amr", "acr", "sid",
 			"preferred_username", "name", "email", "email_verified", "roles", "groups", "role"},
+	}
+	if e.multiTenant {
+		cfg.ClaimsSupported = append(cfg.ClaimsSupported, "org_id")
 	}
 	if e.SupportsRevocation() {
 		cfg.RevocationEndpoint = e.issuerURL + "/oauth/revoke"
@@ -616,7 +632,7 @@ func (e *Engine) ExchangeRefreshToken(raw, clientID, clientSecret, scope string)
 // tokenResponse signs an access token already registered under accessJTI and, for the
 // openid scope, an ID token describing the login that established sessionID.
 func (e *Engine) tokenResponse(user *store.User, clientID, sessionID, scope string, evidence store.AuthenticationEvidence, nonce, accessJTI string, exp, now time.Time) (*TokenResponse, error) {
-	accessToken, err := e.keyManager.SignJWT(map[string]any{
+	access := map[string]any{
 		"iss":       e.issuerURL,
 		"sub":       user.ID,
 		"aud":       clientID,
@@ -625,7 +641,9 @@ func (e *Engine) tokenResponse(user *store.User, clientID, sessionID, scope stri
 		"jti":       accessJTI,
 		"scope":     scope,
 		"token_use": "access_token",
-	})
+	}
+	e.addOrg(access, user.Org().String())
+	accessToken, err := e.keyManager.SignJWT(access)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign access token: %w", err)
 	}
@@ -735,6 +753,7 @@ var ErrClaimsTooLarge = errors.New("identity claims exceed the token size limit;
 // the app keeps it on. Nothing about another app ever appears.
 func (e *Engine) identityClaims(user *store.User, clientID, scope string) (map[string]any, error) {
 	claims := map[string]any{"sub": user.ID}
+	e.addOrg(claims, user.Org().String())
 	if hasScope(scope, "profile") {
 		claims["username"] = user.Username
 		claims["preferred_username"] = user.Username

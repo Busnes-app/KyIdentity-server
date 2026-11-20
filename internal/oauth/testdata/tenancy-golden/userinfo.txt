@@ -1,0 +1,1 @@
+{"email":"golden@example.com","email_verified":false,"name":"Golden","preferred_username":"golden","roles":[],"sub":"golden-user","username":"golden"}

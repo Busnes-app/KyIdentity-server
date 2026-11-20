@@ -13,6 +13,7 @@ import (
 // and records each attempt, so an operator can see which apps were told and which were not.
 type LogoutDelivery struct {
 	ID, ClientID, ClientName, BackchannelLogoutURI, UserID, SID string
+	OrgID                                                       string // the user's org when queued; the logout token carries it in multi-tenant mode
 	Status                                                      string // queued, delivered, failed
 	Attempts                                                    int
 	LastError, ClaimToken                                       string
@@ -53,11 +54,11 @@ func enqueueLogoutTx(tx *sql.Tx, now time.Time, where string, args ...any) error
 	return err
 }
 
-const logoutDeliveryColumns = `d.id, d.client_id, COALESCE(c.client_name, d.client_id), COALESCE(c.backchannel_logout_uri, ''), d.user_id, d.sid, d.status, d.attempts, d.last_error, d.claim_token, d.next_attempt_at, d.created_at, d.updated_at`
+const logoutDeliveryColumns = `d.id, d.client_id, COALESCE(c.client_name, d.client_id), COALESCE(c.backchannel_logout_uri, ''), d.user_id, d.sid, d.status, d.attempts, d.last_error, d.claim_token, d.next_attempt_at, d.created_at, d.updated_at, d.org_id`
 
 func scanLogoutDelivery(row interface{ Scan(...any) error }) (*LogoutDelivery, error) {
 	d := &LogoutDelivery{}
-	err := row.Scan(&d.ID, &d.ClientID, &d.ClientName, &d.BackchannelLogoutURI, &d.UserID, &d.SID, &d.Status, &d.Attempts, &d.LastError, &d.ClaimToken, &d.NextAttemptAt, &d.CreatedAt, &d.UpdatedAt)
+	err := row.Scan(&d.ID, &d.ClientID, &d.ClientName, &d.BackchannelLogoutURI, &d.UserID, &d.SID, &d.Status, &d.Attempts, &d.LastError, &d.ClaimToken, &d.NextAttemptAt, &d.CreatedAt, &d.UpdatedAt, &d.OrgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
