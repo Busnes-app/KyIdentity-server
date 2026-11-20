@@ -49,7 +49,7 @@ func TestADeadHolderDelaysTheScheduleByOneTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	stores := handles(t, cfg.DBPath, 2)
-	raw, err := store.OpenRawForTest(cfg.DBPath)
+	raw, err := store.OpenRawForTest(cfg.DBPath + "?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestALostLeaseEndsTheRunningDeposit(t *testing.T) {
 			if err := backup.StorePairing(a, cfg.EncryptionKey, "https://recovery.example.test", "token"); err != nil {
 				t.Fatal(err)
 			}
-			raw, err := store.OpenRawForTest(cfg.DBPath)
+			raw, err := store.OpenRawForTest(cfg.DBPath + "?_pragma=busy_timeout(5000)")
 			if err != nil {
 				t.Fatal(err)
 			}
