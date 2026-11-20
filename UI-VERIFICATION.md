@@ -104,3 +104,7 @@ OAuth clients and Suite sync now fit 1280–1920 px desktop widths without horiz
 ## Active Directory connector — 2026-11-19
 
 Suite sync gains an "Active Directory (LDAPS)" choice in Connect service and a per-connector panel: settings with a never-displayed bind password and a Replace field, a one-time agent token, Test connection, and a directory-password table whose `.ky-status` pills show who cannot sign in to a PC yet, with "Send password-change request" (the existing reset link). Before and after captures (1440×900 and 390×844, light and dark) from a real server built from the branch with seeded rows are in `docs/ui-active-directory-2026-11-19/`. Limits: the capture server had no reachable DC, so its row reads Failing; the Type column wraps `active_directory` on desktop.
+
+## Mac sign-in (XCreds) — 2026-11-19
+
+Workstation login gains Linux desktops and Macs sub-headings, a generated XCreds configuration profile, and two switches in Edit settings: Allow Mac sign-in (XCreds) and Require a password at sign-in. Before (`origin/master` a86964c) and after captures (1440×900 and 390×844, light and dark, all `overflow=0`) from real servers are in [docs/ui-workstation-macos-2026-11-19](docs/ui-workstation-macos-2026-11-19/README.md). Limits: the capture issuer is loopback HTTP, so the profile shows `http://127.0.0.1:5391`; the profile's long lines scroll inside its text box.
