@@ -12,6 +12,7 @@ The links below open repository documents and need network access.
 
 - [Standalone installation](https://github.com/Busnes-app/KyIdentity-server/blob/master/INSTALL.md)
 - [Proxy trust configuration](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/UPGRADES-AND-RECOVERY.md)
+- [Active Directory](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/ACTIVE-DIRECTORY.md)
 - [HR provisioning](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/HR-PROVISIONING.md)
 - [Architecture](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/ARCHITECTURE.md)
 - [Running](https://github.com/Busnes-app/KyIdentity-server/blob/master/docs/RUNNING.md)

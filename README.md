@@ -40,6 +40,7 @@ startup without being overwritten; read the [signing-key upgrade guidance](docs/
 
 ## Documentation
 
+- [Active Directory](docs/ACTIVE-DIRECTORY.md) — sync users and groups into one AD OU and set their passwords through the DC agent, so Windows PCs sign in with KyIdentity accounts.
 - [HR provisioning](docs/HR-PROVISIONING.md) — import source UIDs, reserve KyPost email before SSO account creation, and write the confirmed address back to HR.
 
 - [Architecture](docs/ARCHITECTURE.md) — Architecture & Standard Library Philosophy. <a id="architecture--standard-library-philosophy"></a><a id="standard-library-implementations"></a><a id="direct-dependencies"></a>

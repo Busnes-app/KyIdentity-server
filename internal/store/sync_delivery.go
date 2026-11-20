@@ -306,7 +306,7 @@ func (s *Store) MarkSyncDeliveryUncertain(ev AccountSyncEvent) error {
 }
 
 // deliverableTypes are the connector types the worker sends to; others pause.
-const deliverableTypes = `('scim','suite_webhook','kypost','kypasswords','kybookmarks','kynotes')`
+const deliverableTypes = `('scim','suite_webhook','kypost','kypasswords','kybookmarks','kynotes','active_directory')`
 
 // SystemForClient returns the connector that shares an app with the OAuth client.
 func (s *Store) SystemForClient(clientID string) (string, error) {

@@ -223,6 +223,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/suite/people", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.People)))
 	mux.Handle("GET /api/suite/groups", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Groups)))
 
+	// Active Directory agent (docs/ACTIVE-DIRECTORY.md): Bearer agent token, one connector's queue.
+	adAgentH := &ADAgentHandler{store: s.store}
+	mux.Handle("GET /api/ad-agent/v1/passwords", s.middleware.RateLimit("ad_agent", 60, 2)(adAgentH.authenticate(adAgentH.Passwords)))
+	mux.Handle("POST /api/ad-agent/v1/passwords/{userId}/{seq}", s.middleware.RateLimit("ad_agent", 60, 2)(adAgentH.authenticate(adAgentH.Result)))
+
 	// Organisation branding: public, because the sign-in page shows it (issue #145).
 	// Forward-auth (docs/FORWARD-AUTH.md): edge routes authenticate the per-app secret.
 	forwardH := NewForwardHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
@@ -305,6 +310,9 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/systems/{id}/recovery-evidence", permAdmin, true, http.HandlerFunc(adminH.ExportRecoveryEvidence)},
 		{"POST", "/api/admin/systems/{id}/provisioning/resume", permAdmin, true, http.HandlerFunc(adminH.ResumeProvisioning)},
 		{"DELETE", "/api/admin/systems/{id}", permAdmin, true, http.HandlerFunc(adminH.DeletePairedSystem)},
+		{"GET", "/api/admin/systems/{id}/active-directory", permRead, false, http.HandlerFunc(adminH.GetActiveDirectory)},
+		{"PUT", "/api/admin/systems/{id}/active-directory", permAdmin, true, http.HandlerFunc(adminH.PutActiveDirectory)},
+		{"POST", "/api/admin/systems/{id}/active-directory/agent-token", permAdmin, true, http.HandlerFunc(adminH.IssueADAgentToken)},
 		{"GET", "/api/admin/clients", permRead, false, http.HandlerFunc(adminH.ListOAuthClients)},
 		{"POST", "/api/admin/clients", permAdmin, true, http.HandlerFunc(adminH.CreateOAuthClient)},
 		{"GET", "/api/admin/workstation-apps", permRead, false, http.HandlerFunc(adminH.ListWorkstationApps)},

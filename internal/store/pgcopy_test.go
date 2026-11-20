@@ -136,6 +136,16 @@ func copyFixture(t *testing.T, s *Store) {
 	if _, err := s.ImportHR(inbound.ID, HRInput{SourceUID: "employee-Ä", PreferredName: "round.trip", DisplayName: "Pending hire 🙂", Active: true, SourceVersion: 7}, nil); err != nil {
 		t.Fatal(err)
 	}
+	// Absent from a database built only up to an earlier migration (the tenancy upgrade test).
+	hasAD := s.db.QueryRow(`SELECT count(*) FROM ad_connectors`).Scan(new(int)) == nil
+	if hasAD {
+		must(s.CreateADSystem(&PairedSystem{ID: "ad-1", Name: "Directory", SystemType: "active_directory", CallbackURL: "ldaps://dc.example.test", HMACSecretEncrypted: "sealed", Status: "active"},
+			&ADConnector{BindDN: "CN=sync,DC=example,DC=test", BaseDN: "OU=KyIdentity,DC=example,DC=test", CAPEM: "pem", AgentPublicKey: "x25519:key", AgentKeyMAC: "mac", PasswordTTLMinutes: 60}, nil))
+		must(s.SetADAgentToken("ad-1", "kyad_fixture", nil))
+		if _, err := s.db.Exec(`INSERT INTO ad_passwords(system_id,user_id,seq,ciphertext,signature,expires_at,password_tag,delivered_seq,delivered_at) VALUES('ad-1',?,5,'ct','sig',?,'tag',4,?)`, user.ID, now.Add(time.Hour), now); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// The rest have no method that writes them outside a longer flow.
 	for _, q := range []struct {
 		sql  string

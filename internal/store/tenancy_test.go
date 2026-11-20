@@ -32,11 +32,13 @@ var (
 		// A code is bound to a user on approval and cascades with them; a pending one is flow
 		// state, like authorization_interactions.
 		"device_codes": "users",
+		// One sealed directory password per connector and user.
+		"ad_passwords": "users",
 	}
 	platformTables = []string{"schema_migrations", "leases", "installer_setup_resources", "paired_systems",
 		"device_signon_jtis", "oauth_clients", "launcher_icons", "applications", "system_settings", "app_registry",
 		"authorization_interactions", "app_roles", "enrollment_policies", "sync_reconcile_jobs", "rate_limits",
-		"push_relay_keys", "proxy_apps", "workstation_apps", "orgs", "platform_tokens", "platform_requests", "platform_events"}
+		"push_relay_keys", "proxy_apps", "workstation_apps", "ad_connectors", "orgs", "platform_tokens", "platform_requests", "platform_events"}
 )
 
 // testCatalogs is the SQLite catalog of a fresh database, and the Postgres one when the

@@ -202,6 +202,20 @@ jobs:
         working-directory: workers/fcn
       - run: node --test push-relay-shared/*.test.mts workers/apns/src/*.test.mts workers/fcn/src/*.test.mts
 
+  # Active Directory end to end: a throwaway Samba AD DC, this branch's server and the
+  # DC agent, proven with kinit, smbclient and ldapsearch (docs/ACTIVE-DIRECTORY.md).
+  samba-ad:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: shellcheck -x scripts/e2e-samba-ad.sh scripts/e2e-samba-ad-kyidentity.sh
+      - run: scripts/e2e-samba-ad-kyidentity.sh
+
   docker:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -249,7 +263,7 @@ jobs:
   # the pushed bytes are the tested bytes. A pull request from a fork must
   # never reach this job or write a package.
   publish:
-    needs: [go, web, relay, docker, postgres]
+    needs: [go, web, relay, docker, postgres, samba-ad]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -100,3 +100,7 @@ OAuth clients and Suite sync now fit 1280–1920 px desktop widths without horiz
 ## Stale tab after an upgrade — 2026-11-02
 
 `index.html` and the SPA fallback are sent with `Cache-Control: no-cache`; assets keep their headers (`internal/api/spa_cache_test.go`). `web/src/main.tsx` starts ky-ui's `watchForUpdate`, which offers a reload when the server serves a different build. Before and after shots of a real server upgrade under an open tab (1440×900, Busnes Light and Dark) and the limits are in [docs/ui-stale-tab-2026-11-02](docs/ui-stale-tab-2026-11-02/README.md). `check-vendor.mjs` passes, and the committed `web/dist` equals a fresh Node 26 build.
+
+## Active Directory connector — 2026-11-19
+
+Suite sync gains an "Active Directory (LDAPS)" choice in Connect service and a per-connector panel: settings with a never-displayed bind password and a Replace field, a one-time agent token, Test connection, and a directory-password table whose `.ky-status` pills show who cannot sign in to a PC yet, with "Send password-change request" (the existing reset link). Before and after captures (1440×900 and 390×844, light and dark) from a real server built from the branch with seeded rows are in `docs/ui-active-directory-2026-11-19/`. Limits: the capture server had no reachable DC, so its row reads Failing; the Type column wraps `active_directory` on desktop.

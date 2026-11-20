@@ -2,10 +2,11 @@ import { SyncDeliveries } from './SyncDeliveries';
 import { ProvisioningState } from './ProvisioningState';
 import React, { useEffect, useId, useState } from 'react';
 import { UrlCell } from './UrlCell';
-import { PairedSystem } from '../types';
+import type { ADSettingsInput, PairedSystem } from '../types';
 import { apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { Modal } from './Modal';
+import { ActiveDirectoryPanel, ADFields, blankAD, createActiveDirectory } from './ActiveDirectory';
 import { parseCreatedSystem, parsePairedSystems } from '../parsers';
 import {
   RefreshCw,
@@ -51,6 +52,10 @@ const PRESET_METADATA: Record<
     defaultDesc: 'Self-hosted cloud storage & collaboration',
     defaultIcon: 'https://nextcloud.com/media/nextcloud-logo-white.svg',
   },
+  active_directory: {
+    defaultName: 'Active Directory',
+    defaultUrl: '',
+  },
   suite_webhook: {
     defaultName: 'Custom signed webhook',
     defaultUrl: 'https://api.example.com/scim/v2',
@@ -60,11 +65,12 @@ const PRESET_METADATA: Record<
 };
 
 /** A legacy or unknown type: delivery pauses until an administrator picks a protocol. */
-const needsReview = (s: PairedSystem) => !['scim', 'suite_webhook', 'kypost', 'kypasswords', 'kybookmarks', 'kynotes'].includes(s.systemType);
+const needsReview = (s: PairedSystem) => !['scim', 'active_directory', 'suite_webhook', 'kypost', 'kypasswords', 'kybookmarks', 'kynotes'].includes(s.systemType);
 
 export const AdminSystems: React.FC = () => {
   const [deliverySystem, setDeliverySystem] = useState<PairedSystem | null>(null);
   const [provisioningSystem, setProvisioningSystem] = useState<PairedSystem | null>(null);
+  const [directorySystem, setDirectorySystem] = useState<PairedSystem | null>(null);
   const [systems, setSystems] = useState<PairedSystem[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -78,6 +84,7 @@ export const AdminSystems: React.FC = () => {
   const [iconUrl, setIconUrl] = useState('');
   const [callbackUrl, setCallbackUrl] = useState('');
   const [bearerToken, setBearerToken] = useState('');
+  const [ad, setAD] = useState<ADSettingsInput>(blankAD);
   const [groups, setGroups] = useState(false);
   const [reconcileHours, setReconcileHours] = useState(0);
   const [editing, setEditing] = useState<PairedSystem | null>(null);
@@ -109,6 +116,7 @@ export const AdminSystems: React.FC = () => {
       setIconUrl(meta.defaultIcon || '');
     }
     setBearerToken('');
+    setAD(blankAD);
     setFormError(null);
   };
 
@@ -126,6 +134,12 @@ export const AdminSystems: React.FC = () => {
         const grant = await requestGrant(`Update the connection for '${editing.name}'?`, `PUT ${path}`);
         await apiRequest(path, { method: 'PUT', stepUpToken: grant, body: JSON.stringify({ systemType, bearerToken, groups, reconcileHours }) });
         handleCloseModal();
+        return;
+      }
+      if (systemType === 'active_directory') {
+        const created = await createActiveDirectory(targetName.trim(), ad, requestGrant);
+        handleCloseModal();
+        setDirectorySystem(created.system);
         return;
       }
       const grant = await requestGrant(
@@ -167,6 +181,7 @@ export const AdminSystems: React.FC = () => {
     setShowPairModal(false);
     setEditing(null);
     setBearerToken('');
+    setAD(blankAD);
     setGroups(false);
     setReconcileHours(0);
     setCreatedToken(null);
@@ -176,7 +191,7 @@ export const AdminSystems: React.FC = () => {
   const handleTriggerResync = async (s: PairedSystem) => {
     try {
       await apiRequest(`/api/admin/systems/${s.id}/resync`, { method: 'POST' });
-      alert(`Full account directory resync queued for '${s.name}' via SCIM 2.0`);
+      alert(`Full account directory resync queued for '${s.name}'`);
       fetchSystems();
     } catch (err) {
       alert(errorMessage(err, 'Failed to trigger resync'));
@@ -206,6 +221,7 @@ export const AdminSystems: React.FC = () => {
 
   const isCustomOrGeneric = systemType === 'scim' || systemType === 'suite_webhook';
   const openConnection = (s: PairedSystem) => {
+    if (s.systemType === 'active_directory') { setDirectorySystem(s); return; }
     setEditing(s); setSystemType(s.systemType === 'scim' ? 'scim' : '');
     setTargetName(s.name); setCallbackUrl(s.callbackUrl); setDescription(s.description ?? ''); setIconUrl(s.iconUrl ?? '');
     setBearerToken(''); setGroups(s.groupsEnabled); setReconcileHours(s.reconcileHours); setCreatedToken(null); setFormError(null); setShowPairModal(true);
@@ -213,7 +229,8 @@ export const AdminSystems: React.FC = () => {
   const testConnection = async (s: PairedSystem) => {
     try {
       await apiRequest(`/api/admin/systems/${s.id}/test`, { method: 'POST' });
-      alert('SCIM Users lookup succeeded. This does not verify write permissions or provisioning.');
+      alert(s.systemType === 'active_directory' ? 'LDAPS bind and OU search succeeded. This does not verify write permissions or the DC agent.'
+        : 'SCIM Users lookup succeeded. This does not verify write permissions or provisioning.');
     } catch (err) { alert(errorMessage(err, 'Connection test failed')); }
   };
 
@@ -226,12 +243,13 @@ export const AdminSystems: React.FC = () => {
         </div>
         <button className="primary-btn sm" onClick={handleOpenModal}>
           <Plus size={14} />
-          <span>Connect SCIM target</span>
+          <span>Connect service</span>
         </button>
       </div>
       {listError && <div className="alert-box error" role="alert">{listError}<button className="secondary-btn sm" onClick={fetchSystems}>Retry</button></div>}
 
       {deliverySystem && <SyncDeliveries key={deliverySystem.id} system={deliverySystem} onClose={() => setDeliverySystem(null)} />}
+      {directorySystem && <ActiveDirectoryPanel key={directorySystem.id} system={directorySystem} onClose={() => setDirectorySystem(null)} onTest={() => testConnection(directorySystem)} />}
       {provisioningSystem && <ProvisioningState key={provisioningSystem.id} system={provisioningSystem} onClose={() => setProvisioningSystem(null)} />}
       <div className="table-card">
         <table className="admin-table systems-table">
@@ -249,7 +267,7 @@ export const AdminSystems: React.FC = () => {
             {systems?.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-5 text-muted">
-                  No downstream SCIM products connected yet. Click <strong>Connect SCIM target</strong> to connect a service.
+                  No downstream services connected yet. Click <strong>Connect service</strong> to connect a service.
                 </td>
               </tr>
             ) : (
@@ -374,6 +392,7 @@ export const AdminSystems: React.FC = () => {
                   </>}
                   <option value="scim">Generic SCIM 2.0 (Nextcloud, OwnCloud, etc.)</option>
                   <option value="suite_webhook">Custom signed suite webhook</option>
+                  {!editing && <option value="active_directory">Active Directory (LDAPS)</option>}
                 </select>
               </div>
 
@@ -417,7 +436,8 @@ export const AdminSystems: React.FC = () => {
                 </>
               )}
 
-              <div className="form-group">
+              {systemType === 'active_directory' && <ADFields value={ad} onChange={setAD} passwordSet={false} />}
+              {systemType !== 'active_directory' && <div className="form-group">
                 <label className="form-label">{systemType === 'scim' ? 'SCIM Base URL' : 'Signed webhook URL'}</label>
                 <input
                   type="url"
@@ -431,7 +451,7 @@ export const AdminSystems: React.FC = () => {
                 <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
                   {systemType === 'scim' ? 'Uses the target’s user IDs for updates and deactivation. Requires externalId filtering, PUT, and PATCH support.' : 'Sends signed SCIM user bodies to this exact webhook URL.'}
                 </span>
-              </div>
+              </div>}
 
               {systemType === 'scim' && <div className="form-group">
                 <label className="form-label" htmlFor="scim-bearer">Bearer token issued by the target service</label>
@@ -449,7 +469,7 @@ export const AdminSystems: React.FC = () => {
               </div>}
               <div className="alert-box info sm" style={{ marginBottom: '1.25rem' }}>
                 <Key size={14} />
-                <span>{systemType === 'scim' ? 'Use an HTTPS SCIM base URL and the service’s provisioning token.' : editing ? 'The existing webhook signing secret will be retained.' : 'KyIdentity generates a signing secret shown once after connection.'}</span>
+                <span>{systemType === 'active_directory' ? 'After connecting, issue an agent token for the DC agent from this connector’s settings.' : systemType === 'scim' ? 'Use an HTTPS SCIM base URL and the service’s provisioning token.' : editing ? 'The existing webhook signing secret will be retained.' : 'KyIdentity generates a signing secret shown once after connection.'}</span>
               </div>
 
               <div className="modal-footer">
@@ -488,8 +508,8 @@ export const SystemRowActions: React.FC<{
       <div id={menuId} popover="auto" className="row-actions-menu" role="group" aria-label={`More actions for ${s.name}`} onClickCapture={event => {
         if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.hidePopover();
       }}>
-        {(review || s.systemType === 'scim') && <button type="button" className="row-action" onClick={onConnection}>
-          <Settings size={15} aria-hidden="true" />{review ? 'Review connection' : 'Connection settings'}
+        {(review || s.systemType === 'scim' || s.systemType === 'active_directory') && <button type="button" className="row-action" onClick={onConnection}>
+          <Settings size={15} aria-hidden="true" />{review ? 'Review connection' : s.systemType === 'active_directory' ? 'Directory settings' : 'Connection settings'}
         </button>}
         <button type="button" className="row-action" onClick={onDeliveries}>
           <History size={15} aria-hidden="true" />Deliveries
@@ -497,7 +517,7 @@ export const SystemRowActions: React.FC<{
         <button type="button" className="row-action" onClick={onProvisioning}>
           <Users size={15} aria-hidden="true" />Provisioning
         </button>
-        {s.systemType === 'scim' && <button type="button" className="row-action" onClick={onTest}>
+        {(s.systemType === 'scim' || s.systemType === 'active_directory') && <button type="button" className="row-action" onClick={onTest}>
           <PlugZap size={15} aria-hidden="true" />Test connection
         </button>}
         <button type="button" className="row-action" disabled={review} onClick={onResync} title="Re-replicate all accounts via SCIM">
