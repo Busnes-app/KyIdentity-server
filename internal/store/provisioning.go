@@ -201,8 +201,8 @@ func queueDesiredStateTx(tx *sql.Tx, d desiredState, now time.Time) error {
 		return err
 	}
 	for _, r := range resets {
-		if _, err := tx.Exec(`INSERT INTO account_sync_events (org_id,`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			org, r.ID, r.UserID, r.SystemID, r.EventType, string(d.payload), r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision, 0); err != nil {
+		if _, err := tx.Exec(`INSERT INTO account_sync_events (`+syncEventColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			r.ID, r.UserID, r.SystemID, r.EventType, string(d.payload), r.Attempts, r.Status, r.LastError, r.NextAttempt, r.CreatedAt, now, "", revision, 0, org); err != nil {
 			return err
 		}
 	}

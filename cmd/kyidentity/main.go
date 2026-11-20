@@ -174,6 +174,7 @@ func main() {
 		log.Fatalf("Applying the restored state failed, refusing to start: %v", err)
 	}
 	syncEngine := sync.NewEngine(dbStore, cfg.EncryptionKey)
+	syncEngine.SetMultiTenant(cfg.Tenancy == "multi")
 	mfaEngine := mfa.NewEngine(dbStore, cfg.EncryptionKey)
 	relaySender, err := mfa.NewRelaySender(
 		mfa.RelayConfig{
@@ -235,6 +236,7 @@ func main() {
 	mfaEngine.SetUbuntuPushSender(mfa.NewUbuntuPushSender(cfg.UbuntuPushURL, cfg.UbuntuPushAppID))
 	oauthEngine := oauth.NewEngine(dbStore, keyManager, cfg.IssuerURL)
 	oauthEngine.SetUserCodeKey(cfg.SecretKey)
+	oauthEngine.SetMultiTenant(cfg.Tenancy == "multi")
 
 	if err := bootstrapOnStart(dbStore, cfg.BootstrapUser, cfg.BootstrapPass, cfg.DataDir, cfg.Replicated); err != nil {
 		log.Fatalf("Bootstrap failed: %v", err)

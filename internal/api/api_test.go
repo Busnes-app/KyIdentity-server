@@ -475,6 +475,8 @@ func setupTestServerWith(t *testing.T, opts ...func(*config.Config)) (*Server, *
 	mfaEngine.SetIssuerOrigin(testIssuerOrigin)
 	oauthEngine := oauth.NewEngine(dbStore, km, cfg.IssuerURL)
 	oauthEngine.SetUserCodeKey(cfg.SecretKey)
+	syncEngine.SetMultiTenant(cfg.Tenancy == "multi")
+	oauthEngine.SetMultiTenant(cfg.Tenancy == "multi")
 
 	server := NewServer(cfg, dbStore, km, syncEngine, mfaEngine, oauthEngine, auditLogger, nil)
 

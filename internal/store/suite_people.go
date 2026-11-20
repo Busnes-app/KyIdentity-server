@@ -7,12 +7,12 @@ type SuitePerson struct {
 	ID, Name, Email string
 }
 
-// SuitePeople lists active everyday users who may open clientID: those whose display name
+// SuitePeople lists the org's active everyday users who may open clientID: those whose display name
 // has a word starting with q or whose username or email starts with q, or, when emails is
 // set, those with exactly those addresses. Administrator accounts are never listed. At most
 // limit rows, ordered by name.
-func (s *Store) SuitePeople(clientID, q string, emails []string, limit int) ([]SuitePerson, error) {
-	match, args := `u.email IN (?`+strings.Repeat(",?", max(len(emails)-1, 0))+`)`, []any{clientID}
+func (o *OrgStore) SuitePeople(clientID, q string, emails []string, limit int) ([]SuitePerson, error) {
+	match, args := `u.email IN (?`+strings.Repeat(",?", max(len(emails)-1, 0))+`)`, []any{o.org, clientID}
 	if emails == nil {
 		p := likePrefix(q)
 		match = `(u.display_name LIKE ? ESCAPE '\' OR u.display_name LIKE ? ESCAPE '\' OR u.username LIKE ? ESCAPE '\' OR u.email LIKE ? ESCAPE '\')`
@@ -22,8 +22,8 @@ func (s *Store) SuitePeople(clientID, q string, emails []string, limit int) ([]S
 			args = append(args, e)
 		}
 	}
-	rows, err := s.db.Query(`SELECT u.id, CASE WHEN u.display_name<>'' THEN u.display_name ELSE u.username END, u.email FROM users u
- WHERE u.role='user' AND NOT u.pending AND u.email<>''
+	rows, err := o.s.db.Query(`SELECT u.id, CASE WHEN u.display_name<>'' THEN u.display_name ELSE u.username END, u.email FROM users u
+ WHERE u.org_id=? AND u.role='user' AND NOT u.pending AND u.email<>''
  AND EXISTS(SELECT 1 FROM effective_app_access e JOIN app_registry a ON a.id=e.app_id JOIN oauth_clients c ON c.id=a.client_id WHERE e.user_id=u.id AND c.id=? AND c.enabled)
  AND `+match+` ORDER BY lower(u.display_name), u.id LIMIT ?`, append(args, limit)...)
 	if err != nil {

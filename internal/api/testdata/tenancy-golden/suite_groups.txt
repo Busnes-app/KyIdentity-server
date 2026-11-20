@@ -1,0 +1,1 @@
+{"groups":[{"id":"st-group","name":"st team","slug":"st-team","state":"active","members":["st-me","st-other"]}]}

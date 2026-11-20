@@ -217,11 +217,12 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("POST /oauth/revoke", s.middleware.RateLimit("oauth_revoke", 30, 1.0)(http.HandlerFunc(oauthH.Revoke)))
 
 	// Suite directory: server-to-server, HTTP Basic client credentials (docs/SUITE-DIRECTORY.md).
-	suiteH := &SuiteHandler{store: s.store, oauthEngine: s.oauthEngine, audit: s.audit, middleware: s.middleware, encryptionKey: s.cfg.EncryptionKey}
+	suiteH := &SuiteHandler{store: s.store, oauthEngine: s.oauthEngine, audit: s.audit, middleware: s.middleware, encryptionKey: s.cfg.EncryptionKey, multiTenant: s.cfg.Tenancy == "multi"}
 	mux.Handle("GET /api/suite/apps", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Apps)))
 	mux.Handle("GET /api/suite/peer", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Peer)))
 	mux.Handle("GET /api/suite/people", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.People)))
 	mux.Handle("GET /api/suite/groups", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Groups)))
+	mux.Handle("GET /api/suite/orgs", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Orgs)))
 
 	// Active Directory agent (docs/ACTIVE-DIRECTORY.md): Bearer agent token, one connector's queue.
 	adAgentH := &ADAgentHandler{store: s.store}

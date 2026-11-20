@@ -1,8 +1,10 @@
 # Suite directory
 
 KyIdentity tells suite apps about each other, so cross-app features work without an
-operator copying URLs or secrets between servers. Read-only service endpoints, called
-server to server by a registered app with its own OAuth client credentials. The people route
+operator copying URLs or secrets between servers. Four read-only service endpoints, called
+server to server by a registered app with its own OAuth client credentials. A multi-tenant
+install adds a fifth, `/api/suite/orgs`, and scopes people and groups by organisation (see
+Multi-tenant installs). The people route
 is contract A2 of the wave-1 suite integrations (`ky-redesign/integrations/suite-integrations-contracts.md`);
 this file is the durable copy.
 
@@ -113,6 +115,11 @@ limit and `no-store`. No parameters. Design and threat model:
   turned on and never reused, so a recreated namesake gets `sales-2`. `name` follows renames.
 - At most 200 groups can be on at once. Ordered by `id`. Not audited.
 
+In a multi-tenant install `org_id` (a UUID from `/api/suite/orgs`) is required, and the
+list holds that organisation's groups only. Without it the answer is
+`400 {"error":"invalid_request"}`; an organisation the caller is not told about by
+`/api/suite/orgs` is `404 {"error":"unknown_org"}`. A single-tenant install ignores it.
+
 Apps reconcile, keyed on `id` only: poll about every 60 s; on an error change nothing; for
 an `active` group ensure one resource (create, or un-archive), set its name, and set its
 members to exactly the listed subjects that have a local SSO account; for an `archived`
@@ -120,44 +127,47 @@ group with a resource, archive it (read-only, no members, kept for administrator
 delete, and never archive because a group is absent from a response. Client:
 `ky-primitives/suitedir` `Groups`.
 
-## `GET /api/suite/email-domains`
+## Multi-tenant installs
 
-The suite's mail domains: the domains users' addresses use, set once by the KyIdentity
-administrator (Administration → Suite settings). KyPost and the other apps read them here
-instead of configuring their own. Same authentication, rate limit and `no-store`; any
-enabled confidential client may read them. No parameters.
+A multi-tenant install (design `docs/superpowers/specs/2026-11-19-tenancy-design.md`) holds
+many organisations under one issuer. The caller is a global client, so the organisation
+always comes from KyIdentity's data, never from the calling app:
+
+- `/api/suite/apps?sub=` and `/api/suite/people?sub=` answer for the `sub` user's
+  organisation: people lists only its users, and apps only the apps its plan enables. `/apps`
+  without `sub` stays global.
+- `/api/suite/groups` requires `org_id` (above).
+- Tokens and UserInfo carry `org_id`, and so does the body of every signed suite webhook,
+  inside the `ky-primitives/syncauth` signature.
+
+### `GET /api/suite/orgs`
+
+The organisations the calling app serves. Same authentication, rate limit and `no-store`.
+`404 {"error":"not_found"}` in a single-tenant install.
+
+- Listed: every organisation that has (or had) the calling app enabled, with `enabled`
+  `false` once its plan turns the app off, and every deleted organisation (a tombstone, never
+  reused). Others are absent.
+- `revision` rises across the whole install with each change to an organisation or its
+  apps, so a poll asks only for what changed: `since=<revision>` lists what changed after it.
+- Ordered by `revision`, then `id`. `limit` 1 to 500, default 100. A full page carries
+  `next`; pass it back as `cursor` (instead of `since`) for the next page.
+- `enabled` and `quotas` (the plan's opaque object) are the calling app's only, read from
+  the organisation's `org_apps` row. The platform API writes those rows in tenancy build plan
+  PR 6; until then a multi-tenant install is refused at startup, so nothing serves this.
 
 ```json
-{"domains": ["example.com", "xn--bcher-kva.example"]}
+{"orgs": [{"id": "…", "status": "active", "revision": 42, "enabled": true, "quotas": {"storage_gb": 5}}],
+ "next": "42.…"}
 ```
 
-- Lowercase ASCII, IDNs in punycode, each a DNS name of at least two labels: no scheme,
-  port, path, wildcard or address. No duplicates, at most 50, in the administrator's order.
-  `[]` when none are set.
-- Platform-wide: one list for the install (on the hosted platform, set by staff), never
-  per org. These are mail domains, not app hostnames.
-- Informational: KyIdentity does not refuse user addresses outside the list. Poll it
-  (every few minutes is plenty); on an error keep the last list.
+`status` is `active`, `suspended`, `deletion_scheduled` or `deleted`. Apps poll about every
+60 s. Remember the highest `revision` seen once a pass ends without `next`, and start the
+next poll from it. An error changes nothing.
 
-## Default theme: `GET /api/appearance`
-
-The suite-wide default theme, set by the KyIdentity administrator. Unlike the routes above it
-is **public** (no credential, `Cache-Control: no-cache`, rate limited per IP), because
-KyIdentity's sign-in page applies it before anyone signs in and the value is not sensitive.
-
-```json
-{"defaultTheme": "ocean-pair"}
-```
-
-- `defaultTheme` is a ky-ui theme choice ID: `system` (Busnes following the OS; also the
-  value when unset), a pair ID (`busnes-pair`, `matter-pair`, `ocean-pair`, `forest-pair`,
-  `ky-pair`, `nord-pair`: that palette, following the OS) or a half ID (`busnes-light`,
-  `busnes-dark`, `light-matter`, `dark-matter`, `white-cliffs`, `ocean`, `forest-light`,
-  `forest`, `polished-ky`, `patina-ky`, `paper`, `nord`: a fixed palette and mode).
-  KyIdentity accepts only these.
-- A user's own saved choice always wins; the default applies only where the user has saved
-  none. There is no lock. Platform-wide, never per org.
-- Apps apply it with ky-ui 0.12.0 or later: the app's backend reads this route, hands the
-  value to its pages (server-rendered for first paint, or from a same-origin route), and the
-  page calls `setServerDefaultTheme(value)` then applies `chooseTheme(savedValue)`. Treat any
-  value ky-ui does not know as `system`.
+Downstream contract, for every app run as a shared multi-tenant install: refuse a token
+without `org_id`; key every row by `org_id`; bind a local account to `(sub, org_id)` and
+refuse a known `sub` arriving with another `org_id`; take the org only from a verified token,
+a signed webhook or a suite answer, never a URL, form or header; stop serving an
+organisation whose status is not `active`, and drop its data only at `deleted`; enforce
+your own quotas from this list. Client: `ky-primitives/suitedir` `Orgs`.

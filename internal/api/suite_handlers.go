@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
@@ -21,6 +22,8 @@ type SuiteHandler struct {
 	audit         *audit.Logger
 	middleware    *MiddlewareManager
 	encryptionKey []byte
+	// multiTenant scopes groups by org_id and serves /api/suite/orgs (tenancy design).
+	multiTenant bool
 }
 
 // suitePeers are the pairs KyIdentity introduces, each as {a, b} with a < b.
@@ -142,7 +145,8 @@ func (h *SuiteHandler) People(w http.ResponseWriter, r *http.Request, caller *st
 	}
 	var people []store.SuitePerson
 	if err == nil && allowed {
-		people, err = h.store.SuitePeople(caller.ID, text, emails, limit)
+		// Only the sub's own org: the org comes from the user row, never the caller.
+		people, err = h.store.Org(user.Org()).SuitePeople(caller.ID, text, emails, limit)
 	}
 	if err != nil {
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
@@ -187,12 +191,77 @@ func (h *SuiteHandler) Peer(w http.ResponseWriter, r *http.Request, caller *stor
 	suiteJSON(w, http.StatusOK, map[string]string{"client": peer.ID, "url": origin, "secret": suitePeerSecret(h.encryptionKey, a, b)})
 }
 
-// Groups lists the suite groups for the calling app (docs/SUITE-DIRECTORY.md).
+// Groups lists the suite groups for the calling app (docs/SUITE-DIRECTORY.md): the
+// install's in single-tenant mode, else the org_id one's, which is required.
 func (h *SuiteHandler) Groups(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
-	groups, err := h.store.SuiteGroupsFor(caller.ID)
+	org := h.store.DefaultOrg()
+	if h.multiTenant {
+		id := r.URL.Query().Get("org_id")
+		if id == "" {
+			suiteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+			return
+		}
+		o, ok, err := h.store.SuiteOrg(caller.ID, id)
+		if err != nil {
+			suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+		if !ok {
+			suiteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown_org"})
+			return
+		}
+		org = h.store.Org(o)
+	}
+	groups, err := org.SuiteGroupsFor(caller.ID)
 	if err != nil {
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
 	suiteJSON(w, http.StatusOK, map[string]any{"groups": groups})
+}
+
+// suiteOrgsLimit bounds one /api/suite/orgs page.
+const suiteOrgsLimit = 500
+
+// Orgs lists the orgs the calling app serves, with that app's enablement and quotas, in
+// revision order (docs/SUITE-DIRECTORY.md). Multi-tenant only.
+func (h *SuiteHandler) Orgs(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
+	if !h.multiTenant {
+		suiteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	q := r.URL.Query()
+	var after int64
+	var afterID string
+	limit, ok := 100, !(q.Has("since") && q.Has("cursor"))
+	var err error
+	if q.Has("since") {
+		after, err = strconv.ParseInt(q.Get("since"), 10, 64)
+		ok = ok && err == nil && after >= 0
+	}
+	if q.Has("cursor") {
+		rev, id, found := strings.Cut(q.Get("cursor"), ".")
+		after, err = strconv.ParseInt(rev, 10, 64)
+		ok = ok && found && err == nil && after >= 0 && id != "" && len(id) <= 64
+		afterID = id
+	}
+	if q.Has("limit") {
+		limit, err = strconv.Atoi(q.Get("limit"))
+		ok = ok && err == nil && limit >= 1 && limit <= suiteOrgsLimit
+	}
+	if !ok {
+		suiteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+		return
+	}
+	orgs, err := h.store.Platform().SuiteOrgs(caller.ID, after, afterID, limit)
+	if err != nil {
+		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	body := map[string]any{"orgs": orgs}
+	if len(orgs) == limit {
+		last := orgs[len(orgs)-1]
+		body["next"] = strconv.FormatInt(last.Revision, 10) + "." + last.ID
+	}
+	suiteJSON(w, http.StatusOK, body)
 }

@@ -74,8 +74,21 @@ func CreateOrgForTest(s *Store, kind string) (OrgID, error) {
 	}
 	id := uuid.NewString()
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,created_at,updated_at) VALUES(?,?,?,'active',?,?)`, id, kind+" "+id[:8], kind, now, now)
+	_, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,revision,created_at,updated_at) VALUES(?,?,?,'active',`+nextOrgRevisionSQL+`,?,?)`, id, kind+" "+id[:8], kind, now, now)
 	return OrgID{id}, err
+}
+
+// EnableOrgAppForTest turns an app on for an org with quotas (a JSON object). Test
+// binaries only: org_apps is written by the platform API (build plan PR 6).
+func EnableOrgAppForTest(s *Store, org OrgID, appID, quotas string) error {
+	if !testing.Testing() {
+		panic("store: EnableOrgAppForTest outside a test binary")
+	}
+	_, err := s.db.Exec(`INSERT INTO org_apps(org_id,app_id,enabled,quotas_json) VALUES(?,?,TRUE,?)`, org.id, appID, quotas)
+	if err == nil {
+		_, err = s.db.Exec(`UPDATE orgs SET revision=`+nextOrgRevisionSQL+` WHERE id=?`, org.id)
+	}
+	return err
 }
 
 // connectorOrgTx is the org of an inbound SCIM connector: its token decided it, so every

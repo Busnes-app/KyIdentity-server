@@ -1,0 +1,1 @@
+{"apps":[{"id":"devapp","name":"devapp","url":"http://localhost:8080"},{"id":"kycalendar","name":"kycalendar","url":"https://cal.example.test/api/sso/kysignon/login"},{"id":"kypost","name":"kypost","url":"https://mail.example.test/api/auth/oidc/login"},{"id":"pub","name":"pub","url":"https://pub.example.test"}]}
