@@ -45,9 +45,10 @@ func (s *Store) migrateLogoutDeliveries() error {
 // over oidc_client_sessions (alias cs) and registered a back-channel receiver. It must run
 // before the session rows are deleted, because the sid mapping cascades with them.
 func enqueueLogoutTx(tx *sql.Tx, now time.Time, where string, args ...any) error {
-	_, err := tx.Exec(`INSERT INTO logout_deliveries (id, client_id, user_id, sid, status, attempts, next_attempt_at, created_at, updated_at)
- SELECT lower(hex(randomblob(16))), cs.client_id, cs.user_id, cs.sid, 'queued', 0, ?, ?, ?
- FROM oidc_client_sessions cs JOIN oauth_clients c ON c.id=cs.client_id
+	// A delivery is in its user's org; it outlives the user, so it keeps org_id itself.
+	_, err := tx.Exec(`INSERT INTO logout_deliveries (org_id, id, client_id, user_id, sid, status, attempts, next_attempt_at, created_at, updated_at)
+ SELECT u.org_id, lower(hex(randomblob(16))), cs.client_id, cs.user_id, cs.sid, 'queued', 0, ?, ?, ?
+ FROM oidc_client_sessions cs JOIN oauth_clients c ON c.id=cs.client_id JOIN users u ON u.id=cs.user_id
  WHERE c.enabled AND c.backchannel_logout_uri<>'' AND `+where, append([]any{now, now, now}, args...)...)
 	return err
 }
@@ -68,7 +69,8 @@ func scanLogoutDelivery(row interface{ Scan(...any) error }) (*LogoutDelivery, e
 // lease is claimable again; a delivery out of attempts is marked failed rather than retried.
 // The UPDATE's own WHERE repeats the subquery's test, so a row is only taken while it is
 // still claimable, whatever serialises the writers.
-func (s *Store) ClaimLogoutDelivery(lease time.Duration) (*LogoutDelivery, error) {
+func (p *PlatformStore) ClaimLogoutDelivery(lease time.Duration) (*LogoutDelivery, error) {
+	s := p.s
 	now := time.Now().UTC()
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -101,7 +103,8 @@ func (s *Store) ClaimLogoutDelivery(lease time.Duration) (*LogoutDelivery, error
 
 // FinishLogoutDelivery records an attempt's outcome under the worker's claim token. A
 // failure schedules the next attempt with exponential backoff until the attempts run out.
-func (s *Store) FinishLogoutDelivery(d *LogoutDelivery, attemptErr error) error {
+func (p *PlatformStore) FinishLogoutDelivery(d *LogoutDelivery, attemptErr error) error {
+	s := p.s
 	now := time.Now().UTC()
 	status, message, next := "delivered", "", now
 	if attemptErr != nil {
@@ -139,14 +142,14 @@ func logoutRetryDelay(attempts int) time.Duration {
 
 // RetryLogoutDeliveryNow makes one of userID's queued or failed deliveries due
 // immediately with a fresh attempt budget; it reports whether a delivery was found.
-func (s *Store) RetryLogoutDeliveryNow(userID, id string, audit *AuditEvent) (bool, error) {
+func (o *OrgStore) RetryLogoutDeliveryNow(userID, id string, audit *AuditEvent) (bool, error) {
 	now := time.Now().UTC()
-	tx, err := s.db.Begin()
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE logout_deliveries SET status='queued', attempts=0, next_attempt_at=?, claim_token='', lease_until=NULL, updated_at=? WHERE id=? AND user_id=? AND status<>'delivered'`, now, now, id, userID)
+	res, err := tx.Exec(`UPDATE logout_deliveries SET status='queued', attempts=0, next_attempt_at=?, claim_token='', lease_until=NULL, updated_at=? WHERE org_id=? AND id=? AND user_id=? AND status<>'delivered'`, now, now, o.org, id, userID)
 	if err != nil {
 		return false, err
 	}
@@ -163,17 +166,19 @@ func (s *Store) RetryLogoutDeliveryNow(userID, id string, audit *AuditEvent) (bo
 // DeleteLogoutDeliveriesOlderThan prunes delivered rows last touched before cutoff. A
 // failed delivery is evidence that an app was never told, so it stays until it succeeds
 // or an administrator retries it; the completion view must never read absence as success.
-func (s *Store) DeleteLogoutDeliveriesOlderThan(cutoff time.Time) error {
+func (p *PlatformStore) DeleteLogoutDeliveriesOlderThan(cutoff time.Time) error {
+	s := p.s
 	_, err := s.db.Exec(`DELETE FROM logout_deliveries WHERE status='delivered' AND updated_at<?`, cutoff)
 	return err
 }
 
 // ListLogoutDeliveries returns a user's most recent deliveries, newest first.
-func (s *Store) ListLogoutDeliveries(userID string, limit int) ([]LogoutDelivery, error) {
+func (o *OrgStore) ListLogoutDeliveries(userID string, limit int) ([]LogoutDelivery, error) {
+	s := o.s
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT `+logoutDeliveryColumns+` FROM logout_deliveries d LEFT JOIN oauth_clients c ON c.id=d.client_id WHERE d.user_id=? ORDER BY d.created_at DESC, d.id LIMIT ?`, userID, limit)
+	rows, err := s.db.Query(`SELECT `+logoutDeliveryColumns+` FROM logout_deliveries d LEFT JOIN oauth_clients c ON c.id=d.client_id WHERE d.org_id=? AND d.user_id=? ORDER BY d.created_at DESC, d.id LIMIT ?`, o.org, userID, limit)
 	if err != nil {
 		return nil, err
 	}

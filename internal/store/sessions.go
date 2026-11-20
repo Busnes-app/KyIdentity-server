@@ -18,10 +18,11 @@ type AppGrant struct {
 
 // ListUserSessions returns the browser sessions the middleware would still accept, most
 // recently active first. The token hash is never loaded.
-func (s *Store) ListUserSessions(userID string, idleTTL time.Duration) ([]Session, error) {
+func (o *OrgStore) ListUserSessions(userID string, idleTTL time.Duration) ([]Session, error) {
+	s := o.s
 	now := time.Now().UTC()
 	// Workstation sessions have their own sliding expiry and no browser limits.
-	rows, err := s.db.Query(`SELECT id, user_id, ip_address, user_agent, expires_at, created_at, last_active_at, factor_method, COALESCE(workstation_client_id,''), COALESCE((SELECT client_name FROM oauth_clients c WHERE c.id=sessions.workstation_client_id),'') FROM sessions WHERE user_id=? AND expires_at>? AND (workstation_client_id IS NOT NULL OR (last_active_at>? AND created_at>?)) ORDER BY last_active_at DESC`, userID, now, now.Add(-idleTTL), now.Add(-s.SessionLimits().AbsoluteTTL()))
+	rows, err := s.db.Query(`SELECT id, user_id, ip_address, user_agent, expires_at, created_at, last_active_at, factor_method, COALESCE(workstation_client_id,''), COALESCE((SELECT client_name FROM oauth_clients c WHERE c.id=sessions.workstation_client_id),'') FROM sessions WHERE user_id=? AND user_id IN (SELECT id FROM users WHERE org_id=?) AND expires_at>? AND (workstation_client_id IS NOT NULL OR (last_active_at>? AND created_at>?)) ORDER BY last_active_at DESC`, userID, o.org, now, now.Add(-idleTTL), now.Add(-s.SessionLimits().AbsoluteTTL()))
 	if err != nil {
 		return nil, err
 	}
@@ -39,8 +40,8 @@ func (s *Store) ListUserSessions(userID string, idleTTL time.Duration) ([]Sessio
 
 // ListUserAppGrants groups a user's live tokens by client, most recently issued first.
 // Grouping happens here because SQLite aggregates over DATETIME columns come back as text.
-func (s *Store) ListUserAppGrants(userID string) ([]AppGrant, error) {
-	rows, err := s.db.Query(`SELECT t.client_id, COALESCE(c.client_name, t.client_id), t.created_at, t.expires_at FROM issued_tokens t LEFT JOIN oauth_clients c ON c.id=t.client_id WHERE t.user_id=? AND t.revoked_at IS NULL AND t.expires_at>? ORDER BY t.created_at DESC`, userID, time.Now().UTC())
+func (o *OrgStore) ListUserAppGrants(userID string) ([]AppGrant, error) {
+	rows, err := o.s.db.Query(`SELECT t.client_id, COALESCE(c.client_name, t.client_id), t.created_at, t.expires_at FROM issued_tokens t LEFT JOIN oauth_clients c ON c.id=t.client_id WHERE t.user_id=? AND t.user_id IN (SELECT id FROM users WHERE org_id=?) AND t.revoked_at IS NULL AND t.expires_at>? ORDER BY t.created_at DESC`, userID, o.org, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -73,8 +74,11 @@ func (s *Store) ListUserAppGrants(userID string) ([]AppGrant, error) {
 
 // RevokeSession removes one of userID's sessions with everything it minted. A session that
 // does not exist or belongs to someone else is ErrNotFound and writes nothing.
-func (s *Store) RevokeSession(userID, sessionID string, audit *AuditEvent) error {
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+func (o *OrgStore) RevokeSession(userID, sessionID string, audit *AuditEvent) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := requireOrgUserTx(tx, o.org, userID); err != nil {
+			return err
+		}
 		n, err := revokeSessionsTx(tx, time.Now().UTC(), `id=? AND user_id=?`, sessionID, userID)
 		if err != nil {
 			return err
@@ -87,8 +91,11 @@ func (s *Store) RevokeSession(userID, sessionID string, audit *AuditEvent) error
 }
 
 // RevokeOtherSessions signs out every session of userID except keepSessionID.
-func (s *Store) RevokeOtherSessions(userID, keepSessionID string, audit *AuditEvent) error {
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+func (o *OrgStore) RevokeOtherSessions(userID, keepSessionID string, audit *AuditEvent) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := requireOrgUserTx(tx, o.org, userID); err != nil {
+			return err
+		}
 		if _, err := revokeSessionsTx(tx, time.Now().UTC(), `user_id=? AND id<>?`, userID, keepSessionID); err != nil {
 			return err
 		}
@@ -100,8 +107,11 @@ func (s *Store) RevokeOtherSessions(userID, keepSessionID string, audit *AuditEv
 
 // RevokeUserClientAccess revokes one app's tokens and pending codes for a user while
 // leaving browser sessions and other apps alone.
-func (s *Store) RevokeUserClientAccess(userID, clientID string, audit *AuditEvent) error {
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+func (o *OrgStore) RevokeUserClientAccess(userID, clientID string, audit *AuditEvent) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := requireOrgUserTx(tx, o.org, userID); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		if err := enqueueLogoutTx(tx, now, `cs.user_id=? AND cs.client_id=?`, userID, clientID); err != nil {
 			return err

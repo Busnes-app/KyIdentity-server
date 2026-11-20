@@ -90,3 +90,16 @@ func connectorOrgTx(q interface {
 	}
 	return org, err
 }
+
+// requireOrgUserTx is ErrNotFound unless userID is one of the org's users. A user's org
+// cannot change (users_org_immutable), so the answer holds for the transaction.
+func requireOrgUserTx(tx *sql.Tx, org, userID string) error {
+	var ok bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=?)`, org, userID).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	return nil
+}

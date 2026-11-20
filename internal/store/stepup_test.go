@@ -168,7 +168,7 @@ func TestPasswordChangeBurnsPendingStepUpChallenges(t *testing.T) {
 	if err := s.CreateStepUpChallenge(c, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ChangePassword(user.ID, "session", "changed", nil); err != nil {
+	if err := s.DefaultOrg().ChangePassword(user.ID, "session", "changed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if saved, err := s.GetStepUpChallenge(c.TokenHash, c.UserID, c.SessionID); err != nil || saved != nil {
@@ -205,14 +205,14 @@ func TestPasswordChangeAndRevocationSpendPendingMFALogins(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending("before-change")
-	if err := s.ChangePassword(user.ID, "session", "changed", nil); err != nil {
+	if err := s.DefaultOrg().ChangePassword(user.ID, "session", "changed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if live("before-change") {
 		t.Fatal("pending MFA login survived the password change")
 	}
 	pending("before-revoke")
-	if err := s.RevokeUserAccess(user.ID, nil); err != nil {
+	if err := s.DefaultOrg().RevokeUserAccess(user.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if live("before-revoke") {
@@ -234,7 +234,7 @@ func TestMFATokenNotIssuedAfterThePasswordChanged(t *testing.T) {
 		t.Fatalf("token for the current password: %v", err)
 	}
 	session := seedSession(t, s, user.ID, now.Add(time.Hour), now)
-	if err := s.ChangePassword(user.ID, session, "changed", nil); err != nil {
+	if err := s.DefaultOrg().ChangePassword(user.ID, session, "changed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := issue("stale"); !errors.Is(err, ErrNotFound) {

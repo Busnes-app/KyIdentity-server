@@ -319,7 +319,7 @@ func TestDeviceGrantRefusals(t *testing.T) {
 	if err != nil || approving == nil {
 		t.Fatal(err)
 	}
-	if err := f.db.RevokeSession(u2.ID, approving.ID, nil); err != nil {
+	if err := f.db.DefaultOrg().RevokeSession(u2.ID, approving.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if status, body := f.poll(f.clientID, device); status != 400 || body["error"] != "invalid_grant" {
@@ -449,7 +449,7 @@ func TestWorkstationSessionsEndWithAccess(t *testing.T) {
 				f.t.Fatal(err)
 			}
 			hash, _ := auth.HashPassword("another-long-passphrase")
-			if err := f.db.ChangePassword(u.ID, sess.ID, hash, nil); err != nil {
+			if err := f.db.DefaultOrg().ChangePassword(u.ID, sess.ID, hash, nil); err != nil {
 				f.t.Fatal(err)
 			}
 		},
@@ -484,7 +484,7 @@ func TestWorkstationSessionEndsOnSCIMDeprovision(t *testing.T) {
 		t.Fatalf("scim create: %d %s", created.Code, created.Body.String())
 	}
 	id := scimUser(t, created.Body.Bytes())["id"].(string)
-	raw, _ := f.db.IssueAccountToken(id, "activation", "manual", time.Hour, nil)
+	raw, _ := f.db.DefaultOrg().IssueAccountToken(id, "activation", "manual", time.Hour, nil)
 	if _, err := f.db.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -606,7 +606,7 @@ func TestPasswordChangeWithdrawsUnredeemedApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash, _ := auth.HashPassword("another-long-passphrase")
-	if err := f.db.ChangePassword(u.ID, sess.ID, hash, nil); err != nil {
+	if err := f.db.DefaultOrg().ChangePassword(u.ID, sess.ID, hash, nil); err != nil {
 		t.Fatal(err)
 	}
 	if status, body := f.poll(f.clientID, device); status == 200 || body["error"] != "access_denied" {

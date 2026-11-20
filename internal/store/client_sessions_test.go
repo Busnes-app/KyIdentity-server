@@ -65,7 +65,7 @@ func TestClientSessionSIDIsStablePerClientAndSession(t *testing.T) {
 		t.Fatalf("unknown sid: %+v %v", cs, err)
 	}
 
-	if err := s.RevokeSession(u.ID, sid1, nil); err != nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, sid1, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cs, err := s.GetClientSession(a); err != nil || cs != nil {

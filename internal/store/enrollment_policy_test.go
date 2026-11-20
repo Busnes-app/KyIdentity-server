@@ -211,7 +211,7 @@ func TestEnrollmentLastFactorRemovalAndReset(t *testing.T) {
 	if deleted, err := s.DeleteWebAuthnCredential("key", u.ID, nil); err != nil || !deleted {
 		t.Fatal("alternative factor did not permit removal", err)
 	}
-	if err := s.ResetUserMFA(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().ResetUserMFA(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	status, _ := s.SessionEnrollmentStatus(u.ID, "")

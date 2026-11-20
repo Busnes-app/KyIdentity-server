@@ -181,7 +181,7 @@ func TestProofLogoutDeliveriesAreClaimedOnce(t *testing.T) {
 	var mu sync.Mutex
 	perClient := map[string]int{}
 	seen := claimAll(t, replicasOf(t, s, proofHandles), func(s *Store) ([]string, error) {
-		d, err := s.ClaimLogoutDelivery(time.Minute)
+		d, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 		if d == nil || err != nil {
 			return nil, err
 		}
@@ -266,7 +266,7 @@ func TestProofAccountTokenIsRedeemedOnce(t *testing.T) {
 	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
-	link, err := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	link, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

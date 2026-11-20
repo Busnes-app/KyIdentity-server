@@ -125,7 +125,7 @@ func TestMFAResetRollsBackWhenItsAuditRowCannotBeWritten(t *testing.T) {
 	}
 	audit := poisonedAudit(t, s, "admin.user_mfa_reset", u.ID)
 
-	if err := s.ResetUserMFA(u.ID, audit); err == nil {
+	if err := s.DefaultOrg().ResetUserMFA(u.ID, audit); err == nil {
 		t.Fatal("an unauditable MFA reset reported success")
 	}
 	methods, err := s.ListUserMFAMethods(u.ID)

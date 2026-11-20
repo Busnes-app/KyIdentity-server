@@ -132,7 +132,7 @@ func TestProvisioningFollowsEffectiveAccess(t *testing.T) {
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 7, false}) {
 		t.Fatal("local disable", got)
 	}
-	if err := s.ResetUserMFA(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().ResetUserMFA(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 {

@@ -107,11 +107,11 @@ func TestDeletingRevokesAccessQueuesLogoutAndKeepsCompletionState(t *testing.T) 
 	}
 
 	deliverAll(t, s)
-	d, err := s.ClaimLogoutDelivery(time.Minute)
+	d, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || d == nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if err := s.FinishLogoutDelivery(d, nil); err != nil {
+	if err := s.Platform().FinishLogoutDelivery(d, nil); err != nil {
 		t.Fatal(err)
 	}
 	off, _ = s.DefaultOrg().UserOffboarding(u.ID)
@@ -153,7 +153,7 @@ func TestDeletionRollsBackWhenTheAuditRowCannotBeWritten(t *testing.T) {
 	if n := countDeliveries(t, s, `1=1`); n != 0 {
 		t.Fatal("logout queued despite rollback")
 	}
-	if left, _ := s.ListUserSessions(u.ID, time.Hour); len(left) != 1 {
+	if left, _ := s.DefaultOrg().ListUserSessions(u.ID, time.Hour); len(left) != 1 {
 		t.Fatal("session lost despite rollback")
 	}
 }
@@ -182,7 +182,7 @@ func TestReenablingStartsANewGenerationAndRequiresANewLogin(t *testing.T) {
 	if got := pendingFor(t, s, "assigned", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 3, true}) {
 		t.Fatalf("after re-enable: %+v", got)
 	}
-	if left, _ := s.ListUserSessions(u.ID, time.Hour); len(left) != 0 {
+	if left, _ := s.DefaultOrg().ListUserSessions(u.ID, time.Hour); len(left) != 0 {
 		t.Fatal("a session survived disable and re-enable")
 	}
 	off, err := s.DefaultOrg().UserOffboarding(u.ID)
@@ -276,11 +276,11 @@ func TestExhaustedLogoutOutlivesPruningAndKeepsCompletionFalse(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE logout_deliveries SET attempts=4, next_attempt_at=? WHERE user_id=?`, now.Add(-time.Second), u.ID); err != nil {
 		t.Fatal(err)
 	}
-	d, err := s.ClaimLogoutDelivery(time.Minute)
+	d, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || d == nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if err := s.FinishLogoutDelivery(d, errors.New("receiver down")); err != nil {
+	if err := s.Platform().FinishLogoutDelivery(d, errors.New("receiver down")); err != nil {
 		t.Fatal(err)
 	}
 	if n := countDeliveries(t, s, `user_id=? AND status='failed'`, u.ID); n != 1 {
@@ -289,7 +289,7 @@ func TestExhaustedLogoutOutlivesPruningAndKeepsCompletionFalse(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE logout_deliveries SET updated_at=? WHERE user_id=?`, now.Add(-8*24*time.Hour), u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)); err != nil {
+	if err := s.Platform().DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	off, err := s.DefaultOrg().UserOffboarding(u.ID)

@@ -54,7 +54,7 @@ func TestResetUserMFANotifiesHoldingConnectors(t *testing.T) {
 	provisionedUser(t, s, u, "target")
 	provisionedUser(t, s, u, "paused")
 	mustExec(t, s, `UPDATE paired_systems SET status='disabled' WHERE id='paused'`)
-	if err := s.ResetUserMFA(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().ResetUserMFA(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := pendingFor(t, s, "target", u.ID)

@@ -46,12 +46,12 @@ const deliveryLease = 60 * time.Second
 // DeliverPendingLogout performs one queued back-channel logout and records the outcome.
 // It reports whether there was anything to do.
 func (e *Engine) DeliverPendingLogout(ctx context.Context) (bool, error) {
-	d, err := e.store.ClaimLogoutDelivery(deliveryLease)
+	d, err := e.store.Platform().ClaimLogoutDelivery(deliveryLease)
 	if err != nil || d == nil {
 		return false, err
 	}
 	attemptErr := e.postLogout(ctx, d.BackchannelLogoutURI, d.ClientID, d.UserID, d.SID)
-	if err := e.store.FinishLogoutDelivery(d, attemptErr); err != nil {
+	if err := e.store.Platform().FinishLogoutDelivery(d, attemptErr); err != nil {
 		return true, err
 	}
 	return true, nil

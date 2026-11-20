@@ -17,7 +17,7 @@ func TestRedemptionQueuedBehindRevocationFails(t *testing.T) {
 	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
-	link, err := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	link, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,7 @@ import (
 func activated(t *testing.T, s *Store, connectorID, external, username string) *User {
 	t.Helper()
 	u := upstream(t, s, connectorID, external, username)
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}

@@ -58,7 +58,7 @@ func TestRevokingASessionQueuesLogoutForItsReceivers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.RevokeSession(u.ID, a, nil); err != nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, a, nil); err != nil {
 		t.Fatal(err)
 	}
 	if n := countDeliveries(t, s, `1=1`); n != 1 {
@@ -67,7 +67,7 @@ func TestRevokingASessionQueuesLogoutForItsReceivers(t *testing.T) {
 	if n := countDeliveries(t, s, `client_id='with' AND user_id=? AND sid=? AND status='queued'`, u.ID, sidA); n != 1 {
 		t.Fatal("delivery is not for the revoked session's receiver")
 	}
-	if err := s.RevokeOtherSessions(u.ID, uuid.NewString(), nil); err != nil {
+	if err := s.DefaultOrg().RevokeOtherSessions(u.ID, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if n := countDeliveries(t, s, `1=1`); n != 2 {
@@ -109,7 +109,7 @@ func TestRevokingOneClientQueuesLogoutOnlyForThatClient(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.RevokeUserClientAccess(u.ID, "x", nil); err != nil {
+	if err := s.DefaultOrg().RevokeUserClientAccess(u.ID, "x", nil); err != nil {
 		t.Fatal(err)
 	}
 	if n := countDeliveries(t, s, `client_id='x'`); n != 1 {
@@ -133,36 +133,36 @@ func TestLogoutDeliveryClaimRetryAndTerminalFailure(t *testing.T) {
 	if _, err := s.EnsureClientSession("app", sess, u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeSession(u.ID, sess, nil); err != nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, sess, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	d, err := s.ClaimLogoutDelivery(time.Minute)
+	d, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || d == nil || d.ClientID != "app" || d.UserID != u.ID || d.SID == "" || d.Attempts != 1 {
 		t.Fatalf("claim: %+v %v", d, err)
 	}
 	if d.BackchannelLogoutURI != "https://app.example/bc" {
 		t.Fatalf("claimed delivery lacks its target: %+v", d)
 	}
-	if again, err := s.ClaimLogoutDelivery(time.Minute); err != nil || again != nil {
+	if again, err := s.Platform().ClaimLogoutDelivery(time.Minute); err != nil || again != nil {
 		t.Fatalf("a leased delivery was claimed twice: %+v %v", again, err)
 	}
 
 	// A stale claim token cannot finish the job.
 	stale := *d
 	stale.ClaimToken = "stale"
-	if err := s.FinishLogoutDelivery(&stale, nil); !errors.Is(err, ErrNotFound) {
+	if err := s.Platform().FinishLogoutDelivery(&stale, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("stale claim finished the delivery: %v", err)
 	}
 
-	if err := s.FinishLogoutDelivery(d, errors.New("503")); err != nil {
+	if err := s.Platform().FinishLogoutDelivery(d, errors.New("503")); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := s.ListLogoutDeliveries(u.ID, 10)
+	rows, err := s.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
 	if err != nil || len(rows) != 1 || rows[0].Status != "queued" || rows[0].LastError != "503" || !rows[0].NextAttemptAt.After(now) {
 		t.Fatalf("after failure: %+v %v", rows, err)
 	}
-	if d, err := s.ClaimLogoutDelivery(time.Minute); err != nil || d != nil {
+	if d, err := s.Platform().ClaimLogoutDelivery(time.Minute); err != nil || d != nil {
 		t.Fatalf("a delivery waiting for its backoff was claimed: %+v %v", d, err)
 	}
 
@@ -170,18 +170,18 @@ func TestLogoutDeliveryClaimRetryAndTerminalFailure(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE logout_deliveries SET next_attempt_at=?, attempts=4`, now.Add(-time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	d, err = s.ClaimLogoutDelivery(time.Minute)
+	d, err = s.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || d == nil || d.Attempts != 5 {
 		t.Fatalf("fifth claim: %+v %v", d, err)
 	}
-	if err := s.FinishLogoutDelivery(d, errors.New("still down")); err != nil {
+	if err := s.Platform().FinishLogoutDelivery(d, errors.New("still down")); err != nil {
 		t.Fatal(err)
 	}
-	rows, _ = s.ListLogoutDeliveries(u.ID, 10)
+	rows, _ = s.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
 	if rows[0].Status != "failed" {
 		t.Fatalf("status = %q, want failed", rows[0].Status)
 	}
-	if d, _ := s.ClaimLogoutDelivery(time.Minute); d != nil {
+	if d, _ := s.Platform().ClaimLogoutDelivery(time.Minute); d != nil {
 		t.Fatal("a failed delivery was claimed")
 	}
 }
@@ -196,24 +196,24 @@ func TestLogoutDeliverySuccessAndExpiredLeaseReclaim(t *testing.T) {
 	if _, err := s.EnsureClientSession("app", sess, u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeSession(u.ID, sess, nil); err != nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, sess, nil); err != nil {
 		t.Fatal(err)
 	}
-	first, err := s.ClaimLogoutDelivery(-time.Second)
+	first, err := s.Platform().ClaimLogoutDelivery(-time.Second)
 	if err != nil || first == nil {
 		t.Fatalf("claim: %v", err)
 	}
-	second, err := s.ClaimLogoutDelivery(time.Minute)
+	second, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || second == nil || second.ID != first.ID || second.Attempts != 2 {
 		t.Fatalf("expired lease not reclaimed: %+v %v", second, err)
 	}
-	if err := s.FinishLogoutDelivery(first, nil); !errors.Is(err, ErrNotFound) {
+	if err := s.Platform().FinishLogoutDelivery(first, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("the lapsed worker finished the job: %v", err)
 	}
-	if err := s.FinishLogoutDelivery(second, nil); err != nil {
+	if err := s.Platform().FinishLogoutDelivery(second, nil); err != nil {
 		t.Fatal(err)
 	}
-	rows, _ := s.ListLogoutDeliveries(u.ID, 10)
+	rows, _ := s.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
 	if len(rows) != 1 || rows[0].Status != "delivered" || rows[0].ClientName != "App app" {
 		t.Fatalf("rows = %+v", rows)
 	}
@@ -238,28 +238,28 @@ func TestClaimSkipsClientsWithAnActiveLease(t *testing.T) {
 	if _, err := s.EnsureClientSession("fast", b, u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeSession(u.ID, a, nil); err != nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, a, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeSession(u.ID, b, nil); err != nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, b, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	first, err := s.ClaimLogoutDelivery(time.Minute)
+	first, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || first == nil || first.ClientID != "slow" {
 		t.Fatalf("first claim: %+v %v", first, err)
 	}
-	second, err := s.ClaimLogoutDelivery(time.Minute)
+	second, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || second == nil || second.ClientID != "fast" {
 		t.Fatalf("second claim should skip the leased client: %+v %v", second, err)
 	}
-	if third, err := s.ClaimLogoutDelivery(time.Minute); err != nil || third != nil {
+	if third, err := s.Platform().ClaimLogoutDelivery(time.Minute); err != nil || third != nil {
 		t.Fatalf("slow's second row was claimed while its first is in flight: %+v %v", third, err)
 	}
-	if err := s.FinishLogoutDelivery(first, nil); err != nil {
+	if err := s.Platform().FinishLogoutDelivery(first, nil); err != nil {
 		t.Fatal(err)
 	}
-	if next, err := s.ClaimLogoutDelivery(time.Minute); err != nil || next == nil || next.ClientID != "slow" {
+	if next, err := s.Platform().ClaimLogoutDelivery(time.Minute); err != nil || next == nil || next.ClientID != "slow" {
 		t.Fatalf("slow's second row after the first finished: %+v %v", next, err)
 	}
 }
@@ -278,7 +278,7 @@ func TestPruningRemovesOnlyDeliveredOldRows(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.RevokeSession(u.ID, sess, nil); err != nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, sess, nil); err != nil {
 		t.Fatal(err)
 	}
 	old := now.Add(-8 * 24 * time.Hour)
@@ -291,7 +291,7 @@ func TestPruningRemovesOnlyDeliveredOldRows(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE logout_deliveries SET updated_at=? WHERE client_id='c'`, old); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)); err != nil {
+	if err := s.Platform().DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if n := countDeliveries(t, s, `1=1`); n != 2 {

@@ -103,33 +103,33 @@ func TestRetryLogoutDeliveryNow(t *testing.T) {
 	seedLogoutClient(t, s, "app", "https://app.example/bc")
 	logoutRow(t, s, "failed", u.ID, "failed")
 	logoutRow(t, s, "done", u.ID, "delivered")
-	if ok, err := s.RetryLogoutDeliveryNow(other.ID, "failed", nil); err != nil || ok {
+	if ok, err := s.DefaultOrg().RetryLogoutDeliveryNow(other.ID, "failed", nil); err != nil || ok {
 		t.Fatal("another user's delivery retried", ok, err)
 	}
-	if ok, err := s.RetryLogoutDeliveryNow(u.ID, "done", nil); err != nil || ok {
+	if ok, err := s.DefaultOrg().RetryLogoutDeliveryNow(u.ID, "done", nil); err != nil || ok {
 		t.Fatal("delivered logout retried", ok, err)
 	}
-	if ok, err := s.RetryLogoutDeliveryNow(u.ID, "failed", poisonedAudit(t, s, "user.logout_retry", "failed")); err == nil || ok {
+	if ok, err := s.DefaultOrg().RetryLogoutDeliveryNow(u.ID, "failed", poisonedAudit(t, s, "user.logout_retry", "failed")); err == nil || ok {
 		t.Fatal("retry ignored audit failure", ok, err)
 	}
 	if countDeliveries(t, s, `id='failed' AND status='failed' AND attempts=5`) != 1 {
 		t.Fatal("failed audit left the retry applied")
 	}
 	audit := &AuditEvent{ID: "retry", Action: "user.logout_retry", Outcome: "success", CreatedAt: time.Now().UTC()}
-	if ok, err := s.RetryLogoutDeliveryNow(u.ID, "failed", audit); err != nil || !ok {
+	if ok, err := s.DefaultOrg().RetryLogoutDeliveryNow(u.ID, "failed", audit); err != nil || !ok {
 		t.Fatal("retry", ok, err)
 	}
 	if countDeliveries(t, s, `id='failed' AND status='queued' AND attempts=0 AND claim_token='' AND next_attempt_at<=?`, time.Now().UTC()) != 1 || auditActions(t, s, "user.logout_retry") != 1 {
 		t.Fatal("retry not due now with fresh budget and audit")
 	}
-	d, err := s.ClaimLogoutDelivery(time.Minute)
+	d, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || d == nil || d.ID != "failed" {
 		t.Fatalf("retried delivery not claimable: %+v %v", d, err)
 	}
 	// A finish with a forged claim token is refused.
 	forged := *d
 	forged.ClaimToken = "forged"
-	if err := s.FinishLogoutDelivery(&forged, nil); !errors.Is(err, ErrNotFound) {
+	if err := s.Platform().FinishLogoutDelivery(&forged, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal("forged claim finished delivery", err)
 	}
 }

@@ -116,7 +116,7 @@ func TestInboundSCIMUserLifecycle(t *testing.T) {
 	}
 
 	// Activate locally, then let the upstream drive the active flag.
-	raw, _ := db.IssueAccountToken(id, "activation", "manual", time.Hour, nil)
+	raw, _ := db.DefaultOrg().IssueAccountToken(id, "activation", "manual", time.Hour, nil)
 	if _, err := db.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestInboundSCIMBoundaries(t *testing.T) {
 	}
 
 	// Local override: an administrator disables; the upstream's active=true does not lift it.
-	raw, _ := db.IssueAccountToken(id, "activation", "manual", time.Hour, nil)
+	raw, _ := db.DefaultOrg().IssueAccountToken(id, "activation", "manual", time.Hour, nil)
 	if _, err := db.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestDisconnectingAConnectorNeedsAChoiceForItsAccounts(t *testing.T) {
 	connectorID, token := connectorWithToken(t, srv, db, admin, "write")
 	created := scimCall(t, srv, token, "POST", "/scim/v2/Users", `{"externalId":"e1","userName":"leaver","emails":[{"value":"l@up.test"}]}`)
 	id, _ := scimUser(t, created.Body.Bytes())["id"].(string)
-	raw, _ := db.IssueAccountToken(id, "activation", "manual", time.Hour, nil)
+	raw, _ := db.DefaultOrg().IssueAccountToken(id, "activation", "manual", time.Hour, nil)
 	if _, err := db.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}

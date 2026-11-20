@@ -65,7 +65,7 @@ func TestHRStagingVersionsAndLifecycle(t *testing.T) {
 		t.Fatal("completed job reclaimed", err)
 	}
 	// Activate through the real account-token path, then verify HR departure.
-	raw, err := s.IssueAccountToken(w.ID, "activation", "manual", time.Hour, nil)
+	raw, err := s.DefaultOrg().IssueAccountToken(w.ID, "activation", "manual", time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,11 +23,11 @@ func TestPendingUserActivatesThroughASingleUseLink(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := pendingUser(t, s)
-	first, err := s.IssueAccountToken(u.ID, "activation", "manual", 24*time.Hour, nil)
+	first, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", 24*time.Hour, nil)
 	if err != nil || first == "" {
 		t.Fatalf("issue: %q %v", first, err)
 	}
-	second, err := s.IssueAccountToken(u.ID, "activation", "manual", 24*time.Hour, nil)
+	second, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", 24*time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestPendingUserActivatesThroughASingleUseLink(t *testing.T) {
 	if _, err := s.RedeemAccountToken(second, "reset", "hash-1", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("activation link accepted as a reset: %v", err)
 	}
-	if _, err := s.IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("reset link issued for a pending account: %v", err)
 	}
 	got, err := s.RedeemAccountToken(second, "activation", "hash-1", nil)
@@ -51,10 +51,10 @@ func TestPendingUserActivatesThroughASingleUseLink(t *testing.T) {
 	if _, err := s.RedeemAccountToken(second, "activation", "hash-2", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("link replayed: %v", err)
 	}
-	if _, err := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("activation link issued for an active account: %v", err)
 	}
-	expired, err := s.IssueAccountToken(u.ID, "reset", "manual", -time.Second, nil)
+	expired, err := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "manual", -time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestEmailDeliveredActivationVerifiesTheAddress(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := pendingUser(t, s)
-	raw, err := s.IssueAccountToken(u.ID, "activation", "email", time.Hour, nil)
+	raw, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "email", time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestPendingUsersAreNotProvisionedUntilActivation(t *testing.T) {
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 0 {
 		t.Fatalf("pending account provisioned: %+v", got)
 	}
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestResetLinkReplacesPasswordAndRevokesEverything(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, err := s.IssueAccountToken(u.ID, "reset", "email", 30*time.Minute, nil)
+	raw, err := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "email", 30*time.Minute, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestResetLinkReplacesPasswordAndRevokesEverything(t *testing.T) {
 	if stored.PasswordHash != "new-hash" || stored.Status != "active" {
 		t.Fatalf("after reset: %+v", stored)
 	}
-	if left, _ := s.ListUserSessions(u.ID, time.Hour); len(left) != 0 {
+	if left, _ := s.DefaultOrg().ListUserSessions(u.ID, time.Hour); len(left) != 0 {
 		t.Fatal("session survived a password reset")
 	}
 	if n := count(t, s, `SELECT COUNT(*) FROM issued_tokens WHERE jti=? AND revoked_at IS NULL`, jti); n != 0 {
@@ -144,7 +144,7 @@ func TestResetLinkReplacesPasswordAndRevokesEverything(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("reset link issued for a disabled account: %v", err)
 	}
 }
@@ -159,12 +159,12 @@ func TestChangePasswordKeepsTheCurrentSessionAndRevokesTheRest(t *testing.T) {
 	keep := seedSession(t, s, u.ID, now.Add(time.Hour), now)
 	other := seedSession(t, s, u.ID, now.Add(time.Hour), now)
 	jti, _, _ := seedGrants(t, s, u.ID, other, "app")
-	raw, _ := s.IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil)
 
-	if err := s.ChangePassword(u.ID, keep, "changed", nil); err != nil {
+	if err := s.DefaultOrg().ChangePassword(u.ID, keep, "changed", nil); err != nil {
 		t.Fatal(err)
 	}
-	left, _ := s.ListUserSessions(u.ID, time.Hour)
+	left, _ := s.DefaultOrg().ListUserSessions(u.ID, time.Hour)
 	if len(left) != 1 || left[0].ID != keep {
 		t.Fatalf("sessions after change: %+v", left)
 	}
@@ -178,7 +178,7 @@ func TestChangePasswordKeepsTheCurrentSessionAndRevokesTheRest(t *testing.T) {
 	if stored.PasswordHash != "changed" {
 		t.Fatal("password not changed")
 	}
-	if err := s.ChangePassword(uuid.NewString(), keep, "x", nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DefaultOrg().ChangePassword(uuid.NewString(), keep, "x", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown user: %v", err)
 	}
 }
@@ -195,16 +195,16 @@ func TestChangePasswordNeedsTheLiveSessionAndEndsPairingTokens(t *testing.T) {
 	if err := s.CreateDevicePairingToken(&DevicePairingToken{ID: "pair", UserID: u.ID, TokenHash: "pair-hash", PINHash: "pin", ExpiresAt: now.Add(90 * time.Second)}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ChangePassword(u.ID, keep, "changed", nil); err != nil {
+	if err := s.DefaultOrg().ChangePassword(u.ID, keep, "changed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(t, s, `SELECT COUNT(*) FROM device_pairing_tokens WHERE id='pair' AND expires_at>?`, time.Now().UTC()); n != 0 {
 		t.Fatal("pairing token survived a password change")
 	}
-	if err := s.RevokeUserAccess(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().RevokeUserAccess(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ChangePassword(u.ID, keep, "attacker", nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DefaultOrg().ChangePassword(u.ID, keep, "attacker", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("change from a revoked session: %v", err)
 	}
 	if stored, _ := s.DefaultOrg().GetUserByID(u.ID); stored.PasswordHash != "changed" {
@@ -217,11 +217,11 @@ func TestEmailChangeClearsVerificationAndOutstandingLinks(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := pendingUser(t, s)
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "email", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "email", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	reset, _ := s.IssueAccountToken(u.ID, "reset", "email", time.Hour, nil)
+	reset, _ := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "email", time.Hour, nil)
 	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	stored.Email = "new-" + stored.Email
 	if err := s.UpdateUserWithSyncEvents(stored, false, nil); err != nil {
@@ -235,7 +235,7 @@ func TestEmailChangeClearsVerificationAndOutstandingLinks(t *testing.T) {
 		t.Fatalf("reset link survived an address change: %v", err)
 	}
 	// An unrelated profile edit keeps both.
-	again, _ := s.IssueAccountToken(u.ID, "reset", "email", time.Hour, nil)
+	again, _ := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "email", time.Hour, nil)
 	after.DisplayName = "Renamed"
 	if err := s.UpdateUserWithSyncEvents(after, false, nil); err != nil {
 		t.Fatal(err)
@@ -248,7 +248,7 @@ func TestEmailChangeClearsVerificationAndOutstandingLinks(t *testing.T) {
 func TestRedeemRollsBackWhenTheAuditRowCannotBeWritten(t *testing.T) {
 	s, _ := newStoreWithUser(t, "user")
 	u := pendingUser(t, s)
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", poisonedAudit(t, s, "auth.account_activated", u.ID)); err == nil {
 		t.Fatal("activation succeeded without its audit row")
 	}
@@ -265,7 +265,7 @@ func TestExpiredAccountTokensArePruned(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := pendingUser(t, s)
-	if _, err := s.IssueAccountToken(u.ID, "activation", "manual", -time.Second, nil); err != nil {
+	if _, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", -time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteExpiredAccountTokens(); err != nil {
@@ -282,9 +282,9 @@ func TestLinksDieWithAccessRevocationAndStateChanges(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := pendingUser(t, s)
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	// "Revoke everything" on an invited account cancels the invitation.
-	if err := s.RevokeUserAccess(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().RevokeUserAccess(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); !errors.Is(err, ErrNotFound) {
@@ -296,7 +296,7 @@ func TestLinksDieWithAccessRevocationAndStateChanges(t *testing.T) {
 	}
 
 	// An administrator setting the password activates manually; the older link is dead.
-	raw, _ = s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	raw, _ = s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	stored.PasswordHash, stored.Pending, stored.Status = "admin-set", false, "active"
 	if err := s.UpdateUserWithSyncEvents(stored, true, nil); err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestLinksDieWithAccessRevocationAndStateChanges(t *testing.T) {
 
 	// A reset link issued while active is refused once the account is disabled, even if
 	// the token row itself is somehow still live.
-	reset, _ := s.IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil)
+	reset, _ := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil)
 	if _, err := s.db.Exec(`UPDATE users SET status='disabled' WHERE id=?`, u.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestPromotionAndDelegationEndOutstandingLinks(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	promoted := pendingUser(t, s)
-	raw, err := s.IssueAccountToken(promoted.ID, "activation", "manual", 24*time.Hour, nil)
+	raw, err := s.DefaultOrg().IssueAccountToken(promoted.ID, "activation", "manual", 24*time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestPromotionAndDelegationEndOutstandingLinks(t *testing.T) {
 	}
 
 	delegated := pendingUser(t, s)
-	if raw, err = s.IssueAccountToken(delegated.ID, "activation", "manual", 24*time.Hour, nil); err != nil {
+	if raw, err = s.DefaultOrg().IssueAccountToken(delegated.ID, "activation", "manual", 24*time.Hour, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().SetDelegations(delegated.ID, Delegations{Helpdesk: true}, nil); err != nil {

@@ -113,9 +113,9 @@ func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEven
 		// sessions, so this cannot be done afterwards. A logout only ever removes
 		// access, so re-announcing one is safe; a login already announced is not
 		// queued twice.
-		res, err := tx.Exec(`INSERT INTO logout_deliveries (id, client_id, user_id, sid, status, attempts, next_attempt_at, created_at, updated_at)
- SELECT lower(hex(randomblob(16))), cs.client_id, cs.user_id, cs.sid, 'queued', 0, ?, ?, ?
- FROM oidc_client_sessions cs JOIN oauth_clients c ON c.id=cs.client_id
+		res, err := tx.Exec(`INSERT INTO logout_deliveries (org_id, id, client_id, user_id, sid, status, attempts, next_attempt_at, created_at, updated_at)
+ SELECT u.org_id, lower(hex(randomblob(16))), cs.client_id, cs.user_id, cs.sid, 'queued', 0, ?, ?, ?
+ FROM oidc_client_sessions cs JOIN oauth_clients c ON c.id=cs.client_id JOIN users u ON u.id=cs.user_id
  WHERE c.enabled AND c.backchannel_logout_uri<>''
  AND NOT EXISTS (SELECT 1 FROM logout_deliveries d WHERE d.client_id=cs.client_id AND d.sid=cs.sid AND d.status<>'delivered')`, now, now, now)
 		if err != nil {

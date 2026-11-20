@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -228,6 +229,64 @@ func TestCrossOrgMatrix(t *testing.T) {
 	}
 	if covered < 34 {
 		t.Fatalf("only %d routes covered", covered)
+	}
+
+	// Account routes: A's member names B's session, request, passkey and device. Each
+	// answers as a missing ID does; the lists show none of B's.
+	passkeyB := &store.WebAuthnCredential{ID: uuid.NewString(), UserID: userB.ID, CredentialID: uuid.NewString(), PublicKeySPKI: "x", Name: "b-key"}
+	if err := db.CreateWebAuthnCredential(passkeyB, nil); err != nil {
+		t.Fatal(err)
+	}
+	deviceB := &store.NativeDevice{ID: uuid.NewString(), UserID: userB.ID, DeviceName: "b-phone", DeviceIdentifier: uuid.NewString()}
+	if err := db.UpsertNativeDevice(deviceB); err != nil {
+		t.Fatal(err)
+	}
+	sessB, err := db.GetSessionByTokenHash(crypto.HashSHA256(sessionB), time.Hour)
+	if err != nil || sessB == nil {
+		t.Fatal(sessB, err)
+	}
+	ownB := func() string {
+		t.Helper()
+		keys, err1 := db.ListUserWebAuthnCredentials(userB.ID)
+		devices, err2 := db.ListUserNativeDevices(userB.ID)
+		if err1 != nil || err2 != nil {
+			t.Fatal(err1, err2)
+		}
+		out, _ := json.Marshal([]any{snapshotB(), keys, devices})
+		return string(out)
+	}
+	beforeOwn := ownB()
+	account := []struct{ method, path, id, body string }{
+		{"DELETE", "/api/user/sessions/{id}", sessB.ID, ""},
+		{"DELETE", "/api/user/access-requests/{id}", req, ""},
+		{"DELETE", "/api/user/passkeys/{id}", passkeyB.ID, ""},
+		{"DELETE", "/api/user/devices/{id}", deviceB.ID, ""},
+		{"PUT", "/api/notifications/native/devices/{id}/mfa", deviceB.ID, `{"enabled":true}`},
+		{"PUT", "/api/notifications/native/devices/{id}/sign-on", deviceB.ID, `{"enabled":true}`},
+	}
+	for name, cookie := range customers {
+		for _, rt := range account {
+			do := func(id string) *httptest.ResponseRecorder {
+				path := strings.Replace(rt.path, "{id}", id, 1)
+				return adminRequestWithStepUp(t, srv, rt.method, path, cookie, rt.body, mintStepUp(t, srv, cookie, rt.method+" "+path))
+			}
+			res, want := do(rt.id), do(uuid.NewString())
+			body := strings.ReplaceAll(res.Body.String(), rt.id, "ID")
+			if res.Code != want.Code || res.Code/100 == 2 || res.Code/100 == 5 || !sameShape(body, want.Body.String()) {
+				t.Errorf("%s %s as A's %s with B's ID: %d %s, a missing ID answers %d %s", rt.method, rt.path, name, res.Code, body, want.Code, want.Body.String())
+			}
+		}
+		for _, path := range []string{"/api/user/sessions", "/api/user/access-requests", "/api/user/passkeys", "/api/user/devices", "/api/user/applications"} {
+			body := adminRequestWithStepUp(t, srv, "GET", path, cookie, "", "").Body.String()
+			for _, id := range append(names, sessB.ID, passkeyB.ID, deviceB.ID) {
+				if strings.Contains(body, id) {
+					t.Errorf("GET %s as A's %s shows B's %q", path, name, id)
+				}
+			}
+		}
+	}
+	if after := ownB(); after != beforeOwn {
+		t.Fatalf("account routes changed org B:\n before %s\n after  %s", beforeOwn, after)
 	}
 }
 

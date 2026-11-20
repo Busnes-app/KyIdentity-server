@@ -120,7 +120,7 @@ func queuedLogout(t *testing.T, e *Engine, db *store.Store, backchannel string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RevokeSession(u.ID, sess, nil); err != nil {
+	if err := db.DefaultOrg().RevokeSession(u.ID, sess, nil); err != nil {
 		t.Fatal(err)
 	}
 	return u, sid
@@ -145,7 +145,7 @@ func TestBackchannelDeliveryPostsASignedLogoutTokenAndRecordsTheOutcome(t *testi
 	if err != nil || claims["sid"] != sid || claims["sub"] != u.ID || claims["aud"] != "app" {
 		t.Fatalf("posted token: %v %v", claims, err)
 	}
-	rows, _ := db.ListLogoutDeliveries(u.ID, 10)
+	rows, _ := db.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
 	if len(rows) != 1 || rows[0].Status != "delivered" {
 		t.Fatalf("rows = %+v", rows)
 	}
@@ -168,11 +168,11 @@ func TestBackchannelDeliveryRetriesServerErrorsWithAFreshToken(t *testing.T) {
 		t.Fatalf("first attempt: %v %v", did, err)
 	}
 	first := rcv.last.Load().(interface{ Get(string) string }).Get("logout_token")
-	rows, _ := db.ListLogoutDeliveries(u.ID, 10)
+	rows, _ := db.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
 	if rows[0].Status != "queued" || rows[0].Attempts != 1 || rows[0].LastError == "" {
 		t.Fatalf("after 503: %+v", rows[0])
 	}
-	if _, err := db.RetryLogoutDeliveryNow(u.ID, rows[0].ID, nil); err != nil {
+	if _, err := db.DefaultOrg().RetryLogoutDeliveryNow(u.ID, rows[0].ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	atomic.StoreInt32(&rcv.status, http.StatusOK)
@@ -183,7 +183,7 @@ func TestBackchannelDeliveryRetriesServerErrorsWithAFreshToken(t *testing.T) {
 	if first == second {
 		t.Fatal("a retry must mint a fresh token, not replay the old one")
 	}
-	rows, _ = db.ListLogoutDeliveries(u.ID, 10)
+	rows, _ = db.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
 	if rows[0].Status != "delivered" || rows[0].Attempts != 1 { // a manual retry restores the attempt budget
 		t.Fatalf("after retry: %+v", rows[0])
 	}
@@ -211,7 +211,7 @@ func TestBackchannelDeliveryNeverFollowsRedirects(t *testing.T) {
 	if atomic.LoadInt32(&followed) != 0 {
 		t.Fatal("the delivery client followed a redirect")
 	}
-	rows, _ := db.ListLogoutDeliveries(u.ID, 10)
+	rows, _ := db.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
 	if rows[0].Status != "queued" || rows[0].LastError == "" {
 		t.Fatalf("a redirect is not an acknowledgement: %+v", rows[0])
 	}
@@ -242,7 +242,7 @@ func TestATarpittedReceiverDoesNotBlockOtherApps(t *testing.T) {
 		if _, err := db.EnsureClientSession(clientID, sess, u.ID); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.RevokeSession(u.ID, sess, nil); err != nil {
+		if err := db.DefaultOrg().RevokeSession(u.ID, sess, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -261,7 +261,7 @@ func TestATarpittedReceiverDoesNotBlockOtherApps(t *testing.T) {
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		rows, _ := db.ListLogoutDeliveries(u.ID, 10)
+		rows, _ := db.DefaultOrg().ListLogoutDeliveries(u.ID, 10)
 		fastDone := false
 		for _, r := range rows {
 			fastDone = fastDone || (r.ClientID == "fast" && r.Status == "delivered")

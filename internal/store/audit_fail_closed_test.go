@@ -32,9 +32,9 @@ func TestMutationsRollBackWhenTheirAuditCannotBeWritten(t *testing.T) {
 			func(s *Store, _ *User) bool { app, err := s.GetApplicationByID("a"); return err == nil && app == nil },
 		},
 		"session revocation": {
-			func(s *Store, u *User, a *AuditEvent) error { return s.RevokeUserAccess(u.ID, a) },
+			func(s *Store, u *User, a *AuditEvent) error { return s.DefaultOrg().RevokeUserAccess(u.ID, a) },
 			func(s *Store, u *User) bool {
-				live, err := s.ListUserSessions(u.ID, time.Hour)
+				live, err := s.DefaultOrg().ListUserSessions(u.ID, time.Hour)
 				return err == nil && len(live) == 1
 			},
 		},

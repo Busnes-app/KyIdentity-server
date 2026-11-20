@@ -77,7 +77,7 @@ func TestListUserSessionsOmitsExpiredAndIdleSessions(t *testing.T) {
 	seedSession(t, s, u.ID, now.Add(time.Hour), now.Add(-time.Hour))
 	seedSession(t, s, createTestUser(t, s).ID, now.Add(time.Hour), now)
 
-	got, err := s.ListUserSessions(u.ID, 30*time.Minute)
+	got, err := s.DefaultOrg().ListUserSessions(u.ID, 30*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestRevokeSessionLeavesTheUsersOtherSessionIntact(t *testing.T) {
 	bJTI, bCode, bStep := seedGrants(t, s, u.ID, b, "app-1")
 
 	audit := &AuditEvent{ID: uuid.NewString(), Action: "user.session_revoked", TargetID: a, Outcome: "success"}
-	if err := s.RevokeSession(u.ID, a, audit); err != nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, a, audit); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(t, s, `SELECT COUNT(*) FROM sessions WHERE id=?`, a); n != 0 {
@@ -124,7 +124,7 @@ func TestRevokeSessionRejectsAnotherUsersSession(t *testing.T) {
 	sid := seedSession(t, s, owner.ID, now.Add(time.Hour), now)
 	jti, code, step := seedGrants(t, s, owner.ID, sid, "app-1")
 
-	err := s.RevokeSession(other.ID, sid, &AuditEvent{ID: uuid.NewString(), Action: "x", Outcome: "success"})
+	err := s.DefaultOrg().RevokeSession(other.ID, sid, &AuditEvent{ID: uuid.NewString(), Action: "x", Outcome: "success"})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -143,7 +143,7 @@ func TestRevokeSessionRollsBackWithoutItsAuditRow(t *testing.T) {
 	sid := seedSession(t, s, u.ID, now.Add(time.Hour), now)
 	jti, code, step := seedGrants(t, s, u.ID, sid, "app-1")
 
-	if err := s.RevokeSession(u.ID, sid, poisonedAudit(t, s, "user.session_revoked", sid)); err == nil {
+	if err := s.DefaultOrg().RevokeSession(u.ID, sid, poisonedAudit(t, s, "user.session_revoked", sid)); err == nil {
 		t.Fatal("expected the poisoned audit row to fail the transaction")
 	}
 	if n := count(t, s, `SELECT COUNT(*) FROM sessions WHERE id=?`, sid); n != 1 {
@@ -162,7 +162,7 @@ func TestRevokeOtherSessionsKeepsTheCurrentOne(t *testing.T) {
 	kJTI, kCode, kStep := seedGrants(t, s, u.ID, keep, "app-1")
 	gJTI, gCode, gStep := seedGrants(t, s, u.ID, gone, "app-1")
 
-	if err := s.RevokeOtherSessions(u.ID, keep, &AuditEvent{ID: uuid.NewString(), Action: "user.other_sessions_revoked", Outcome: "success"}); err != nil {
+	if err := s.DefaultOrg().RevokeOtherSessions(u.ID, keep, &AuditEvent{ID: uuid.NewString(), Action: "user.other_sessions_revoked", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(t, s, `SELECT COUNT(*) FROM sessions WHERE user_id=?`, u.ID); n != 1 {
@@ -181,7 +181,7 @@ func TestRevokeUserClientAccessRevokesOnlyThatClient(t *testing.T) {
 	xJTI, xCode, xStep := seedGrants(t, s, u.ID, sid, "app-x")
 	yJTI, yCode, _ := seedGrants(t, s, u.ID, sid, "app-y")
 
-	if err := s.RevokeUserClientAccess(u.ID, "app-x", &AuditEvent{ID: uuid.NewString(), Action: "admin.app_access_revoked", Outcome: "success"}); err != nil {
+	if err := s.DefaultOrg().RevokeUserClientAccess(u.ID, "app-x", &AuditEvent{ID: uuid.NewString(), Action: "admin.app_access_revoked", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(t, s, `SELECT COUNT(*) FROM issued_tokens WHERE jti=? AND revoked_at IS NULL`, xJTI); n != 0 {
@@ -218,7 +218,7 @@ func TestListUserAppGrantsGroupsLiveTokensByClient(t *testing.T) {
 	}
 	seedGrants(t, s, createTestUser(t, s).ID, seedSession(t, s, u.ID, now.Add(time.Hour), now), "app-z")
 
-	got, err := s.ListUserAppGrants(u.ID)
+	got, err := s.DefaultOrg().ListUserAppGrants(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

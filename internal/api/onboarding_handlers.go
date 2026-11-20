@@ -66,7 +66,7 @@ func (h *OnboardingHandler) issue(r *http.Request, actor *store.User, u *store.U
 		delivery = "email"
 	}
 	pending := h.audit.Prepare("admin.account_link_issued", actor.ID, actor.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"kind": kind, "delivery": delivery})
-	raw, err := h.store.IssueAccountToken(u.ID, kind, delivery, ttl, pending.Row)
+	raw, err := h.store.Org(u.Org()).IssueAccountToken(u.ID, kind, delivery, ttl, pending.Row)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func (h *OnboardingHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending := h.audit.Prepare("auth.password_reset_requested", u.ID, u.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"delivery": "email"})
-	raw, err := h.store.IssueAccountToken(u.ID, "reset", "email", ResetTTL, pending.Row)
+	raw, err := h.store.Org(u.Org()).IssueAccountToken(u.ID, "reset", "email", ResetTTL, pending.Row)
 	if err != nil {
 		log.Printf("password reset for %s: %v", u.ID, err)
 		generic()
@@ -290,7 +290,7 @@ func (h *OnboardingHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 		details["required"] = true
 	}
 	pending := h.audit.Prepare("user.password_changed", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
-	if err := h.store.ChangePassword(user.ID, sess.ID, hash, pending.Row); errors.Is(err, store.ErrNotFound) {
+	if err := h.store.Org(user.Org()).ChangePassword(user.ID, sess.ID, hash, pending.Row); errors.Is(err, store.ErrNotFound) {
 		// The session was revoked (a reset, a sign-out everywhere) while this request ran.
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
