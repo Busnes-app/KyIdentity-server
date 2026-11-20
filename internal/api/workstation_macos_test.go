@@ -230,7 +230,7 @@ func TestPublicClientRefreshStillRefused(t *testing.T) {
 	workstation := f.codeLogin(cookie)
 
 	newClient(t, f.db, "public-app", []string{xcredsRedirect}, []string{"openid"})
-	if err := f.db.SetAppAssignment(appIDFor(t, f.db, "public-app"), "users", u.ID, true, nil); err != nil {
+	if err := f.db.DefaultOrg().SetAppAssignment(appIDFor(t, f.db, "public-app"), "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	verifier := uuid.NewString() + uuid.NewString()
