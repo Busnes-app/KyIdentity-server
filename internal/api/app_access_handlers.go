@@ -28,7 +28,7 @@ func (h *AdminHandler) ListAppAccessUsers(w http.ResponseWriter, r *http.Request
 		b := raw == "true"
 		enabled = &b
 	}
-	result, err := h.store.ListAppAccessUsers(r.PathValue("id"), p.Query, mode, enabled, p.Limit, p.Offset)
+	result, err := orgStore(r).ListAppAccessUsers(r.PathValue("id"), p.Query, mode, enabled, p.Limit, p.Offset)
 	if err != nil {
 		writeAppRegistryError(w, err)
 		return
@@ -41,7 +41,7 @@ func (h *AdminHandler) ListAppAccessGroups(w http.ResponseWriter, r *http.Reques
 		http.Error(w, `{"error":"invalid_request"}`, 400)
 		return
 	}
-	groups, total, err := h.store.ListAppAccessGroups(r.PathValue("id"), p.Query, p.Limit, p.Offset)
+	groups, total, err := orgStore(r).ListAppAccessGroups(r.PathValue("id"), p.Query, p.Limit, p.Offset)
 	if err != nil {
 		writeAppRegistryError(w, err)
 		return
@@ -93,9 +93,9 @@ func (h *AdminHandler) SetAppAssignment(w http.ResponseWriter, r *http.Request) 
 	}
 	event := h.audit.Prepare(action, actor.ID, actor.Username, r.PathValue("id"), "application", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
 	if assigned {
-		err = h.store.SetAppAssignmentUntil(r.PathValue("id"), kind, r.PathValue("principal"), expiresAt, event.Row)
+		err = orgStore(r).SetAppAssignmentUntil(r.PathValue("id"), kind, r.PathValue("principal"), expiresAt, event.Row)
 	} else {
-		err = h.store.SetAppAssignment(r.PathValue("id"), kind, r.PathValue("principal"), false, event.Row)
+		err = orgStore(r).SetAppAssignment(r.PathValue("id"), kind, r.PathValue("principal"), false, event.Row)
 	}
 	if err != nil {
 		writeAppRegistryError(w, err)

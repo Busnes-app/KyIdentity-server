@@ -665,7 +665,7 @@ func (e *Engine) StartWorker(ctx context.Context) {
 	go e.alertWorker(ctx)
 	go e.hrWorker(ctx)
 	// Overdue expiries are applied at start, so a restart drains them before anything else.
-	if _, err := e.store.RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
+	if _, err := e.store.Platform().RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
 		log.Printf("expiry follow-up failed: %v", err)
 	}
 
@@ -674,7 +674,7 @@ func (e *Engine) StartWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-reconcile.C:
-			if _, err := e.store.RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
+			if _, err := e.store.Platform().RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
 				log.Printf("expiry follow-up failed: %v", err)
 			}
 			if err := e.store.ReconcileProvisioning(); err != nil && ctx.Err() == nil {

@@ -101,7 +101,7 @@ func TestEnrollmentGracePersistsAndExpiresWithoutWorker(t *testing.T) {
 func TestEnrollmentRestrictedSessionCannotUpgradeOrExchange(t *testing.T) {
 	s, u, _ := enrollmentFixture(t)
 	apps, _, _ := s.ListAppRecords("client", 25, 0)
-	if err := s.SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	accessCode(t, s, u, "old")
@@ -223,7 +223,7 @@ func TestEnrollmentLastFactorRemovalAndReset(t *testing.T) {
 func TestEnrollmentDeadlineBlocksOnlineTokenAndRegistration(t *testing.T) {
 	s, u, _ := enrollmentFixture(t)
 	apps, _, _ := s.ListAppRecords("client", 25, 0)
-	if err := s.SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetEnrollmentPolicy(enrollmentPolicy("organization", 3600), "admin-session", nil); err != nil {
@@ -250,7 +250,7 @@ func TestEnrollmentDeadlineBlocksOnlineTokenAndRegistration(t *testing.T) {
 func TestEnrollmentPolicyTokenRace(t *testing.T) {
 	s, u, _ := enrollmentFixture(t)
 	apps, _, _ := s.ListAppRecords("client", 25, 0)
-	if err := s.SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	accessCode(t, s, u, "race")

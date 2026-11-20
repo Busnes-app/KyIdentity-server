@@ -248,7 +248,7 @@ func TestRefreshFamilyAndRotatedTokenEndWithAccessGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	until := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
-	if err := f.db.SetAppAssignmentUntil(a.ID, "users", f.user.ID, &until, nil); err != nil {
+	if err := f.db.DefaultOrg().SetAppAssignmentUntil(a.ID, "users", f.user.ID, &until, nil); err != nil {
 		t.Fatal(err)
 	}
 	first := f.login("openid")

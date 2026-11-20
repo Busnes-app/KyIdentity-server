@@ -120,7 +120,7 @@ func TestActiveDirectoryPasswordQueueEndToEnd(t *testing.T) {
 			app = a.ID
 		}
 	}
-	if err := db.SetAppAssignment(app, "users", user.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetAppAssignment(app, "users", user.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if rr := adminRequest(t, srv, "PUT", "/api/admin/users/"+user.ID, cookie, `{"password":"Known-Test-Pass-92"}`); rr.Code != http.StatusOK {

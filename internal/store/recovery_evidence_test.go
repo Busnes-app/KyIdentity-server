@@ -50,7 +50,7 @@ func TestRecoveryEvidenceIncludesAcknowledgedLossAndDeletion(t *testing.T) {
 			app := recoveryFixture(t, s)
 			current, lost, unknown := createTestUser(t, s), createTestUser(t, s), createTestUser(t, s)
 			for _, u := range []*User{current, lost} {
-				if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+				if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -61,7 +61,7 @@ func TestRecoveryEvidenceIncludesAcknowledgedLossAndDeletion(t *testing.T) {
 			if deleted {
 				err = s.DefaultOrg().DeleteUserWithSyncEvents(lost.ID, nil)
 			} else {
-				err = s.SetAppAssignment(app, "users", lost.ID, false, nil)
+				err = s.DefaultOrg().SetAppAssignment(app, "users", lost.ID, false, nil)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -109,7 +109,7 @@ func TestRecoveryEvidenceProjectsLiveRolesAndExpiry(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"reader", "writer"} {
@@ -121,7 +121,7 @@ func TestRecoveryEvidenceProjectsLiveRolesAndExpiry(t *testing.T) {
 		if name == "writer" {
 			kind, principal = "groups", g.ID
 		}
-		if err := s.SetAppRoleAssignment(app, role.ID, kind, principal, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppRoleAssignment(app, role.ID, kind, principal, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -151,7 +151,7 @@ func TestRecoveryEvidenceFailsClosedWithoutPartialOutput(t *testing.T) {
 	defer cleanup()
 	app := recoveryFixture(t, s)
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	export := func(audit *AuditEvent, sign func(*PairedSystem, []byte, time.Time) error) ([]byte, error) {
@@ -191,12 +191,12 @@ func TestRecoveryEvidenceSerializesConcurrentAuthorityMutation(t *testing.T) {
 	defer cleanup()
 	app := recoveryFixture(t, s)
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	started, done := make(chan struct{}), make(chan error, 1)
 	b, err := s.ExportRecoveryEvidence("mail", "https://identity.test", strings.Repeat("a", 64), []string{u.ID}, nil, func(*PairedSystem, []byte, time.Time) error {
-		go func() { close(started); done <- s.SetAppAssignment(app, "users", u.ID, false, nil) }()
+		go func() { close(started); done <- s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil) }()
 		<-started
 		select {
 		case err := <-done:

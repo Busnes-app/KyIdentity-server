@@ -94,7 +94,9 @@ func scanIDPairs(rows *sql.Rows, err error) ([]idPair, error) {
 // its own, so one row that cannot be processed neither blocks the rest nor hides: its
 // failure is audited and returned, and the next pass retries it. The pass only ever
 // removes; an instant extended before the run is not due and is untouched.
-func (s *Store) RunDueExpiries(now time.Time) (ExpiryRun, error) {
+// RunDueExpiries is the housekeeping sweep over every org.
+func (p *PlatformStore) RunDueExpiries(now time.Time) (ExpiryRun, error) {
+	s := p.s
 	var run ExpiryRun
 	var errs []error
 	unix := now.Unix()

@@ -56,8 +56,9 @@ const accessReasonSQL = `CASE WHEN NOT f.active THEN 'user_disabled' WHEN NOT f.
 
 // ExplainAccess explains one user's access to one app as it stands now. Group names
 // appear only for groups assigned to the app, in grants and in role sources alike.
-func (s *Store) ExplainAccess(userID, appID string) (*AccessExplanation, error) {
-	tx, err := s.db.Begin()
+// ExplainAccess explains one of the org's users; another org's is ErrUserMissing.
+func (o *OrgStore) ExplainAccess(userID, appID string) (*AccessExplanation, error) {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func (s *Store) ExplainAccess(userID, appID string) (*AccessExplanation, error) 
 	if err != nil {
 		return nil, err
 	}
-	u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, userID))
+	u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id=? AND id=?`, o.org, userID))
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +137,7 @@ func (s *Store) ExplainAccess(userID, appID string) (*AccessExplanation, error) 
 		return nil, err
 	}
 	if e.Allowed && app.ClientID != "" {
-		if e.AccessEndsAt, err = s.AccessEndsAt(userID, app.ClientID); err != nil {
+		if e.AccessEndsAt, err = o.s.AccessEndsAt(userID, app.ClientID); err != nil {
 			return nil, err
 		}
 	}
@@ -145,14 +146,14 @@ func (s *Store) ExplainAccess(userID, appID string) (*AccessExplanation, error) 
 
 // ExplainClientAccess explains access to the app behind an OAuth client; a client with
 // no app record explains as nothing.
-func (s *Store) ExplainClientAccess(userID, clientID string) (*AccessExplanation, error) {
+func (o *OrgStore) ExplainClientAccess(userID, clientID string) (*AccessExplanation, error) {
 	var appID string
-	err := s.db.QueryRow(`SELECT id FROM app_registry WHERE client_id=?`, clientID).Scan(&appID)
+	err := o.s.db.QueryRow(`SELECT id FROM app_registry WHERE client_id=?`, clientID).Scan(&appID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrAppRecordMissing
 	}
 	if err != nil {
 		return nil, err
 	}
-	return s.ExplainAccess(userID, appID)
+	return o.ExplainAccess(userID, appID)
 }

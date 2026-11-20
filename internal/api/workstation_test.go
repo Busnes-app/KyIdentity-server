@@ -60,7 +60,7 @@ func (f *wsFixture) settings(grant bool, ttl, window int) *httptest.ResponseReco
 func (f *wsFixture) assignedUser() (*store.User, string) {
 	f.t.Helper()
 	u := newUser(f.t, f.db, "user")
-	if err := f.db.SetAppAssignment(f.appID, "users", u.ID, true, nil); err != nil {
+	if err := f.db.DefaultOrg().SetAppAssignment(f.appID, "users", u.ID, true, nil); err != nil {
 		f.t.Fatal(err)
 	}
 	return u, newSession(f.t, f.db, u, time.Now().UTC().Add(time.Hour))
@@ -184,7 +184,7 @@ func TestDeviceGrantLifecycle(t *testing.T) {
 	if err := f.db.DefaultOrg().SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.SetAppAssignment(f.appID, "groups", g.ID, true, nil); err != nil {
+	if err := f.db.DefaultOrg().SetAppAssignment(f.appID, "groups", g.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -420,7 +420,7 @@ func TestWorkstationSessionsEndWithAccess(t *testing.T) {
 			}
 		},
 		"unassign": func(f *wsFixture, u *store.User, _ string) {
-			if err := f.db.SetAppAssignment(f.appID, "users", u.ID, false, nil); err != nil {
+			if err := f.db.DefaultOrg().SetAppAssignment(f.appID, "users", u.ID, false, nil); err != nil {
 				f.t.Fatal(err)
 			}
 		},
@@ -488,7 +488,7 @@ func TestWorkstationSessionEndsOnSCIMDeprovision(t *testing.T) {
 	if _, err := f.db.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.SetAppAssignment(f.appID, "users", id, true, nil); err != nil {
+	if err := f.db.DefaultOrg().SetAppAssignment(f.appID, "users", id, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	cookie := newSession(t, f.db, mustUser(t, f.db, id), time.Now().UTC().Add(time.Hour))
@@ -652,10 +652,10 @@ func TestLostAccessWithdrawsApprovalForGood(t *testing.T) {
 	if rr := f.decide(cookie, userCode, true); rr.Code != 200 {
 		t.Fatalf("approve: %d", rr.Code)
 	}
-	if err := f.db.SetAppAssignment(f.appID, "users", u.ID, false, nil); err != nil {
+	if err := f.db.DefaultOrg().SetAppAssignment(f.appID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.SetAppAssignment(f.appID, "users", u.ID, true, nil); err != nil {
+	if err := f.db.DefaultOrg().SetAppAssignment(f.appID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if status, body := f.poll(f.clientID, device); status == 200 || body["error"] != "access_denied" {

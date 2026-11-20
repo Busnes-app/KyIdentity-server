@@ -72,7 +72,7 @@ func TestADConnectorFollowsAssignments(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -102,7 +102,7 @@ func TestADConnectorFollowsAssignments(t *testing.T) {
 		t.Fatal("re-enabled user still disabled", got.Attrs)
 	}
 	// Losing the group empties it and disables the account; both are kept.
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -123,7 +123,7 @@ func TestADConnectorLeavesForeignObjectsAlone(t *testing.T) {
 	if err := s.DefaultOrg().CreateUser(squatter); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", squatter.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", squatter.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -143,7 +143,7 @@ func TestADConnectorLeavesForeignObjectsAlone(t *testing.T) {
 		t.Fatalf("conflict not reported to the admin: %+v", failing)
 	}
 	// A disable of an account the directory never had creates nothing.
-	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", squatter.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", squatter.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -250,7 +250,7 @@ func adEnableWaitsForReset(t *testing.T, ackFirst bool) {
 	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -321,7 +321,7 @@ func TestADRenameFollowsKyIdentity(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -382,7 +382,7 @@ func TestADDeliveryEndsWithItsContext(t *testing.T) {
 	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)

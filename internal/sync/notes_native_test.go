@@ -181,11 +181,11 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 		waitNotesNativeFile(t, dir, name+"-checked")
 	}
 	phase("created")
-	if err := s.SetAppAssignment(app.ID, "users", day.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", day.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	phase("unassigned")
-	if err := s.SetAppAssignment(app.ID, "users", day.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", day.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	phase("reassigned")
@@ -201,17 +201,17 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 		t.Fatal(err)
 	}
 	phase("deleted")
-	if err := s.SetAppAssignment(app.ID, "users", owner.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", owner.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	phase("owner-unassigned")
-	if err := s.SetAppAssignment(app.ID, "users", owner.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", owner.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A recreated worker must consume the committed scope intent and signing key.
 	e = identitysync.NewEngine(s, key)
 	phase("owner-reassigned")
-	roles, err := s.ListAppRoles(app.ID)
+	roles, err := s.DefaultOrg().ListAppRoles(app.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 	if adminRole == "" {
 		t.Fatal("native administrator role missing")
 	}
-	if err := s.SetAppRoleAssignment(app.ID, adminRole, "users", owner.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, adminRole, "users", owner.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Before dispatch, the receiver still has its local admin grant. Only the
@@ -234,7 +234,7 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 	}
 	waitNotesNativeFile(t, dir, "owner-role-limited-checked")
 	phase("owner-role-revoked")
-	if err := s.SetAppRoleAssignment(app.ID, adminRole, "users", owner.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, adminRole, "users", owner.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	phase("owner-role-restored")

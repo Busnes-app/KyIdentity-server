@@ -3,28 +3,31 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
 )
 
 // crossOrgSteps names, per admin path prefix, the build plan step (tenancy design, PR 2)
-// whose rows TestCrossOrgMatrix runs on that route. "2a" routes are covered; a later step
-// moves its prefixes to "2a"'s list as it scopes them. A route under no prefix fails.
+// whose rows TestCrossOrgMatrix runs on that route. "2a" marks covered routes (2a's and
+// the later steps' as they land); a later step moves its prefixes there as it scopes
+// them. A route under no prefix fails.
 var crossOrgSteps = []struct{ prefix, step string }{
 	{"/api/admin/users", "2a"},
 	{"/api/admin/groups", "2a"},
-	{"/api/admin/app-registry", "2b"},
+	{"/api/admin/app-registry", "2a"},
 	{"/api/admin/clients", "2b"},
 	{"/api/admin/workstation-apps", "2b"},
 	{"/api/admin/applications", "2b"},
 	{"/api/admin/icons", "2b"},
 	{"/api/admin/proxy-apps", "2b"},
-	{"/api/admin/access-requests", "2b"},
+	{"/api/admin/access-requests", "2a"},
 	{"/api/admin/enrollment-policies", "2b"},
 	{"/api/admin/mail", "2b"},
 	{"/api/admin/session-settings", "2b"},
@@ -101,6 +104,7 @@ func TestCrossOrgMatrix(t *testing.T) {
 	if _, err := db.Org(orgB).SetSuiteGroup(groupB.ID, true, nil, nil); err != nil {
 		t.Fatal(err)
 	}
+	app, req := crossOrgApps(t, db, orgB, userB, groupB)
 	staffGroup := &store.Group{ID: uuid.NewString(), Name: "staff-" + uuid.NewString()[:8]}
 	if err := db.Org(staffOrg).CreateGroup(staffGroup, nil); err != nil {
 		t.Fatal(err)
@@ -123,7 +127,10 @@ func TestCrossOrgMatrix(t *testing.T) {
 		members, _, err3 := b.ListGroupUsers(groupB.ID, "", true, 100, 0)
 		suite, err4 := b.GetSuiteGroup(groupB.ID)
 		d, err5 := b.Delegations(userB.ID)
-		for _, err := range []error{err1, err2, err3, err4, err5} {
+		access, err6 := b.ListAppAccessUsers(app.app, "", "", nil, 100, 0)
+		roles, err7 := b.ListAppRoles(app.app)
+		requests, _, err8 := b.ListAccessRequests(store.AccessRequestFilter{UserID: userB.ID, Limit: 100})
+		for _, err := range []error{err1, err2, err3, err4, err5, err6, err7, err8} {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,7 +139,7 @@ func TestCrossOrgMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, _ := json.Marshal([]any{users, groups, members, suite, d, sess != nil})
+		out, _ := json.Marshal([]any{users, groups, members, suite, d, sess != nil, access.Users, roles, requests})
 		return string(out)
 	}
 	before := snapshotB()
@@ -140,17 +147,29 @@ func TestCrossOrgMatrix(t *testing.T) {
 		res := adminRequestWithStepUp(t, srv, rt.method, path, cookie, crossOrgBody(rt), mintStepUp(t, srv, cookie, rt.method+" "+path))
 		return res.Code, res.Body.String()
 	}
-	fill := func(rt adminRoute, user, group string) string {
-		p := rt.path
-		if strings.HasPrefix(p, "/api/admin/groups/") {
-			p = strings.Replace(p, "{id}", group, 1)
+	// fill puts user, group (or, on a groups {kind}, group as the principal) and request
+	// into the path; apps and roles are global, so they are real ones.
+	fill := func(rt adminRoute, kind, user, group, request string) string {
+		p := strings.Replace(rt.path, "{kind}", kind, 1)
+		principal := user
+		if kind == "groups" {
+			principal = group
 		}
-		p = strings.Replace(strings.Replace(p, "{id}", user, 1), "{userId}", user, 1)
+		switch {
+		case strings.HasPrefix(p, "/api/admin/groups/"):
+			p = strings.Replace(p, "{id}", group, 1)
+		case strings.HasPrefix(p, "/api/admin/app-registry/"):
+			p = strings.Replace(p, "{id}", app.app, 1)
+		case strings.HasPrefix(p, "/api/admin/access-requests/"):
+			p = strings.Replace(p, "{id}", request, 1)
+		}
+		p = strings.NewReplacer("{id}", user, "{userId}", user, "{principal}", principal, "{roleId}", app.role).Replace(p)
 		for _, ph := range []string{"{sid}", "{clientId}", "{deliveryId}"} {
 			p = strings.Replace(p, ph, "x", 1)
 		}
 		return p
 	}
+	names := []string{userB.ID, userB.Username, groupB.ID, groupB.Name, req}
 
 	covered := 0
 	for _, rt := range srv.adminRoutes {
@@ -160,36 +179,46 @@ func TestCrossOrgMatrix(t *testing.T) {
 			continue
 		}
 		for name, cookie := range customers {
-			if code, body := call(rt, fill(rt, userB.ID, groupB.ID), cookie); code != http.StatusForbidden || !strings.Contains(body, `"error":"forbidden"`) {
+			if code, body := call(rt, fill(rt, "users", userB.ID, groupB.ID, req), cookie); code != http.StatusForbidden || !strings.Contains(body, `"error":"forbidden"`) {
 				t.Errorf("%s %s as A's %s: %d %s", rt.method, rt.path, name, code, body)
 			}
 		}
-		if step != "2a" {
+		// Platform routes change what every org shares; TestPlatformRoutesNeedAnAdministrator
+		// covers them.
+		if step != "2a" || rt.scope != orgRoute {
 			continue
 		}
 		covered++
+		names_b := regexp.MustCompile(`\{(principal|userId|access-requests)\}`)
+		takesB := names_b.MatchString(rt.path) || strings.Contains(rt.path, "/users/{id}") || strings.Contains(rt.path, "/groups/{id}") || strings.Contains(rt.path, "/access-requests/{id}")
 		for name, cookie := range staff {
-			if !strings.Contains(rt.path, "{") {
-				// Lists and creates: nothing of B's comes back.
-				_, body := call(rt, rt.path, cookie)
-				for _, id := range []string{userB.ID, userB.Username, groupB.ID, groupB.Name} {
+			if !takesB {
+				// Lists, creates and app-wide routes: nothing of B's comes back.
+				_, body := call(rt, fill(rt, "users", userB.ID, groupB.ID, req), cookie)
+				for _, id := range names {
 					if strings.Contains(body, id) {
 						t.Errorf("%s %s as staff %s answered with B's %q", rt.method, rt.path, name, id)
 					}
 				}
 				continue
 			}
-			wantCode, wantBody := call(rt, fill(rt, uuid.NewString(), uuid.NewString()), cookie)
-			targets := [][2]string{{userB.ID, groupB.ID}}
-			if strings.Contains(rt.path, "{userId}") {
-				targets = append(targets, [2]string{userB.ID, staffGroup.ID})
+			kinds := []string{"users"}
+			if strings.Contains(rt.path, "{kind}") {
+				kinds = append(kinds, "groups")
 			}
-			for _, tg := range targets {
-				code, body := call(rt, fill(rt, tg[0], tg[1]), cookie)
-				// A missing ID's error names the ID asked for; compare the rest.
-				body = strings.ReplaceAll(strings.ReplaceAll(body, tg[0], "ID"), tg[1], "ID")
-				if code != wantCode || code == http.StatusOK || code/100 == 5 || !sameShape(body, wantBody) {
-					t.Errorf("%s %s as staff %s with B's IDs: %d %s, a missing ID answers %d %s", rt.method, rt.path, name, code, body, wantCode, wantBody)
+			for _, kind := range kinds {
+				wantCode, wantBody := call(rt, fill(rt, kind, uuid.NewString(), uuid.NewString(), uuid.NewString()), cookie)
+				targets := [][3]string{{userB.ID, groupB.ID, req}}
+				if strings.Contains(rt.path, "{userId}") {
+					targets = append(targets, [3]string{userB.ID, staffGroup.ID, req})
+				}
+				for _, tg := range targets {
+					code, body := call(rt, fill(rt, kind, tg[0], tg[1], tg[2]), cookie)
+					// A missing ID's error names the ID asked for; compare the rest.
+					body = strings.NewReplacer(tg[0], "ID", tg[1], "ID", tg[2], "ID").Replace(body)
+					if code != wantCode || code == http.StatusOK || code/100 == 5 || !sameShape(body, wantBody) {
+						t.Errorf("%s %s (%s) as staff %s with B's IDs: %d %s, a missing ID answers %d %s", rt.method, rt.path, kind, name, code, body, wantCode, wantBody)
+					}
 				}
 			}
 		}
@@ -197,7 +226,7 @@ func TestCrossOrgMatrix(t *testing.T) {
 			t.Fatalf("%s %s changed org B:\n before %s\n after  %s", rt.method, rt.path, before, after)
 		}
 	}
-	if covered < 20 {
+	if covered < 34 {
 		t.Fatalf("only %d routes covered", covered)
 	}
 }
@@ -234,4 +263,97 @@ func crossOrgBody(rt adminRoute) string {
 		return `{"displayName":"taken","role":"admin","status":"disabled"}`
 	}
 	return `{}`
+}
+
+type crossOrgApp struct{ app, role string }
+
+// crossOrgApps makes a global app with a role, and gives B's user and group a grant and
+// the role on it; a second, requestable app holds a pending request of B's user.
+func crossOrgApps(t *testing.T, db *store.Store, orgB store.OrgID, userB *store.User, groupB *store.Group) (crossOrgApp, string) {
+	t.Helper()
+	record := func(id string) store.AppRecord {
+		if err := db.CreateOAuthClient(&store.OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
+			t.Fatal(err)
+		}
+		apps, _, err := db.ListAppRecords(id, 1, 0)
+		if err != nil || len(apps) != 1 {
+			t.Fatal(apps, err)
+		}
+		return apps[0]
+	}
+	granted, requestable := record("cross-org-app"), record("cross-org-request")
+	role, err := db.CreateAppRole(granted.ID, "editor", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := db.Org(orgB)
+	for kind, principal := range map[string]string{"users": userB.ID, "groups": groupB.ID} {
+		if err := b.SetAppAssignment(granted.ID, kind, principal, true, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SetAppRoleAssignment(granted.ID, role.ID, kind, principal, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.SetAppRequestable(requestable.ID, true, requestable.Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	req, err := db.CreateAccessRequest(userB.ID, requestable.ID, "please", 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return crossOrgApp{granted.ID, role.ID}, req.ID
+}
+
+// A platform route changes what every org shares, so in a multi-tenant install only a
+// global administrator passes it, whatever the delegation; an org route keeps today's
+// permissions. Single-tenant installs keep today's matrix (TestPermissionMatrixCoversEveryAdminRoute).
+func TestPlatformRoutesNeedAnAdministrator(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServerWith(t, func(c *config.Config) { c.Tenancy = "multi" })
+	defer cleanup()
+	exp := time.Now().UTC().Add(time.Hour)
+	staffOrg, err := store.CreateOrgForTest(db, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateOAuthClient(&store.OAuthClient{ID: "owned", ClientName: "owned", ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	apps, _, _ := db.ListAppRecords("owned", 1, 0)
+	admin := newSession(t, db, newOrgUser(t, db, staffOrg, "admin"), exp)
+	delegates := map[string]string{}
+	for name, d := range map[string]store.Delegations{"helpdesk": {Helpdesk: true}, "auditor": {Auditor: true}, "owner": {AppOwner: []string{apps[0].ID}}} {
+		u := newOrgUser(t, db, staffOrg, "user")
+		if err := db.Org(staffOrg).SetDelegations(u.ID, d, nil); err != nil {
+			t.Fatal(err)
+		}
+		delegates[name] = newSession(t, db, u, exp)
+	}
+	forbidden := func(rt adminRoute, cookie string) bool {
+		path := strings.NewReplacer("{id}", apps[0].ID, "{kind}", "users").Replace(rt.path)
+		for _, ph := range []string{"{sid}", "{clientId}", "{deliveryId}", "{roleId}", "{principal}", "{token}", "{userId}", "{tokenId}"} {
+			path = strings.Replace(path, ph, "x", 1)
+		}
+		res := adminRequestWithStepUp(t, srv, rt.method, path, cookie, `{}`, mintStepUp(t, srv, cookie, rt.method+" "+path))
+		return res.Code == http.StatusForbidden && strings.Contains(res.Body.String(), `"error":"forbidden"`)
+	}
+	var platform, reachedByDelegate int
+	for _, rt := range srv.adminRoutes {
+		if rt.scope == platformRoute {
+			platform++
+			for name, cookie := range delegates {
+				if !forbidden(rt, cookie) {
+					t.Errorf("%s %s: staff %s passed a platform route", rt.method, rt.path, name)
+				}
+			}
+		} else if !forbidden(rt, delegates["auditor"]) || !forbidden(rt, delegates["helpdesk"]) {
+			reachedByDelegate++
+		}
+		if forbidden(rt, admin) {
+			t.Errorf("%s %s: staff admin refused", rt.method, rt.path)
+		}
+	}
+	if platform < 60 || reachedByDelegate < 10 {
+		t.Fatalf("platform routes %d, org routes a delegate reaches %d", platform, reachedByDelegate)
+	}
 }

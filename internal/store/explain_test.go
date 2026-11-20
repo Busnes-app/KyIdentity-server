@@ -14,7 +14,7 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 	}
 	check := func(step string, wantAllowed bool, wantReason string) *AccessExplanation {
 		t.Helper()
-		e, err := s.ExplainAccess(u.ID, a.ID)
+		e, err := s.DefaultOrg().ExplainAccess(u.ID, a.ID)
 		if err != nil {
 			t.Fatalf("%s: %v", step, err)
 		}
@@ -29,7 +29,7 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 		t.Fatalf("unassigned explanation = %+v", e)
 	}
 	until := future(time.Hour)
-	if err := s.SetAppAssignmentUntil(a.ID, "users", u.ID, until, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(a.ID, "users", u.ID, until, nil); err != nil {
 		t.Fatal(err)
 	}
 	e = check("direct", true, "direct_assignment")
@@ -39,14 +39,14 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().SetGroupMembership("staff", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, _ := s.CreateAppRole(a.ID, "operator", "", nil)
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "staff", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "groups", "staff", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A role mapped through a group that is not assigned to the app names no group.
@@ -56,7 +56,7 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership("hidden", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "hidden", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "groups", "hidden", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	e = check("direct and group", true, "direct_assignment")
@@ -66,7 +66,7 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 	if len(e.Roles) != 1 || e.Roles[0].Role != "operator" || e.Roles[0].Via != "group" || e.Roles[0].GroupName != "Staff" {
 		t.Fatalf("roles = %+v", e.Roles)
 	}
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "hidden", false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "groups", "hidden", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().SetGroupMembership("hidden", u.ID, false, nil); err != nil {
@@ -89,7 +89,7 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 		t.Fatalf("roles after leaving the group = %+v", e.Roles)
 	}
 	// Disabled account, then an ended one.
-	if err := s.SetAppAssignmentUntil(a.ID, "users", u.ID, nil, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(a.ID, "users", u.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	check("re-granted", true, "direct_assignment")
@@ -105,10 +105,10 @@ func TestExplainAccessMatchesTheDecision(t *testing.T) {
 	if e = check("ended", false, "account_ended"); e.UserEndsAt == nil {
 		t.Fatal("end date missing from the explanation")
 	}
-	if _, err := s.ExplainAccess("missing", a.ID); err == nil {
+	if _, err := s.DefaultOrg().ExplainAccess("missing", a.ID); err == nil {
 		t.Fatal("missing user explained")
 	}
-	if _, err := s.ExplainClientAccess(u.ID, "no-such-client"); err == nil {
+	if _, err := s.DefaultOrg().ExplainClientAccess(u.ID, "no-such-client"); err == nil {
 		t.Fatal("unknown client explained")
 	}
 }

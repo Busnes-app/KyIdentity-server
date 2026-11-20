@@ -52,11 +52,11 @@ func TestAppAccessUnionAndRevocation(t *testing.T) {
 		if err := s.DefaultOrg().SetGroupMembership(id, u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.SetAppAssignment(a.ID, "groups", id, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(a.ID, "groups", id, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	accessCode(t, s, u, "pending")
@@ -76,7 +76,7 @@ func TestAppAccessUnionAndRevocation(t *testing.T) {
 	if revoked, err := s.IsTokenRevoked("token"); err != nil || revoked {
 		t.Fatal("alternative grant lost token", err)
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if allowed, _ := s.ClientAccessAllowed(u.ID, "client"); allowed {
@@ -88,7 +88,7 @@ func TestAppAccessUnionAndRevocation(t *testing.T) {
 	if c, err := s.GetValidAuthorizationCode("pending"); err != nil || c != nil {
 		t.Fatal("lost access retained code", err)
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "raced-token", "spent")); !errors.Is(err, ErrAppAccessDenied) {
@@ -103,11 +103,11 @@ func TestAppAccessPreviewAndAuditRollback(t *testing.T) {
 	if err := s.SetAppPolicy(a.ID, "all_active_users", true, 1, nil); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ListAppAccessUsers(a.ID, "does-not-match", "assigned_only", nil, 25, 0)
+	p, err := s.DefaultOrg().ListAppAccessUsers(a.ID, "does-not-match", "assigned_only", nil, 25, 0)
 	if err != nil || p.Total != 0 || p.LosingAccess != 1 {
 		t.Fatalf("loss count depended on search: %+v %v", p, err)
 	}
-	p, err = s.ListAppAccessUsers(a.ID, "", "assigned_only", nil, 25, 0)
+	p, err = s.DefaultOrg().ListAppAccessUsers(a.ID, "", "assigned_only", nil, 25, 0)
 	if err != nil || !p.Users[0].Effective || p.Users[0].Preview || p.Users[0].Reason != "all_active_users" {
 		t.Fatalf("wrong preview: %+v %v", p, err)
 	}
@@ -131,10 +131,10 @@ func TestAppAccessPreviewAndAuditRollback(t *testing.T) {
 	if c, _ := s.GetValidAuthorizationCode("pending"); c == nil {
 		t.Fatal("failed policy removed code")
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, audit); err == nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, audit); err == nil {
 		t.Fatal("assignment ignored audit failure")
 	}
-	p, err = s.ListAppAccessUsers(a.ID, "", "", nil, 25, 0)
+	p, err = s.DefaultOrg().ListAppAccessUsers(a.ID, "", "", nil, 25, 0)
 	if err != nil || p.Users[0].Direct {
 		t.Fatal("failed audit retained assignment", err)
 	}
@@ -154,7 +154,7 @@ func TestAppAccessPreviewAndAuditRollback(t *testing.T) {
 func TestAppAccessRegistrationRace(t *testing.T) {
 	s, u, a := appAccessFixture(t)
 	for i := 0; i < 20; i++ {
-		if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 		id := fmt.Sprint("race-", i)
@@ -169,10 +169,10 @@ func TestAppAccessRegistrationRace(t *testing.T) {
 			}
 		})
 		wg.Go(func() {
-			if err := s.SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
+			if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
 				t.Error(err)
 			}
-			if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+			if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 				t.Error(err)
 			}
 		})
@@ -216,7 +216,7 @@ func TestAppAccessMigrationAndLinkSafety(t *testing.T) {
 	if err := s.LinkAppRecords(a.ID, b.ID, 2, 1, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	newID, err := s.UnlinkAppRecord(a.ID, "client", 4, nil)
@@ -232,7 +232,7 @@ func TestAppAccessMigrationAndLinkSafety(t *testing.T) {
 	if err := s.migrate(); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ListAppAccessUsers(newID, "", "", nil, 25, 0)
+	p, err := s.DefaultOrg().ListAppAccessUsers(newID, "", "", nil, 25, 0)
 	if err != nil || !p.Users[0].Direct || !p.Users[0].Effective {
 		t.Fatal("restart lost assignments", err)
 	}
@@ -246,7 +246,7 @@ func TestAppAccessGroupDeletionRevokesSoleGrant(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership("c", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(a.ID, "groups", "c", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "groups", "c", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	accessCode(t, s, u, "pending")
@@ -266,7 +266,7 @@ func TestAppAccessGroupDeletionRevokesSoleGrant(t *testing.T) {
 	if code, err := s.GetValidAuthorizationCode("pending"); err != nil || code != nil {
 		t.Errorf("group deletion retained pending code: %+v err=%v", code, err)
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "raced-token", "spent")); !errors.Is(err, ErrAppAccessDenied) {
@@ -284,14 +284,14 @@ func TestAppAccessEnabledPreview(t *testing.T) {
 		if enabled {
 			wantLoss = 0
 		}
-		p, err := s.ListAppAccessUsers(a.ID, "", "", &enabled, 25, 0)
+		p, err := s.DefaultOrg().ListAppAccessUsers(a.ID, "", "", &enabled, 25, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if p.LosingAccess != wantLoss || len(p.Users) != 1 || !p.Users[0].Effective || p.Users[0].Preview != enabled || !p.App.Enabled {
 			t.Fatalf("enabled=%v: wrong preview: %+v", enabled, p)
 		}
-		p, err = s.ListAppAccessUsers(a.ID, "does-not-match", "", &enabled, 25, 0)
+		p, err = s.DefaultOrg().ListAppAccessUsers(a.ID, "does-not-match", "", &enabled, 25, 0)
 		if err != nil || p.LosingAccess != wantLoss || p.Total != 0 {
 			t.Fatalf("enabled=%v: filtered loss count: %+v err=%v", enabled, p, err)
 		}

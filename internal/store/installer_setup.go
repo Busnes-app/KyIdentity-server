@@ -572,7 +572,7 @@ func (s *Store) ApplyInstallerSetup(p InstallerSetup, inspect bool) (*InstallerR
 			principals = append(principals, adminID)
 		}
 		for _, principal := range principals {
-			if _, err := applyAppAssignmentTx(tx, appID, "users", principal, true, nil); err != nil {
+			if _, err := applyAppAssignmentTx(tx, DefaultOrgID, appID, "users", principal, true, nil); err != nil {
 				return nil, err
 			}
 			if err := audit("assignment", c.ID, principal); err != nil {

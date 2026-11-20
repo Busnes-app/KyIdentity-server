@@ -60,7 +60,7 @@ func TestAppAuthenticationDeadline(t *testing.T) {
 // client, stale revisions and refresh on a public client change nothing and keep tokens.
 func TestSetAppAuthenticationPolicyRefusals(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {
@@ -96,7 +96,7 @@ func TestSetAppAuthenticationPolicyRefusals(t *testing.T) {
 // bumps the policy revision nor revokes tokens; a confidential client may enable refresh.
 func TestSetAppAuthenticationPolicyUnchangedAndRefresh(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {

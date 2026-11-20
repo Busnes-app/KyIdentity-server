@@ -204,3 +204,100 @@ func TestOrgNeedsAStoredPrincipal(t *testing.T) {
 	}()
 	s.Org((&User{ID: "built"}).Org())
 }
+
+// Apps and roles are global; who holds them is per org. Bound to A, the store cannot
+// grant, map, list, explain or decide anything for B's users and groups.
+func TestOrgStoreAppsRefuseAnotherOrgsIDs(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	a, b := testOrg(t, s, "household"), testOrg(t, s, "household")
+	adminA := testOrgUser(t, s.DefaultOrg(), "admin")
+	userA, userB := testOrgUser(t, a, "user"), testOrgUser(t, b, "user")
+	groupA, groupB := testOrgGroup(t, a), testOrgGroup(t, b)
+	record := func(id string) AppRecord {
+		if err := s.CreateOAuthClient(&OAuthClient{ID: id, ClientName: id, ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true}, nil); err != nil {
+			t.Fatal(err)
+		}
+		apps, _, err := s.ListAppRecords(id, 1, 0)
+		if err != nil || len(apps) != 1 {
+			t.Fatal(apps, err)
+		}
+		return apps[0]
+	}
+	app, requestable := record("org-app"), record("org-request")
+	role, err := s.CreateAppRole(app.ID, "editor", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both plans enable the app, so B's users are in app_access_facts for a leak to show.
+	for _, o := range []*OrgStore{a, b} {
+		if _, err := s.db.Exec(`INSERT INTO org_apps(org_id,app_id,enabled) VALUES(?,?,TRUE)`, o.org, app.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for kind, principal := range map[string]string{"users": userB.ID, "groups": groupB.ID} {
+		if err := b.SetAppAssignment(app.ID, kind, principal, true, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SetAppRoleAssignment(app.ID, role.ID, kind, principal, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetAppRequestable(requestable.ID, true, requestable.Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	req, err := s.CreateAccessRequest(userB.ID, requestable.ID, "please", 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grants := func() string {
+		rows, err := scanStrings(s.db.Query(`SELECT 'u'||user_id FROM app_user_assignments UNION ALL SELECT 'g'||group_id FROM app_group_assignments
+ UNION ALL SELECT 'ru'||user_id FROM app_role_user_assignments UNION ALL SELECT 'rg'||group_id FROM app_role_group_assignments
+ UNION ALL SELECT 'r'||status FROM access_requests ORDER BY 1`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(rows, ",")
+	}
+	before := grants()
+	for kind, principal := range map[string]string{"users": userB.ID, "groups": groupB.ID} {
+		for _, on := range []bool{true, false} {
+			if err := a.SetAppAssignment(app.ID, kind, principal, on, nil); !errors.Is(err, ErrAppRecordMissing) {
+				t.Errorf("SetAppAssignment %s %v: %v", kind, on, err)
+			}
+			if err := a.SetAppRoleAssignment(app.ID, role.ID, kind, principal, on, nil); !errors.Is(err, ErrAppRecordMissing) {
+				t.Errorf("SetAppRoleAssignment %s %v: %v", kind, on, err)
+			}
+		}
+	}
+	if err := a.SetAppAssignmentUntil(app.ID, "users", userB.ID, nil, nil); !errors.Is(err, ErrAppRecordMissing) {
+		t.Errorf("SetAppAssignmentUntil: %v", err)
+	}
+	if _, err := a.ExplainAccess(userB.ID, app.ID); !errors.Is(err, ErrUserMissing) {
+		t.Errorf("ExplainAccess: %v", err)
+	}
+	if _, err := a.DecideAccessRequest(req.ID, adminA.ID, true, "", nil); !errors.Is(err, ErrRequestNotPending) {
+		t.Errorf("DecideAccessRequest: %v", err)
+	}
+	if after := grants(); after != before {
+		t.Fatalf("grants changed:\n before %s\n after  %s", before, after)
+	}
+	users, err := a.ListAppAccessUsers(app.ID, "", "all_active_users", nil, 50, 0)
+	if err != nil || users.Total != 1 || users.Users[0].ID != userA.ID || users.GainingAccess != 1 || users.LosingAccess != 0 {
+		t.Errorf("ListAppAccessUsers: %+v %v", users, err)
+	}
+	groups, total, err := a.ListAppAccessGroups(app.ID, "", 50, 0)
+	if err != nil || total != 1 || groups[0].ID != groupA.ID {
+		t.Errorf("ListAppAccessGroups: %v %d %v", groups, total, err)
+	}
+	roles, err := a.ListAppRoles(app.ID)
+	if err != nil || len(roles) != 1 || len(roles[0].Users)+len(roles[0].Groups) != 0 {
+		t.Errorf("ListAppRoles shows B's mappings: %+v %v", roles, err)
+	}
+	if list, total, err := a.ListAccessRequests(AccessRequestFilter{Limit: 50}); err != nil || total != 0 || len(list) != 0 {
+		t.Errorf("ListAccessRequests: %v %d %v", list, total, err)
+	}
+	if list, total, err := b.ListAccessRequests(AccessRequestFilter{Limit: 50}); err != nil || total != 1 || list[0].ID != req.ID {
+		t.Errorf("B's own ListAccessRequests: %v %d %v", list, total, err)
+	}
+}

@@ -118,7 +118,7 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 	if err := s.CreateUpstreamGroup(g, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 0 {

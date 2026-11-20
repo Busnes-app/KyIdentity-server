@@ -57,7 +57,7 @@ func (h *AccessRequestHandler) ListOwn(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	requests, _, err := h.store.ListAccessRequests(store.AccessRequestFilter{UserID: user.ID, Limit: 50})
+	requests, _, err := orgStore(r).ListAccessRequests(store.AccessRequestFilter{UserID: user.ID, Limit: 50})
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -118,7 +118,7 @@ func (h *AccessRequestHandler) Inbox(w http.ResponseWriter, r *http.Request) {
 		status = ""
 	}
 	actor := GetUserFromContext(r.Context())
-	requests, total, err := h.store.ListAccessRequests(store.AccessRequestFilter{ActorID: actor.ID, Status: status, Limit: p.Limit, Offset: p.Offset})
+	requests, total, err := orgStore(r).ListAccessRequests(store.AccessRequestFilter{ActorID: actor.ID, Status: status, Limit: p.Limit, Offset: p.Offset})
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -145,7 +145,7 @@ func (h *AccessRequestHandler) Decide(approve bool) http.HandlerFunc {
 			action = "access.request_approved"
 		}
 		pending := h.audit.Prepare(action, actor.ID, actor.Username, r.PathValue("id"), "access_request", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-		decided, err := h.store.DecideAccessRequest(r.PathValue("id"), actor.ID, approve, req.Note, pending.Row)
+		decided, err := orgStore(r).DecideAccessRequest(r.PathValue("id"), actor.ID, approve, req.Note, pending.Row)
 		if err != nil {
 			writeAccessRequestError(w, err)
 			return

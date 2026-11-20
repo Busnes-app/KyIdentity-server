@@ -12,7 +12,7 @@ import (
 func refreshFixture(t *testing.T, idle, life time.Duration) (*Store, *User, *RefreshFamily) {
 	t.Helper()
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	accessCode(t, s, u, "code")
@@ -187,7 +187,7 @@ func TestRotateRefreshTokenClampsAccessExpiry(t *testing.T) {
 // code, and the refusal leaves no family or token rows behind.
 func TestCreateRefreshFamilyRequiresSpentCode(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	accessCode(t, s, u, "unspent")

@@ -55,13 +55,13 @@ func TestReconcileJobListsAndRepairsGenericSCIM(t *testing.T) {
 		others = append(others, o)
 	}
 	for _, x := range []*store.User{u, others[0], others[1], others[2]} {
-		if err := s.SetAppAssignment(app.ID, "users", x.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", x.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
 	drain(t, e)
 	// fourth loses access and is deactivated; the target later reactivates it by itself.
-	if err := s.SetAppAssignment(app.ID, "users", others[2].ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", others[2].ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -155,11 +155,11 @@ func TestReconcileJobDoesNotBlockDelivery(t *testing.T) {
 		if err := s.DefaultOrg().CreateUser(o); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.SetAppAssignment(app.ID, "users", o.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", o.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -182,7 +182,7 @@ func TestReconcileJobDoesNotBlockDelivery(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
@@ -243,18 +243,18 @@ func TestReconcileJobRejectsOverlongRemoteIDs(t *testing.T) {
 		}
 	}
 	for _, x := range []*store.User{u, revoked} {
-		if err := s.SetAppAssignment(app.ID, "users", x.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", x.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
 	drain(t, e)
-	if err := s.SetAppAssignment(app.ID, "users", revoked.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", revoked.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
 	// adopted has access but no mapping yet: a complete repair would link it to
 	// whatever the target lists under its externalId.
-	if err := s.SetAppAssignment(app.ID, "users", adopted.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", adopted.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The target reactivates the revoked account and lists a 140-rune id next to
@@ -319,10 +319,10 @@ func TestRepairReprovisionsWipedTarget(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "users", direct.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", direct.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -379,7 +379,7 @@ func TestRepairedGroupGetsItsMemberOnceTheMemberIsCreated(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -428,10 +428,10 @@ func TestGroupWriteChecksTheMappingOfAMemberItAdds(t *testing.T) {
 	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -475,7 +475,7 @@ func TestLargeGroupAdditionCompletesAndSkipsAReassignedMember(t *testing.T) {
 	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	var users []*store.User
@@ -484,7 +484,7 @@ func TestLargeGroupAdditionCompletesAndSkipsAReassignedMember(t *testing.T) {
 		if err := s.DefaultOrg().CreateUser(u); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 		users = append(users, u)
@@ -539,7 +539,7 @@ func TestRepairCountsAReusedRemoteID(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, x := range []*store.User{u, other} {
-		if err := s.SetAppAssignment(app.ID, "users", x.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", x.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

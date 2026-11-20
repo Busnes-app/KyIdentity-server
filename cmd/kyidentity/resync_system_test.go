@@ -68,7 +68,7 @@ func TestResyncSystem(t *testing.T) {
 		}
 	}
 	for _, on := range []bool{true, false} {
-		if err := s.SetAppAssignment(appID, "users", u.ID, on, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(appID, "users", u.ID, on, nil); err != nil {
 			t.Fatal(err)
 		}
 		deliver()

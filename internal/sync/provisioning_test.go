@@ -269,10 +269,10 @@ func TestGenericSCIMFollowsAssignments(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -291,21 +291,21 @@ func TestGenericSCIMFollowsAssignments(t *testing.T) {
 		t.Fatal("resync provisioned an unassigned user", ok, remote.posts)
 	}
 	// One of two grants goes: the account stays active.
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
 	if got, _ := remote.userByExternal(u.ID); !got.Active {
 		t.Fatal("removing one grant deactivated the account")
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
 	if got, _ := remote.userByExternal(u.ID); got.Active {
 		t.Fatal("final removal left the account active")
 	}
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -316,7 +316,7 @@ func TestGenericSCIMFollowsAssignments(t *testing.T) {
 	remote.mu.Lock()
 	remote.users = map[string]scim.User{}
 	remote.mu.Unlock()
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -362,7 +362,7 @@ func TestGenericSCIMGroupDelivery(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -401,7 +401,7 @@ func TestGenericSCIMGroupDelivery(t *testing.T) {
 	if g, _ := remote.groupByExternal(group.ID); g.DisplayName != "staff" || remote.posts["Groups"] != 1 {
 		t.Fatal(g, remote.posts)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -435,7 +435,7 @@ func groupFixture(t *testing.T) (*Engine, *store.Store, *fakeSCIM, *store.Group,
 	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -550,11 +550,11 @@ func TestSuiteReceiverRevisionsAndInactiveNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := appRecordFor(t, s, sys.ID)
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -568,7 +568,7 @@ func TestSuiteReceiverRevisionsAndInactiveNotFound(t *testing.T) {
 	if err := s.DefaultOrg().CreateUser(stranger); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "users", stranger.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", stranger.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	ev, err := s.ClaimDueSyncEvents(10, time.Minute)
@@ -580,7 +580,7 @@ func TestSuiteReceiverRevisionsAndInactiveNotFound(t *testing.T) {
 	}
 	// The create is fenced when scope is lost, so the disable queues behind it; the
 	// fenced create is then abandoned without ever reaching the receiver.
-	if err := s.SetAppAssignment(app.ID, "users", stranger.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", stranger.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.FinishSyncDelivery(ev[0], "failed", "rejected", 5, nil); err != nil {
@@ -620,7 +620,7 @@ func TestConcurrentDispatchAndRestartPreserveOrdering(t *testing.T) {
 	assigned := false
 	for i := 0; i < 6; i++ {
 		assigned = !assigned
-		if err := s.SetAppAssignment(app.ID, "users", u.ID, assigned, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, assigned, nil); err != nil {
 			t.Fatal(err)
 		}
 		dispatchers(e)
@@ -662,7 +662,7 @@ func TestRevokedRolesReachTheTargetAsAnEmptyList(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := appRecordFor(t, s, sys.ID)
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -670,14 +670,14 @@ func TestRevokedRolesReachTheTargetAsAnEmptyList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
 	if got, _ := remote.userByExternal(u.ID); len(got.Roles) != 1 || got.Roles[0].Value != "operator" {
 		t.Fatalf("role did not reach the target: %+v", got.Roles)
 	}
-	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -714,11 +714,11 @@ func TestCreateCarriesTheExplicitRoleList(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The role is held before the account exists downstream.
-	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{u.ID, other.ID} {
-		if err := s.SetAppAssignment(app.ID, "users", id, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", id, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -756,17 +756,17 @@ func TestUserReplaceRequiresCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
 	remote.mu.Lock()
 	remote.putStatus = http.StatusAccepted
 	remote.mu.Unlock()
-	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, role.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -797,12 +797,12 @@ func TestResyncDeactivatesAccountsARestoredTargetReadmits(t *testing.T) {
 	}
 	app := appRecordFor(t, s, sys.ID)
 	for _, id := range []string{u.ID, gone.ID} {
-		if err := s.SetAppAssignment(app.ID, "users", id, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", id, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
 	drain(t, e)
-	if err := s.SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().DeleteUserWithSyncEvents(gone.ID, nil); err != nil {
@@ -847,7 +847,7 @@ func TestGenericSCIMRemovalBeforeCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	remote.users["held"] = scim.User{ID: "held", ExternalID: u.ID, UserName: u.Username, Active: true}
-	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	setStatus(t, s, u, "disabled")
@@ -898,7 +898,7 @@ func TestSuiteRemovalWhileCreateRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.DispatchPendingEvents(context.Background()); err != nil {

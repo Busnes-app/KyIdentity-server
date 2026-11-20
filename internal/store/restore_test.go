@@ -63,7 +63,7 @@ func restoreFixture(t *testing.T) (*Store, func()) {
 	// of them is still what this directory wants: nothing supersedes the queued work,
 	// which is what makes it eligible to be re-pended after a restore.
 	app := provisioningFixture(t, s, "hr")
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	var revision int
@@ -341,7 +341,7 @@ func TestRestoreKeepsQueuedRemovals(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT id FROM app_registry WHERE system_id='hr'`).Scan(&appID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(appID, "users", userID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appID, "users", userID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	var removal string

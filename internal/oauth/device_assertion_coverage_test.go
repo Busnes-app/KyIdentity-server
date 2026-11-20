@@ -83,7 +83,7 @@ func TestExchangeDeviceAssertionBoundedByAccessGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	until := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
-	if err := f.db.SetAppAssignmentUntil(a.ID, "users", f.user.ID, &until, nil); err != nil {
+	if err := f.db.DefaultOrg().SetAppAssignmentUntil(a.ID, "users", f.user.ID, &until, nil); err != nil {
 		t.Fatal(err)
 	}
 	resp, _, err := f.covExchange(t, signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil)))
@@ -154,7 +154,7 @@ func TestExchangeDeviceAssertionRefusesOversizedClaims(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := f.db.SetAppRoleAssignment(a.ID, r.ID, "users", f.user.ID, true, nil); err != nil {
+		if err := f.db.DefaultOrg().SetAppRoleAssignment(a.ID, r.ID, "users", f.user.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

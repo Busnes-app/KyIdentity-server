@@ -11,7 +11,7 @@ import (
 // or owner of that app. The route's permission scopes it to the app; the answer names
 // only groups assigned to that app, which the same viewers already see.
 func (h *AdminHandler) ExplainAppAccess(w http.ResponseWriter, r *http.Request) {
-	e, err := h.store.ExplainAccess(r.PathValue("userId"), r.PathValue("id"))
+	e, err := orgStore(r).ExplainAccess(r.PathValue("userId"), r.PathValue("id"))
 	switch {
 	case errors.Is(err, store.ErrAppRecordMissing), errors.Is(err, store.ErrUserMissing):
 		http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
@@ -35,7 +35,7 @@ func (h *AccessRequestHandler) OwnAccessExplanation(w http.ResponseWriter, r *ht
 	}
 	user := GetUserFromContext(r.Context())
 	denied := map[string]any{"allowed": false, "reason": "no_access", "requestable": false}
-	e, err := h.store.ExplainClientAccess(user.ID, clientID)
+	e, err := orgStore(r).ExplainClientAccess(user.ID, clientID)
 	switch {
 	case errors.Is(err, store.ErrAppRecordMissing):
 		writeGroupJSON(w, denied)

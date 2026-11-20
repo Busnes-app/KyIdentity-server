@@ -20,11 +20,11 @@ func TestExpiredGrantsLoseAccessWithoutTheWorker(t *testing.T) {
 	if err := s.SetAppPolicy(a.ID, "assigned_only", true, a.Revision, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignmentUntil(a.ID, "users", u.ID, future(-time.Minute), nil); !errors.Is(err, ErrExpiryInPast) {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(a.ID, "users", u.ID, future(-time.Minute), nil); !errors.Is(err, ErrExpiryInPast) {
 		t.Fatalf("past expiry accepted: %v", err)
 	}
 	until := future(time.Hour)
-	if err := s.SetAppAssignmentUntil(a.ID, "users", u.ID, until, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(a.ID, "users", u.ID, until, nil); err != nil {
 		t.Fatal(err)
 	}
 	if allowed, _ := s.ClientAccessAllowed(u.ID, "client"); !allowed {
@@ -57,7 +57,7 @@ func TestExpiredGrantsLoseAccessWithoutTheWorker(t *testing.T) {
 	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().SetGroupMembershipUntil("staff", u.ID, future(time.Hour), "", nil); err != nil {
@@ -86,20 +86,20 @@ func TestRunDueExpiriesRevokesAndDeprovisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	clientApps, _, _ := s.ListAppRecords("client", 1, 0)
-	if err := s.SetAppAssignmentUntil(appID, "users", u.ID, future(time.Hour), nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(appID, "users", u.ID, future(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignmentUntil(appID, "users", other.ID, future(time.Hour), nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(appID, "users", other.ID, future(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignmentUntil(clientApps[0].ID, "users", u.ID, future(time.Hour), nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(clientApps[0].ID, "users", u.ID, future(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().CreateGroup(&Group{ID: "ops", Name: "Ops"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, _ := s.CreateAppRole(clientApps[0].ID, "operator", "", nil)
-	if err := s.SetAppRoleAssignment(clientApps[0].ID, role.ID, "groups", "ops", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(clientApps[0].ID, role.ID, "groups", "ops", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().SetGroupMembershipUntil("ops", u.ID, future(time.Hour), "", nil); err != nil {
@@ -119,17 +119,17 @@ func TestRunDueExpiriesRevokesAndDeprovisions(t *testing.T) {
 	if claims, _ := s.UserAppClaims(u.ID, "client"); len(claims.Roles) != 1 {
 		t.Fatalf("role not held before expiry: %+v", claims)
 	}
-	if run, err := s.RunDueExpiries(time.Now().UTC()); err != nil || run.Assignments+run.Memberships+run.Accounts != 0 {
+	if run, err := s.Platform().RunDueExpiries(time.Now().UTC()); err != nil || run.Assignments+run.Memberships+run.Accounts != 0 {
 		t.Fatalf("nothing is due yet: %+v %v", run, err)
 	}
 	// Everything of u's expires; other's grant is extended just before the run.
 	if _, err := s.db.Exec(`UPDATE app_user_assignments SET expires_at=unixepoch()-5; UPDATE group_memberships SET expires_at=unixepoch()-5`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignmentUntil(appID, "users", other.ID, future(2*time.Hour), nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(appID, "users", other.ID, future(2*time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.RunDueExpiries(time.Now().UTC())
+	run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 	if err != nil || run.Assignments != 2 || run.Memberships != 1 || run.Accounts != 0 {
 		t.Fatalf("run = %+v %v", run, err)
 	}
@@ -157,7 +157,7 @@ func TestRunDueExpiriesRevokesAndDeprovisions(t *testing.T) {
 	if expired != 3 {
 		t.Fatalf("expiry audit rows = %d", expired)
 	}
-	if run, err := s.RunDueExpiries(time.Now().UTC()); err != nil || run.Assignments+run.Memberships != 0 {
+	if run, err := s.Platform().RunDueExpiries(time.Now().UTC()); err != nil || run.Assignments+run.Memberships != 0 {
 		t.Fatalf("second run repeated work: %+v %v", run, err)
 	}
 }
@@ -197,7 +197,7 @@ func TestAccountEndDate(t *testing.T) {
 	if sess, _ := s.GetSessionByTokenHash("hash", time.Hour); sess == nil {
 		t.Fatal("fixture session missing")
 	}
-	run, err := s.RunDueExpiries(time.Now().UTC())
+	run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 	if err != nil || run.Accounts != 1 {
 		t.Fatalf("run = %+v %v", run, err)
 	}
@@ -212,7 +212,7 @@ func TestAccountEndDate(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE users SET ends_at=unixepoch()-1 WHERE id=?`, admin.ID); err != nil {
 		t.Fatal(err)
 	}
-	if run, err := s.RunDueExpiries(time.Now().UTC()); err != nil || run.Accounts != 0 {
+	if run, err := s.Platform().RunDueExpiries(time.Now().UTC()); err != nil || run.Accounts != 0 {
 		t.Fatalf("last admin ended: %+v %v", run, err)
 	}
 	got, _ := s.DefaultOrg().GetUserByID(admin.ID)
@@ -281,7 +281,7 @@ func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
 	apps, _, _ := s.ListAppRecords("client", 1, 0)
 	stuck, fine, ending := createTestUserNamed(t, s, "stuck"), createTestUserNamed(t, s, "fine"), createTestUserNamed(t, s, "ending")
 	for _, u := range []*User{stuck, fine} {
-		if err := s.SetAppAssignmentUntil(apps[0].ID, "users", u.ID, future(time.Hour), nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignmentUntil(apps[0].ID, "users", u.ID, future(time.Hour), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -301,7 +301,7 @@ func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
 	if _, err := s.db.Exec(dialect(s, `CREATE TRIGGER stuck_row BEFORE DELETE ON app_user_assignments WHEN OLD.user_id='`+stuck.ID+`' BEGIN SELECT RAISE(ABORT,'row is stuck'); END`)); err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.RunDueExpiries(time.Now().UTC())
+	run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 	if err == nil || !strings.Contains(err.Error(), "row is stuck") {
 		t.Fatalf("stuck row not reported: %v", err)
 	}
@@ -322,13 +322,13 @@ func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
 	if failed != 1 {
 		t.Fatalf("failure audit rows = %d", failed)
 	}
-	if run, err = s.RunDueExpiries(time.Now().UTC()); err == nil || run.Assignments+run.Memberships+run.Accounts != 0 {
+	if run, err = s.Platform().RunDueExpiries(time.Now().UTC()); err == nil || run.Assignments+run.Memberships+run.Accounts != 0 {
 		t.Fatalf("second pass: %+v %v", run, err)
 	}
 	if _, err := s.db.Exec(dialect(s, `DROP TRIGGER stuck_row`)); err != nil {
 		t.Fatal(err)
 	}
-	if run, err = s.RunDueExpiries(time.Now().UTC()); err != nil || run.Assignments != 1 {
+	if run, err = s.Platform().RunDueExpiries(time.Now().UTC()); err != nil || run.Assignments != 1 {
 		t.Fatalf("recovered pass: %+v %v", run, err)
 	}
 }
@@ -343,11 +343,11 @@ func TestAccessEndsAtFollowsTheUnion(t *testing.T) {
 	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	direct, membership := future(time.Hour), future(3*time.Hour)
-	if err := s.SetAppAssignmentUntil(a.ID, "users", u.ID, direct, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(a.ID, "users", u.ID, direct, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().SetGroupMembershipUntil("staff", u.ID, membership, "", nil); err != nil {
@@ -472,7 +472,7 @@ func TestExpiryFollowUpKeepsARenewalMadeAfterItsScan(t *testing.T) {
 	mustExec(t, s, `UPDATE group_memberships SET expires_at=unixepoch()-1`)
 	mustExec(t, s, `CREATE TRIGGER renew_other AFTER DELETE ON group_memberships BEGIN
  UPDATE group_memberships SET expires_at=unixepoch()+3600 WHERE group_id=OLD.group_id AND user_id<>OLD.user_id; END`)
-	run, err := s.RunDueExpiries(time.Now().UTC())
+	run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

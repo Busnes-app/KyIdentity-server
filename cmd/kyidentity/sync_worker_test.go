@@ -55,7 +55,7 @@ func assignUser(t *testing.T, s *store.Store, appID, name string) {
 	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(appID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 }

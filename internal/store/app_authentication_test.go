@@ -38,7 +38,7 @@ func TestAppAuthenticationEvidence(t *testing.T) {
 
 func TestAppAuthenticationRevocationAndRollback(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	apps, _, _ := s.ListAppRecords("client", 25, 0)
@@ -110,7 +110,7 @@ func TestAppAuthenticationRevocationAndRollback(t *testing.T) {
 
 func TestAppAuthenticationFinalCodeCheck(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	apps, _, _ := s.ListAppRecords("client", 25, 0)
@@ -158,7 +158,7 @@ func TestAppAuthenticationFinalCodeCheck(t *testing.T) {
 
 func TestAppAuthenticationExchangeRace(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	apps, _, _ := s.ListAppRecords("client", 25, 0)
@@ -194,7 +194,7 @@ func TestAppAuthenticationExchangeRace(t *testing.T) {
 func TestAppAuthenticationUpgradeAndLinks(t *testing.T) {
 	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	accessCode(t, s, u, "preupgrade")
@@ -229,7 +229,7 @@ func TestAppAuthenticationUpgradeAndLinks(t *testing.T) {
 	if p, _ := s.ClientAuthenticationPolicy("client"); p != a.Authentication {
 		t.Fatal("upgrade changed default SSO")
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateApplication(&Application{ID: "launcher", Name: "Card", URL: "https://example.com", Enabled: true}, nil); err != nil {

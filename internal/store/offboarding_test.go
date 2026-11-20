@@ -12,7 +12,7 @@ import (
 func provisionedUser(t *testing.T, s *Store, u *User, systemID string) {
 	t.Helper()
 	app := provisioningFixture(t, s, systemID)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if events := deliverAll(t, s); len(events) != 1 || events[0].EventType != "user.created" {

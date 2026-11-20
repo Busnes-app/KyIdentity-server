@@ -209,8 +209,10 @@ func scanAccessRequest(row interface{ Scan(...any) error }) (*AccessRequest, err
 	return r, nil
 }
 
-func (s *Store) ListAccessRequests(f AccessRequestFilter) ([]AccessRequest, int, error) {
-	where, args := ` WHERE 1=1`, []any{}
+// ListAccessRequests pages the requests of the org's users.
+func (o *OrgStore) ListAccessRequests(f AccessRequestFilter) ([]AccessRequest, int, error) {
+	s := o.s
+	where, args := ` WHERE u.org_id=?`, []any{o.org}
 	if f.UserID != "" {
 		where, args = where+` AND r.user_id=?`, append(args, f.UserID)
 	}
@@ -225,7 +227,7 @@ func (s *Store) ListAccessRequests(f AccessRequestFilter) ([]AccessRequest, int,
 		where = where + ` AND r.expires_at>unixepoch()`
 	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM access_requests r`+where, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM access_requests r JOIN users u ON u.id=r.user_id`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := s.db.Query(accessRequestSelect+where+` ORDER BY r.created_at DESC, r.id LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
@@ -249,7 +251,9 @@ func (s *Store) ListAccessRequests(f AccessRequestFilter) ([]AccessRequest, int,
 // read under the write lock, so a stale form, a withdrawn delegation or a second
 // decision cannot grant anything. An approval is a direct assignment with the requested
 // expiry, written through the same path as a manual grant.
-func (s *Store) DecideAccessRequest(id, actorID string, approve bool, note string, audit *AuditEvent) (*AccessRequest, error) {
+// Another org's request is ErrRequestNotPending, like a missing one.
+func (o *OrgStore) DecideAccessRequest(id, actorID string, approve bool, note string, audit *AuditEvent) (*AccessRequest, error) {
+	s := o.s
 	note = strings.TrimSpace(note)
 	if len(note) > maxReasonLength {
 		return nil, ErrAppLinkConflict
@@ -257,7 +261,7 @@ func (s *Store) DecideAccessRequest(id, actorID string, approve bool, note strin
 	now := time.Now().UTC()
 	var out *AccessRequest
 	err := s.auditedTx(audit, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE access_requests SET status=status WHERE id=? AND status='pending'`, id)
+		res, err := tx.Exec(`UPDATE access_requests SET status=status WHERE id=? AND status='pending' AND user_id IN (SELECT id FROM users WHERE org_id=?)`, id, o.org)
 		if err != nil {
 			return err
 		}
@@ -308,7 +312,7 @@ func (s *Store) DecideAccessRequest(id, actorID string, approve bool, note strin
 			}
 			keep := err == nil && (!current.Valid || expiresAt != nil && current.Int64 >= expiresAt.Unix())
 			if !keep {
-				if _, err := applyAppAssignmentTx(tx, req.AppID, "users", req.UserID, true, expiresAt); err != nil {
+				if _, err := applyAppAssignmentTx(tx, o.org, req.AppID, "users", req.UserID, true, expiresAt); err != nil {
 					return err
 				}
 			}

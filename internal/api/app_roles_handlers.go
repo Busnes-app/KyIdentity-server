@@ -21,7 +21,7 @@ func writeAppRoleError(w http.ResponseWriter, err error) {
 
 func (h *AdminHandler) ListAppRoles(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	roles, err := h.store.ListAppRoles(id)
+	roles, err := orgStore(r).ListAppRoles(id)
 	if err != nil {
 		writeAppRegistryError(w, err)
 		return
@@ -78,7 +78,7 @@ func (h *AdminHandler) SetAppRoleAssignment(w http.ResponseWriter, r *http.Reque
 	}
 	actor := GetUserFromContext(r.Context())
 	event := h.audit.Prepare(action, actor.ID, actor.Username, r.PathValue("id"), "application", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	if err := h.store.SetAppRoleAssignment(r.PathValue("id"), r.PathValue("roleId"), kind, r.PathValue("principal"), assigned, event.Row); err != nil {
+	if err := orgStore(r).SetAppRoleAssignment(r.PathValue("id"), r.PathValue("roleId"), kind, r.PathValue("principal"), assigned, event.Row); err != nil {
 		writeAppRoleError(w, err)
 		return
 	}

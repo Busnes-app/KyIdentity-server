@@ -87,7 +87,7 @@ func TestInstallerSCIMGlobalDisableAcrossOwnedConnectors(t *testing.T) {
 			}
 			if loseOneFirst {
 				app := appRecordFor(t, s, systems["first"])
-				if err := s.SetAppAssignment(app.ID, "users", day.ID, false, nil); err != nil {
+				if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", day.ID, false, nil); err != nil {
 					t.Fatal(err)
 				}
 				drain(t, e)

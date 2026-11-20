@@ -53,7 +53,7 @@ func newFwdFixture(t *testing.T) *fwdFixture {
 		}
 		p, _ := db.ProxyAppByHost(host)
 		f.apps[host] = fwdApp{id: out.ProxyApp.ID, appID: p.AppID, secret: out.EdgeSecret}
-		if err := db.SetAppAssignment(p.AppID, "users", f.user.ID, true, nil); err != nil {
+		if err := db.DefaultOrg().SetAppAssignment(p.AppID, "users", f.user.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -227,7 +227,7 @@ func TestForwardLoginHeaderAndGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 		if name != "unassigned" {
-			if err := f.db.SetAppAssignment(p.AppID, "groups", g.ID, true, nil); err != nil {
+			if err := f.db.DefaultOrg().SetAppAssignment(p.AppID, "groups", g.ID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -408,7 +408,7 @@ func TestForwardRevocationWithin30Seconds(t *testing.T) {
 			}
 		}, http.StatusUnauthorized},
 		{"unassigned", func(u *store.User) {
-			if err := f.db.SetAppAssignment(p.AppID, "users", u.ID, false, nil); err != nil {
+			if err := f.db.DefaultOrg().SetAppAssignment(p.AppID, "users", u.ID, false, nil); err != nil {
 				t.Fatal(err)
 			}
 		}, http.StatusForbidden},
@@ -420,7 +420,7 @@ func TestForwardRevocationWithin30Seconds(t *testing.T) {
 	}
 	for _, c := range cases {
 		u := newUser(t, f.db, "user")
-		if err := f.db.SetAppAssignment(p.AppID, "users", u.ID, true, nil); err != nil {
+		if err := f.db.DefaultOrg().SetAppAssignment(p.AppID, "users", u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 		cookie := f.signIn(appHost, f.loginSession(u, "push", time.Now().UTC()))

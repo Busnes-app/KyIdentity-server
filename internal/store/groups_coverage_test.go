@@ -64,7 +64,7 @@ func TestDeleteGroupRevokesGrantedAccess(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership("staff", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {

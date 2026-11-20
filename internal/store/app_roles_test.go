@@ -57,7 +57,7 @@ func TestAppRolesAreScopedToTheirApp(t *testing.T) {
 			t.Fatalf("invalid role name %q accepted: %v", bad, err)
 		}
 	}
-	if err := s.SetAppRoleAssignment(billing.ID, role.ID, "groups", "finance", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "groups", "finance", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	claims, err := s.UserAppClaims(u.ID, "billing")
@@ -72,28 +72,28 @@ func TestAppRolesAreScopedToTheirApp(t *testing.T) {
 		t.Fatalf("role leaked into another app: %+v", other)
 	}
 	// A direct mapping and a group mapping to the same role yield the role once.
-	if err := s.SetAppRoleAssignment(billing.ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if claims, _ = s.UserAppClaims(u.ID, "billing"); len(claims.Roles) != 1 {
 		t.Fatalf("duplicate role: %+v", claims)
 	}
-	listed, _ := s.ListAppRoles(billing.ID)
+	listed, _ := s.DefaultOrg().ListAppRoles(billing.ID)
 	if len(listed) != 1 || len(listed[0].Users) != 1 || len(listed[0].Groups) != 1 || listed[0].Groups[0].Name != "Finance" {
 		t.Fatalf("listing: %+v", listed)
 	}
 	// Mapping a role of one app through another app's id is refused.
-	if err := s.SetAppRoleAssignment(hr.ID, role.ID, "users", u.ID, true, nil); !errors.Is(err, ErrAppRecordMissing) {
+	if err := s.DefaultOrg().SetAppRoleAssignment(hr.ID, role.ID, "users", u.ID, true, nil); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatalf("cross-app mapping: %v", err)
 	}
-	if err := s.SetAppRoleAssignment(billing.ID, role.ID, "users", uuid.NewString(), true, nil); !errors.Is(err, ErrAppRecordMissing) {
+	if err := s.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "users", uuid.NewString(), true, nil); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatalf("unknown principal: %v", err)
 	}
 	// Removing the group mapping leaves the direct one; removing that leaves nothing.
-	if err := s.SetAppRoleAssignment(billing.ID, role.ID, "groups", "finance", false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "groups", "finance", false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppRoleAssignment(billing.ID, role.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if claims, _ = s.UserAppClaims(u.ID, "billing"); len(claims.Roles) != 0 {
@@ -114,7 +114,7 @@ func TestRoleChangesRevokeGrantsAndBlockStaleCodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	role, _ := s.CreateAppRole(billing.ID, "reader", "", nil)
-	if err := s.SetAppRoleAssignment(billing.ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	code := func(id, client string, user *User, session string) {
@@ -137,7 +137,7 @@ func TestRoleChangesRevokeGrantsAndBlockStaleCodes(t *testing.T) {
 		t.Fatal("consume")
 	}
 
-	if err := s.SetAppRoleAssignment(billing.ID, role.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if revoked, _ := s.IsTokenRevoked("t-billing"); !revoked {
@@ -193,7 +193,7 @@ func TestAppRolesReachProvisioningAndDeletingARoleRevokesIt(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership("ops", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(appID, "groups", "ops", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appID, "groups", "ops", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
@@ -201,7 +201,7 @@ func TestAppRolesReachProvisioningAndDeletingARoleRevokesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppRoleAssignment(appID, role.ID, "groups", "ops", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(appID, role.ID, "groups", "ops", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	var payload string
@@ -221,7 +221,7 @@ func TestAppRolesReachProvisioningAndDeletingARoleRevokesIt(t *testing.T) {
 	if strings.Contains(payload, `"operator"`) {
 		t.Fatalf("deleted role still delivered: %s", payload)
 	}
-	if roles, _ := s.ListAppRoles(appID); len(roles) != 0 {
+	if roles, _ := s.DefaultOrg().ListAppRoles(appID); len(roles) != 0 {
 		t.Fatalf("role survived deletion: %+v", roles)
 	}
 	// Apps with roles cannot be linked or unlinked until the roles are removed.
@@ -253,7 +253,7 @@ func TestLeavingAMappedGroupRevokesTheRoleDownstream(t *testing.T) {
 		t.Fatal(err)
 	}
 	role, _ := s.CreateAppRole(appID, "operator", "", nil)
-	if err := s.SetAppRoleAssignment(appID, role.ID, "groups", "ops", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(appID, role.ID, "groups", "ops", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DefaultOrg().SetGroupMembership("ops", u.ID, true, nil); err != nil {
@@ -303,11 +303,11 @@ func TestRevokedRolesAreSentAsAnEmptyList(t *testing.T) {
 	if _, err := s.CreateAppRole(appID, "other", "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppRoleAssignment(appID, held.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(appID, held.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
-	if err := s.SetAppRoleAssignment(appID, held.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(appID, held.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	var payload string
@@ -358,7 +358,7 @@ func TestFirstAndLastRoleRepushEveryProvisionedProfile(t *testing.T) {
 	if n := pendingRoleEvents(t, s, u.ID); n != 0 {
 		t.Fatalf("deleting one of two roles re-sent %d profiles for nothing", n)
 	}
-	roles, _ := s.ListAppRoles(appID)
+	roles, _ := s.DefaultOrg().ListAppRoles(appID)
 	if err := s.DeleteAppRole(appID, roles[0].ID, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestRetryAndRepairSendAppRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppRoleAssignment(appID, member.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(appID, member.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
@@ -456,7 +456,7 @@ func TestProvisioningGlobalAdminNeedsExplicitAppRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("target", `"roles":[]`)
-	if err := s.SetAppRoleAssignment(appID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(appID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	check("target", `"roles":[{"value":"admin","primary":true}]`)
@@ -519,7 +519,7 @@ func TestLegacyRoleRefreshPreservesUncertainAttempt(t *testing.T) {
 	u := createTestUser(t, s)
 	// This reset's active profile represents a current app entitlement. Access-loss
 	// narrowing is covered separately; this test pins role refresh after recovery.
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)

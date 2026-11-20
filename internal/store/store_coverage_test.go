@@ -257,7 +257,7 @@ func TestDeleteUserWithSyncEventsRules(t *testing.T) {
 // rolls back both the update and the revocation.
 func TestUpdateOAuthClientWithAuditRevokesOnDisable(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {
@@ -331,7 +331,7 @@ func TestLauncherAppAccessKeys(t *testing.T) {
 	if got, err := s.LauncherAppAccess(u.ID); err != nil || len(got) != 0 {
 		t.Fatal("unassigned user sees apps", got, err)
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.LauncherAppAccess(u.ID)
@@ -357,7 +357,7 @@ func TestLauncherAppAccessKeys(t *testing.T) {
 // filters and pages, and assignment flags reflect only this app.
 func TestListAppAccessGroups(t *testing.T) {
 	s, _, a := appAccessFixture(t)
-	if _, _, err := s.ListAppAccessGroups("missing", "", 25, 0); !errors.Is(err, ErrAppRecordMissing) {
+	if _, _, err := s.DefaultOrg().ListAppAccessGroups("missing", "", 25, 0); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatal("missing app", err)
 	}
 	for _, g := range []string{"Sales", "Support", "Engineering"} {
@@ -365,14 +365,14 @@ func TestListAppAccessGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.SetAppAssignment(a.ID, "groups", "Support", true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "groups", "Support", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	groups, total, err := s.ListAppAccessGroups(a.ID, "s", 1, 1)
+	groups, total, err := s.DefaultOrg().ListAppAccessGroups(a.ID, "s", 1, 1)
 	if err != nil || total != 2 || len(groups) != 1 || groups[0].ID != "Support" || !groups[0].Assigned {
 		t.Fatalf("search page = %+v %d %v", groups, total, err)
 	}
-	groups, total, _ = s.ListAppAccessGroups(a.ID, "", 25, 0)
+	groups, total, _ = s.DefaultOrg().ListAppAccessGroups(a.ID, "", 25, 0)
 	if total != 3 || groups[0].Name != "Engineering" || groups[0].Assigned || groups[1].Assigned {
 		t.Fatalf("full list = %+v %d", groups, total)
 	}
@@ -394,14 +394,14 @@ func TestSetAppPolicyRefusesBadInput(t *testing.T) {
 	if allowed, _ := s.ClientAccessAllowed(u.ID, "client"); allowed {
 		t.Fatal("refused policy granted access")
 	}
-	if _, err := s.ListAppAccessUsers(a.ID, "", "everyone", nil, 25, 0); !errors.Is(err, ErrAppLinkConflict) {
+	if _, err := s.DefaultOrg().ListAppAccessUsers(a.ID, "", "everyone", nil, 25, 0); !errors.Is(err, ErrAppLinkConflict) {
 		t.Fatal("unknown preview mode", err)
 	}
-	if _, err := s.ListAppAccessUsers("missing", "", "", nil, 25, 0); !errors.Is(err, ErrAppRecordMissing) {
+	if _, err := s.DefaultOrg().ListAppAccessUsers("missing", "", "", nil, 25, 0); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatal("missing app preview", err)
 	}
 	off := false
-	p, err := s.ListAppAccessUsers(a.ID, "", "all_active_users", &off, 25, 0)
+	p, err := s.DefaultOrg().ListAppAccessUsers(a.ID, "", "all_active_users", &off, 25, 0)
 	if err != nil || p.GainingAccess != 0 || p.LosingAccess != 0 {
 		t.Fatalf("disabled preview grants access: %+v %v", p, err)
 	}
