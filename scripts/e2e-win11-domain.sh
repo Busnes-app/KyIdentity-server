@@ -321,7 +321,7 @@ _win_cleanup() {
 	fi
 	if [[ -n ${E2E_WIN11_EVIDENCE:-} && -d ${E2E_WIN11_SHOTS:-} ]]; then
 		mkdir -p "$E2E_WIN11_EVIDENCE"
-		cp "$E2E_WIN11_SHOTS"/*.png "$E2E_WIN11_EVIDENCE/" 2>/dev/null || true
+		cp "$E2E_WIN11_SHOTS"/*.png "$E2E_WIN11_SHOTS/run.log" "$E2E_WIN11_EVIDENCE/" 2>/dev/null || true
 	fi
 	win_down
 	dc_down

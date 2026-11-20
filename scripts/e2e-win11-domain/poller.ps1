@@ -1,6 +1,9 @@
 # Runs as SYSTEM from boot: runs each cmd\NAME.ps1 the host drops in the share once, and
 # writes out\NAME.txt then out\NAME.rc (the exit code, written last).
-$share = '\\host.lan\Data'
+# By address, not name: Windows then skips Kerberos (NTLM to the guest share), so the channel
+# keeps working while the DC is unreachable.
+$ip = [Net.Dns]::GetHostAddresses('host.lan') | Where-Object AddressFamily -EQ 'InterNetwork' | Select-Object -First 1
+$share = "\\$ip\Data"
 $run = 'C:\kyws\run'
 New-Item -ItemType Directory -Force $run | Out-Null
 while (-not (Test-Path "$share\out")) { Start-Sleep 2 }
