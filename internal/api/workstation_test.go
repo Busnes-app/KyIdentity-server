@@ -178,10 +178,10 @@ func TestDeviceGrantLifecycle(t *testing.T) {
 	defer done()
 	u, cookie := f.assignedUser()
 	g := &store.Group{ID: uuid.NewString(), Name: "linux-users"}
-	if err := f.db.CreateGroup(g, nil); err != nil {
+	if err := f.db.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
+	if err := f.db.DefaultOrg().SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.db.SetAppAssignment(f.appID, "groups", g.ID, true, nil); err != nil {

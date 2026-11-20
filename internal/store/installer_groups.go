@@ -50,7 +50,7 @@ func configureInstallerGroups(tx *sql.Tx, p InstallerSetup, everydayID string, i
 			}
 			// Reuse native policy and role hooks; new groups start with no MFA requirement.
 			if g.IncludeEveryday {
-				if _, _, err := applyGroupMembershipTx(tx, id, everydayID, true, nil, ""); err != nil {
+				if _, _, err := applyGroupMembershipTx(tx, DefaultOrgID, id, everydayID, true, nil, ""); err != nil {
 					return nil, err
 				}
 				if err := audit("group_membership", g.Name, everydayID); err != nil {

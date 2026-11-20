@@ -33,7 +33,7 @@ func createTestUserNamed(t *testing.T, s *Store, username string) *User {
 		DisplayName: username, Email: username + "@test.invalid",
 		PasswordHash: "x", Role: "user", Status: "active",
 	}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	return u
@@ -97,7 +97,7 @@ func TestDeleteUserWithSyncEventsMigratesLegacyForeignKey(t *testing.T) {
 	if _, err := s.db.Exec(`INSERT INTO sync_resource_state(system_id,resource_id,active,provisioned,revision) VALUES('system','deleted-user',TRUE,TRUE,1)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUserWithSyncEvents("deleted-user", nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents("deleted-user", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,7 +124,7 @@ func TestUpdateUserWithSyncEventsPreservesLastAdmin(t *testing.T) {
 	}
 	defer s.Close()
 	u := &User{ID: "admin", Username: "admin", DisplayName: "Admin", Email: "admin@example.test", PasswordHash: "hash", Role: "admin", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	u.Role = "user"
@@ -140,7 +140,7 @@ func TestIdleSessionIsRejectedBeforeAbsoluteExpiry(t *testing.T) {
 	}
 	defer s.Close()
 	user := &User{ID: "user", Username: "user", DisplayName: "User", Email: "user@example.test", PasswordHash: "hash", Role: "user", Status: "active"}
-	if err := s.CreateUser(user); err != nil {
+	if err := s.DefaultOrg().CreateUser(user); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateSession(&Session{ID: "session", UserID: user.ID, SessionTokenHash: "token", IPAddress: "127.0.0.1", UserAgent: "test", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {

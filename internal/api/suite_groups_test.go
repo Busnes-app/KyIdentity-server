@@ -73,7 +73,7 @@ func TestSuiteGroupLifecycle(t *testing.T) {
 	for _, u := range []*store.User{alice, bob, noAccess, gone, admin} {
 		call("PUT", path+"/members/"+u.ID, "")
 	}
-	if _, err := db.EditUser(gone.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
+	if _, err := db.DefaultOrg().EditUser(gone.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,7 +174,7 @@ func TestSuiteGroupRefusals(t *testing.T) {
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 	userCookie := newSession(t, db, user, time.Now().UTC().Add(time.Hour))
 	g := &store.Group{ID: "g1", Name: "Team"}
-	if err := db.CreateGroup(g, nil); err != nil {
+	if err := db.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
 	path := "/api/admin/groups/g1/suite"

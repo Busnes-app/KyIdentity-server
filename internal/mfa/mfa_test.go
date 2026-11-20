@@ -50,7 +50,7 @@ func setupTestMFAEngine(t *testing.T) (*Engine, *store.Store, *store.User, func(
 		Role:         "user",
 		Status:       "active",
 	}
-	if err := dbStore.CreateUser(user); err != nil {
+	if err := dbStore.DefaultOrg().CreateUser(user); err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
 
@@ -138,7 +138,7 @@ func TestTOTPSecretSwappedBetweenUsersDoesNotOpen(t *testing.T) {
 	engine, s, victim, cleanup := setupTestMFAEngine(t)
 	defer cleanup()
 	attacker := &store.User{ID: uuid.New().String(), Username: "mallory", DisplayName: "M", Email: "m@example.com", PasswordHash: "h", Role: "user", Status: "active"}
-	if err := s.CreateUser(attacker); err != nil {
+	if err := s.DefaultOrg().CreateUser(attacker); err != nil {
 		t.Fatal(err)
 	}
 	for _, u := range []*store.User{victim, attacker} {
@@ -408,7 +408,7 @@ func TestPushResponseRequiresValidDeviceSignature(t *testing.T) {
 			ID: uuid.New().String(), Username: "bob", Email: "bob@example.com",
 			PasswordHash: "mock-hash", Role: "user", Status: "active",
 		}
-		if err := dbStore.CreateUser(other); err != nil {
+		if err := dbStore.DefaultOrg().CreateUser(other); err != nil {
 			t.Fatalf("CreateUser failed: %v", err)
 		}
 

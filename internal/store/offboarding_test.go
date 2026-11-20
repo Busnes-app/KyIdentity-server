@@ -75,10 +75,10 @@ func TestDeletingRevokesAccessQueuesLogoutAndKeepsCompletionState(t *testing.T) 
 	}
 	jti, _, _ := seedGrants(t, s, u.ID, sess, "tok")
 
-	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetUserByID(u.ID); got != nil {
+	if got, _ := s.DefaultOrg().GetUserByID(u.ID); got != nil {
 		t.Fatal("user row survived")
 	}
 	if n := countDeliveries(t, s, `user_id=? AND status='queued'`, u.ID); n != 1 {
@@ -94,7 +94,7 @@ func TestDeletingRevokesAccessQueuesLogoutAndKeepsCompletionState(t *testing.T) 
 		t.Fatalf("remote mapping lost: %q %v", remote, err)
 	}
 
-	off, err := s.UserOffboarding(u.ID)
+	off, err := s.DefaultOrg().UserOffboarding(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestDeletingRevokesAccessQueuesLogoutAndKeepsCompletionState(t *testing.T) 
 	if err := s.FinishLogoutDelivery(d, nil); err != nil {
 		t.Fatal(err)
 	}
-	off, _ = s.UserOffboarding(u.ID)
+	off, _ = s.DefaultOrg().UserOffboarding(u.ID)
 	if !off.Acknowledged || off.Verified || !off.Targets[0].Acknowledged || off.Targets[0].Observed != "" {
 		t.Fatalf("offboarding after acknowledgement: %+v", off)
 	}
@@ -123,14 +123,14 @@ func TestDeletingRevokesAccessQueuesLogoutAndKeepsCompletionState(t *testing.T) 
 	if _, err := s.db.Exec(`UPDATE sync_resource_state SET observed='absent',observed_at=? WHERE resource_id=?`, time.Now().UTC().Add(time.Second), u.ID); err != nil {
 		t.Fatal(err)
 	}
-	off, _ = s.UserOffboarding(u.ID)
+	off, _ = s.DefaultOrg().UserOffboarding(u.ID)
 	if !off.Verified || !off.Targets[0].Verified {
 		t.Fatalf("offboarding after listing: %+v", off)
 	}
 	if _, err := s.db.Exec(`UPDATE sync_resource_state SET observed='unsupported' WHERE resource_id=?`, u.ID); err != nil {
 		t.Fatal(err)
 	}
-	off, _ = s.UserOffboarding(u.ID)
+	off, _ = s.DefaultOrg().UserOffboarding(u.ID)
 	if off.Verified || off.Targets[0].Verified || !off.Acknowledged {
 		t.Fatalf("unsupported verification counted as verified: %+v", off)
 	}
@@ -144,10 +144,10 @@ func TestDeletionRollsBackWhenTheAuditRowCannotBeWritten(t *testing.T) {
 	if _, err := s.EnsureClientSession("app", sess, u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUserWithSyncEvents(u.ID, poisonedAudit(t, s, "admin.user_deleted", u.ID)); err == nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, poisonedAudit(t, s, "admin.user_deleted", u.ID)); err == nil {
 		t.Fatal("deletion succeeded without its audit row")
 	}
-	if got, _ := s.GetUserByID(u.ID); got == nil {
+	if got, _ := s.DefaultOrg().GetUserByID(u.ID); got == nil {
 		t.Fatal("user deleted despite rollback")
 	}
 	if n := countDeliveries(t, s, `1=1`); n != 0 {
@@ -185,7 +185,7 @@ func TestReenablingStartsANewGenerationAndRequiresANewLogin(t *testing.T) {
 	if left, _ := s.ListUserSessions(u.ID, time.Hour); len(left) != 0 {
 		t.Fatal("a session survived disable and re-enable")
 	}
-	off, err := s.UserOffboarding(u.ID)
+	off, err := s.DefaultOrg().UserOffboarding(u.ID)
 	if err != nil || off.Deleted || !off.Active || off.Acknowledged || off.Verified || len(off.Targets) != 1 || off.Targets[0].Recorded {
 		t.Fatalf("offboarding view after re-enable: %+v %v", off, err)
 	}
@@ -212,7 +212,7 @@ func TestLogoutCompletionCountsEveryDelivery(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	off, err := s.UserOffboarding(u.ID)
+	off, err := s.DefaultOrg().UserOffboarding(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,13 +234,13 @@ func TestUntrackedHolderKeepsDeletionOutOfComplete(t *testing.T) {
 	if err := s.CreatePairedSystem(&PairedSystem{ID: "untracked", Name: "untracked", SystemType: "scim", CallbackURL: "https://untracked.example/scim", Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE account_sync_events SET status='delivered' WHERE user_id=? AND system_id='tracked'`, u.ID); err != nil {
 		t.Fatal(err)
 	}
-	off, err := s.UserOffboarding(u.ID)
+	off, err := s.DefaultOrg().UserOffboarding(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestExhaustedLogoutOutlivesPruningAndKeepsCompletionFalse(t *testing.T) {
 	if err := s.DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	off, err := s.UserOffboarding(u.ID)
+	off, err := s.DefaultOrg().UserOffboarding(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,14 +313,14 @@ func TestListingThatStillSeesTheAccountActiveContradictsTheAcknowledgement(t *te
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
-	off, err := s.UserOffboarding(u.ID)
+	off, err := s.DefaultOrg().UserOffboarding(u.ID)
 	if err != nil || !off.Acknowledged || !off.Targets[0].Acknowledged {
 		t.Fatalf("before the listing: %+v %v", off, err)
 	}
 	if _, err := s.db.Exec(`UPDATE sync_resource_state SET observed='present_active',observed_at=? WHERE resource_id=?`, off.Targets[0].LastEvent.UpdatedAt.Add(time.Second), u.ID); err != nil {
 		t.Fatal(err)
 	}
-	off, _ = s.UserOffboarding(u.ID)
+	off, _ = s.DefaultOrg().UserOffboarding(u.ID)
 	tgt := off.Targets[0]
 	if off.Acknowledged || off.Verified || tgt.Acknowledged || tgt.Verified || !tgt.Contradicted {
 		t.Fatalf("a contradicting listing was rounded up: %+v", off)
@@ -329,7 +329,7 @@ func TestListingThatStillSeesTheAccountActiveContradictsTheAcknowledgement(t *te
 	if _, err := s.db.Exec(`UPDATE sync_resource_state SET observed_at=? WHERE resource_id=?`, tgt.LastEvent.UpdatedAt.Add(-time.Second), u.ID); err != nil {
 		t.Fatal(err)
 	}
-	off, _ = s.UserOffboarding(u.ID)
+	off, _ = s.DefaultOrg().UserOffboarding(u.ID)
 	if !off.Acknowledged || off.Targets[0].Contradicted {
 		t.Fatalf("a stale listing contradicted a later delivery: %+v", off)
 	}
@@ -347,20 +347,20 @@ func TestAcknowledgementOutlivesPrunedSyncEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
-	off, err := s.UserOffboarding(u.ID)
+	off, err := s.DefaultOrg().UserOffboarding(u.ID)
 	if err != nil || !off.Acknowledged {
 		t.Fatalf("after delivery: %+v %v", off, err)
 	}
 	if _, err := s.db.Exec(`UPDATE sync_resource_state SET observed='absent',observed_at=? WHERE resource_id=?`, time.Now().UTC().Add(time.Second), u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if off, _ = s.UserOffboarding(u.ID); !off.Verified {
+	if off, _ = s.DefaultOrg().UserOffboarding(u.ID); !off.Verified {
 		t.Fatalf("after listing: %+v", off)
 	}
 	if err := s.DeleteDeliveredSyncEvents(time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	off, _ = s.UserOffboarding(u.ID)
+	off, _ = s.DefaultOrg().UserOffboarding(u.ID)
 	if !off.Acknowledged || !off.Verified || !off.Targets[0].Acknowledged || off.Targets[0].LastEvent != nil {
 		t.Fatalf("pruning the outbox row lost the acknowledgement: %+v", off)
 	}
@@ -373,7 +373,7 @@ func TestAcknowledgementOutlivesPrunedSyncEvents(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(u, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	off, _ = s.UserOffboarding(u.ID)
+	off, _ = s.DefaultOrg().UserOffboarding(u.ID)
 	if off.Acknowledged || off.Targets[0].Acknowledged {
 		t.Fatalf("a new removal inherited the old acknowledgement: %+v", off)
 	}

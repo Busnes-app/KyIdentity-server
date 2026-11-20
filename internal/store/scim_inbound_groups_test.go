@@ -98,10 +98,10 @@ func TestUpstreamGroupsHoldOnlyTheConnectorsAccounts(t *testing.T) {
 
 	// A local rename of an upstream group is refused; a description edit is fine.
 	local2, _ := s.GetUpstreamGroup(a.ID, g.ID)
-	if err := s.UpdateGroup(&Group{ID: g.ID, Name: "Local name", Description: ""}, nil); !errors.Is(err, ErrGroupSourceOwned) {
+	if err := s.DefaultOrg().UpdateGroup(&Group{ID: g.ID, Name: "Local name", Description: ""}, nil); !errors.Is(err, ErrGroupSourceOwned) {
 		t.Fatalf("local rename of an upstream group: %v", err)
 	}
-	if err := s.UpdateGroup(&Group{ID: g.ID, Name: local2.Name, Description: "local note"}, nil); err != nil {
+	if err := s.DefaultOrg().UpdateGroup(&Group{ID: g.ID, Name: local2.Name, Description: "local note"}, nil); err != nil {
 		t.Fatalf("local description edit refused: %v", err)
 	}
 }
@@ -143,7 +143,7 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 	if err := s.DeleteUpstreamGroup(a.ID, g.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetUserByID(alice.ID); got == nil || got.Status != "active" || got.SourceConnectorID != a.ID {
+	if got, _ := s.DefaultOrg().GetUserByID(alice.ID); got == nil || got.Status != "active" || got.SourceConnectorID != a.ID {
 		t.Fatalf("group deletion touched the user: %+v", got)
 	}
 	if got := pendingFor(t, s, "target", alice.ID); len(got) != 1 || got[0].Active {
@@ -160,7 +160,7 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 	if _, err := s.DeleteSCIMConnector(a.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	groups, _, _ := s.ListGroups("Kept", "", 10, 0)
+	groups, _, _ := s.DefaultOrg().ListGroups("Kept", "", 10, 0)
 	if len(groups) != 1 || groups[0].SourceConnectorID != "" || groups[0].MemberCount != 1 {
 		t.Fatalf("released group: %+v", groups)
 	}
@@ -228,7 +228,7 @@ func TestUpstreamRenameOfMFARequiredGroupIsRefused(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	admin := &User{ID: "admin-1", Username: "boss", DisplayName: "Boss", Email: "boss@x.test", PasswordHash: "x", Role: "admin", Status: "active"}
-	if err := s.CreateUser(admin); err != nil {
+	if err := s.DefaultOrg().CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetMFAMethod(&MFAMethod{ID: "admin-totp", UserID: admin.ID, MethodType: "totp", EncryptedSecret: "test"}, nil); err != nil {
@@ -311,7 +311,7 @@ func TestLocallyAddedMemberDoesNotBlockUpstreamEdits(t *testing.T) {
 	if err := s.CreateUpstreamGroup(g, []string{alice.ID, bob.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembershipForSession(g.ID, local.ID, true, "", nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembershipForSession(g.ID, local.ID, true, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	// The upstream removes alice; the set it writes still holds the local member.

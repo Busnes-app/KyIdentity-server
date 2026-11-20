@@ -78,11 +78,17 @@ type Offboarding struct {
 
 // UserOffboarding reads the completion view. It works after the directory row is gone
 // and returns sql.ErrNoRows only when nothing was ever recorded for the ID.
-func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
+// It sees only the org's rows: another org's user, live or deleted, is sql.ErrNoRows.
+func (o *OrgStore) UserOffboarding(userID string) (*Offboarding, error) {
+	s := o.s
 	off := &Offboarding{UserID: userID, Targets: []OffboardingTarget{}, Acknowledged: true, Verified: true}
-	var exists, active bool
-	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id=?),EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND (ends_at IS NULL OR ends_at>unixepoch()))`, userID, userID).Scan(&exists, &active); err != nil {
+	var exists, active, elsewhere, logouts bool
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=?),EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND status='active' AND (ends_at IS NULL OR ends_at>unixepoch())),
+ EXISTS(SELECT 1 FROM users WHERE org_id<>? AND id=?),EXISTS(SELECT 1 FROM logout_deliveries WHERE org_id=? AND user_id=?)`, o.org, userID, o.org, userID, o.org, userID, o.org, userID).Scan(&exists, &active, &elsewhere, &logouts); err != nil {
 		return nil, err
+	}
+	if elsewhere {
+		return nil, sql.ErrNoRows
 	}
 	off.Deleted, off.Active = !exists, active
 	off.Acknowledged, off.Verified = !active, !active
@@ -91,7 +97,7 @@ func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
  ev.event_type,ev.status,ev.last_error,ev.attempts,ev.next_attempt_at,ev.updated_at
  FROM sync_resource_state st JOIN paired_systems s ON s.id=st.system_id
  LEFT JOIN account_sync_events ev ON ev.id=(SELECT id FROM account_sync_events x WHERE x.system_id=st.system_id AND x.user_id=st.resource_id ORDER BY x.rowid DESC LIMIT 1)
- WHERE st.resource_id=? AND st.kind='user' ORDER BY lower(s.name),s.id`, userID)
+ WHERE st.org_id=? AND st.resource_id=? AND st.kind='user' ORDER BY lower(s.name),s.id`, o.org, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,11 +143,14 @@ func (s *Store) UserOffboarding(userID string) (*Offboarding, error) {
 		return nil, err
 	}
 	// The list is a display page; completion is decided over every delivery.
-	if off.Logouts, err = s.ListLogoutDeliveries(userID, 50); err != nil {
-		return nil, err
+	// A user's deliveries are all in the user's org.
+	if logouts {
+		if off.Logouts, err = s.ListLogoutDeliveries(userID, 50); err != nil {
+			return nil, err
+		}
 	}
 	var outstanding bool
-	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM logout_deliveries WHERE user_id=? AND status<>'delivered')`, userID).Scan(&outstanding); err != nil {
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM logout_deliveries WHERE org_id=? AND user_id=? AND status<>'delivered')`, o.org, userID).Scan(&outstanding); err != nil {
 		return nil, err
 	}
 	off.Acknowledged = off.Acknowledged && !outstanding

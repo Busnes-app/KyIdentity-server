@@ -68,7 +68,7 @@ func TestInstallerGroupsOwnedClaimsReadOnlyAndDrift(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT id FROM directory_groups WHERE name='Suite users'`).Scan(&groupID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(groupID, day.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(groupID, day.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ApplyInstallerSetup(p, false); err == nil {
@@ -87,7 +87,7 @@ func TestInstallerGroupsRollbackForeignConflictsAndAuditFailure(t *testing.T) {
 			defer close()
 			p := groupInstallerFixture()
 			if cause == "foreign" {
-				if err := s.CreateGroup(&Group{ID: uuid.NewString(), Name: "Suite users", Description: "preserve foreign"}, nil); err != nil {
+				if err := s.DefaultOrg().CreateGroup(&Group{ID: uuid.NewString(), Name: "Suite users", Description: "preserve foreign"}, nil); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -141,7 +141,7 @@ func TestInstallerGroupAssignmentAndDefinitionDriftAreNotRepaired(t *testing.T) 
 			case "claim":
 				_, err = s.db.Exec(`UPDATE app_registry SET groups_claim=FALSE WHERE id=?`, appID)
 			case "definition":
-				err = s.UpdateGroup(&Group{ID: groupID, Name: "Suite users", Description: "retain operator change"}, nil)
+				err = s.DefaultOrg().UpdateGroup(&Group{ID: groupID, Name: "Suite users", Description: "retain operator change"}, nil)
 			}
 			if err != nil {
 				t.Fatal(err)

@@ -148,7 +148,7 @@ func TestLoginAndCSRFAuthenticationFlow(t *testing.T) {
 		Role:         "user",
 		Status:       "active",
 	}
-	_ = dbStore.CreateUser(user)
+	_ = dbStore.DefaultOrg().CreateUser(user)
 
 	// 1. Fetch CSRF token
 	req := httptest.NewRequest("GET", "/api/auth/csrf", nil)
@@ -237,7 +237,7 @@ func TestAdminSystemPairingHandshakeViaAPI(t *testing.T) {
 		Role:         "admin",
 		Status:       "active",
 	}
-	_ = dbStore.CreateUser(admin)
+	_ = dbStore.DefaultOrg().CreateUser(admin)
 
 	// Create session for admin
 	adminSessionToken, _ := crypto.GenerateRandomHex(32)
@@ -320,7 +320,7 @@ func TestOIDCAuthorizeAndPKCETokenFlowViaHTTP(t *testing.T) {
 		Role:         "user",
 		Status:       "active",
 	}
-	_ = dbStore.CreateUser(user)
+	_ = dbStore.DefaultOrg().CreateUser(user)
 
 	sessionToken, _ := crypto.GenerateRandomHex(32)
 	_ = dbStore.CreateSession(&store.Session{
@@ -499,7 +499,7 @@ func TestAdminListAuditEventsPagination(t *testing.T) {
 		Role:         "admin",
 		Status:       "active",
 	}
-	_ = dbStore.CreateUser(admin)
+	_ = dbStore.DefaultOrg().CreateUser(admin)
 
 	adminSessionToken, _ := crypto.GenerateRandomHex(32)
 	_ = dbStore.CreateSession(&store.Session{
@@ -591,7 +591,7 @@ func TestAdminCreatePairedSystemSCIM(t *testing.T) {
 		Role:         "admin",
 		Status:       "active",
 	}
-	_ = dbStore.CreateUser(admin)
+	_ = dbStore.DefaultOrg().CreateUser(admin)
 
 	adminSessionToken, _ := crypto.GenerateRandomHex(32)
 	_ = dbStore.CreateSession(&store.Session{

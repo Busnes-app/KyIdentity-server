@@ -137,10 +137,10 @@ func TestSambaADEndToEnd(t *testing.T) {
 	}
 	user, _ := db.GetUserByUsername("winuser")
 	group := &store.Group{ID: "11111111-2222-3333-4444-555555555555", Name: "pc-users"}
-	if err := db.CreateGroup(group, nil); err != nil {
+	if err := db.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetGroupMembership(group.ID, user.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetGroupMembership(group.ID, user.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	apps, _, _ := db.ListAppRecords("", 100, 0)
@@ -241,7 +241,7 @@ func TestSambaADEndToEnd(t *testing.T) {
 	must("the password from before the reset no longer logs in", !ok)
 
 	// A rename upstream (SCIM) renames the AD account: logon name, UPN and CN.
-	if _, err := db.EditUser(user.ID, nil, func(x *store.User) (bool, error) { x.Username = "winuser2"; return false, nil }); err != nil {
+	if _, err := db.DefaultOrg().EditUser(user.ID, nil, func(x *store.User) (bool, error) { x.Username = "winuser2"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	dispatch()
@@ -256,7 +256,7 @@ func TestSambaADEndToEnd(t *testing.T) {
 		t.Fatal(rr.Body.String())
 	}
 	squatter, _ := db.GetUserByUsername("squatter")
-	if err := db.SetGroupMembership(group.ID, squatter.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetGroupMembership(group.ID, squatter.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	dispatch()

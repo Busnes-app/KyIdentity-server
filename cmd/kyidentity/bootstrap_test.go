@@ -46,7 +46,7 @@ func TestBootstrapDoesNotResetAnExistingAdminPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.EditUser(admin.ID, nil, func(u *store.User) (bool, error) {
+	if _, err := db.DefaultOrg().EditUser(admin.ID, nil, func(u *store.User) (bool, error) {
 		u.PasswordHash = rotated
 		return true, nil
 	}); err != nil {
@@ -127,7 +127,7 @@ func TestBootstrapHonoursEmailAndAudits(t *testing.T) {
 // not create.
 func TestBootstrapRefusesAnExistingNonAdmin(t *testing.T) {
 	db := testStore(t)
-	if err := db.CreateUser(&store.User{ID: "u1", Username: "admin", DisplayName: "A", Email: "a@test.invalid", PasswordHash: "x", Role: "user", Status: "active"}); err != nil {
+	if err := db.DefaultOrg().CreateUser(&store.User{ID: "u1", Username: "admin", DisplayName: "A", Email: "a@test.invalid", PasswordHash: "x", Role: "user", Status: "active"}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -141,7 +141,7 @@ func TestBootstrapRefusesAnExistingNonAdmin(t *testing.T) {
 		t.Fatalf("the existing account was changed: %+v", u)
 	}
 
-	if err := db.CreateUser(&store.User{ID: "u2", Username: "old-admin", DisplayName: "B", Email: "b@test.invalid", PasswordHash: "x", Role: "admin", Status: "disabled"}); err != nil {
+	if err := db.DefaultOrg().CreateUser(&store.User{ID: "u2", Username: "old-admin", DisplayName: "B", Email: "b@test.invalid", PasswordHash: "x", Role: "admin", Status: "disabled"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ensureBootstrapAdmin(db, "old-admin", "", "a-good-first-password", "test"); err == nil {

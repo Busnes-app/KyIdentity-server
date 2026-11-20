@@ -32,7 +32,7 @@ func TestDisableUserByNameDisablesAndAudits(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("disable = %v, %v", changed, err)
 	}
-	got, _ := s.GetUserByID(u.ID)
+	got, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if got.Status != "disabled" || got.Role != "user" || got.PasswordHash != "hash" {
 		t.Fatalf("disable changed more than status: %+v", got)
 	}
@@ -77,7 +77,7 @@ func TestDisableUserByNameRefusesBadGuards(t *testing.T) {
 	if _, err := s.DisableUserByName("ada", "guard", disableAudit()); !errors.Is(err, ErrGuardAdministrator) {
 		t.Fatal("disabled admin accepted as guard", err)
 	}
-	got, _ := s.GetUserByID(u.ID)
+	got, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if got.Status != "active" || count(t, s, `SELECT COUNT(*) FROM sessions WHERE user_id=?`, u.ID) != 1 || auditActions(t, s, "admin.user_disabled") != 0 {
 		t.Fatal("refused disable changed state or audited")
 	}
@@ -92,7 +92,7 @@ func TestDisableUserByNameAuditFailureRollsBack(t *testing.T) {
 	if _, err := s.DisableUserByName("ada", "guard", poisonedAudit(t, s, "admin.user_disabled", u.ID)); err == nil {
 		t.Fatal("disable ignored audit failure")
 	}
-	got, _ := s.GetUserByID(u.ID)
+	got, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if got.Status != "active" || count(t, s, `SELECT COUNT(*) FROM sessions WHERE user_id=?`, u.ID) != 1 {
 		t.Fatal("failed audit left the account disabled")
 	}
@@ -126,7 +126,7 @@ func TestDisableUserByNameSetsLocalOverrideOnUpstreamAccount(t *testing.T) {
 	if changed, err := s.DisableUserByName("sourced", "guard", nil); err != nil || !changed {
 		t.Fatalf("upstream-disabled account = %v, %v", changed, err)
 	}
-	got, _ := s.GetUserByID(up.ID)
+	got, _ := s.DefaultOrg().GetUserByID(up.ID)
 	if !got.LocallyDisabled || got.Status != "disabled" {
 		t.Fatalf("local override not set: %+v", got)
 	}
@@ -134,7 +134,7 @@ func TestDisableUserByNameSetsLocalOverrideOnUpstreamAccount(t *testing.T) {
 	if err := upstreamWrite(s, up); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetUserByID(up.ID); got.Status != "disabled" {
+	if got, _ := s.DefaultOrg().GetUserByID(up.ID); got.Status != "disabled" {
 		t.Fatal("upstream lifted the local disable")
 	}
 	if changed, err := s.DisableUserByName("sourced", "guard", nil); err != nil || changed {

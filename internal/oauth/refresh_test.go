@@ -48,7 +48,7 @@ func newRefreshFixture(t *testing.T) *refreshFixture {
 	t.Cleanup(func() { _ = raw.Close() })
 	f := &refreshFixture{t: t, e: NewEngine(db, km, "http://localhost:5867"), db: db, raw: raw, secret: "client-secret-value"}
 	f.user = &store.User{ID: uuid.NewString(), Username: "alice", DisplayName: "Alice", Email: "alice@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := db.CreateUser(f.user); err != nil {
+	if err := db.DefaultOrg().CreateUser(f.user); err != nil {
 		t.Fatal(err)
 	}
 	f.client = f.newClient("kynotes", "confidential")
@@ -215,7 +215,7 @@ func TestRefreshRevokedByEveryLifecyclePath(t *testing.T) {
 			}
 		},
 		"user disabled": func(f *refreshFixture, _ string) {
-			if _, err := f.db.EditUser(f.user.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
+			if _, err := f.db.DefaultOrg().EditUser(f.user.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
 				t.Fatal(err)
 			}
 		},

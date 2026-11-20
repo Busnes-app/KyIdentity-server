@@ -32,10 +32,10 @@ func TestRunDueExpiriesIsolatesAccountFailures(t *testing.T) {
 	if count(t, s, `SELECT COUNT(*) FROM users WHERE id=? AND status='active' AND NOT locally_disabled`, stuck.ID) != 1 {
 		t.Fatal("failed end changed the stored account")
 	}
-	if got, _ := s.GetUserByID(stuck.ID); got.Status != "disabled" {
+	if got, _ := s.DefaultOrg().GetUserByID(stuck.ID); got.Status != "disabled" {
 		t.Fatal("account past its end date reads as active")
 	}
-	if got, _ := s.GetUserByID(due.ID); got.Status != "disabled" || !got.LocallyDisabled {
+	if got, _ := s.DefaultOrg().GetUserByID(due.ID); got.Status != "disabled" || !got.LocallyDisabled {
 		t.Fatalf("due account not ended: %+v", got)
 	}
 	if expiryOutcomes(t, s, "account.end_failed", "failure") != 1 || expiryOutcomes(t, s, "account.ended", "success") != 1 {
@@ -52,10 +52,10 @@ func TestRunDueExpiriesMembershipUnderRequiredPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, g := range []string{"required", "plain"} {
-		if err := s.CreateGroup(&Group{ID: g, Name: g}, nil); err != nil {
+		if err := s.DefaultOrg().CreateGroup(&Group{ID: g, Name: g}, nil); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.SetGroupMembership(g, u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetGroupMembership(g, u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

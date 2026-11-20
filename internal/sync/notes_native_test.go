@@ -66,7 +66,7 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := &store.User{ID: uuid.NewString(), Username: "foreign-admin", Email: "foreign@example.test", PasswordHash: passwordHash, Role: "admin", Status: "active"}
-	if err := s.CreateUser(foreign); err != nil {
+	if err := s.DefaultOrg().CreateUser(foreign); err != nil {
 		t.Fatal(err)
 	}
 	e := identitysync.NewEngine(s, key)
@@ -189,15 +189,15 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 		t.Fatal(err)
 	}
 	phase("reassigned")
-	if _, err := s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	phase("disabled")
-	if _, err := s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "active"; return false, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "active"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	phase("reactivated")
-	if err := s.DeleteUserWithSyncEvents(day.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(day.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	phase("deleted")

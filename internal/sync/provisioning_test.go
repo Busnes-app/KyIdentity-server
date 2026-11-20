@@ -258,15 +258,15 @@ func TestGenericSCIMFollowsAssignments(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := &store.User{ID: uuid.NewString(), Username: "other", DisplayName: "Other", Email: "other@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(other); err != nil {
+	if err := s.DefaultOrg().CreateUser(other); err != nil {
 		t.Fatal(err)
 	}
 	app := appRecordFor(t, s, sys.ID)
 	group := &store.Group{ID: uuid.NewString(), Name: "staff"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
@@ -352,14 +352,14 @@ func TestGenericSCIMGroupDelivery(t *testing.T) {
 	}
 	app := appRecordFor(t, s, sys.ID)
 	second := &store.User{ID: uuid.NewString(), Username: "second", DisplayName: "Second", Email: "second@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(second); err != nil {
+	if err := s.DefaultOrg().CreateUser(second); err != nil {
 		t.Fatal(err)
 	}
 	group := &store.Group{ID: uuid.NewString(), Name: "staff"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
@@ -381,14 +381,14 @@ func TestGenericSCIMGroupDelivery(t *testing.T) {
 	if got := members(); len(got) != 1 || got[0] != first.ID {
 		t.Fatal("group not delivered with its provisioned member", got, first.ID)
 	}
-	if err := s.SetGroupMembership(group.ID, second.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, second.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
 	if got := members(); len(got) != 2 {
 		t.Fatal("new member missing after its create", got)
 	}
-	if err := s.SetGroupMembership(group.ID, second.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, second.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -429,10 +429,10 @@ func groupFixture(t *testing.T) (*Engine, *store.Store, *fakeSCIM, *store.Group,
 	}
 	app := appRecordFor(t, s, sys.ID)
 	group := &store.Group{ID: uuid.NewString(), Name: "staff"}
-	if err := s.CreateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(group.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "groups", group.ID, true, nil); err != nil {
@@ -456,7 +456,7 @@ func TestGroupWriteRefusesForeignMapping(t *testing.T) {
 	}
 	remote.mu.Unlock()
 	group.Name = "renamed"
-	if err := s.UpdateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().UpdateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -479,7 +479,7 @@ func TestGroupWriteRequiresCompletion(t *testing.T) {
 	remote.putStatus = http.StatusAccepted
 	remote.mu.Unlock()
 	group.Name = "renamed"
-	if err := s.UpdateGroup(group, nil); err != nil {
+	if err := s.DefaultOrg().UpdateGroup(group, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -565,7 +565,7 @@ func TestSuiteReceiverRevisionsAndInactiveNotFound(t *testing.T) {
 	}
 	// A receiver that never held a disabled account answers 404; that completes the disable.
 	stranger := &store.User{ID: uuid.NewString(), Username: "stranger", DisplayName: "S", Email: "s@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(stranger); err != nil {
+	if err := s.DefaultOrg().CreateUser(stranger); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app.ID, "users", stranger.ID, true, nil); err != nil {
@@ -705,7 +705,7 @@ func TestCreateCarriesTheExplicitRoleList(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := &store.User{ID: uuid.NewString(), Username: "other", DisplayName: "Other", Email: "other@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(other); err != nil {
+	if err := s.DefaultOrg().CreateUser(other); err != nil {
 		t.Fatal(err)
 	}
 	app := appRecordFor(t, s, sys.ID)
@@ -792,7 +792,7 @@ func TestResyncDeactivatesAccountsARestoredTargetReadmits(t *testing.T) {
 		t.Fatal(err)
 	}
 	gone := &store.User{ID: uuid.NewString(), Username: "gone", DisplayName: "Gone", Email: "gone@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(gone); err != nil {
+	if err := s.DefaultOrg().CreateUser(gone); err != nil {
 		t.Fatal(err)
 	}
 	app := appRecordFor(t, s, sys.ID)
@@ -805,7 +805,7 @@ func TestResyncDeactivatesAccountsARestoredTargetReadmits(t *testing.T) {
 	if err := s.SetAppAssignment(app.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUserWithSyncEvents(gone.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(gone.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, e)
@@ -929,7 +929,7 @@ func TestSuiteRemovalWhileCreateRetries(t *testing.T) {
 
 func setStatus(t *testing.T, s *store.Store, u *store.User, status string) {
 	t.Helper()
-	if _, err := s.EditUser(u.ID, nil, func(next *store.User) (bool, error) { next.Status = status; return true, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(next *store.User) (bool, error) { next.Status = status; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -937,7 +937,7 @@ func setStatus(t *testing.T, s *store.Store, u *store.User, status string) {
 func member(t *testing.T, s *store.Store) *store.User {
 	t.Helper()
 	u := &store.User{ID: uuid.NewString(), Username: "pat", DisplayName: "Pat", Email: "pat@example.com", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	return u

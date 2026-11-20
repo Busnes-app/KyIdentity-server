@@ -259,7 +259,7 @@ func TestReconcilePreviewWritesNothingAndManagedIsConnectorScoped(t *testing.T) 
 	if got := pendingFor(t, s, "target", held.ID); len(got) != 0 {
 		t.Fatal("repair wrote through a disputed mapping", got)
 	}
-	if err := s.DeleteUserWithSyncEvents(stranger.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(stranger.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	var body string
@@ -290,7 +290,7 @@ func TestReconcileReportBoundsRemoteText(t *testing.T) {
 			if err := s.SaveSCIMUserLink("target", u.ID, "r"+u.ID); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+			if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 				t.Fatal(err)
 			}
 			deliverAll(t, s)
@@ -340,7 +340,7 @@ func TestReconcileDriftUnsupportedAndGroups(t *testing.T) {
 		t.Fatalf("%+v", rows)
 	}
 	g := &Group{ID: uuid.NewString(), Name: "staff"}
-	if err := s.CreateGroup(g, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
@@ -350,7 +350,7 @@ func TestReconcileDriftUnsupportedAndGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	orphanGroup := &Group{ID: uuid.NewString(), Name: "former"}
-	if err := s.CreateGroup(orphanGroup, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(orphanGroup, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A group this connector once delivered, since unassigned, still exists at the target.

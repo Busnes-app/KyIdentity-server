@@ -59,10 +59,10 @@ func TestIDTokenCarriesOnlyThisAppsRoles(t *testing.T) {
 	testClient(t, db, "billing", "public", []string{"https://app/cb"}, []string{"openid", "profile", "email"})
 	testClient(t, db, "hr", "public", []string{"https://app/cb"}, []string{"openid", "profile"})
 	billing := appFor(t, db, "billing")
-	if err := db.CreateGroup(&store.Group{ID: "finance", Name: "Finance"}, nil); err != nil {
+	if err := db.DefaultOrg().CreateGroup(&store.Group{ID: "finance", Name: "Finance"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetGroupMembership("finance", user.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetGroupMembership("finance", user.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, err := db.CreateAppRole(billing.ID, "billing.admin", "", nil)
@@ -168,7 +168,7 @@ func TestGlobalAdminTokenRolesRequireAppAssignment(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	user := testUser(t, db)
-	if _, err := db.EditUser(user.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return true, nil }); err != nil {
+	if _, err := db.DefaultOrg().EditUser(user.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	user.Role = "admin"

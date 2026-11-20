@@ -11,7 +11,7 @@ import (
 func pendingUser(t *testing.T, s *Store) *User {
 	t.Helper()
 	u := &User{ID: uuid.NewString(), Username: "p" + uuid.NewString()[:8], DisplayName: "Pending", Email: uuid.NewString()[:8] + "@x.test", Role: "user", Status: "disabled", Pending: true}
-	if err := s.CreateUserWithSyncEvents(u, nil); err != nil {
+	if err := s.DefaultOrg().CreateUserWithSyncEvents(u, nil); err != nil {
 		t.Fatal(err)
 	}
 	return u
@@ -44,7 +44,7 @@ func TestPendingUserActivatesThroughASingleUseLink(t *testing.T) {
 	if err != nil || got == nil || got.ID != u.ID {
 		t.Fatalf("redeem: %+v %v", got, err)
 	}
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if stored.Pending || stored.Status != "active" || stored.PasswordHash != "hash-1" || stored.EmailVerifiedAt != nil {
 		t.Fatalf("after activation: %+v", stored)
 	}
@@ -78,7 +78,7 @@ func TestEmailDeliveredActivationVerifiesTheAddress(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if stored.EmailVerifiedAt == nil {
 		t.Fatal("email delivered activation did not verify the address")
 	}
@@ -127,7 +127,7 @@ func TestResetLinkReplacesPasswordAndRevokesEverything(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "reset", "new-hash", nil); err != nil {
 		t.Fatal(err)
 	}
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if stored.PasswordHash != "new-hash" || stored.Status != "active" {
 		t.Fatalf("after reset: %+v", stored)
 	}
@@ -174,7 +174,7 @@ func TestChangePasswordKeepsTheCurrentSessionAndRevokesTheRest(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "reset", "x", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("reset link survived a password change: %v", err)
 	}
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if stored.PasswordHash != "changed" {
 		t.Fatal("password not changed")
 	}
@@ -207,7 +207,7 @@ func TestChangePasswordNeedsTheLiveSessionAndEndsPairingTokens(t *testing.T) {
 	if err := s.ChangePassword(u.ID, keep, "attacker", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("change from a revoked session: %v", err)
 	}
-	if stored, _ := s.GetUserByID(u.ID); stored.PasswordHash != "changed" {
+	if stored, _ := s.DefaultOrg().GetUserByID(u.ID); stored.PasswordHash != "changed" {
 		t.Fatalf("revoked session overwrote the password: %q", stored.PasswordHash)
 	}
 }
@@ -222,12 +222,12 @@ func TestEmailChangeClearsVerificationAndOutstandingLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	reset, _ := s.IssueAccountToken(u.ID, "reset", "email", time.Hour, nil)
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	stored.Email = "new-" + stored.Email
 	if err := s.UpdateUserWithSyncEvents(stored, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := s.GetUserByID(u.ID)
+	after, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if after.EmailVerifiedAt != nil {
 		t.Fatal("verification survived an address change")
 	}
@@ -252,7 +252,7 @@ func TestRedeemRollsBackWhenTheAuditRowCannotBeWritten(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", poisonedAudit(t, s, "auth.account_activated", u.ID)); err == nil {
 		t.Fatal("activation succeeded without its audit row")
 	}
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if !stored.Pending || stored.PasswordHash != "" {
 		t.Fatalf("activation applied despite rollback: %+v", stored)
 	}
@@ -290,7 +290,7 @@ func TestLinksDieWithAccessRevocationAndStateChanges(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("link survived access revocation: %v", err)
 	}
-	stored, _ := s.GetUserByID(u.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
 	if stored.Status != "disabled" || !stored.Pending {
 		t.Fatalf("revoked invitation changed state: %+v", stored)
 	}
@@ -304,7 +304,7 @@ func TestLinksDieWithAccessRevocationAndStateChanges(t *testing.T) {
 	if _, err := s.RedeemAccountToken(raw, "activation", "link-set", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("activation link overwrote an admin-set password: %v", err)
 	}
-	if after, _ := s.GetUserByID(u.ID); after.PasswordHash != "admin-set" {
+	if after, _ := s.DefaultOrg().GetUserByID(u.ID); after.PasswordHash != "admin-set" {
 		t.Fatalf("password changed by a dead link: %+v", after)
 	}
 
@@ -332,7 +332,7 @@ func TestPromotionAndDelegationEndOutstandingLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.EditUser(promoted.ID, nil, func(next *User) (bool, error) { next.Role = "admin"; return true, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(promoted.ID, nil, func(next *User) (bool, error) { next.Role = "admin"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); !errors.Is(err, ErrNotFound) {
@@ -343,7 +343,7 @@ func TestPromotionAndDelegationEndOutstandingLinks(t *testing.T) {
 	if raw, err = s.IssueAccountToken(delegated.ID, "activation", "manual", 24*time.Hour, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetDelegations(delegated.ID, Delegations{Helpdesk: true}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(delegated.ID, Delegations{Helpdesk: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); !errors.Is(err, ErrNotFound) {

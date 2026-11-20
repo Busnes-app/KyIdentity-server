@@ -54,13 +54,13 @@ func TestExpiredGrantsLoseAccessWithoutTheWorker(t *testing.T) {
 		t.Fatalf("token issued on an expired grant: %v", err)
 	}
 	// An unexpired group grant is an alternate source: access stays.
-	if err := s.CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembershipUntil("staff", u.ID, future(time.Hour), "", nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembershipUntil("staff", u.ID, future(time.Hour), "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if allowed, _ := s.ClientAccessAllowed(u.ID, "client"); !allowed {
@@ -95,14 +95,14 @@ func TestRunDueExpiriesRevokesAndDeprovisions(t *testing.T) {
 	if err := s.SetAppAssignmentUntil(clientApps[0].ID, "users", u.ID, future(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateGroup(&Group{ID: "ops", Name: "Ops"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "ops", Name: "Ops"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, _ := s.CreateAppRole(clientApps[0].ID, "operator", "", nil)
 	if err := s.SetAppRoleAssignment(clientApps[0].ID, role.ID, "groups", "ops", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembershipUntil("ops", u.ID, future(time.Hour), "", nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembershipUntil("ops", u.ID, future(time.Hour), "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateSession(&Session{ID: "session", UserID: u.ID, SessionTokenHash: "hash", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
@@ -184,14 +184,14 @@ func TestAccountEndDate(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(u, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetUserByID(u.ID); got.Status != "active" || got.EndsAt == nil {
+	if got, _ := s.DefaultOrg().GetUserByID(u.ID); got.Status != "active" || got.EndsAt == nil {
 		t.Fatalf("future end date changed status: %+v", got)
 	}
 	if _, err := s.db.Exec(`UPDATE users SET ends_at=unixepoch()-1 WHERE id=?`, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	// Ended: every read that decides access sees a disabled account, worker or not.
-	if got, _ := s.GetUserByID(u.ID); got.Status != "disabled" {
+	if got, _ := s.DefaultOrg().GetUserByID(u.ID); got.Status != "disabled" {
 		t.Fatal("ended account still reads active")
 	}
 	if sess, _ := s.GetSessionByTokenHash("hash", time.Hour); sess == nil {
@@ -215,7 +215,7 @@ func TestAccountEndDate(t *testing.T) {
 	if run, err := s.RunDueExpiries(time.Now().UTC()); err != nil || run.Accounts != 0 {
 		t.Fatalf("last admin ended: %+v %v", run, err)
 	}
-	got, _ := s.GetUserByID(admin.ID)
+	got, _ := s.DefaultOrg().GetUserByID(admin.ID)
 	if got.Status != "active" || got.EndsAt != nil {
 		t.Fatalf("last admin not preserved: %+v", got)
 	}
@@ -234,7 +234,7 @@ func TestAccountEndDate(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT ends_at FROM users WHERE id=?`, u.ID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	fresh, _ := s.GetUserByID(u.ID)
+	fresh, _ := s.DefaultOrg().GetUserByID(u.ID)
 	fresh.EndsAt = future(-time.Minute)
 	if err := s.UpdateUserWithSyncEvents(fresh, false, nil); !errors.Is(err, ErrExpiryInPast) {
 		t.Fatalf("past end date accepted by the store: %v", err)
@@ -260,12 +260,12 @@ func TestEndedAdministratorDoesNotCount(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE users SET ends_at=unixepoch()-1 WHERE id=?`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	stepDown, _ := s.GetUserByID(first.ID)
+	stepDown, _ := s.DefaultOrg().GetUserByID(first.ID)
 	stepDown.Role = "user"
 	if err := s.UpdateUserWithSyncEvents(stepDown, false, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatalf("phantom ended administrator satisfied the guard: %v", err)
 	}
-	if n, _ := s.CountAdmins(); n != 1 {
+	if n, _ := s.Platform().CountAdmins(); n != 1 {
 		t.Fatalf("CountAdmins counted the ended administrator: %d", n)
 	}
 }
@@ -285,10 +285,10 @@ func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembershipUntil("staff", fine.ID, future(time.Hour), "", nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembershipUntil("staff", fine.ID, future(time.Hour), "", nil); err != nil {
 		t.Fatal(err)
 	}
 	ending.EndsAt = future(time.Hour)
@@ -340,7 +340,7 @@ func TestAccessEndsAtFollowsTheUnion(t *testing.T) {
 	if err := s.SetAppPolicy(a.ID, "assigned_only", true, a.Revision, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
@@ -350,13 +350,13 @@ func TestAccessEndsAtFollowsTheUnion(t *testing.T) {
 	if err := s.SetAppAssignmentUntil(a.ID, "users", u.ID, direct, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembershipUntil("staff", u.ID, membership, "", nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembershipUntil("staff", u.ID, membership, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if end, err := s.AccessEndsAt(u.ID, "client"); err != nil || end == nil || !end.Equal(*membership) {
 		t.Fatalf("union end = %v %v, want %v", end, err, membership)
 	}
-	if err := s.SetGroupMembershipUntil("staff", u.ID, nil, "", nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembershipUntil("staff", u.ID, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if end, _ := s.AccessEndsAt(u.ID, "client"); end != nil {
@@ -396,12 +396,12 @@ func TestUnchangedScheduleDoesNotTripTheGuard(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE users SET role='user' WHERE id=?`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	stored, _ := s.GetUserByID(first.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(first.ID)
 	stored.DisplayName = "Renamed"
 	if err := s.UpdateUserWithSyncEvents(stored, false, nil); err != nil {
 		t.Fatalf("editing the scheduled sole administrator: %v", err)
 	}
-	if again, _ := s.GetUserByID(first.ID); again.DisplayName != "Renamed" || again.EndsAt == nil || !again.EndsAt.Equal(*first.EndsAt) {
+	if again, _ := s.DefaultOrg().GetUserByID(first.ID); again.DisplayName != "Renamed" || again.EndsAt == nil || !again.EndsAt.Equal(*first.EndsAt) {
 		t.Fatalf("edit lost the schedule: %+v", again)
 	}
 	stored.EndsAt = future(2 * time.Hour)
@@ -430,17 +430,17 @@ func TestEndDatedAdministratorIsNoCoverForTheLast(t *testing.T) {
 		"disable":  func(u *User) { u.Status, u.LocallyDisabled = "disabled", true },
 		"end-date": func(u *User) { u.EndsAt = future(2 * time.Hour) },
 	} {
-		if _, err := s.EditUser(permanent.ID, nil, func(u *User) (bool, error) { change(u); return false, nil }); !errors.Is(err, ErrLastActiveAdmin) {
+		if _, err := s.DefaultOrg().EditUser(permanent.ID, nil, func(u *User) (bool, error) { change(u); return false, nil }); !errors.Is(err, ErrLastActiveAdmin) {
 			t.Fatalf("%s the only administrator without an end date: %v", name, err)
 		}
 	}
-	if err := s.DeleteUserWithSyncEvents(permanent.ID, nil); !errors.Is(err, ErrLastActiveAdmin) {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(permanent.ID, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatalf("deleting the only administrator without an end date: %v", err)
 	}
 	if _, err := s.DeleteSCIMConnector(c.ID, true, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatalf("disabling the connector's administrator: %v", err)
 	}
-	if got, _ := s.GetUserByID(permanent.ID); got == nil || got.Role != "admin" || got.Status != "active" || got.EndsAt != nil {
+	if got, _ := s.DefaultOrg().GetUserByID(permanent.ID); got == nil || got.Role != "admin" || got.Status != "active" || got.EndsAt != nil {
 		t.Fatalf("refused change touched the administrator: %+v", got)
 	}
 	// A second administrator without an end date makes every one of them allowed.
@@ -461,11 +461,11 @@ func TestExpiryFollowUpKeepsARenewalMadeAfterItsScan(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	a, b := createTestUserNamed(t, s, "first"), createTestUserNamed(t, s, "second")
-	if err := s.CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, u := range []*User{a, b} {
-		if err := s.SetGroupMembershipUntil("staff", u.ID, future(time.Hour), "", nil); err != nil {
+		if err := s.DefaultOrg().SetGroupMembershipUntil("staff", u.ID, future(time.Hour), "", nil); err != nil {
 			t.Fatal(err)
 		}
 	}

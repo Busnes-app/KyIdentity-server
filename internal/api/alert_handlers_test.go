@@ -50,7 +50,7 @@ func TestAlertInboxAndAcknowledgement(t *testing.T) {
 	admin := newSession(t, db, newUser(t, db, "admin"), exp)
 	auditor := newUser(t, db, "user")
 	auditorCookie := newSession(t, db, auditor, exp)
-	if err := db.SetDelegations(auditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(auditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	target := newUser(t, db, "user")
@@ -132,7 +132,7 @@ func TestAlertSettings(t *testing.T) {
 	admin := newSession(t, db, adminUser, exp)
 	auditor := newUser(t, db, "user")
 	auditorCookie := newSession(t, db, auditor, exp)
-	if err := db.SetDelegations(auditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(auditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	plain := newUser(t, db, "user")

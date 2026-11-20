@@ -158,9 +158,7 @@ func migrateTenancy(tx *sql.Tx) error {
 	var b strings.Builder
 	b.WriteString(orgKeysSQL)
 	for _, t := range tenancyTriggers() {
-		// SQLite has IS NOT for IS DISTINCT FROM.
-		cond := strings.NewReplacer("IS NOT DISTINCT FROM", "IS", "IS DISTINCT FROM", "IS NOT").Replace(refusals[t.refusal])
-		fmt.Fprintf(&b, "CREATE TRIGGER IF NOT EXISTS %s %s ON %s FOR EACH ROW WHEN %s BEGIN SELECT RAISE(ABORT, '%s'); END;\n", t.name, t.timing, t.table, cond, t.message)
+		b.WriteString(sqliteTriggerSQL(t, refusals[t.refusal]))
 	}
 	b.WriteString(`DROP VIEW IF EXISTS effective_app_access; DROP VIEW IF EXISTS app_access_facts; DROP VIEW IF EXISTS active_principals;
 CREATE VIEW app_access_facts AS ` + appAccessFactsSQL("unixepoch()") + `;
@@ -202,14 +200,56 @@ ALTER TABLE group_memberships ADD FOREIGN KEY (org_id,user_id) REFERENCES users(
 `)
 	refusals := tenancyRefusals(`extract(epoch from now())`)
 	for _, t := range tenancyTriggers() {
-		ret := "NEW"
-		if strings.Contains(t.timing, "DELETE") {
-			ret = "OLD"
-		}
-		fmt.Fprintf(&b, "CREATE FUNCTION %[1]s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN\n IF (%[2]s) THEN RAISE EXCEPTION '%[3]s'; END IF; RETURN %[4]s; END $$;\n"+
-			"CREATE TRIGGER %[1]s %[5]s ON %[6]s FOR EACH ROW EXECUTE FUNCTION %[1]s();\n", t.name, refusals[t.refusal], t.message, ret, t.timing, t.table)
+		b.WriteString(pgTriggerSQL(t, refusals[t.refusal]))
 	}
 	b.WriteString(`CREATE OR REPLACE VIEW app_access_facts AS ` + appAccessFactsSQL(pgEpoch) + `;
 CREATE VIEW active_principals AS ` + activePrincipalsSQL(pgEpoch) + `;`)
 	return b.String()
+}
+
+func sqliteTriggerSQL(t tenancyTrigger, cond string) string {
+	// SQLite has IS NOT for IS DISTINCT FROM.
+	cond = strings.NewReplacer("IS NOT DISTINCT FROM", "IS", "IS DISTINCT FROM", "IS NOT").Replace(cond)
+	return fmt.Sprintf("CREATE TRIGGER IF NOT EXISTS %s %s ON %s FOR EACH ROW WHEN %s BEGIN SELECT RAISE(ABORT, '%s'); END;\n", t.name, t.timing, t.table, cond, t.message)
+}
+
+func pgTriggerSQL(t tenancyTrigger, cond string) string {
+	ret := "NEW"
+	if strings.Contains(t.timing, "DELETE") {
+		ret = "OLD"
+	}
+	return fmt.Sprintf("CREATE FUNCTION %[1]s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN\n IF (%[2]s) THEN RAISE EXCEPTION '%[3]s'; END IF; RETURN %[4]s; END $$;\n"+
+		"CREATE TRIGGER %[1]s %[5]s ON %[6]s FOR EACH ROW EXECUTE FUNCTION %[1]s();\n", t.name, cond, t.message, ret, t.timing, t.table)
+}
+
+// staffOrgTriggers refuse role='admin' and any delegation for an account outside an org
+// that may hold them (D8): the staff org, or a single-tenant install's default org. They
+// cover every write path, the installer and SCIM included.
+func staffOrgTriggers() []tenancyTrigger {
+	return []tenancyTrigger{
+		{"users_staff_admin_insert", "BEFORE INSERT", "users", notStaffAdmin, msgStaffOnly},
+		{"users_staff_admin_update", "BEFORE UPDATE OF role", "users", notStaffAdmin, msgStaffOnly},
+		{"admin_delegations_staff_org", "BEFORE INSERT", "admin_delegations", `EXISTS(SELECT 1 FROM users u JOIN orgs o ON o.id=u.org_id WHERE u.id=NEW.user_id AND o.kind NOT IN ('default','staff'))`, msgStaffOnly},
+	}
+}
+
+const notStaffAdmin = `NEW.role='admin' AND NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.kind IN ('default','staff'))`
+
+// In these triggers refusal holds the condition itself, not a tenancyRefusals key.
+func migrateStaffOrg(tx *sql.Tx) error {
+	var b strings.Builder
+	for _, t := range staffOrgTriggers() {
+		b.WriteString(sqliteTriggerSQL(t, t.refusal))
+	}
+	_, err := tx.Exec(b.String())
+	return err
+}
+
+func migrateStaffOrgPostgres(tx *sql.Tx) error {
+	var b strings.Builder
+	for _, t := range staffOrgTriggers() {
+		b.WriteString(pgTriggerSQL(t, t.refusal))
+	}
+	_, err := tx.Exec(b.String())
+	return err
 }

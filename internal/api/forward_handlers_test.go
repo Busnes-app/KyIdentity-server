@@ -220,10 +220,10 @@ func TestForwardLoginHeaderAndGroups(t *testing.T) {
 	}
 	for _, name := range []string{"ops", "bad,name", "unassigned"} {
 		g := &store.Group{ID: uuid.NewString(), Name: name}
-		if err := f.db.CreateGroup(g, nil); err != nil {
+		if err := f.db.DefaultOrg().CreateGroup(g, nil); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.db.SetGroupMembership(g.ID, f.user.ID, true, nil); err != nil {
+		if err := f.db.DefaultOrg().SetGroupMembership(g.ID, f.user.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 		if name != "unassigned" {
@@ -403,7 +403,7 @@ func TestForwardRevocationWithin30Seconds(t *testing.T) {
 		want   int
 	}{
 		{"disabled", func(u *store.User) {
-			if _, err := f.db.EditUser(u.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
+			if _, err := f.db.DefaultOrg().EditUser(u.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
 				t.Fatal(err)
 			}
 		}, http.StatusUnauthorized},

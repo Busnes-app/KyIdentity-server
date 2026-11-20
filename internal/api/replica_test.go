@@ -33,7 +33,7 @@ func adminCaller(t *testing.T, srv *Server, s *store.Store) func(method, path st
 	t.Helper()
 	hash, _ := auth.HashPassword("AdminPassword123!")
 	admin := &store.User{ID: uuid.NewString(), Username: "admin-" + uuid.NewString()[:8], DisplayName: "Admin", Email: uuid.NewString()[:8] + "@replica.test", PasswordHash: hash, Role: "admin", Status: "active"}
-	if err := s.CreateUser(admin); err != nil {
+	if err := s.DefaultOrg().CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
 	token, _ := crypto.GenerateRandomHex(32)

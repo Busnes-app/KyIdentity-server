@@ -71,7 +71,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 		ID: uuid.New().String(), Username: "admin_backup_test", DisplayName: "Admin Backup", Email: "admin@backup.test",
 		PasswordHash: passHash, Role: "admin", Status: "active",
 	}
-	if err := dbStore.CreateUser(adminUser); err != nil {
+	if err := dbStore.DefaultOrg().CreateUser(adminUser); err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
 	adminSessionToken, _ := crypto.GenerateRandomHex(32)

@@ -93,7 +93,7 @@ func TestLoginRefusalsAreIndistinguishable(t *testing.T) {
 	other := func(name, status string) *store.User {
 		u := &store.User{ID: name + "-" + f.user.ID, Username: name, Email: name + "@stepup.test",
 			PasswordHash: f.user.PasswordHash, Role: "user", Status: status}
-		if err := f.store.CreateUser(u); err != nil {
+		if err := f.store.DefaultOrg().CreateUser(u); err != nil {
 			t.Fatal(err)
 		}
 		return u

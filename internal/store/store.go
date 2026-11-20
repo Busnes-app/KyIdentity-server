@@ -894,32 +894,33 @@ func (s *Store) migrateSyncEventsUserReference() error {
 	return tx.Commit()
 }
 
-// User CRUD
-func (s *Store) CreateUser(u *User) error {
-	query := `
-	INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, password_change_required, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+// User CRUD. A new user is in the handle's org; lookups by ID see only that org's users.
+func (o *OrgStore) CreateUser(u *User) error {
 	now := rowTime()
-	u.CreatedAt = now
-	u.UpdatedAt = now
-	_, err := s.db.Exec(query, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.CreatedAt, u.UpdatedAt)
-	return err
+	u.CreatedAt, u.UpdatedAt = now, now
+	_, err := o.s.db.Exec(insertUserSQL, o.org, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.CreatedAt, u.UpdatedAt)
+	if err == nil {
+		u.orgID = o.org
+	}
+	return staffOrgError(err)
 }
 
+const insertUserSQL = `INSERT INTO users (org_id, id, username, display_name, email, password_hash, role, status, pending, password_change_required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
 // CreateUserWithSyncEvents is the transactional outbox path for directory creation.
-func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
-	tx, err := s.db.Begin()
+func (o *OrgStore) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	now := rowTime()
 	u.CreatedAt, u.UpdatedAt = now, now
-	if _, err := tx.Exec(`INSERT INTO users (id, username, display_name, email, password_hash, role, status, pending, password_change_required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.CreatedAt, u.UpdatedAt); err != nil {
+	if _, err := tx.Exec(insertUserSQL, o.org, u.ID, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.CreatedAt, u.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
 			return ErrUserConflict
 		}
-		return err
+		return staffOrgError(err)
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {
 		return err
@@ -927,13 +928,27 @@ func (s *Store) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 	if err := recordAuditTx(tx, audit); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	u.orgID = o.org
+	return nil
 }
 
-func (s *Store) GetUserByID(id string) (*User, error) {
+// GetUserByID finds a user of the org; another org's user reads as missing (nil).
+func (o *OrgStore) GetUserByID(id string) (*User, error) {
+	return scanUser(o.s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id = ? AND id = ?`, o.org, id))
+}
+
+// PrincipalByID loads the user a pre-org credential names: a session, an authorization
+// code, a refresh family, an MFA or step-up token, a device sign-on or a verified token's
+// sub. Never call it with an ID from a request: that is OrgStore.GetUserByID.
+func (s *Store) PrincipalByID(id string) (*User, error) {
 	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 }
 
+// GetUserByUsername and GetUserByEmail are the pre-org lookups of sign-in, forgot-password
+// and the operator commands: username and email are unique across orgs (D5).
 func (s *Store) GetUserByUsername(username string) (*User, error) {
 	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE username = ?`, username))
 }
@@ -942,8 +957,8 @@ func (s *Store) GetUserByEmail(email string) (*User, error) {
 	return scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users WHERE email = ?`, email))
 }
 
-func (s *Store) ListUsers() ([]User, error) {
-	rows, err := s.db.Query(`SELECT ` + userColumns + ` FROM users ORDER BY username ASC`)
+func (o *OrgStore) ListUsers() ([]User, error) {
+	rows, err := o.s.db.Query(`SELECT `+userColumns+` FROM users WHERE org_id = ? ORDER BY username ASC`, o.org)
 	if err != nil {
 		return nil, err
 	}
@@ -963,28 +978,28 @@ func (s *Store) ListUsers() ([]User, error) {
 // EditUser applies one request's changes to the row as read under the write lock, so a
 // field the request does not touch keeps whatever a concurrent write left there. edit
 // may refuse; it reports whether the change must revoke the account's access.
-func (s *Store) EditUser(id string, audit *AuditEvent, edit func(u *User) (revokeAccess bool, err error)) (*User, error) {
-	return s.updateUser(id, audit, func(_ *sql.Tx, u *User) (bool, error) { return edit(u) })
+func (o *OrgStore) EditUser(id string, audit *AuditEvent, edit func(u *User) (revokeAccess bool, err error)) (*User, error) {
+	return o.updateUser(id, audit, func(_ *sql.Tx, u *User) (bool, error) { return edit(u) })
 }
 
 // updateUser is the one account-update transaction. edit changes a copy of the row read
 // under the write lock, before anything is written, so no caller writes a stale field.
 // A source-owned row's status is then re-derived from its source state.
-func (s *Store) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u *User) (revokeAccess bool, err error)) (*User, error) {
-	tx, err := s.db.Begin()
+func (o *OrgStore) updateUser(id string, audit *AuditEvent, edit func(tx *sql.Tx, u *User) (revokeAccess bool, err error)) (*User, error) {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	stored, err := updateUserTx(tx, id, audit, edit)
+	stored, err := updateUserTx(tx, o.org, id, audit, edit)
 	if err != nil {
 		return nil, err
 	}
 	return stored, tx.Commit()
 }
 
-func updateUserTx(tx *sql.Tx, id string, audit *AuditEvent, edit func(*sql.Tx, *User) (bool, error)) (*User, error) {
-	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
+func updateUserTx(tx *sql.Tx, org, id string, audit *AuditEvent, edit func(*sql.Tx, *User) (bool, error)) (*User, error) {
+	current, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id = ? AND id = ?`, org, id))
 	if err != nil {
 		return nil, err
 	}
@@ -1015,8 +1030,8 @@ func updateUserTx(tx *sql.Tx, id string, audit *AuditEvent, edit func(*sql.Tx, *
 		}
 	}
 	now := rowTime()
-	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, password_change_required = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, u.ID); err != nil {
-		return nil, enrollmentMutationError(err)
+	if _, err := tx.Exec(`UPDATE users SET username = ?, display_name = ?, email = ?, password_hash = ?, role = ?, status = ?, pending = ?, password_change_required = ?, source_active = ?, locally_disabled = ?, ends_at = ?, updated_at = ? WHERE org_id = ? AND id = ?`, u.Username, u.DisplayName, u.Email, u.PasswordHash, u.Role, u.Status, u.Pending, u.PasswordChangeRequired, u.SourceActive, u.LocallyDisabled, unixOrNil(u.EndsAt), now, org, u.ID); err != nil {
+		return nil, staffOrgError(enrollmentMutationError(err))
 	}
 	if oldRole != "admin" && u.Role == "admin" {
 		// A link a delegate issued while the account was ordinary must not hand them an
@@ -1027,14 +1042,14 @@ func updateUserTx(tx *sql.Tx, id string, audit *AuditEvent, edit func(*sql.Tx, *
 	}
 	if !strings.EqualFold(oldEmail, u.Email) {
 		// A new address is unproven, and a link mailed to the old one must not act on it.
-		if _, err := tx.Exec(`UPDATE users SET email_verified_at = NULL WHERE id = ?`, u.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE users SET email_verified_at = NULL WHERE org_id = ? AND id = ?`, org, u.ID); err != nil {
 			return nil, err
 		}
 		if err := expireAccountTokensTx(tx, now, `user_id=?`, u.ID); err != nil {
 			return nil, err
 		}
 	}
-	stored, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, u.ID))
+	stored, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id=? AND id=?`, org, u.ID))
 	if err != nil {
 		return nil, err
 	}
@@ -1060,9 +1075,11 @@ func updateUserTx(tx *sql.Tx, id string, audit *AuditEvent, edit func(*sql.Tx, *
 	return stored, nil
 }
 
-func (s *Store) CountAdmins() (int, error) {
+// CountAdmins counts active administrators in every org: the first-start bootstrap's
+// question. Only the default or staff org can hold one (D8).
+func (p *PlatformStore) CountAdmins() (int, error) {
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&count)
+	err := p.s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE ` + activeAdminSQL).Scan(&count)
 	return count, err
 }
 
@@ -1070,13 +1087,13 @@ func (s *Store) CountAdmins() (int, error) {
 // Every connector that holds the account gets a deletion through its desired state, so
 // completion stays visible afterwards; connectors with no recorded account get a bare
 // deletion in case they hold one from whole-directory delivery that predates tracking.
-func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error {
-	tx, err := s.db.Begin()
+func (o *OrgStore) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, userID))
+	u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id=? AND id=?`, o.org, userID))
 	if err != nil {
 		return err
 	}
@@ -1107,7 +1124,7 @@ func (s *Store) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) error
 			return err
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM users WHERE id = ?`, userID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM users WHERE org_id = ? AND id = ?`, o.org, userID); err != nil {
 		return err
 	}
 	if err := reconcileProvisioningTx(tx, now); err != nil {

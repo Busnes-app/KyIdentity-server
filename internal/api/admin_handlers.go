@@ -42,7 +42,7 @@ func NewAdminHandler(s *store.Store, syncEngine *sync.Engine, audit *audit.Logge
 
 // ListUsers lists all user accounts.
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := h.store.ListUsers()
+	users, err := orgStore(r).ListUsers()
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -122,7 +122,7 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		"pending":                user.Pending,
 		"passwordChangeRequired": !user.Pending,
 	})
-	if err := h.syncEngine.CreateUserAndQueueSyncEvents(user, created.Row); err != nil {
+	if err := h.syncEngine.CreateUserAndQueueSyncEvents(orgStore(r), user, created.Row); err != nil {
 		if errors.Is(err, store.ErrUserConflict) {
 			writeAPIError(w, http.StatusConflict, "user_exists", "Username or email already exists")
 			return
@@ -187,7 +187,7 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// The edit runs on the row as read under the write lock and sets only what this
 	// request names, so a concurrent password reset or role change is never reverted.
 	updated := h.audit.Prepare("admin.user_updated", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	user, err := h.store.EditUser(userID, updated.Row, func(user *store.User) (bool, error) {
+	user, err := orgStore(r).EditUser(userID, updated.Row, func(user *store.User) (bool, error) {
 		if user.SourceConnectorID != "" && ((req.DisplayName != "" && req.DisplayName != user.DisplayName) || (req.Email != "" && !strings.EqualFold(req.Email, user.Email))) {
 			return false, errSourceOwned
 		}
@@ -296,7 +296,7 @@ func (h *AdminHandler) ResetUserMFA(w http.ResponseWriter, r *http.Request) {
 	admin := GetUserFromContext(r.Context())
 	userID := r.PathValue("id")
 
-	user, err := h.store.GetUserByID(userID)
+	user, err := orgStore(r).GetUserByID(userID)
 	if err != nil || user == nil {
 		http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
 		return
@@ -329,6 +329,9 @@ func (h *AdminHandler) ResetUserMFA(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) RevokeUserSessions(w http.ResponseWriter, r *http.Request) {
 	admin := GetUserFromContext(r.Context())
 	userID := r.PathValue("id")
+	if _, ok := orgUser(w, r, userID); !ok {
+		return
+	}
 
 	// Revocation is the one place where reporting an unearned success is worse than
 	// reporting failure: the admin stops looking.
@@ -352,7 +355,7 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	admin := GetUserFromContext(r.Context())
 	userID := r.PathValue("id")
 
-	user, err := h.store.GetUserByID(userID)
+	user, err := orgStore(r).GetUserByID(userID)
 	if err != nil || user == nil {
 		http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
 		return
@@ -361,7 +364,7 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	deleted := h.audit.Prepare("admin.user_deleted", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
 		"username": user.Username,
 	})
-	if err := h.syncEngine.DeleteUserAndQueueSyncEvents(userID, deleted.Row); err != nil {
+	if err := h.syncEngine.DeleteUserAndQueueSyncEvents(orgStore(r), userID, deleted.Row); err != nil {
 		if errors.Is(err, store.ErrLastActiveAdmin) {
 			http.Error(w, `{"error":"cannot_delete_last_admin","error_description":"Cannot delete the only active administrator"}`, http.StatusBadRequest)
 		} else {

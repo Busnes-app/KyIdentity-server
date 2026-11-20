@@ -108,7 +108,7 @@ func setupTestSyncEngine(t *testing.T) (*Engine, *store.Store, *store.User, func
 		Role:         "admin",
 		Status:       "active",
 	}
-	if err := dbStore.CreateUser(adminUser); err != nil {
+	if err := dbStore.DefaultOrg().CreateUser(adminUser); err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
 
@@ -441,10 +441,10 @@ func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
 	}
 	check(`"roles":[]`, true)
 	other := &store.User{ID: uuid.NewString(), Username: "remaining-admin", DisplayName: "Remaining", Role: "admin", Status: "active", PasswordHash: "fixture"}
-	if err := s.CreateUser(other); err != nil {
+	if err := s.DefaultOrg().CreateUser(other); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.EditUser(admin.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
+	if _, err := s.DefaultOrg().EditUser(admin.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
 		t.Fatal(err)
 	}
 	check(`"roles":[]`, false)

@@ -26,13 +26,13 @@ func TestPermissionMatrixCoversEveryAdminRoute(t *testing.T) {
 	target := newUser(t, db, "user")
 	targetAdmin := newUser(t, db, "admin")
 	targetAuditor := newUser(t, db, "user")
-	if err := db.SetDelegations(targetAuditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(targetAuditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	delegate := func(d store.Delegations) (*store.User, string) {
 		u := newUser(t, db, "user")
-		if err := db.SetDelegations(u.ID, d, nil); err != nil {
+		if err := db.DefaultOrg().SetDelegations(u.ID, d, nil); err != nil {
 			t.Fatal(err)
 		}
 		return u, newSession(t, db, u, exp)
@@ -110,7 +110,7 @@ func TestPermissionMatrixCoversEveryAdminRoute(t *testing.T) {
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), appA[0].ID) || strings.Contains(list.Body.String(), appB[0].ID) {
 		t.Fatalf("owner listing: %d %s", list.Code, list.Body.String())
 	}
-	if err := db.SetDelegations(ownerA.ID, store.Delegations{}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(ownerA.ID, store.Delegations{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !forbidden("GET", "/api/admin/app-registry/"+appA[0].ID+"/roles", ownerACookie) {

@@ -33,7 +33,7 @@ func (s *Store) DisableUserByName(username, guard string, audit *AuditEvent) (bo
 	if u == nil {
 		return false, ErrNotFound
 	}
-	_, err = s.updateUser(u.ID, audit, func(tx *sql.Tx, u *User) (bool, error) {
+	_, err = s.Org(u.Org()).updateUser(u.ID, audit, func(tx *sql.Tx, u *User) (bool, error) {
 		if !strings.EqualFold(u.Username, username) {
 			return false, ErrNotFound // renamed since the lookup
 		}

@@ -74,7 +74,7 @@ func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 		t.Fatal("restart or fixture reset the delivery counter", deliveryRevision, err)
 	}
 	// Local deletion removes the old event but not its in-flight resource fence.
-	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The write holds the deletion back even past its recovery time; only its known
@@ -325,7 +325,7 @@ func TestReadOnlyListingsDoNotWaitForWriter(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := s.ListGroups("", "", 10, 0)
+		_, _, err := s.DefaultOrg().ListGroups("", "", 10, 0)
 		if err == nil {
 			_, _, err = s.ListProvisioningState("target", "", 10, 0)
 		}

@@ -60,7 +60,7 @@ func (h *AdminHandler) ListGroups(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid_request","error_description":"Use limit 1–100, a nonnegative offset, and search up to 200 characters"}`, 400)
 		return
 	}
-	groups, total, err := h.store.ListGroups(p.Query, r.URL.Query().Get("userId"), p.Limit, p.Offset)
+	groups, total, err := orgStore(r).ListGroups(p.Query, r.URL.Query().Get("userId"), p.Limit, p.Offset)
 	if err != nil {
 		writeGroupError(w, err)
 		return
@@ -75,7 +75,7 @@ func (h *AdminHandler) ListGroupUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid_request"}`, 400)
 		return
 	}
-	users, total, err := h.store.ListGroupUsers(r.PathValue("id"), p.Query, include == "true", p.Limit, p.Offset)
+	users, total, err := orgStore(r).ListGroupUsers(r.PathValue("id"), p.Query, include == "true", p.Limit, p.Offset)
 	if err != nil {
 		writeGroupError(w, err)
 		return
@@ -117,9 +117,9 @@ func (h *AdminHandler) saveGroup(w http.ResponseWriter, r *http.Request, create 
 	actor := GetUserFromContext(r.Context())
 	event := h.audit.Prepare(action, actor.ID, actor.Username, g.ID, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"name": g.Name, "description": g.Description})
 	if create {
-		err = h.store.CreateGroup(g, event.Row)
+		err = orgStore(r).CreateGroup(g, event.Row)
 	} else {
-		err = h.store.UpdateGroup(g, event.Row)
+		err = orgStore(r).UpdateGroup(g, event.Row)
 	}
 	if err != nil {
 		writeGroupError(w, err)
@@ -137,7 +137,7 @@ func (h *AdminHandler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	actor := GetUserFromContext(r.Context())
 	id := r.PathValue("id")
 	event := h.audit.Prepare("admin.group_deleted", actor.ID, actor.Username, id, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	if err := h.store.DeleteGroupForSession(id, GetSessionFromContext(r.Context()).ID, event.Row); err != nil {
+	if err := orgStore(r).DeleteGroupForSession(id, GetSessionFromContext(r.Context()).ID, event.Row); err != nil {
 		if errors.Is(err, store.ErrEmergencyAdministrator) {
 			if auditErr := h.audit.Record("admin.group_deleted", actor.ID, actor.Username, id, "group", h.middleware.ClientIP(r), r.UserAgent(), "denied", map[string]any{"reason": "compliant_admin_required"}); auditErr != nil {
 				stepUpInternalError(w)
@@ -170,9 +170,9 @@ func (h *AdminHandler) SetGroupMembership(w http.ResponseWriter, r *http.Request
 	event := h.audit.Prepare(action, actor.ID, actor.Username, groupID, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", details)
 	sessionID := GetSessionFromContext(r.Context()).ID
 	if member {
-		err = h.store.SetGroupMembershipUntil(groupID, userID, expiresAt, sessionID, event.Row)
+		err = orgStore(r).SetGroupMembershipUntil(groupID, userID, expiresAt, sessionID, event.Row)
 	} else {
-		err = h.store.SetGroupMembershipForSession(groupID, userID, false, sessionID, event.Row)
+		err = orgStore(r).SetGroupMembershipForSession(groupID, userID, false, sessionID, event.Row)
 	}
 	if err != nil {
 		if errors.Is(err, store.ErrEnrollmentPolicy) || errors.Is(err, store.ErrEmergencyAdministrator) {
@@ -193,7 +193,7 @@ func (h *AdminHandler) SetGroupMembership(w http.ResponseWriter, r *http.Request
 }
 
 func (h *AdminHandler) GetSuiteGroup(w http.ResponseWriter, r *http.Request) {
-	settings, err := h.store.GetSuiteGroup(r.PathValue("id"))
+	settings, err := orgStore(r).GetSuiteGroup(r.PathValue("id"))
 	if err != nil {
 		writeGroupError(w, err)
 		return
@@ -216,7 +216,7 @@ func (h *AdminHandler) SetSuiteGroup(w http.ResponseWriter, r *http.Request) {
 	actor := GetUserFromContext(r.Context())
 	id := r.PathValue("id")
 	event := h.audit.Prepare("admin.group_suite_updated", actor.ID, actor.Username, id, "group", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"enabled": *req.Enabled, "apps": req.Apps})
-	settings, err := h.store.SetSuiteGroup(id, *req.Enabled, req.Apps, event.Row)
+	settings, err := orgStore(r).SetSuiteGroup(id, *req.Enabled, req.Apps, event.Row)
 	if err != nil {
 		var input store.InputError
 		if errors.As(err, &input) {

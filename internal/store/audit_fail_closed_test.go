@@ -96,7 +96,7 @@ func TestMutationsRollBackWhenTheirAuditCannotBeWritten(t *testing.T) {
 func TestCreateUserClashIsUserConflict(t *testing.T) {
 	s, u := newStoreWithUser(t, "user")
 	dup := &User{ID: "u2", Username: u.Username, Email: "other@example.test", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := s.CreateUserWithSyncEvents(dup, nil); !errors.Is(err, ErrUserConflict) {
+	if err := s.DefaultOrg().CreateUserWithSyncEvents(dup, nil); !errors.Is(err, ErrUserConflict) {
 		t.Fatalf("duplicate username: %v", err)
 	}
 }

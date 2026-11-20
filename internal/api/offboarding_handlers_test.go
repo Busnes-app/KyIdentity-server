@@ -34,7 +34,7 @@ func TestOffboardingViewSurvivesDeletionAndIsAdminOnly(t *testing.T) {
 	if _, err := db.EnsureClientSession("kynotes", sessionIDFor(t, db, newSession(t, db, u, exp)), u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+	if err := db.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 

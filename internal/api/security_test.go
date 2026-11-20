@@ -32,7 +32,7 @@ func newUser(t *testing.T, db *store.Store, role string) *store.User {
 		DisplayName: "U", Email: uuid.New().String()[:8] + "@x.test",
 		PasswordHash: hash, Role: role, Status: "active",
 	}
-	if err := db.CreateUser(u); err != nil {
+	if err := db.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	return u
@@ -804,7 +804,7 @@ func TestDeletingUserQueuesDeletionSyncEvent(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("deleting user returned %d: %s", rr.Code, rr.Body.String())
 	}
-	if user, err := db.GetUserByID(victim.ID); err != nil || user != nil {
+	if user, err := db.DefaultOrg().GetUserByID(victim.ID); err != nil || user != nil {
 		t.Fatalf("deleted user still present: user=%+v err=%v", user, err)
 	}
 	pending, err := db.GetPendingSyncEvents(10)

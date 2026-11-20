@@ -516,7 +516,7 @@ func (e *Engine) dispatchPushChallenge(challenge *store.MFAChallenge, decoys []s
 		ExpiresAtMS: challenge.ExpiresAt.UnixMilli(),
 	}
 	// Display only: without it the authenticator falls back to the name saved at pairing.
-	if user, err := e.store.GetUserByID(challenge.UserID); err == nil {
+	if user, err := e.store.PrincipalByID(challenge.UserID); err == nil {
 		push.Username = user.Username
 	} else {
 		log.Printf("mfa push: sending challenge %s without a username: %v", challenge.ID, err)

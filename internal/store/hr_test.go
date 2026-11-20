@@ -34,7 +34,7 @@ func TestHRStagingVersionsAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u, _ := s.GetUserByID(w.ID); u != nil {
+	if u, _ := s.DefaultOrg().GetUserByID(w.ID); u != nil {
 		t.Fatal("identity created before KyPost assigned email")
 	}
 	if retry, err := s.ImportHR(c, in, nil); err != nil || retry.ID != w.ID {
@@ -50,7 +50,7 @@ func TestHRStagingVersionsAndLifecycle(t *testing.T) {
 	if err := s.FinishHR(job, "alice.adams@example.test", ""); err != nil {
 		t.Fatal(err)
 	}
-	u, err := s.GetUserByID(w.ID)
+	u, err := s.DefaultOrg().GetUserByID(w.ID)
 	if err != nil || u == nil || u.Username != "alice.adams@example.test" || u.Email != u.Username || u.SourceConnectorID != c || u.ExternalID != in.SourceUID || u.Status != "disabled" || !u.Pending || u.Role != "user" {
 		t.Fatal(u, err)
 	}
@@ -77,7 +77,7 @@ func TestHRStagingVersionsAndLifecycle(t *testing.T) {
 	if _, err := s.ImportHR(c, in, nil); err != nil {
 		t.Fatal(err)
 	}
-	u, _ = s.GetUserByID(w.ID)
+	u, _ = s.DefaultOrg().GetUserByID(w.ID)
 	if u.Status != "disabled" || u.SourceActive || u.Pending {
 		t.Fatal("departure failed", u)
 	}
@@ -90,7 +90,7 @@ func TestHRStagingVersionsAndLifecycle(t *testing.T) {
 	if _, err := s.ImportHR(c, in, nil); err != nil {
 		t.Fatal(err)
 	}
-	u, _ = s.GetUserByID(w.ID)
+	u, _ = s.DefaultOrg().GetUserByID(w.ID)
 	if u.Status != "active" || u.Email != "alice.adams@example.test" {
 		t.Fatal("rehire changed identity/address", u)
 	}
@@ -115,7 +115,7 @@ func TestHRLeaseSupersessionAuditAndRestore(t *testing.T) {
 	if err := s.FinishHR(job, "alice@example.test", ""); err != nil {
 		t.Fatal(err)
 	}
-	if u, _ := s.GetUserByID(w.ID); u != nil {
+	if u, _ := s.DefaultOrg().GetUserByID(w.ID); u != nil {
 		t.Fatal("stale allocation created departed account")
 	}
 	in.SourceVersion = 3
@@ -139,7 +139,7 @@ CREATE TRIGGER reject_hr_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUT
 	if err := s.FinishHR(job, "alice@example.test", ""); err == nil {
 		t.Fatal("audit failure ignored")
 	}
-	if u, _ := s.GetUserByID(w.ID); u != nil {
+	if u, _ := s.DefaultOrg().GetUserByID(w.ID); u != nil {
 		t.Fatal("unaudited identity persisted")
 	}
 	drop := `DROP TRIGGER reject_hr_audit`
@@ -210,7 +210,7 @@ func TestHRRestartAndWritebackRetry(t *testing.T) {
 	if err := reopened.FinishHR(job, job.Email, ""); err != nil {
 		t.Fatal(err)
 	}
-	users, err := reopened.ListUsers()
+	users, err := reopened.DefaultOrg().ListUsers()
 	if err != nil || len(users) != 1 || users[0].ID != w.ID {
 		t.Fatal("duplicate identity", users, err)
 	}
@@ -238,7 +238,7 @@ func TestHRRefusesPreviouslyAuthorizedSCIMWrites(t *testing.T) {
 	if err := s.FinishHR(job, "alice@example.test", ""); err != nil {
 		t.Fatal(err)
 	}
-	u, err = s.GetUserByID(w.ID)
+	u, err = s.DefaultOrg().GetUserByID(w.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestHRRefusesPreviouslyAuthorizedSCIMWrites(t *testing.T) {
 	if _, err := s.UpdateUpstreamUser(c, u.ID, nil, func(current *User) error { current.Email = u.Email; return nil }); !errors.Is(err, ErrHRConflict) {
 		t.Fatal("SCIM overwrite bypassed versioning", err)
 	}
-	stored, _ := s.GetUserByID(w.ID)
+	stored, _ := s.DefaultOrg().GetUserByID(w.ID)
 	if stored.Email != "alice@example.test" {
 		t.Fatal("HR email overwritten")
 	}

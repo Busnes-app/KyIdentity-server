@@ -20,6 +20,7 @@ type contextKey string
 
 const (
 	userContextKey    contextKey = "user"
+	orgContextKey     contextKey = "org"
 	sessionContextKey contextKey = "session"
 )
 
@@ -346,7 +347,7 @@ func (m *MiddlewareManager) authenticate(r *http.Request) (*store.User, *store.S
 		return nil, nil, err
 	}
 
-	user, err := m.store.GetUserByID(sess.UserID)
+	user, err := m.store.PrincipalByID(sess.UserID)
 	if err != nil || user == nil || user.Status != "active" {
 		return nil, nil, err
 	}
@@ -361,9 +362,12 @@ func writeSessionUnavailable(w http.ResponseWriter, err error) {
 	writeAPIError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "The session could not be checked; try again shortly.")
 }
 
-func withIdentity(r *http.Request, user *store.User, sess *store.Session) *http.Request {
+// withIdentity also binds the request's OrgStore to the signed-in user's org: the org
+// comes from the principal, never from the request.
+func (m *MiddlewareManager) withIdentity(r *http.Request, user *store.User, sess *store.Session) *http.Request {
 	ctx := context.WithValue(r.Context(), userContextKey, user)
 	ctx = context.WithValue(ctx, sessionContextKey, sess)
+	ctx = context.WithValue(ctx, orgContextKey, m.store.Org(user.Org()))
 	return r.WithContext(ctx)
 }
 
@@ -392,7 +396,7 @@ func (m *MiddlewareManager) RequireAuth(next http.Handler) http.Handler {
 			http.Error(w, `{"error":"enrollment_required","error_description":"Complete MFA enrollment and sign in again to continue."}`, 403)
 			return
 		}
-		next.ServeHTTP(w, withIdentity(r, user, sess))
+		next.ServeHTTP(w, m.withIdentity(r, user, sess))
 	})
 }
 
@@ -406,7 +410,7 @@ func (m *MiddlewareManager) OptionalAuth(next http.Handler) http.Handler {
 			return
 		}
 		if user != nil {
-			r = withIdentity(r, user, sess)
+			r = m.withIdentity(r, user, sess)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -494,6 +498,31 @@ func GetUserFromContext(ctx context.Context) *store.User {
 		return u
 	}
 	return nil
+}
+
+// orgStore is the store bound to the signed-in user's org. Only routes behind RequireAuth
+// or a signed-in OptionalAuth have one; anything else is a programming error.
+func orgStore(r *http.Request) *store.OrgStore {
+	o, ok := r.Context().Value(orgContextKey).(*store.OrgStore)
+	if !ok {
+		panic("api: no OrgStore on an unauthenticated request")
+	}
+	return o
+}
+
+// orgUser resolves a user ID from the request in the caller's org. Another org's user
+// answers user_not_found, exactly as a missing one does.
+func orgUser(w http.ResponseWriter, r *http.Request, id string) (*store.User, bool) {
+	u, err := orgStore(r).GetUserByID(id)
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return nil, false
+	}
+	if u == nil {
+		http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
+		return nil, false
+	}
+	return u, true
 }
 
 // GetSessionFromContext retrieves active session from context.

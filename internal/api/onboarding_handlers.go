@@ -107,7 +107,7 @@ func (h *OnboardingHandler) body(u *store.User, kind, raw string) string {
 func (h *OnboardingHandler) AdminIssueLink(kind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		admin := GetUserFromContext(r.Context())
-		u, err := h.store.GetUserByID(r.PathValue("id"))
+		u, err := orgStore(r).GetUserByID(r.PathValue("id"))
 		if err != nil || u == nil {
 			http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
 			return

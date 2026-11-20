@@ -39,7 +39,7 @@ func TestSCIMMappingDurability(t *testing.T) {
 	if err = s.SaveSCIMUserLink("b", u.ID, "remote"); err != nil {
 		t.Fatal("connector mappings overlap", err)
 	}
-	if err = s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+	if err = s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

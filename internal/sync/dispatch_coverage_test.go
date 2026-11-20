@@ -438,20 +438,20 @@ func TestUserMutationWrappersQueueEvents(t *testing.T) {
 	}
 	grantAllUsers(t, s, sys.ID)
 	u := &store.User{ID: uuid.NewString(), Username: "newbie", DisplayName: "New", Email: "n@example.test", PasswordHash: "x", Role: "user", Status: "active"}
-	if err := e.CreateUserAndQueueSyncEvents(u, nil); err != nil {
+	if err := e.CreateUserAndQueueSyncEvents(s.DefaultOrg(), u, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := outbox(t, s, sys.ID, u.ID); len(got) != 1 || got[0].eventType != "user.created" {
 		t.Fatalf("create not queued: %+v", got)
 	}
-	if err := e.DeleteUserAndQueueSyncEvents(u.ID, nil); err != nil {
+	if err := e.DeleteUserAndQueueSyncEvents(s.DefaultOrg(), u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := outbox(t, s, sys.ID, u.ID)
 	if len(got) == 0 || got[len(got)-1].eventType != "user.deleted" {
 		t.Fatalf("removal not queued: %+v", got)
 	}
-	if stored, _ := s.GetUserByID(u.ID); stored != nil {
+	if stored, _ := s.DefaultOrg().GetUserByID(u.ID); stored != nil {
 		t.Fatal("user not deleted")
 	}
 }

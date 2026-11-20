@@ -272,12 +272,12 @@ func TestSuiteGroupIsInItsGroupsOrg(t *testing.T) {
 	defer cleanup()
 	newTestOrg(t, s, "org-b", "active")
 	g := &Group{ID: "g-1", Name: "Team"}
-	if err := s.CreateGroup(g, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
 	refused(t, s, msgSuiteGroupOrg, `INSERT INTO suite_groups(group_id,slug,name,enabled,created_at,updated_at,org_id) VALUES('g-1','team','Team',TRUE,1,1,'org-b')`)
 	refused(t, s, msgSuiteGroupOrg, `INSERT INTO suite_groups(group_id,slug,name,enabled,created_at,updated_at) VALUES('g-none','none','None',TRUE,1,1)`)
-	if _, err := s.SetSuiteGroup(g.ID, true, nil, nil); err != nil {
+	if _, err := s.DefaultOrg().SetSuiteGroup(g.ID, true, nil, nil); err != nil {
 		t.Fatal("the store's own suite group write:", err)
 	}
 	refused(t, s, msgOrgChanged, `UPDATE suite_groups SET org_id='org-b' WHERE group_id='g-1'`)
@@ -301,10 +301,10 @@ func TestMembershipsCannotSpanOrgs(t *testing.T) {
 	for _, q := range cross {
 		refused(t, s, msgMembershipOrgs, q)
 	}
-	if err := s.SetGroupMembership("g-a", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("g-a", u.ID, true, nil); err != nil {
 		t.Fatal("a same-org membership:", err)
 	}
-	if err := s.SetGroupMembership("g-a", "no-such-user", true, nil); err != ErrGroupTargetMissing {
+	if err := s.DefaultOrg().SetGroupMembership("g-a", "no-such-user", true, nil); err != ErrGroupTargetMissing {
 		t.Fatalf("a missing user is %v, want ErrGroupTargetMissing", err)
 	}
 	if !s.postgres {
@@ -361,7 +361,16 @@ func TestTenancyUpgradeKeepsEveryView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Today's store code names org_id, which the previous schema lacks: lend it the column
+	// for the fixture and take it back, so the upgrade adds it as it would.
+	scoped := []string{"users", "directory_groups", "group_memberships", "suite_groups"}
+	for _, table := range scoped {
+		tenancyExec(t, s, `ALTER TABLE `+table+` ADD COLUMN org_id TEXT DEFAULT '`+DefaultOrgID+`'`)
+	}
 	copyFixture(t, s)
+	for _, table := range scoped {
+		tenancyExec(t, s, `ALTER TABLE `+table+` DROP COLUMN org_id`)
+	}
 	tenancyExec(t, s, `UPDATE enrollment_policies SET required=TRUE WHERE scope='administrators'`,
 		`UPDATE group_memberships SET expires_at=1 WHERE group_id IN (SELECT id FROM directory_groups WHERE name='Staff Ünits')`)
 	if err := s.SetSetting(BrandingNameSetting, "Example Household"); err != nil {

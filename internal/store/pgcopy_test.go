@@ -25,7 +25,7 @@ func copyFixture(t *testing.T, s *Store) {
 	t.Helper()
 	admin := &User{ID: uuid.NewString(), Username: "Zoë-Ångström", DisplayName: "Zoë 🙂 Ångström", Email: "Zoe@Example.test",
 		PasswordHash: "$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA", Role: "admin", Status: "active"}
-	if err := s.CreateUser(admin); err != nil {
+	if err := s.DefaultOrg().CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
 	user := createTestUserNamed(t, s, "MixedCase.User")
@@ -44,13 +44,13 @@ func copyFixture(t *testing.T, s *Store) {
 	}
 	app := provisioningFixture(t, s, "hr")
 	g := &Group{ID: uuid.NewString(), Name: "Staff Ünits"}
-	if err := s.CreateGroup(g, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(g.ID, user.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(g.ID, user.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetSuiteGroup(g.ID, true, map[string]bool{"kypost": true}, nil); err != nil {
+	if _, err := s.DefaultOrg().SetSuiteGroup(g.ID, true, map[string]bool{"kypost": true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
@@ -104,7 +104,7 @@ func copyFixture(t *testing.T, s *Store) {
 	}
 	must(s.SetAppRoleAssignment(app, role.ID, "users", user.ID, true, nil))
 	must(s.SetAppRoleAssignment(app, role.ID, "groups", g.ID, true, nil))
-	must(s.SetDelegations(user.ID, Delegations{Helpdesk: true, AppOwner: []string{app}}, nil))
+	must(s.DefaultOrg().SetDelegations(user.ID, Delegations{Helpdesk: true, AppOwner: []string{app}}, nil))
 	must(s.CreateApplication(&Application{ID: uuid.NewString(), Name: "Wiki", URL: "https://wiki.test", IconName: "book", Enabled: false, CreatedAt: now}, nil))
 	must(s.CreateLauncherIcon(&LauncherIcon{ID: uuid.NewString(), ContentType: "image/png", Data: []byte{1, 2, 3}, CreatedAt: now}, nil))
 	must(s.SetLauncherPrefs(user.ID, LauncherPrefs{Layout: "tiles", Groups: []LauncherGroup{{Name: "Wörk", Apps: []string{"client:client-1"}}}, Hidden: []string{}}))

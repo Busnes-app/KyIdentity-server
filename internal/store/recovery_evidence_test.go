@@ -59,7 +59,7 @@ func TestRecoveryEvidenceIncludesAcknowledgedLossAndDeletion(t *testing.T) {
 			}
 			var err error
 			if deleted {
-				err = s.DeleteUserWithSyncEvents(lost.ID, nil)
+				err = s.DefaultOrg().DeleteUserWithSyncEvents(lost.ID, nil)
 			} else {
 				err = s.SetAppAssignment(app, "users", lost.ID, false, nil)
 			}
@@ -103,10 +103,10 @@ func TestRecoveryEvidenceProjectsLiveRolesAndExpiry(t *testing.T) {
 	app := recoveryFixture(t, s)
 	u := createTestUser(t, s)
 	g := &Group{ID: uuid.NewString(), Name: "staff"}
-	if err := s.CreateGroup(g, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {

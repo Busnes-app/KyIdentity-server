@@ -107,7 +107,7 @@ func TestInvitedAccountActivatesThroughItsLink(t *testing.T) {
 	if got := login(t, srv, "newcomer", "a-long-enough-password"); got.Code != http.StatusOK {
 		t.Fatalf("login after activation: %d %s", got.Code, got.Body.String())
 	}
-	u, _ := db.GetUserByID(resp.User.ID)
+	u, _ := db.DefaultOrg().GetUserByID(resp.User.ID)
 	if u.Pending || u.Status != "active" || u.EmailVerifiedAt != nil {
 		t.Fatalf("after activation: %+v", u)
 	}
@@ -135,7 +135,7 @@ func TestPendingAccountActivatesOnlyByPassword(t *testing.T) {
 	if got := adminRequest(t, srv, "PUT", "/api/admin/users/"+resp.User.ID, admin, `{"status":"active","password":"set-by-the-admin-12"}`); got.Code != http.StatusOK {
 		t.Fatalf("manual activation: %d %s", got.Code, got.Body.String())
 	}
-	u, _ := db.GetUserByID(resp.User.ID)
+	u, _ := db.DefaultOrg().GetUserByID(resp.User.ID)
 	if u.Pending || u.Status != "active" {
 		t.Fatalf("after manual activation: %+v", u)
 	}

@@ -32,7 +32,7 @@ func newStoreWithUser(t *testing.T, role string) (*Store, *User) {
 		ID: "u1", Username: "ada", DisplayName: "Ada", Email: "ada@example.test",
 		PasswordHash: "hash", Role: role, Status: "active",
 	}
-	if err := s.CreateUser(u); err != nil {
+	if err := s.DefaultOrg().CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
 	return s, u
@@ -52,7 +52,7 @@ func TestUserUpdateRollsBackWhenItsAuditRowCannotBeWritten(t *testing.T) {
 		t.Fatal("an unauditable user update reported success")
 	}
 
-	stored, err := s.GetUserByID(u.ID)
+	stored, err := s.DefaultOrg().GetUserByID(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,10 +88,10 @@ func TestUserCreateRollsBackWhenItsAuditRowCannotBeWritten(t *testing.T) {
 		ID: "u2", Username: "grace", DisplayName: "Grace", Email: "grace@example.test",
 		PasswordHash: "hash", Role: "admin", Status: "active",
 	}
-	if err := s.CreateUserWithSyncEvents(u, audit); err == nil {
+	if err := s.DefaultOrg().CreateUserWithSyncEvents(u, audit); err == nil {
 		t.Fatal("an unauditable user creation reported success")
 	}
-	stored, err := s.GetUserByID("u2")
+	stored, err := s.DefaultOrg().GetUserByID("u2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +104,10 @@ func TestUserDeleteRollsBackWhenItsAuditRowCannotBeWritten(t *testing.T) {
 	s, u := newStoreWithUser(t, "user")
 	audit := poisonedAudit(t, s, "admin.user_deleted", u.ID)
 
-	if err := s.DeleteUserWithSyncEvents(u.ID, audit); err == nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, audit); err == nil {
 		t.Fatal("an unauditable user deletion reported success")
 	}
-	stored, err := s.GetUserByID(u.ID)
+	stored, err := s.DefaultOrg().GetUserByID(u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

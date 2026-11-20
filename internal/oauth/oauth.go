@@ -354,7 +354,7 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 		return nil, errors.New("authorization code has already been redeemed")
 	}
 
-	user, err := e.store.GetUserByID(authCode.UserID)
+	user, err := e.store.PrincipalByID(authCode.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +515,7 @@ func (e *Engine) ExchangeRefreshToken(raw, clientID, clientSecret, scope string)
 	if err != nil {
 		return nil, userID, err
 	}
-	user, err := e.store.GetUserByID(family.UserID)
+	user, err := e.store.PrincipalByID(family.UserID)
 	if err != nil {
 		return nil, userID, err
 	}
@@ -628,7 +628,7 @@ func (e *Engine) GetUserinfo(tokenString string) (map[string]any, error) {
 		return nil, errors.New("missing sub claim in token")
 	}
 
-	user, err := e.store.GetUserByID(sub)
+	user, err := e.store.PrincipalByID(sub)
 	if err != nil {
 		return nil, err
 	}

@@ -22,7 +22,7 @@ func TestAuditSearchAndExport(t *testing.T) {
 	admin := newSession(t, db, newUser(t, db, "admin"), exp)
 	auditor := newUser(t, db, "user")
 	auditorCookie := newSession(t, db, auditor, exp)
-	if err := db.SetDelegations(auditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(auditor.ID, store.Delegations{Auditor: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Seed three events, one with a formula-shaped actor name and a secret-shaped detail.
@@ -84,7 +84,7 @@ func TestAuditSearchAndExport(t *testing.T) {
 	}
 	// A helpdesk delegate is not an audit reader.
 	helpdesk := newUser(t, db, "user")
-	if err := db.SetDelegations(helpdesk.ID, store.Delegations{Helpdesk: true}, nil); err != nil {
+	if err := db.DefaultOrg().SetDelegations(helpdesk.ID, store.Delegations{Helpdesk: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if res := call(t, srv, newSession(t, db, helpdesk, exp), "GET", "/api/admin/audit-events/export?format=csv"); res.Code != http.StatusForbidden {

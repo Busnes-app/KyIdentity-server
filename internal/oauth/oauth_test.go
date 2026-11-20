@@ -78,7 +78,7 @@ func TestAuthorizationCodeExchangeWithPKCE(t *testing.T) {
 		Role:         "user",
 		Status:       "active",
 	}
-	if err := dbStore.CreateUser(user); err != nil {
+	if err := dbStore.DefaultOrg().CreateUser(user); err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
 

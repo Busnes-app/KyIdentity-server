@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -42,21 +43,21 @@ func groupWriteError(err error) error {
 	switch {
 	case isUniqueViolation(err):
 		return ErrGroupNameExists
-	case isForeignKeyViolation(err):
+	case isForeignKeyViolation(err), err != nil && strings.Contains(err.Error(), msgMembershipOrgs):
 		return ErrGroupTargetMissing
 	}
 	return err
 }
 
-func (s *Store) CreateGroup(g *Group, audit *AuditEvent) error {
-	tx, err := s.db.Begin()
+func (o *OrgStore) CreateGroup(g *Group, audit *AuditEvent) error {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	g.CreatedAt = rowTime()
 	g.UpdatedAt = g.CreatedAt
-	if _, err = tx.Exec(`INSERT INTO directory_groups(id,name,description,created_at,updated_at) VALUES (?,?,?,?,?)`, g.ID, g.Name, g.Description, g.CreatedAt, g.UpdatedAt); err != nil {
+	if _, err = tx.Exec(`INSERT INTO directory_groups(org_id,id,name,description,created_at,updated_at) VALUES (?,?,?,?,?,?)`, o.org, g.ID, g.Name, g.Description, g.CreatedAt, g.UpdatedAt); err != nil {
 		return groupWriteError(err)
 	}
 	if err = recordAuditTx(tx, audit); err != nil {
@@ -65,21 +66,21 @@ func (s *Store) CreateGroup(g *Group, audit *AuditEvent) error {
 	return tx.Commit()
 }
 
-func (s *Store) UpdateGroup(g *Group, audit *AuditEvent) error {
-	tx, err := s.db.Begin()
+func (o *OrgStore) UpdateGroup(g *Group, audit *AuditEvent) error {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	g.UpdatedAt = rowTime()
 	var sourceOwned bool
-	if err = tx.QueryRow(`SELECT source_connector_id IS NOT NULL AND name<>? FROM directory_groups WHERE id=?`, g.Name, g.ID).Scan(&sourceOwned); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err = tx.QueryRow(`SELECT source_connector_id IS NOT NULL AND name<>? FROM directory_groups WHERE org_id=? AND id=?`, g.Name, o.org, g.ID).Scan(&sourceOwned); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if sourceOwned {
 		return ErrGroupSourceOwned
 	}
-	result, err := tx.Exec(`UPDATE directory_groups SET name=?,description=?,updated_at=? WHERE id=?`, g.Name, g.Description, g.UpdatedAt, g.ID)
+	result, err := tx.Exec(`UPDATE directory_groups SET name=?,description=?,updated_at=? WHERE org_id=? AND id=?`, g.Name, g.Description, g.UpdatedAt, o.org, g.ID)
 	if err != nil {
 		return groupWriteError(err)
 	}
@@ -99,17 +100,17 @@ func (s *Store) UpdateGroup(g *Group, audit *AuditEvent) error {
 	return tx.Commit()
 }
 
-func (s *Store) DeleteGroup(id string, audit *AuditEvent) error {
-	return s.DeleteGroupForSession(id, "", audit)
+func (o *OrgStore) DeleteGroup(id string, audit *AuditEvent) error {
+	return o.DeleteGroupForSession(id, "", audit)
 }
 
-func (s *Store) DeleteGroupForSession(id, sessionID string, audit *AuditEvent) error {
-	tx, err := s.db.Begin()
+func (o *OrgStore) DeleteGroupForSession(id, sessionID string, audit *AuditEvent) error {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	name, err := deleteGroupTx(tx, id, sessionID)
+	name, err := deleteGroupTx(tx, o.org, id, sessionID)
 	if err != nil {
 		return err
 	}
@@ -122,8 +123,16 @@ func (s *Store) DeleteGroupForSession(id, sessionID string, audit *AuditEvent) e
 
 // deleteGroupTx removes a group with its memberships and policy, revoking what those
 // memberships granted. Users are never touched. It returns the deleted group's name.
-func deleteGroupTx(tx *sql.Tx, id, sessionID string) (string, error) {
-	var err error
+func deleteGroupTx(tx *sql.Tx, org, id, sessionID string) (string, error) {
+	// Another org's group is missing; its org cannot change under us (org_immutable).
+	var exists bool
+	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM directory_groups WHERE org_id=? AND id=?)`, org, id).Scan(&exists)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", ErrGroupTargetMissing
+	}
 	// Revoke while memberships and policy still exist; cascades remove both below.
 	for _, query := range []string{
 		`DELETE FROM authorization_codes WHERE user_id IN (SELECT m.user_id FROM group_memberships m JOIN enrollment_policies p ON p.group_id=m.group_id AND p.required WHERE m.group_id=?)`,
@@ -166,13 +175,13 @@ func deleteGroupTx(tx *sql.Tx, id, sessionID string) (string, error) {
 		return "", err
 	}
 	var name string
-	if err = tx.QueryRow(`DELETE FROM directory_groups WHERE id=? RETURNING name`, id).Scan(&name); err != nil {
+	if err = tx.QueryRow(`DELETE FROM directory_groups WHERE org_id=? AND id=? RETURNING name`, org, id).Scan(&name); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrGroupTargetMissing
 		}
 		return "", err
 	}
-	if err = tombstoneSuiteGroupTx(tx, id, name); err != nil {
+	if err = tombstoneSuiteGroupTx(tx, org, id, name); err != nil {
 		return "", err
 	}
 	if err = roleChangeForAppsTx(tx, apps, members); err != nil {
@@ -189,30 +198,30 @@ func deleteGroupTx(tx *sql.Tx, id, sessionID string) (string, error) {
 
 // Individual membership writes cannot overwrite another administrator's edits.
 // Repeating either desired state is idempotent; each accepted request is audited.
-func (s *Store) SetGroupMembership(groupID, userID string, member bool, audit *AuditEvent) error {
-	return s.SetGroupMembershipForSession(groupID, userID, member, "", audit)
+func (o *OrgStore) SetGroupMembership(groupID, userID string, member bool, audit *AuditEvent) error {
+	return o.SetGroupMembershipForSession(groupID, userID, member, "", audit)
 }
 
-func (s *Store) SetGroupMembershipForSession(groupID, userID string, member bool, sessionID string, audit *AuditEvent) error {
-	return s.setGroupMembership(groupID, userID, member, nil, sessionID, audit)
+func (o *OrgStore) SetGroupMembershipForSession(groupID, userID string, member bool, sessionID string, audit *AuditEvent) error {
+	return o.setGroupMembership(groupID, userID, member, nil, sessionID, audit)
 }
 
 // SetGroupMembershipUntil adds a member until an instant (nil = no bound); repeating it
 // moves the instant.
-func (s *Store) SetGroupMembershipUntil(groupID, userID string, expiresAt *time.Time, sessionID string, audit *AuditEvent) error {
+func (o *OrgStore) SetGroupMembershipUntil(groupID, userID string, expiresAt *time.Time, sessionID string, audit *AuditEvent) error {
 	if err := checkExpiry(expiresAt, time.Now().UTC()); err != nil {
 		return err
 	}
-	return s.setGroupMembership(groupID, userID, true, expiresAt, sessionID, audit)
+	return o.setGroupMembership(groupID, userID, true, expiresAt, sessionID, audit)
 }
 
-func (s *Store) setGroupMembership(groupID, userID string, member bool, expiresAt *time.Time, sessionID string, audit *AuditEvent) error {
-	tx, err := s.db.Begin()
+func (o *OrgStore) setGroupMembership(groupID, userID string, member bool, expiresAt *time.Time, sessionID string, audit *AuditEvent) error {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	groupName, username, err := setGroupMembershipTx(tx, groupID, userID, member, expiresAt, sessionID)
+	groupName, username, err := setGroupMembershipTx(tx, o.org, groupID, userID, member, expiresAt, sessionID)
 	if err != nil {
 		return err
 	}
@@ -225,8 +234,8 @@ func (s *Store) setGroupMembership(groupID, userID string, member bool, expiresA
 
 // setGroupMembershipTx applies one membership change with its policy checks and the
 // grant/provisioning follow-up, returning the names for the audit row.
-func setGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, expiresAt *time.Time, sessionID string) (groupName, username string, err error) {
-	if groupName, username, err = applyGroupMembershipTx(tx, groupID, userID, member, expiresAt, sessionID); err != nil {
+func setGroupMembershipTx(tx *sql.Tx, org, groupID, userID string, member bool, expiresAt *time.Time, sessionID string) (groupName, username string, err error) {
+	if groupName, username, err = applyGroupMembershipTx(tx, org, groupID, userID, member, expiresAt, sessionID); err != nil {
 		return "", "", err
 	}
 	return groupName, username, reconcileAccessTx(tx)
@@ -243,21 +252,22 @@ func reconcileAccessTx(tx *sql.Tx) error {
 }
 
 // applyGroupMembershipTx writes one membership row with its policy checks and nothing
-// else; the caller owes a reconcileAccessTx before committing.
-func applyGroupMembershipTx(tx *sql.Tx, groupID, userID string, member bool, expiresAt *time.Time, sessionID string) (groupName, username string, err error) {
+// else; the caller owes a reconcileAccessTx before committing. A user or group outside org
+// is ErrGroupTargetMissing.
+func applyGroupMembershipTx(tx *sql.Tx, org, groupID, userID string, member bool, expiresAt *time.Time, sessionID string) (groupName, username string, err error) {
 	var result sql.Result
 	if member {
 		// A changed instant counts as a change: it re-runs the policy checks and the
 		// role follow-up like a fresh addition would.
-		result, err = tx.Exec(`INSERT INTO group_memberships(group_id,user_id,expires_at) VALUES (?,?,?) ON CONFLICT(group_id,user_id) DO UPDATE SET expires_at=excluded.expires_at WHERE group_memberships.expires_at IS DISTINCT FROM excluded.expires_at`, groupID, userID, unixOrNil(expiresAt))
+		result, err = tx.Exec(`INSERT INTO group_memberships(org_id,group_id,user_id,expires_at) VALUES (?,?,?,?) ON CONFLICT(group_id,user_id) DO UPDATE SET expires_at=excluded.expires_at WHERE group_memberships.expires_at IS DISTINCT FROM excluded.expires_at`, org, groupID, userID, unixOrNil(expiresAt))
 	} else {
-		result, err = tx.Exec(`DELETE FROM group_memberships WHERE group_id=? AND user_id=?`, groupID, userID)
+		result, err = tx.Exec(`DELETE FROM group_memberships WHERE org_id=? AND group_id=? AND user_id=?`, org, groupID, userID)
 	}
 	if err != nil {
 		return "", "", groupWriteError(err)
 	}
 	// The preceding write acquires the writer lock before checking either parent.
-	if err = tx.QueryRow(`SELECT g.name,u.username FROM directory_groups g CROSS JOIN users u WHERE g.id=? AND u.id=?`, groupID, userID).Scan(&groupName, &username); err != nil {
+	if err = tx.QueryRow(`SELECT g.name,u.username FROM directory_groups g CROSS JOIN users u WHERE g.org_id=? AND g.id=? AND u.org_id=g.org_id AND u.id=?`, org, groupID, userID).Scan(&groupName, &username); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", "", ErrGroupTargetMissing
 		}
@@ -341,31 +351,31 @@ func roleChangeForAppsTx(tx *sql.Tx, apps []AppRecord, users []string) error {
 // Count and page share a read snapshot. userID optionally annotates membership for
 // the user-management view without downloading the entire directory.
 // ponytail: substring searches scan names; add FTS if large-directory searches become slow.
-func (s *Store) ListGroups(query, userID string, limit, offset int) ([]Group, int, error) {
-	tx, err := s.rdb.Begin()
+func (o *OrgStore) ListGroups(query, userID string, limit, offset int) ([]Group, int, error) {
+	tx, err := o.s.rdb.Begin()
 	if err != nil {
 		return nil, 0, err
 	}
 	defer tx.Rollback()
 	if userID != "" {
 		var exists bool
-		if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id=?)`, userID).Scan(&exists); err != nil {
+		if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=?)`, o.org, userID).Scan(&exists); err != nil {
 			return nil, 0, err
 		}
 		if !exists {
 			return nil, 0, ErrGroupTargetMissing
 		}
 	}
-	where := ` WHERE instr(lower(g.name),lower(?))>0`
+	search := ` AND instr(lower(g.name),lower(?))>0`
 	var total int
-	if err = tx.QueryRow(`SELECT COUNT(*) FROM directory_groups g`+where, query).Scan(&total); err != nil {
+	if err = tx.QueryRow(`SELECT COUNT(*) FROM directory_groups g WHERE g.org_id=?`+search, o.org, query).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := tx.Query(`SELECT g.id,g.name,g.description,g.source_connector_id,g.external_id,g.created_at,g.updated_at,
  (SELECT COUNT(*) FROM group_memberships m WHERE m.group_id=g.id),
  EXISTS(SELECT 1 FROM group_memberships m WHERE m.group_id=g.id AND m.user_id=?),
  EXISTS(SELECT 1 FROM suite_groups s WHERE s.group_id=g.id AND s.enabled)
- FROM directory_groups g`+where+` ORDER BY g.name,g.id LIMIT ? OFFSET ?`, userID, query, limit, offset)
+ FROM directory_groups g WHERE g.org_id=?`+search+` ORDER BY g.name,g.id LIMIT ? OFFSET ?`, userID, o.org, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -388,22 +398,22 @@ func (s *Store) ListGroups(query, userID string, limit, offset int) ([]Group, in
 	return groups, total, tx.Commit()
 }
 
-func (s *Store) ListGroupUsers(groupID, query string, includeNonMembers bool, limit, offset int) ([]GroupUser, int, error) {
-	tx, err := s.db.Begin()
+func (o *OrgStore) ListGroupUsers(groupID, query string, includeNonMembers bool, limit, offset int) ([]GroupUser, int, error) {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return nil, 0, err
 	}
 	defer tx.Rollback()
 	var exists bool
-	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM directory_groups WHERE id=?)`, groupID).Scan(&exists); err != nil {
+	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM directory_groups WHERE org_id=? AND id=?)`, o.org, groupID).Scan(&exists); err != nil {
 		return nil, 0, err
 	}
 	if !exists {
 		return nil, 0, ErrGroupTargetMissing
 	}
 	from := ` FROM users u LEFT JOIN group_memberships m ON m.user_id=u.id AND m.group_id=?
- WHERE (? OR m.user_id IS NOT NULL) AND (instr(lower(u.username),lower(?))>0 OR instr(lower(u.display_name),lower(?))>0 OR instr(lower(u.email),lower(?))>0)`
-	args := []any{groupID, includeNonMembers, query, query, query}
+ WHERE u.org_id=? AND (? OR m.user_id IS NOT NULL) AND (instr(lower(u.username),lower(?))>0 OR instr(lower(u.display_name),lower(?))>0 OR instr(lower(u.email),lower(?))>0)`
+	args := []any{groupID, o.org, includeNonMembers, query, query, query}
 	var total int
 	if err = tx.QueryRow(`SELECT COUNT(*)`+from, args...).Scan(&total); err != nil {
 		return nil, 0, err

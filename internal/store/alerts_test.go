@@ -472,7 +472,7 @@ func TestAlertSettingsRecipientsMustBeAllowedToRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	auditor := createTestUserNamed(t, s, "auditor")
-	if err := s.SetDelegations(auditor.ID, Delegations{Auditor: true}, nil); err != nil {
+	if err := s.DefaultOrg().SetDelegations(auditor.ID, Delegations{Auditor: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	plain := createTestUserNamed(t, s, "plain")

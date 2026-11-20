@@ -50,7 +50,7 @@ func newPushFixture(t *testing.T) (*pushFixture, func()) {
 		ID: uuid.New().String(), Username: "alice", DisplayName: "Alice",
 		Email: "alice@example.com", PasswordHash: passHash, Role: "user", Status: "active",
 	}
-	if err := dbStore.CreateUser(user); err != nil {
+	if err := dbStore.DefaultOrg().CreateUser(user); err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestForgedMFATokenCannotFinishPushLogin(t *testing.T) {
 		ID: uuid.New().String(), Username: "mallory", Email: "mallory@example.com",
 		PasswordHash: "mock-hash", Role: "user", Status: "active",
 	}
-	if err := f.store.CreateUser(mallory); err != nil {
+	if err := f.store.DefaultOrg().CreateUser(mallory); err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
 	mPriv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -218,7 +218,7 @@ func (f *pushFixture) approvedChallengeFor(t *testing.T, username string) *store
 		ID: uuid.New().String(), Username: username, Email: username + "@example.com",
 		PasswordHash: "mock-hash", Role: "user", Status: "active",
 	}
-	if err := f.store.CreateUser(other); err != nil {
+	if err := f.store.DefaultOrg().CreateUser(other); err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
 	challenge, err := f.server.mfaEngine.CreatePushChallenge(other.ID, "login")
@@ -417,7 +417,7 @@ func TestPushRespondRejectsAnotherUsersDevice(t *testing.T) {
 	defer cleanup()
 
 	bob := &store.User{ID: uuid.New().String(), Username: "bob", Email: "bob@example.com", PasswordHash: "mock-hash", Role: "user", Status: "active"}
-	if err := f.store.CreateUser(bob); err != nil {
+	if err := f.store.DefaultOrg().CreateUser(bob); err != nil {
 		t.Fatal(err)
 	}
 	bKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

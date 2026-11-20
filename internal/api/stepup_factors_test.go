@@ -253,7 +253,7 @@ func TestStepUpSupportsExistingClientIDsWithSpaces(t *testing.T) {
 	f, cleanup := newStepUpFixture(t)
 	defer cleanup()
 	f.user.Role = "admin"
-	if _, err := f.store.EditUser(f.user.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
+	if _, err := f.store.DefaultOrg().EditUser(f.user.ID, nil, func(u *store.User) (bool, error) { u.Role = "admin"; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	newClient(t, f.store, "app one", []string{"https://app.test/cb"}, []string{"openid"})

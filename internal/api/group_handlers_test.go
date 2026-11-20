@@ -138,7 +138,7 @@ func TestGroupAdminAPI(t *testing.T) {
 			t.Errorf("missing audit %s", action)
 		}
 	}
-	saved, err := db.GetUserByID(user.ID)
+	saved, err := db.DefaultOrg().GetUserByID(user.ID)
 	if err != nil || saved.Role != "user" {
 		t.Fatal("membership granted administrator role")
 	}

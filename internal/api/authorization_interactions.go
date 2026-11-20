@@ -99,7 +99,7 @@ func (h *OAuthHandler) InteractionDetails(w http.ResponseWriter, r *http.Request
 	}
 	username := ""
 	if i.UserID != "" {
-		u, err := h.store.GetUserByID(i.UserID)
+		u, err := h.store.PrincipalByID(i.UserID)
 		if err != nil || u == nil || u.Status != "active" {
 			http.Error(w, `{"error":"invalid_interaction"}`, 400)
 			return

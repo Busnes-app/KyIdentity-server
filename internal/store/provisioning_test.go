@@ -71,10 +71,10 @@ func TestProvisioningFollowsEffectiveAccess(t *testing.T) {
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
 	g := &Group{ID: uuid.NewString(), Name: "staff"}
-	if err := s.CreateGroup(g, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 0 {
@@ -216,7 +216,7 @@ func TestDeleteUserNotifiesEveryConnector(t *testing.T) {
 	if err := s.SaveSCIMUserLink("legacy", u.ID, "remote"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUserWithSyncEvents(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.deleted", 2, false}) {
@@ -328,10 +328,10 @@ func TestGroupDeliveryFollowsAssignmentsAndMembers(t *testing.T) {
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
 	g := &Group{ID: uuid.NewString(), Name: "staff"}
-	if err := s.CreateGroup(g, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
@@ -368,14 +368,14 @@ func TestGroupDeliveryFollowsAssignmentsAndMembers(t *testing.T) {
 		t.Fatal(members, err)
 	}
 	g.Name = "team"
-	if err := s.UpdateGroup(g, nil); err != nil {
+	if err := s.DefaultOrg().UpdateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", g.ID); len(got) != 1 || got[0].Type != "group.updated" || got[0].Revision != 3 {
 		t.Fatal("rename superseded", got)
 	}
 	deliverAll(t, s)
-	if err := s.SetGroupMembership(g.ID, u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership(g.ID, u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", g.ID); len(got) != 1 || got[0].Type != "group.updated" {
@@ -449,7 +449,7 @@ func TestResyncReplaysRemovals(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.DeleteUserWithSyncEvents(deleted.ID, nil); err != nil {
+	if err := s.DefaultOrg().DeleteUserWithSyncEvents(deleted.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)

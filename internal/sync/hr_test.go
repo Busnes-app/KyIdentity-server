@@ -43,7 +43,7 @@ func TestHRCallsKyPostBeforeCreatingSSOIdentity(t *testing.T) {
 			if req.Name != "alice" || req.Domain != "example.test" {
 				t.Error("bad allocation request", string(body))
 			}
-			if u, _ := s.GetUserByID(id); u != nil {
+			if u, _ := s.DefaultOrg().GetUserByID(id); u != nil {
 				t.Error("identity exists before mailbox allocation")
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"userId": id, "email": "alice.2@example.test"})
@@ -61,7 +61,7 @@ func TestHRCallsKyPostBeforeCreatingSSOIdentity(t *testing.T) {
 			if req.SourceUID != "employee-1" || req.ID != id || req.Email != "alice.2@example.test" {
 				t.Error("bad writeback", string(body))
 			}
-			u, _ := s.GetUserByID(id)
+			u, _ := s.DefaultOrg().GetUserByID(id)
 			if u == nil || u.Username != req.Email || !u.Pending || u.Status != "disabled" {
 				t.Error("wrong identity at writeback", u)
 			}

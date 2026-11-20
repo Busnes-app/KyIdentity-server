@@ -55,13 +55,13 @@ func TestListUpstreamGroupsFiltersAndPaging(t *testing.T) {
 // through the group ends with it (tokens revoked); a failed audit rolls everything back.
 func TestDeleteGroupRevokesGrantedAccess(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.DeleteGroup("missing", nil); !errors.Is(err, ErrGroupTargetMissing) {
+	if err := s.DefaultOrg().DeleteGroup("missing", nil); !errors.Is(err, ErrGroupTargetMissing) {
 		t.Fatal("missing group", err)
 	}
-	if err := s.CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
+	if err := s.DefaultOrg().CreateGroup(&Group{ID: "staff", Name: "Staff"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupMembership("staff", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetGroupMembership("staff", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAppAssignment(a.ID, "groups", "staff", true, nil); err != nil {
@@ -70,7 +70,7 @@ func TestDeleteGroupRevokesGrantedAccess(t *testing.T) {
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteGroup("staff", poisonedAudit(t, s, "admin.group_deleted", "staff")); err == nil {
+	if err := s.DefaultOrg().DeleteGroup("staff", poisonedAudit(t, s, "admin.group_deleted", "staff")); err == nil {
 		t.Fatal("delete ignored audit failure")
 	}
 	if allowed, _ := s.ClientAccessAllowed(u.ID, "client"); !allowed || count(t, s, `SELECT COUNT(*) FROM directory_groups WHERE id='staff'`) != 1 {
@@ -78,7 +78,7 @@ func TestDeleteGroupRevokesGrantedAccess(t *testing.T) {
 	}
 	assertRevoked(t, s, "tok", false)
 	audit := &AuditEvent{ID: "del-group", Action: "admin.group_deleted", Outcome: "success", CreatedAt: time.Now().UTC()}
-	if err := s.DeleteGroup("staff", audit); err != nil {
+	if err := s.DefaultOrg().DeleteGroup("staff", audit); err != nil {
 		t.Fatal(err)
 	}
 	if allowed, _ := s.ClientAccessAllowed(u.ID, "client"); allowed {
@@ -88,7 +88,7 @@ func TestDeleteGroupRevokesGrantedAccess(t *testing.T) {
 	if count(t, s, `SELECT COUNT(*) FROM audit_events WHERE id='del-group' AND details_json LIKE '%Staff%'`) != 1 {
 		t.Fatal("deletion audit does not name the group")
 	}
-	if got, _ := s.GetUserByID(u.ID); got == nil || got.Status != "active" {
+	if got, _ := s.DefaultOrg().GetUserByID(u.ID); got == nil || got.Status != "active" {
 		t.Fatal("group deletion touched the user")
 	}
 }

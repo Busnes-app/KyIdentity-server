@@ -363,7 +363,11 @@ func (s *Store) ListUpstreamUsers(connectorID, attribute, value string, startInd
 // override, password and pending stay as the row has them, the external id never
 // changes, and status is re-derived.
 func (s *Store) UpdateUpstreamUser(connectorID, id string, audit *AuditEvent, edit func(u *User) error) (*User, error) {
-	stored, err := s.updateUser(id, audit, func(tx *sql.Tx, u *User) (bool, error) {
+	org, err := connectorOrgTx(s.db, connectorID)
+	if err != nil {
+		return nil, err
+	}
+	stored, err := s.Org(OrgID{org}).updateUser(id, audit, func(tx *sql.Tx, u *User) (bool, error) {
 		if err := requireSCIMSourceTx(tx, connectorID); err != nil {
 			return false, err
 		}

@@ -34,10 +34,10 @@ func (s *Store) migrateDelegations() error {
 	return err
 }
 
-// Delegations reads one user's delegated permissions.
-func (s *Store) Delegations(userID string) (Delegations, error) {
+// Delegations reads one user's delegated permissions; another org's user has none.
+func (o *OrgStore) Delegations(userID string) (Delegations, error) {
 	d := Delegations{AppOwner: []string{}}
-	rows, err := s.db.Query(`SELECT kind, COALESCE(app_id,'') FROM admin_delegations WHERE user_id=? ORDER BY kind, app_id`, userID)
+	rows, err := o.s.db.Query(`SELECT d.kind, COALESCE(d.app_id,'') FROM admin_delegations d JOIN users u ON u.id=d.user_id WHERE u.org_id=? AND d.user_id=? ORDER BY d.kind, d.app_id`, o.org, userID)
 	if err != nil {
 		return d, err
 	}
@@ -59,14 +59,15 @@ func (s *Store) Delegations(userID string) (Delegations, error) {
 	return d, rows.Err()
 }
 
-// SetDelegations replaces a user's delegations with exactly the set given.
-func (s *Store) SetDelegations(userID string, d Delegations, audit *AuditEvent) error {
+// SetDelegations replaces a user's delegations with exactly the set given. Outside the
+// staff org (or a single-tenant install's default org) any delegation is ErrStaffOnly.
+func (o *OrgStore) SetDelegations(userID string, d Delegations, audit *AuditEvent) error {
 	apps := append([]string(nil), d.AppOwner...)
 	sort.Strings(apps)
 	now := time.Now().UTC()
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
 		var exists bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id=?)`, userID).Scan(&exists); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=?)`, o.org, userID).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {
@@ -80,7 +81,7 @@ func (s *Store) SetDelegations(userID string, d Delegations, audit *AuditEvent) 
 				continue
 			}
 			if _, err := tx.Exec(`INSERT INTO admin_delegations(user_id,kind,created_at) VALUES(?,?,?)`, userID, kind, now); err != nil {
-				return enrollmentMutationError(err)
+				return staffOrgError(enrollmentMutationError(err))
 			}
 		}
 		for i, appID := range apps {
@@ -94,7 +95,7 @@ func (s *Store) SetDelegations(userID string, d Delegations, audit *AuditEvent) 
 				return ErrAppRecordMissing
 			}
 			if _, err := tx.Exec(`INSERT INTO admin_delegations(user_id,kind,app_id,created_at) VALUES(?,'app_owner',?,?)`, userID, appID, now); err != nil {
-				return enrollmentMutationError(err)
+				return staffOrgError(enrollmentMutationError(err))
 			}
 		}
 		// A changed requirement set invalidates outstanding grants, as membership does.

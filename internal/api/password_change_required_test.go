@@ -160,7 +160,7 @@ func TestAdminSetPasswordsAreFlagged(t *testing.T) {
 	target, bystander := newUser(t, db, "user"), newUser(t, db, "user")
 	flagged := func(id string) bool {
 		t.Helper()
-		u, err := db.GetUserByID(id)
+		u, err := db.DefaultOrg().GetUserByID(id)
 		if err != nil || u == nil {
 			t.Fatal(err)
 		}

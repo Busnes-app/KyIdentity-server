@@ -74,13 +74,13 @@ func covAuditOutcomes(t *testing.T, db *store.Store, action string) map[string]i
 func covUserWith(t *testing.T, db *store.Store, role string, mutate func(*store.User)) *store.User {
 	t.Helper()
 	u := newUser(t, db, role)
-	if _, err := db.EditUser(u.ID, nil, func(row *store.User) (bool, error) {
+	if _, err := db.DefaultOrg().EditUser(u.ID, nil, func(row *store.User) (bool, error) {
 		mutate(row)
 		return false, nil
 	}); err != nil {
 		t.Fatalf("EditUser: %v", err)
 	}
-	got, err := db.GetUserByID(u.ID)
+	got, err := db.DefaultOrg().GetUserByID(u.ID)
 	if err != nil || got == nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestInteractionDetailsBoundToBrowserAndLiveState(t *testing.T) {
 			t.Fatalf("signed-in details: %d %v", got.Code, body)
 		}
 		// Disabling the account voids the pending interaction for it.
-		if _, err := db.EditUser(u.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
+		if _, err := db.DefaultOrg().EditUser(u.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
 			t.Fatal(err)
 		}
 		again := httptest.NewRecorder()

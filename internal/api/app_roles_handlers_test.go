@@ -25,7 +25,7 @@ func TestAppRolesAdminAPI(t *testing.T) {
 	rows, _, _ := db.ListAppRecords("roles-app", 25, 0)
 	app := rows[0]
 	base := "/api/admin/app-registry/" + app.ID
-	if err := db.CreateGroup(&store.Group{ID: "finance", Name: "Finance"}, nil); err != nil {
+	if err := db.DefaultOrg().CreateGroup(&store.Group{ID: "finance", Name: "Finance"}, nil); err != nil {
 		t.Fatal(err)
 	}
 

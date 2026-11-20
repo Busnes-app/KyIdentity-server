@@ -98,7 +98,7 @@ func TestInstallerSCIMGlobalDisableAcrossOwnedConnectors(t *testing.T) {
 				}
 			}
 			day.Status = "disabled"
-			if _, err := s.EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
+			if _, err := s.DefaultOrg().EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil }); err != nil {
 				t.Fatal(err)
 			}
 			// Recreate the dispatcher before delivery: its memory is not the

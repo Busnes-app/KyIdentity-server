@@ -29,10 +29,10 @@ func TestAppAssignmentOAuthAndLauncherEnforcement(t *testing.T) {
 	}
 	app := rows[0]
 	base := "/api/admin/app-registry/" + app.ID
-	if err := db.CreateGroup(&store.Group{ID: "engineering", Name: "Engineering"}, nil); err != nil {
+	if err := db.DefaultOrg().CreateGroup(&store.Group{ID: "engineering", Name: "Engineering"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetGroupMembership("engineering", user.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetGroupMembership("engineering", user.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	assignment := base + "/assignments/groups/engineering"
