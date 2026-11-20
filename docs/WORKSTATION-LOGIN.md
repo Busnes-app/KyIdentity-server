@@ -166,8 +166,9 @@ app.
 **Sessions.** A Mac sign-in creates a workstation session, as a device code does, with a
 refresh token that rotates on each use and slides by the offline window. Everything in
 [Sessions, refresh and the offline window](#sessions-refresh-and-the-offline-window)
-applies. XCreds re-checks with the refresh token on a timer (`refreshRateHours`). What it shows when
-KyIdentity refuses the refresh is not yet observed. Turning Mac sign-in off stops new sign-ins; open
+applies. XCreds re-checks with the refresh token every 3 hours by default (`refreshRateHours`, read
+from the 5.9 package's defaults). What it shows when KyIdentity refuses the refresh is not
+yet observed. Turning Mac sign-in off stops new sign-ins; open
 sessions keep refreshing until revoked.
 
 **Offline.** XCreds signs in with the local password when it cannot reach KyIdentity. A
@@ -176,12 +177,16 @@ the Mac next reaches KyIdentity and the refresh fails. Remove the local account 
 your MDM when someone leaves.
 
 **Break-glass.** Keep one local administrator account with a password on every Mac.
-XCreds can show a button for the standard Mac login window (`shouldShowMacLoginButton`).
+XCreds shows a button for the standard Mac login window (`shouldShowMacLoginButton`, on by
+default). XCreds' log: `sudo log show --last 30m --predicate '(message contains "XCREDS" or
+message contains "OIDCLITE")'`.
 
 Tested: `TestXCredsFlow` runs XCreds' exact flow against the server (code with PKCE S256, a
 72-character verifier of two UUIDs, the loopback redirect, the exchange with `client_id` in
 the body and no secret, then refresh). A live test of the XCreds login window against
-KyIdentity has not been run yet.
+KyIdentity has not been run yet. It is prepared on a VM (XCreds 5.9 installed and active at
+the login window). macOS 26 needs a click to trust a CA and to install a profile, so those
+steps are left for a person.
 
 ## Screen lock (every OS)
 
