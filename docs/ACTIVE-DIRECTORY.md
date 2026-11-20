@@ -28,6 +28,15 @@ Read these before you turn it on.
    it has nothing to send for passwords set before a user was assigned to the connector.
    Those users show as "Password not yet in directory" until their next password set or
    change. Use "Send password-change request" to mail them a reset link.
+4. **An account is live from creation.** The connector creates each AD account
+   **enabled**, with a random password that nobody knows; KyIdentity does not store
+   it. The account stays enabled until the user's real password arrives (owner
+   decision, 2026-11-19). The risk is small: an enabled account exists whose password
+   nobody can type. It matters only if AD itself is compromised, or if AD has an open
+   password-reset path (a help-desk reset, self-service reset or delegated Reset Password
+   right beyond the two service accounts below) that lets someone set a password KyIdentity
+   did not. Keep Reset Password on the OU limited to `kyidentity-sync` and
+   `kyidentity-agent`.
 
 ## What the connector does
 
@@ -37,8 +46,8 @@ Read these before you turn it on.
   alone, and a name clash with such an object is shown as a delivery error.
 - Users: `sAMAccountName` = KyIdentity username (at most 20 characters, no
   `"/\[]:;|=,+*?<>@`; longer names are refused, never truncated), `userPrincipalName` =
-  username@ the OU's DNS domain, `displayName`, `mail`. A new account gets a random
-  password nobody knows until the agent sets the real one.
+  username@ the OU's DNS domain, `displayName`, `mail`. A new account is created enabled,
+  with a random password nobody knows, until the agent sets the real one (accepted risk 4).
 - A rename in KyIdentity renames the AD account (`sAMAccountName`, `userPrincipalName` and
   CN) or group (`sAMAccountName` and CN) with the same name rules. A new name another
   object holds is a delivery error, and the account keeps its old name until it is fixed.
@@ -148,6 +157,19 @@ older, so an old ciphertext cannot be replayed. Build it with
 The connector view lists every managed user's directory password: In directory, Waiting for
 agent, Locked until the user sets a password, Older password in directory, Rejected by directory (with the reason, for example AD's
 complexity policy), or Password not yet in directory.
+
+**Expect the real password within 7 days** of an account being created. Find accounts
+still waiting in Suite sync → the Active Directory connector's panel, in the directory
+password table. A waiting account's row reads one of:
+
+- **Password not yet in directory**: no password captured yet. After 7 days, use **Send
+  password-change request** on the row.
+- **Locked until the user sets a password**: the user has a temporary password and must
+  choose their own at their next KyIdentity sign-in.
+- **Waiting for agent**: captured but not yet applied. Check that the agent is running.
+
+Until the real password arrives, the user cannot sign in to a PC: nobody knows the
+account's password.
 
 AD checks length and complexity on the agent's reset. It does not check password history on
 an administrative reset; KyIdentity applies its own password policy first.
