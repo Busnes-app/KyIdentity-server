@@ -157,8 +157,8 @@ win_logon() {
 		_win_wait 180 compgen -G "$out/session-*.detail" >/dev/null || true
 		cat "$out"/session-*.txt "$out"/session-*.detail 2>/dev/null | tr -d '\r' || echo "no session report"
 	fi
-	win_shot "$3"
 	_win_autologon_clear
+	win_shot "$3"
 	return "$rc"
 }
 
@@ -170,8 +170,8 @@ win_logon_refused() {
 	rm -f "$E2E_WIN11_SHARE"/out/session-*
 	_win_after_reboot "$1" "$2" || rc=$?
 	printf '%s\n' "${_win_events:-no logon event within 600 s}"
-	win_shot "$4"
 	_win_autologon_clear
+	win_shot "$4"
 	((rc == 0)) && [[ $_win_events == *"4625 type="*"sub=$3"* && $_win_events != *4624* && $_win_events != *session=active* ]]
 }
 
