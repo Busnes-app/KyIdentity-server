@@ -23,6 +23,23 @@ export const splitDomains = (text: string) => text.split(/[\s,]+/).filter(Boolea
 
 const themeLabel = (id: string) => findTheme(id)?.name ?? id;
 
+// `system` stores no suite default, which looks like Busnes following the device. It is listed
+// once, first and by name, so an administrator can see it is selected and choose it to clear.
+export function SuiteThemeSelect({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (v: string) => void }) {
+  return (
+    <select id="suite-theme" className="form-select" value={value} disabled={disabled} onChange={e => onChange(e.target.value)}>
+      <option value="system">No suite default (Busnes, follows device)</option>
+      {THEME_CHOICES.map(({ pair, choices }) => (
+        <optgroup key={pair.id} label={pair.name}>
+          {choices.filter(c => c.value !== 'system').map(({ mode, value: v }) => (
+            <option key={v} value={v}>{mode === 'system' ? `${pair.name}, follows device` : themeLabel(v)}</option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
 export function AdminSuiteSettings() {
   const [saved, setSaved] = useState<SuiteSettings | null>(null);
   const [theme, setTheme] = useState('system');
@@ -71,15 +88,7 @@ export function AdminSuiteSettings() {
           <div className="form-row">
             <div className="form-group flex-1">
               <label className="form-label" htmlFor="suite-theme">Default theme</label>
-              <select id="suite-theme" className="form-select" value={theme} disabled={busy} onChange={e => setTheme(e.target.value)}>
-                {THEME_CHOICES.map(({ pair, choices }) => (
-                  <optgroup key={pair.id} label={pair.name}>
-                    {choices.map(({ mode, value }) => (
-                      <option key={value} value={value}>{mode === 'system' ? `${pair.name}, follows device` : themeLabel(value)}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <SuiteThemeSelect value={theme} disabled={busy} onChange={setTheme} />
             </div>
             <button type="submit" className="primary-btn" disabled={busy || theme === saved.defaultTheme}>Save</button>
           </div>

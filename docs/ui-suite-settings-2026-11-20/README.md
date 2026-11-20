@@ -13,8 +13,10 @@ and API, including step-up for the mail domains.
 | `admin-saved` | `example.com` and `Bücher.example` saved (stored as punycode), default set to Ocean, follows device; the admin's own page switches at once | `white-cliffs` |
 | `signin-default` | a new browser with nothing saved: the sign-in page applies the default (Ocean Light under a light OS) | `white-cliffs` |
 | `signin-user-choice` | the same browser after saving Busnes Light: the user's choice wins | `busnes-light` |
+| `admin-cleared` | the default set back to "No suite default (Busnes, follows device)", which stores `system`; `/api/appearance` answers `system` and a new browser gets the built-in look | `busnes-light` |
 
 The driver also checks that saving one form keeps an unsaved edit in the other (it fails
-against the first version of the page). Run log: `/api/appearance` answered `{"defaultTheme":"ocean-pair"}`, an anonymous
+against the first version of the page), and that a fresh install shows "No suite default" as the
+selected theme. Run log: `/api/appearance` answered `{"defaultTheme":"ocean-pair"}`, an anonymous
 `/api/suite/email-domains` answered 401, and no shot overflows horizontally.
 Not captured: dark scheme, phones, and other apps (none applies the default yet).
