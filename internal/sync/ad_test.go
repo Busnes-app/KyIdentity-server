@@ -221,8 +221,17 @@ func TestADSettingsValidation(t *testing.T) {
 }
 
 // A password reset while the account is disabled must reach the directory before the
-// account is enabled again, or the replaced password signs in on re-enable.
+// account is enabled again, or the replaced password signs in on re-enable. The first
+// password's acknowledgement may also have been lost: it may still be in the directory.
 func TestADEnableWaitsForAResetMadeWhileDisabled(t *testing.T) {
+	for _, ackFirst := range []bool{true, false} {
+		t.Run(map[bool]string{true: "first acknowledged", false: "first acknowledgement lost"}[ackFirst], func(t *testing.T) {
+			adEnableWaitsForReset(t, ackFirst)
+		})
+	}
+}
+
+func adEnableWaitsForReset(t *testing.T, ackFirst bool) {
 	netguard.AllowLoopback = true
 	t.Cleanup(func() { netguard.AllowLoopback = false })
 	e, s, _, cleanup := setupTestSyncEngine(t)
@@ -257,7 +266,9 @@ func TestADEnableWaitsForAResetMadeWhileDisabled(t *testing.T) {
 	if _, err := s.QueueDirectoryPassword(e.DirectoryKeys(), u.ID, "first-hash", []byte("First-Pass-1"), nil); err != nil {
 		t.Fatal(err)
 	}
-	apply()
+	if ackFirst {
+		apply()
+	}
 	edit := func(f func(*store.User)) {
 		t.Helper()
 		if _, err := s.EditUser(u.ID, nil, func(x *store.User) (bool, error) { f(x); return true, nil }); err != nil {

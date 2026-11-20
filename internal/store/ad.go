@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/ed25519"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -167,15 +168,28 @@ func (s *Store) ADSystemForAgentToken(token string) (string, error) {
 	return id, err
 }
 
+// adEntitled is SQL saying the user still has access to the connector's app, whatever the
+// account's status: a disabled user who is still assigned keeps getting resets. system and user
+// are column references.
+func adEntitled(system, user string) string {
+	return `EXISTS(SELECT 1 FROM app_access_facts f JOIN app_registry r ON r.id=f.app_id
+ WHERE r.system_id=` + system + ` AND f.user_id=` + user + ` AND f.client_enabled AND f.enabled AND (f.access_mode='all_active_users' OR f.direct OR f.group_assigned))`
+}
+
+// adLockTag marks an entry that carries a random lock rather than the user's password. It never
+// equals a passwordTag, so the directory never counts as holding the current password.
+const adLockTag = "lock"
+
 func passwordTag(hash string) string {
 	sum := sha256.Sum256([]byte(hash))
 	return hex.EncodeToString(sum[:])
 }
 
-// QueueDirectoryPassword seals plaintext for every AD connector that has ever held the user
-// (a disabled account included) and has an agent key, replacing any undelivered entry. A
-// reset while the account is disabled must replace the directory's copy before the account
-// can be enabled again (see ADPasswordBehind). It queues only while passwordHash is still
+// QueueDirectoryPassword seals plaintext for every AD connector the user still has access to
+// (a disabled account included) and a random lock for every one that has held them since, each
+// with an agent key, replacing any undelivered entry. A reset while the account is disabled
+// must replace the directory's copy before the account can be enabled again (see
+// ADPasswordBehind). It queues only while passwordHash is still
 // the user's current hash, so of two racing changes only the current one is queued, and
 // with the higher sequence number. audit builds one row per queued entry.
 func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string, plaintext []byte, audit func(systemID string, seq int64, superseded bool) *AuditEvent) (int, error) {
@@ -200,8 +214,10 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 		ttl          int
 		last         int64
 		pending      bool
+		entitled     bool
 	}
-	rows, err := tx.Query(`SELECT c.system_id,c.agent_public_key,c.agent_key_mac,c.password_ttl_minutes,COALESCE(p.seq,0),COALESCE(p.ciphertext,'')<>''
+	rows, err := tx.Query(`SELECT c.system_id,c.agent_public_key,c.agent_key_mac,c.password_ttl_minutes,COALESCE(p.seq,0),COALESCE(p.ciphertext,'')<>'',
+ `+adEntitled("c.system_id", "st.resource_id")+`
  FROM ad_connectors c JOIN paired_systems s ON s.id=c.system_id
  JOIN sync_resource_state st ON st.system_id=c.system_id AND st.resource_id=? AND st.kind='user'
  LEFT JOIN ad_passwords p ON p.system_id=c.system_id AND p.user_id=?
@@ -212,7 +228,7 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 	var targets []target
 	for rows.Next() {
 		var t target
-		if err := rows.Scan(&t.id, &t.key, &t.mac, &t.ttl, &t.last, &t.pending); err != nil {
+		if err := rows.Scan(&t.id, &t.key, &t.mac, &t.ttl, &t.last, &t.pending, &t.entitled); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -234,7 +250,13 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 			tampered = append(tampered, t.id)
 			continue
 		}
-		ct, err := adpass.Seal(t.key, t.id, userID, seq, plaintext)
+		// A connector the user has lost access to still holds their retained account. It gets a
+		// random lock, never the new password, so the old one stops working there too.
+		sealed, tag := plaintext, passwordTag(passwordHash)
+		if !t.entitled {
+			sealed, tag = []byte(rand.Text()+"a1!"), adLockTag
+		}
+		ct, err := adpass.Seal(t.key, t.id, userID, seq, sealed)
 		if err != nil {
 			return 0, err
 		}
@@ -243,7 +265,7 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 		if _, err := tx.Exec(`INSERT INTO ad_passwords (system_id,user_id,seq,ciphertext,signature,expires_at,password_tag) VALUES (?,?,?,?,?,?,?)
  ON CONFLICT(system_id,user_id) DO UPDATE SET seq=excluded.seq,ciphertext=excluded.ciphertext,signature=excluded.signature,expires_at=excluded.expires_at,
  attempts=0,last_error='',password_tag=excluded.password_tag`,
-			t.id, userID, seq, ct, sig, expires, passwordTag(passwordHash)); err != nil {
+			t.id, userID, seq, ct, sig, expires, tag); err != nil {
 			return 0, err
 		}
 		if audit != nil {
@@ -266,9 +288,10 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 // ADEnableWaitsForPassword is the delivery error of an enable that waits for the agent.
 const ADEnableWaitsForPassword = "waiting for the DC agent to replace the directory password before enabling the account"
 
-// ADPasswordBehind reports whether the directory still holds a password KyIdentity has since
-// replaced: one was delivered once, and the user's current one is not applied yet. Enabling
-// the account then would let the replaced password sign in again.
+// ADPasswordBehind reports whether the directory may still hold a password KyIdentity has since
+// replaced: a password was queued and the user's current one is not acknowledged. A write whose
+// acknowledgement was lost counts as possibly applied. Enabling the account then would let the
+// replaced password sign in again.
 func (s *Store) ADPasswordBehind(systemID, userID string) (bool, error) {
 	var hash, tag string
 	var seq, delivered int64
@@ -280,7 +303,7 @@ func (s *Store) ADPasswordBehind(systemID, userID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return delivered > 0 && !(delivered == seq && tag == passwordTag(hash)), nil
+	return !(delivered == seq && tag == passwordTag(hash)), nil
 }
 
 // ErrAgentKeyTampered is an agent public key whose MAC does not verify. QueueDirectoryPassword
@@ -298,11 +321,13 @@ type ADPasswordEntry struct {
 
 // PendingADPasswords returns a connector's live entries, least-tried first, then oldest, so
 // entries the agent keeps retrying cannot hold newer ones off the page. A connector under a
-// restore hold gets none until an operator releases it.
+// restore hold gets none until an operator releases it, and a password queued before the user
+// lost access to the connector is not served (a lock is).
 func (s *Store) PendingADPasswords(systemID string, now time.Time, limit int) ([]ADPasswordEntry, error) {
 	now = now.UTC()
 	rows, err := s.db.Query(`SELECT a.user_id,a.seq,a.expires_at,a.ciphertext,a.signature FROM ad_passwords a JOIN paired_systems p ON p.id=a.system_id
- WHERE a.system_id=? AND NOT p.provisioning_hold AND a.ciphertext<>'' AND a.expires_at>? ORDER BY a.attempts,a.seq LIMIT ?`, systemID, now, limit)
+ WHERE a.system_id=? AND NOT p.provisioning_hold AND a.ciphertext<>'' AND a.expires_at>?
+ AND (a.password_tag=? OR `+adEntitled("a.system_id", "a.user_id")+`) ORDER BY a.attempts,a.seq LIMIT ?`, systemID, now, adLockTag, limit)
 	if err != nil {
 		return nil, err
 	}

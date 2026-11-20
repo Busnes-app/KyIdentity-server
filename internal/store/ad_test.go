@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -467,5 +468,105 @@ func TestDirectoryPasswordReachesADisabledAccount(t *testing.T) {
 	var next sql.NullTime
 	if err := s.db.QueryRow(`SELECT next_attempt_at FROM account_sync_events WHERE id='ev-enable'`).Scan(&next); err != nil || next.Valid {
 		t.Fatal("the waiting enable was not re-pended", next, err)
+	}
+}
+
+// A connector the user has lost access to never sees their passwords again: it gets a lock.
+// A disabled user who is still assigned keeps getting the real one.
+func TestDirectoryPasswordsFollowCurrentAccess(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	k, app := adStoreFixture(t, s, "ad-1")
+	u := createTestUser(t, s)
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	open := func() string {
+		t.Helper()
+		var seq int64
+		var ct string
+		if err := s.db.QueryRow(`SELECT seq,ciphertext FROM ad_passwords WHERE system_id='ad-1' AND user_id=?`, u.ID).Scan(&seq, &ct); err != nil {
+			t.Fatal(err)
+		}
+		plain, err := adpass.Open(k, "ad-1", u.ID, seq, ct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(plain)
+	}
+	setHash := func(h string) {
+		t.Helper()
+		if _, err := s.db.Exec(`UPDATE users SET password_hash=? WHERE id=?`, h, u.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Queued while assigned, then access is removed before the agent fetches it: not served.
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Assigned-pass-1"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := s.PendingADPasswords("ad-1", time.Now(), 10); len(e) != 0 {
+		t.Fatal("a password queued before access was removed is still served", e)
+	}
+	// Changed after access was removed: the former connector gets a lock it can serve.
+	setHash("after-unassign")
+	if n, err := s.QueueDirectoryPassword(testKeys, u.ID, "after-unassign", []byte("Unassigned-pass-2"), queuedAudit); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	if got := open(); got == "Unassigned-pass-2" || !strings.HasSuffix(got, "a1!") {
+		t.Fatal("a former connector can read the new password")
+	}
+	if e, _ := s.PendingADPasswords("ad-1", time.Now(), 10); len(e) != 1 {
+		t.Fatal("the lock is not served", e)
+	}
+	if behind, _ := s.ADPasswordBehind("ad-1", u.ID); !behind {
+		t.Fatal("a lock counts as the user's current password")
+	}
+	// Assigned again but disabled: a reset is the real password.
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EditUser(u.ID, nil, func(x *User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
+		t.Fatal(err)
+	}
+	setHash("while-disabled")
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, "while-disabled", []byte("Disabled-pass-3"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	if open() != "Disabled-pass-3" {
+		t.Fatal("a disabled but assigned user's reset was not queued as their password")
+	}
+}
+
+// A first write the agent applied but whose acknowledgement was lost may be in the directory,
+// so a later reset must be acknowledged before the account is enabled.
+func TestDirectoryPasswordUnacknowledgedWriteIsBehind(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	_, app := adStoreFixture(t, s, "ad-1")
+	u := createTestUser(t, s)
+	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("First-pass-1"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE users SET password_hash='reset-hash' WHERE id=?`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, "reset-hash", []byte("Reset-pass-2"), queuedAudit); err != nil {
+		t.Fatal(err)
+	}
+	if behind, _ := s.ADPasswordBehind("ad-1", u.ID); !behind {
+		t.Fatal("an unacknowledged first write let the account be enabled")
+	}
+	e, _ := s.PendingADPasswords("ad-1", time.Now(), 10)
+	if err := s.FinishADPassword("ad-1", u.ID, e[0].Seq, "applied", ""); err != nil {
+		t.Fatal(err)
+	}
+	if behind, _ := s.ADPasswordBehind("ad-1", u.ID); behind {
+		t.Fatal("still behind after the reset was acknowledged")
 	}
 }
