@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,6 +72,9 @@ func (s *Store) dropLease(name, token string) {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM leases WHERE name=? AND token=?`, name, token)
 }
 
+// leaseTicks, set only by LeaseTicksForTest, replaces the renewal ticker.
+var leaseTicks atomic.Pointer[<-chan time.Time]
+
 // ErrLeaseLost is the cause of a HoldLease context that ended because the lease did.
 var ErrLeaseLost = errors.New("the lease was lost to another holder or could not be renewed in time")
 
@@ -129,13 +133,17 @@ func keepLease(ctx context.Context, stop <-chan struct{}, lost context.CancelCau
 	}
 	tick := time.NewTicker(every)
 	defer tick.Stop()
+	ticks := tick.C
+	if t := leaseTicks.Load(); t != nil {
+		ticks = *t
+	}
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-ticks:
 		}
 		start := time.Now()
 		rctx, cancel := context.WithDeadline(ctx, expires.Add(-every))

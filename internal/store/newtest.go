@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 // NewTest is New for test fixtures. On SQLite a path that does not exist yet starts as a
@@ -58,3 +59,10 @@ var sqliteTemplate = sync.OnceValues(func() ([]byte, error) {
 	}
 	return os.ReadFile(path)
 })
+
+// LeaseTicksForTest makes every lease holder renew on a receive from ticks instead of
+// every ttl/4 until t ends, so a test, not the scheduler, decides when a renewal runs.
+func LeaseTicksForTest(t testing.TB, ticks <-chan time.Time) {
+	leaseTicks.Store(&ticks)
+	t.Cleanup(func() { leaseTicks.Store(nil) })
+}

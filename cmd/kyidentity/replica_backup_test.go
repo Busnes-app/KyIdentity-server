@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"testing"
@@ -103,13 +104,15 @@ func TestADeadHolderDelaysTheScheduleByOneTTL(t *testing.T) {
 }
 
 // Taking the lease from a running deposit, by deleting or stealing its row, ends that
-// deposit within one renewal interval: it records a failure, writes no receipt, and the
-// replica the lease now belongs to can run.
+// deposit at its next renewal: it records a failure, writes no receipt, and the replica the
+// lease now belongs to can run. The test sends that renewal itself, under the production
+// ttl, so a starved process cannot lose the lease for time first; how soon renewals run is
+// TestALostLeaseEndsTheHold's to prove.
 func TestALostLeaseEndsTheRunningDeposit(t *testing.T) {
 	for _, how := range []string{"deleted", "stolen"} {
 		t.Run(how, func(t *testing.T) {
-			const ttl = 800 * time.Millisecond
-			shortLease(t, ttl)
+			renew := make(chan time.Time)
+			store.LeaseTicksForTest(t, renew)
 			cfg, _ := commandInstance(t, true)
 			if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
 				t.Fatal(err)
@@ -132,17 +135,28 @@ func TestALostLeaseEndsTheRunningDeposit(t *testing.T) {
 			if how == "stolen" {
 				q = `UPDATE leases SET token='thief' WHERE name=?`
 			}
-			if _, err := raw.Exec(q, backup.Lease); err != nil {
-				t.Fatal(err)
-			}
-			taken := time.Now()
 			select {
 			case <-done:
-			case <-time.After(ttl/4 + 2*time.Second):
+				t.Fatal("the deposit ended before its lease was taken")
+			default:
+			}
+			if res, err := raw.Exec(q, backup.Lease); err != nil {
+				t.Fatal(err)
+			} else if n, _ := res.RowsAffected(); n != 1 {
+				t.Fatal("the running deposit held no lease to take")
+			}
+			select {
+			case renew <- time.Now():
+			case <-time.After(30 * time.Second):
+				t.Fatal("the deposit's lease holder stopped renewing")
+			}
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
 				t.Fatal("the deposit kept running after its lease was taken")
 			}
-			if took := time.Since(taken); took > ttl/4+time.Second {
-				t.Fatalf("the deposit ended %v after the lease was taken, interval %v", took, ttl/4)
+			if cause := <-dep.ended; !errors.Is(cause, store.ErrLeaseLost) {
+				t.Fatalf("the deposit ended with %v, not the lost lease", cause)
 			}
 			if failures(t, a, "admin.backup_run") != 1 {
 				t.Fatal("the cancelled deposit recorded no failure")
