@@ -28,7 +28,9 @@ Macs: `docs/superpowers/specs/2026-11-19-workstation-macos-design.md`.
    [#1886](https://github.com/himmelblau-idm/himmelblau/pull/1886) for
    [#1874](https://github.com/himmelblau-idm/himmelblau/issues/1874): a PIN sign-in after a
    background refresh presents the spent sealed token, and KyIdentity's reuse detection
-   then ends the session. #1886 is on `main` only. and copy the generated file to `/etc/himmelblau/himmelblau.conf`:
+   then ends the session. #1886 is on `main` only.
+
+   Copy the generated file to `/etc/himmelblau/himmelblau.conf`:
 
    ```ini
    [global]
