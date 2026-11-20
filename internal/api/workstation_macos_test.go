@@ -298,6 +298,28 @@ func TestRequirePasswordToggleQueuesBackchannelLogout(t *testing.T) {
 	}
 }
 
+// The client editor cannot change a workstation app's redirects; Mac sign-in owns them.
+func TestWorkstationRedirectsOnlyFollowMacSignIn(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	f.macSignIn = true
+	f.settings(true, 300, 604800)
+	put := func(body string) *httptest.ResponseRecorder {
+		path := "/api/admin/clients/" + f.clientID
+		return adminRequestWithStepUp(t, f.srv, "PUT", path, f.admin, body, mintStepUp(t, f.srv, f.admin, "PUT "+path))
+	}
+	if rr := put(`{"redirectUris":["https://app.example/cb"]}`); rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Mac sign-in") {
+		t.Fatalf("redirect change on a workstation app: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := put(`{"redirectUris":["` + xcredsRedirect + `"],"clientName":"Macs"}`); rr.Code != http.StatusOK {
+		t.Fatalf("unchanged redirects: %d %s", rr.Code, rr.Body.String())
+	}
+	c, _ := f.db.GetOAuthClientByID(f.clientID)
+	if c.RedirectURIsJSON != `["`+xcredsRedirect+`"]` {
+		t.Fatalf("redirects = %s", c.RedirectURIsJSON)
+	}
+}
+
 // Refresh stays a workstation-only exception for public clients, on the code path too.
 func TestPublicClientRefreshStillRefused(t *testing.T) {
 	f, done := newWSFixture(t)

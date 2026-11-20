@@ -412,7 +412,8 @@ func TestDeviceSignOnOriginMismatch(t *testing.T) {
 }
 
 // A workstation app is never signed in to with a phone's push-only assertion, even when
-// an https redirect (so an origin) is registered for it in the client editor.
+// an https redirect (so an origin) is registered for it (the client editor refuses one;
+// this sets it directly).
 func TestDeviceSignOnRefusesWorkstationApp(t *testing.T) {
 	e := newSignOnEnv(t)
 	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "Macs"}

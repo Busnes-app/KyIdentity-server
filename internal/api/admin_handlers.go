@@ -703,6 +703,16 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 			return
 		}
+		// A workstation app's redirects follow its Mac sign-in setting, nothing else.
+		if string(encoded) != client.RedirectURIsJSON {
+			if ws, err := h.store.GetWorkstationApp(client.ID); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
+				return
+			} else if ws != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "A workstation app's redirect URIs are set by its Mac sign-in setting")
+				return
+			}
+		}
 		client.RedirectURIsJSON = string(encoded)
 	}
 	if req.BackchannelLogoutURI != nil {
