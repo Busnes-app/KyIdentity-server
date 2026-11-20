@@ -108,3 +108,9 @@ Suite sync gains an "Active Directory (LDAPS)" choice in Connect service and a p
 ## Mac sign-in (XCreds) — 2026-11-19
 
 Workstation login gains Linux desktops and Macs sub-headings, a generated XCreds configuration profile, and two switches in Edit settings: Allow Mac sign-in (XCreds) and Require a password at sign-in. Before (`origin/master` a86964c) and after captures (1440×900 and 390×844, light and dark, all `overflow=0`) from real servers are in [docs/ui-workstation-macos-2026-11-19](docs/ui-workstation-macos-2026-11-19/README.md). Limits: the capture issuer is loopback HTTP, so the profile shows `http://127.0.0.1:5391`; the profile's long lines scroll inside its text box.
+
+## Suite settings — 2026-11-20
+
+Administration › Suite settings (mail domains, suite default theme) and the sign-in page
+picking up the default, then giving way to a user's own choice: 1440x900 light captures,
+driver and run log in [docs/ui-suite-settings-2026-11-20](docs/ui-suite-settings-2026-11-20/README.md).

@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { findPair, findTheme } from './ky-ui/themes';
-import { THEME_CHOICES, storedTheme } from './theme';
+import { SUITE_DEFAULT_KEY, THEME_CHOICES, THEME_KEY, setSuiteDefaultTheme, storedTheme } from './theme';
 import { Appearance } from './components/Appearance';
 import { Settings } from './components/Settings';
 import type { User } from './types';
@@ -52,5 +52,42 @@ describe('theme', () => {
     ]);
     expect(html).toContain('Pick a palette and how it handles light and dark. Match system switches with your device’s setting; Light or Dark keeps one. Your choice applies straight away and is saved in this browser only.');
     expect(html.match(/type="radio"/g)).toHaveLength(18);
+  });
+
+  describe('suite default', () => {
+    const store = new Map<string, string>();
+    const fake = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    afterEach(() => { setSuiteDefaultTheme(null); store.clear(); delete (globalThis as { localStorage?: unknown }).localStorage; });
+    const withStorage = () => { (globalThis as { localStorage?: unknown }).localStorage = fake; };
+
+    it('a saved choice beats the suite default, which beats Match system', () => {
+      withStorage();
+      setSuiteDefaultTheme('ocean-pair');
+      expect(storedTheme()).toBe('ocean-pair');
+      store.set(THEME_KEY, 'nord');
+      expect(storedTheme()).toBe('nord');
+      store.set(THEME_KEY, 'system');
+      expect(storedTheme()).toBe('system');
+      store.set(THEME_KEY, 'Tropics');
+      expect(storedTheme()).toBe('ocean-pair');
+      setSuiteDefaultTheme(null);
+      store.delete(THEME_KEY);
+      expect(storedTheme()).toBe('system');
+    });
+
+    it('keeps only catalog IDs and caches the default for the next load', () => {
+      withStorage();
+      setSuiteDefaultTheme('forest');
+      expect(store.get(SUITE_DEFAULT_KEY)).toBe('forest');
+      setSuiteDefaultTheme('javascript:alert(1)');
+      expect(storedTheme()).toBe('system');
+      expect(store.get(SUITE_DEFAULT_KEY)).toBe('');
+    });
+
+    it('checks the default on the Appearance page when nothing is saved', () => {
+      withStorage();
+      setSuiteDefaultTheme('nord-pair');
+      expect(renderToStaticMarkup(createElement(Appearance))).toContain('checked="" value="nord-pair"');
+    });
   });
 });

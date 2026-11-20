@@ -32,6 +32,7 @@ var destructiveAdminRoutes = []struct{ method, path, body string }{
 	{"DELETE", "/api/admin/backup/pairing", ``},
 	{"POST", "/api/admin/backup/pin-key", `{"public_key":"AA==","threshold":2,"total_shares":3}`},
 	{"PUT", "/api/admin/backup/schedule", `{"interval_sec":3600}`},
+	{"PUT", "/api/admin/suite-settings/email-domains", `{"domains":["example.com"]}`},
 }
 
 // A stolen admin cookie is the whole threat: it carries every privilege the real

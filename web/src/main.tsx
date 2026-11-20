@@ -7,10 +7,11 @@ import './ky-ui/navigation.css';
 import './ky-ui/appearance.css';
 import './ky-ui/appearance-themes.css';
 import './ky-ui/shell.css';
-import { applyTheme, storedTheme } from './theme';
+import { applyTheme, loadSuiteDefaultTheme, storedTheme } from './theme';
 import { watchForUpdate } from './ky-ui/update.js';
 
 applyTheme(storedTheme());
+void loadSuiteDefaultTheme();
 watchForUpdate({ name: 'KyIdentity' });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
