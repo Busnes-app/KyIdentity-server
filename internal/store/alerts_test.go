@@ -113,7 +113,7 @@ func TestAlertRulesFromAuditEvents(t *testing.T) {
 
 func TestAlertQueueSurvivesRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alerts.db")
-	s, err := New(path)
+	s, err := NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestAlertQueueSurvivesRestart(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if s, err = New(path); err != nil {
+	if s, err = NewTest(path); err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()

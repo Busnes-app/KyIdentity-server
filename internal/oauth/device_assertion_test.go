@@ -287,7 +287,7 @@ func newSignOnFixture(t *testing.T) *signOnFixture {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	db, err := store.New(dbPath)
+	db, err := store.NewTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

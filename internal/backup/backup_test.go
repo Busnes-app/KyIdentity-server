@@ -49,7 +49,7 @@ func instance(t *testing.T) (*config.Config, *store.Store) {
 	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.New(cfg.DBPath)
+	st, err := store.NewTest(cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestCollectSealableCarriesEverythingARestoreNeeds(t *testing.T) {
 	}
 	// The capsule's database is a SQLite file on either backend.
 	t.Setenv("KYIDENTITY_TEST_DATABASE_URL", "")
-	copyStore, err := store.New(restored)
+	copyStore, err := store.NewTest(restored)
 	if err != nil {
 		t.Fatalf("snapshot does not open: %v", err)
 	}

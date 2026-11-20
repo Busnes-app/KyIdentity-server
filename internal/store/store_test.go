@@ -14,7 +14,7 @@ import (
 
 func setupTestStore(t *testing.T) (*Store, func()) {
 	t.Helper()
-	s, err := New(filepath.Join(t.TempDir(), "webauthn.db"))
+	s, err := NewTest(filepath.Join(t.TempDir(), "webauthn.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestDeleteUserWithSyncEventsMigratesLegacyForeignKey(t *testing.T) {
 }
 
 func TestUpdateUserWithSyncEventsPreservesLastAdmin(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := NewTest(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestUpdateUserWithSyncEventsPreservesLastAdmin(t *testing.T) {
 }
 
 func TestIdleSessionIsRejectedBeforeAbsoluteExpiry(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := NewTest(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestNativeDevicePushTokenReplayStateMigrates(t *testing.T) {
 }
 
 func TestListAuditEventsPagination(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "audit_test.db"))
+	s, err := NewTest(filepath.Join(t.TempDir(), "audit_test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -763,7 +763,7 @@ func TestClearPushTokenSparesRotatedKeys(t *testing.T) {
 func TestNativeDeviceCHECKsWidenForLinux(t *testing.T) {
 	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "pre-linux.db")
-	s, err := New(path)
+	s, err := NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +791,7 @@ func TestNativeDeviceCHECKsWidenForLinux(t *testing.T) {
 	}
 
 	for range 2 { // the second open finds nothing to do
-		s, err = New(path)
+		s, err = NewTest(path)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -21,7 +21,7 @@ func replicas(t *testing.T, n int) []*Store {
 	path := filepath.Join(t.TempDir(), "shared.db")
 	out := make([]*Store, n)
 	for i := range out {
-		s, err := New(path)
+		s, err := NewTest(path)
 		if err != nil {
 			t.Fatal(err)
 		}

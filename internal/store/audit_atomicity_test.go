@@ -23,7 +23,7 @@ func poisonedAudit(t *testing.T, s *Store, action, targetID string) *AuditEvent 
 
 func newStoreWithUser(t *testing.T, role string) (*Store, *User) {
 	t.Helper()
-	s, err := New(filepath.Join(t.TempDir(), "atomicity.db"))
+	s, err := NewTest(filepath.Join(t.TempDir(), "atomicity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

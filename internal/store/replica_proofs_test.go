@@ -22,7 +22,7 @@ func replicasOf(t *testing.T, s *Store, n int) []*Store {
 	t.Helper()
 	out := []*Store{s}
 	for len(out) < n {
-		r, err := New(s.path)
+		r, err := NewTest(s.path)
 		if err != nil {
 			t.Fatal(err)
 		}

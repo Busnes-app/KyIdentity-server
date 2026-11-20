@@ -14,7 +14,7 @@ import (
 func TestSnapshotToCapturesCommittedWALWrites(t *testing.T) {
 	SkipOnPostgres(t, "VACUUM INTO snapshot of a WAL-mode SQLite file; pgcopy_test.go covers the Postgres export")
 	dir := t.TempDir()
-	s, err := New(filepath.Join(dir, "live.db"))
+	s, err := NewTest(filepath.Join(dir, "live.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,7 @@ import (
 
 func TestSCIMMappingDurability(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scim.db")
-	s, err := New(path)
+	s, err := NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestSCIMMappingDurability(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = New(path)
+	s, err = NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}

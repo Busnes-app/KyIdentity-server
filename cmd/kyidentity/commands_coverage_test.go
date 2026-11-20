@@ -48,7 +48,7 @@ func commandInstance(t *testing.T, pinned bool) (*config.Config, recoverykey.Pri
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := store.New(cfg.DBPath)
+	s, err := store.NewTest(cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestDepositCommandWritesALocalCopyAndAudits(t *testing.T) {
 	if strings.Contains(logged, "deposited with KyRecovery") {
 		t.Fatalf("an unpaired deposit claimed a KyRecovery receipt: %s", logged)
 	}
-	s, err := store.New(cfg.DBPath)
+	s, err := store.NewTest(cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestDescribeNamesEveryDestination(t *testing.T) {
 // without running a backup.
 func TestBackupLoopStopsOnShutdown(t *testing.T) {
 	cfg, _ := commandInstance(t, true)
-	s, err := store.New(cfg.DBPath)
+	s, err := store.NewTest(cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestBootstrapCommandCreatesThenLeavesTheAdmin(t *testing.T) {
 	if !strings.Contains(out, `"root" is already an active administrator; nothing changed.`) {
 		t.Fatalf("second run output: %q", out)
 	}
-	s, err := store.New(filepath.Join(dir, "kyidentity.db"))
+	s, err := store.NewTest(filepath.Join(dir, "kyidentity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestBootstrapCommandGeneratedPasswordGoesToAPrivateFile(t *testing.T) {
 	if len(password) < 16 || strings.Contains(out, password) {
 		t.Fatalf("generated password %q too short or printed", password)
 	}
-	s, err := store.New(filepath.Join(dir, "kyidentity.db"))
+	s, err := store.NewTest(filepath.Join(dir, "kyidentity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +703,7 @@ func TestDisableUserReportsAnUnreadableFirstRunPassword(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KYIDENTITY_DATA_DIR", dir)
 	t.Setenv("KYIDENTITY_DB_PATH", "")
-	s, err := store.New(filepath.Join(dir, "kyidentity.db"))
+	s, err := store.NewTest(filepath.Join(dir, "kyidentity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -721,7 +721,7 @@ func TestDisableUserReportsAnUnreadableFirstRunPassword(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "first-run password file could not be read") || out.Len() != 0 {
 		t.Fatalf("err = %v, output %q", err, out.String())
 	}
-	s, err = store.New(filepath.Join(dir, "kyidentity.db"))
+	s, err = store.NewTest(filepath.Join(dir, "kyidentity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

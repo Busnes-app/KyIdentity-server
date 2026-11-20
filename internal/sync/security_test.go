@@ -23,7 +23,7 @@ func setupSync(t *testing.T) (*Engine, *store.Store, *store.User, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.New(filepath.Join(dir, "test.db"))
+	db, err := store.NewTest(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

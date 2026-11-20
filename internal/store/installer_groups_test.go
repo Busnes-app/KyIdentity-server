@@ -19,7 +19,7 @@ func groupInstallerFixture() InstallerSetup {
 
 func TestInstallerGroupsOwnedClaimsReadOnlyAndDrift(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "identity.db")
-	s, err := New(path)
+	s, err := NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}

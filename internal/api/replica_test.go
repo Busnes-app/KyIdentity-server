@@ -62,7 +62,7 @@ func adminCaller(t *testing.T, srv *Server, s *store.Store) func(method, path st
 // another replica is.
 func serverOn(t *testing.T, dbPath string, base *config.Config) (*Server, *store.Store) {
 	t.Helper()
-	s, err := store.New(dbPath)
+	s, err := store.NewTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,7 +37,7 @@ func (d *pairDepositor) Deposit(ctx context.Context, url, token string, raw []by
 func TestPairingReadsAreCoherentUnderConcurrentRepairing(t *testing.T) {
 	cfg, writer := instance(t)
 	pair(t, cfg, writer)
-	reader, err := store.New(cfg.DBPath)
+	reader, err := store.NewTest(cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

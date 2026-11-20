@@ -209,7 +209,7 @@ func TestRecipientAndSubjectCannotInjectHeaders(t *testing.T) {
 // Ciphertext sealed for another purpose, even for the same row name, and legacy
 // unbound ciphertext are refused as mail settings; mail ciphertext is refused elsewhere.
 func TestMailSettingsRefuseOtherPurposesAndLegacy(t *testing.T) {
-	db, err := store.New(filepath.Join(t.TempDir(), "mail.db"))
+	db, err := store.NewTest(filepath.Join(t.TempDir(), "mail.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestMailSettingsRefuseOtherPurposesAndLegacy(t *testing.T) {
 }
 
 func TestSettingsRoundTripKeepsThePasswordServerSide(t *testing.T) {
-	db, err := store.New(filepath.Join(t.TempDir(), "mail.db"))
+	db, err := store.NewTest(filepath.Join(t.TempDir(), "mail.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

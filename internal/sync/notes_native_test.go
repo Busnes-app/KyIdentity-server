@@ -52,7 +52,7 @@ func TestKyNotesNativeDirectorySender(t *testing.T) {
 	previous, previousLoopback := netguard.AllowPrivate, netguard.AllowLoopback
 	netguard.AllowPrivate, netguard.AllowLoopback = true, true
 	t.Cleanup(func() { netguard.AllowPrivate, netguard.AllowLoopback = previous, previousLoopback })
-	s, err := store.New(filepath.Join(t.TempDir(), "identity.db"))
+	s, err := store.NewTest(filepath.Join(t.TempDir(), "identity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

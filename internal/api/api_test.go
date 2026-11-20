@@ -33,7 +33,7 @@ func setupTestServer(t *testing.T) (*Server, *store.Store, *sync.Engine, *mfa.En
 	}
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	dbStore, err := store.New(dbPath)
+	dbStore, err := store.NewTest(dbPath)
 	if err != nil {
 		t.Fatalf("store.New failed: %v", err)
 	}
@@ -441,7 +441,7 @@ func setupTestServerWith(t *testing.T, opts ...func(*config.Config)) (*Server, *
 	}
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	dbStore, err := store.New(dbPath)
+	dbStore, err := store.NewTest(dbPath)
 	if err != nil {
 		t.Fatalf("store.New failed: %v", err)
 	}

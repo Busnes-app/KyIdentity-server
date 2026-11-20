@@ -76,7 +76,7 @@ func TestSendRefusesANonSMTPGreeting(t *testing.T) {
 
 // Validate refuses anything that could not send, and Save stores nothing it refused.
 func TestSaveRefusesInvalidSettings(t *testing.T) {
-	db, err := store.New(filepath.Join(t.TempDir(), "mail.db"))
+	db, err := store.NewTest(filepath.Join(t.TempDir(), "mail.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestLoadAndSaveSurfaceStoreErrors(t *testing.T) {
 
 // Sealed bytes that are not settings JSON are an error, not empty settings.
 func TestLoadRejectsCorruptPlaintext(t *testing.T) {
-	db, err := store.New(filepath.Join(t.TempDir(), "mail.db"))
+	db, err := store.NewTest(filepath.Join(t.TempDir(), "mail.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

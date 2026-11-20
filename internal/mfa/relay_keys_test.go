@@ -26,7 +26,7 @@ func relayKeyStore(t *testing.T) *store.Store {
 
 func openRelayKeyStore(t *testing.T, path string) *store.Store {
 	t.Helper()
-	s, err := store.New(path)
+	s, err := store.NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}

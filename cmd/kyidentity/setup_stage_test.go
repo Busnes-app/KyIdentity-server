@@ -20,7 +20,7 @@ func stageFixture(t *testing.T) (setupBundle, string, string) {
 	t.Setenv("KYIDENTITY_DATA_DIR", data)
 	t.Setenv("KYIDENTITY_ENCRYPTION_KEY", "")
 	db := filepath.Join(data, "identity.db")
-	s, err := store.New(db)
+	s, err := store.NewTest(db)
 	if err != nil {
 		t.Fatal(err)
 	}
