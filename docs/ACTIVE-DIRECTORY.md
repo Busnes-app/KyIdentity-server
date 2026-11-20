@@ -178,6 +178,12 @@ an administrative reset; KyIdentity applies its own password policy first.
 
 Apply to the computers that sign in with KyIdentity accounts:
 
+- **Check the DC before a cached logon.** Computer Configuration → Administrative Templates →
+  System → Logon → **Always wait for the network at computer startup and logon** = Enabled.
+  Without it Windows 11 signs a user in from cached credentials at boot and checks the DC
+  afterwards: in the release check a user disabled in KyIdentity, with the DC reachable,
+  still got a desktop (the check failed with "account disabled" and the session stayed).
+  With it the same logon is refused with "Your account has been disabled".
 - **Block password changes on the PC.** A change made with Ctrl-Alt-Del would never reach
   KyIdentity, and the next KyIdentity change would overwrite it. User Configuration →
   Administrative Templates → System → Ctrl+Alt+Del Options → **Remove
@@ -190,6 +196,55 @@ Apply to the computers that sign in with KyIdentity accounts:
   unreachable, cached logons still work for a while, but keep one local administrator
   whose password is managed by Windows LAPS, so you can always get in.
 
+### What disabling does not reach
+
+A PC that cannot reach a DC signs users in from cached credentials, even with the baseline.
+In the release check a user disabled in KyIdentity after their last online logon still
+signed in while the PC was cut off from the DC. Disabling takes effect on a PC the next time
+it reaches a DC. To shorten that window, lower **Interactive logon: Number of previous logons
+to cache** (0 turns cached logon off, and with it any sign-in away from the network); the
+check has not exercised that setting.
+
+## Windows 11 release check
+
+`scripts/e2e-win11-domain.sh` is a manual release check, not CI: it needs `/dev/kvm`,
+docker, about 30 GB of disk and up to an hour. It runs a throwaway Samba AD DC, this branch's
+KyIdentity (in `go test`) and the DC agent, and a fresh, unactivated Windows 11 Pro VM
+(`dockurr/windows`, pinned by digest, which downloads the ISO from Microsoft). Every docker
+object is `kyws-win11-*` and is removed at the end; `E2E_WIN11_KEEP=1` keeps them.
+
+```sh
+E2E_WIN11_EVIDENCE=docs/ui-active-directory-win11-<date> scripts/e2e-win11-domain.sh
+```
+
+It takes `/tmp/ky-integ-test.lock` itself for its builds, so do not run it under that lock;
+`scripts/e2e-samba-ad-kyidentity.sh` does the same when it has to build the DC image.
+
+The script drives Windows through its own shared folder: a SYSTEM task runs the commands it
+drops there. A logon counts only from the Security log (4624 logon type 2 online, 11 cached;
+4625 with its status) and the console session, read after each reboot.
+
+Results of 2026-11-20 (Windows 11 Pro 10.0.26200, Samba 4.23.8; screenshots in
+[`ui-active-directory-win11-2026-11-20/`](ui-active-directory-win11-2026-11-20/)):
+
+| Step | Result | Evidence |
+|---|---|---|
+| 1. Join (`Add-Computer`, reboot) | Joined; secure channel true; `nltest /dsgetdc` finds the DC by DNS | [run log](ui-active-directory-win11-2026-11-20/run-log.txt) |
+| 2. Logon as the KyIdentity user (password the user set) | Online logon (4624 type 2) 4 s after boot; `whoami /upn` = `winuser@kyws.test`; `klist` holds `krbtgt/KYWS.TEST` (AES-256) | [desktop](ui-active-directory-win11-2026-11-20/02-logon-desktop.png) |
+| 3. Password changed in KyIdentity, agent delivers | Old password refused (4625 `0xC000006A`); new password logs on online | [refused](ui-active-directory-win11-2026-11-20/03-old-password-refused.png), [desktop](ui-active-directory-win11-2026-11-20/03-new-password-desktop.png) |
+| 4. Disabled in KyIdentity, DC reachable, Windows default policy | **Not refused**: desktop from cached credentials (4624 type 11), then a background 4625 `0xC0000072` that leaves the session up | [desktop](ui-active-directory-win11-2026-11-20/04-disabled-default-policy.png) |
+| 4. The same, with the baseline GPO | Refused (4625 type 2 `0xC0000072`), no logon of any type | ["Your account has been disabled"](ui-active-directory-win11-2026-11-20/04-disabled-refused.png) |
+| 5. DC unreachable, active user (baseline applied) | Cached logon (4624 type 11) 27 s after boot; no Kerberos tickets | [desktop](ui-active-directory-win11-2026-11-20/05-cached-logon-dc-down.png) |
+| 5. DC unreachable, user disabled after their last online logon | **Cached logon** (4624 type 11) 33 s after boot | [desktop](ui-active-directory-win11-2026-11-20/05-cached-logon-disabled-dc-down.png) |
+| 6. Baseline GPO from Samba (`samba-tool gpo create`/`load`/`setlink`) | Applied: `DisableChangePassword=1` in the user hive, `SyncForegroundPolicy=1`; Ctrl-Alt-Del has no "Change a password" | [before](ui-active-directory-win11-2026-11-20/06-ctrl-alt-del-before-baseline.png), [after](ui-active-directory-win11-2026-11-20/06-ctrl-alt-del-with-baseline.png) |
+
+The run took about 30 minutes on Major: ISO download and unattended install about 10, the
+logon steps 19 (`TestWin11DomainEndToEnd`, 1130 s). Cleanup removed every object it created.
+
+The Windows VM differs from a managed PC in ways that do not change how a domain logon is
+checked: `dockurr/windows` turns UAC and the firewall off and allows guest SMB for its shared
+folder.
+
 ## Limits
 
 - One OU per connector, no nested groups, no configurable UPN suffix or attribute mapping.
@@ -197,6 +252,6 @@ Apply to the computers that sign in with KyIdentity accounts:
 - Reconciliation listing of the OU and read-back diagnostics are not available for this
   connector type.
 - Proven against Samba AD with `kinit`, NTLM (`smbclient`) and `ldapsearch`
-  (`scripts/e2e-samba-ad-kyidentity.sh`, CI job `samba-ad`). A real Windows client join and
-  sign-in has not been tested.
+  (`scripts/e2e-samba-ad-kyidentity.sh`, CI job `samba-ad`), and at a real Windows 11 Pro
+  logon by the manual release check above. Windows AD as the DC is untested.
 - Multi-tenant mode is not supported; see the design document.
