@@ -130,9 +130,13 @@ func (s *Store) CancelAuthorizationInteraction(hash, browserHash string) error {
 }
 
 // RecordInteractionPassword notes that userID's password verified during this interaction,
-// before any session completed it, and binds the interaction to that user.
+// before any session completed it, and binds the interaction to that user. Only a
+// require-password workstation app needs it, and the per-account cap applies as it does
+// when a session completes the interaction.
 func (s *Store) RecordInteractionPassword(hash, browserHash, userID string, at time.Time) error {
-	_, err := s.db.Exec(`UPDATE authorization_interactions SET password_at=?, user_id=? WHERE hash=? AND browser_hash=? AND session_id='' AND expires_at>? AND (user_id='' OR user_id=?)`,
-		at, userID, hash, browserHash, time.Now().UTC(), userID)
+	_, err := s.db.Exec(`UPDATE authorization_interactions SET password_at=?, user_id=? WHERE hash=? AND browser_hash=? AND session_id='' AND expires_at>? AND (user_id='' OR user_id=?)
+ AND EXISTS(SELECT 1 FROM workstation_apps w WHERE w.client_id=authorization_interactions.client_id AND w.require_password)
+ AND (SELECT COUNT(*) FROM authorization_interactions o WHERE o.user_id=? AND o.hash<>?)<10`,
+		at, userID, hash, browserHash, time.Now().UTC(), userID, userID, hash)
 	return err
 }

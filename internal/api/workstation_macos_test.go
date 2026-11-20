@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -217,6 +218,50 @@ func TestRequirePasswordRefusesPasswordlessSignIn(t *testing.T) {
 	_, userCode := f.start()
 	if rr := f.decide(cookie, userCode, true); rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "sign_in_again") {
 		t.Fatalf("device approval under require-password: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// The password step binds an interaction to the account only for a require-password app,
+// and never past the per-account cap a completing session enforces.
+func TestInteractionPasswordScopeAndCap(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	f.macSignIn = true
+	f.settings(true, 300, 604800)
+	u, _ := f.assignedUser()
+	now := time.Now().UTC()
+	interaction := func(browser, owner string) string {
+		t.Helper()
+		hash := crypto.HashSHA256(uuid.NewString())
+		if err := f.db.CreateAuthorizationInteraction(&store.AuthorizationInteraction{Hash: hash, BrowserHash: browser, UserID: owner, Request: "x", ClientID: f.clientID, CreatedAt: now, ExpiresAt: now.Add(time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+		return hash
+	}
+	bound := func(hash, browser string) bool {
+		t.Helper()
+		if err := f.db.RecordInteractionPassword(hash, browser, u.ID, now); err != nil {
+			t.Fatal(err)
+		}
+		i, err := f.db.GetAuthorizationInteraction(hash, browser)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return i.UserID == u.ID
+	}
+	if bound(interaction("off", ""), "off") {
+		t.Fatal("bound to the account although the app does not require a password")
+	}
+	f.requirePassword = true
+	f.settings(true, 300, 604800)
+	if !bound(interaction("on", ""), "on") {
+		t.Fatal("not bound for a require-password app")
+	}
+	for i := 0; i < 9; i++ {
+		interaction(fmt.Sprintf("owned-%d", i), u.ID)
+	}
+	if bound(interaction("over", ""), "over") {
+		t.Fatal("bound past the per-account cap")
 	}
 }
 
