@@ -1,15 +1,9 @@
-# Runs at every interactive logon, as the user: who logged on, how, and the user policy.
+# Runs at every interactive logon, as the user. Writes locally (the poller relays it): the
+# share may be unreachable to this user, and whoami /upn and klist block while the DC is.
 $t = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ')
+$f = "C:\ProgramData\kyws\sessions\session-$t"
 $pol = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue).DisableChangePassword
-$lines = @(
-	"time: $t"
-	"whoami: $(whoami.exe)"
-	"upn: $(whoami.exe /upn 2>&1)"
-	"logonserver: $env:LOGONSERVER"
-	"DisableChangePassword: $pol"
-	'--- klist'
-	(klist.exe 2>&1)
-)
-$out = "\\host.lan\Data\out\session-$t"
-$lines | Set-Content "$out.tmp"
-Rename-Item "$out.tmp" "session-$t.txt"
+@("time: $t", "whoami: $(whoami.exe)", "DisableChangePassword: $pol") | Set-Content "$f.tmp"
+Rename-Item "$f.tmp" "session-$t.txt"
+@("upn: $(whoami.exe /upn 2>&1)", '--- klist', (klist.exe 2>&1)) | Set-Content "$f.tmp"
+Rename-Item "$f.tmp" "session-$t.detail"

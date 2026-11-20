@@ -14,6 +14,8 @@ $sys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 Set-ItemProperty $sys EnableFirstLogonAnimation 0 -Type DWord
 New-Item -ItemType Directory -Force C:\kyws | Out-Null
 Copy-Item C:\OEM\poller.ps1, C:\OEM\session.ps1 C:\kyws\
+New-Item -ItemType Directory -Force C:\ProgramData\kyws\sessions | Out-Null
+icacls.exe C:\ProgramData\kyws\sessions /grant 'Users:(OI)(CI)M' | Out-Null
 icacls.exe C:\kyws /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' 'Users:(OI)(CI)RX' | Out-Null
 # Every interactive logon reports from the user's own session.
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' kyws-session `

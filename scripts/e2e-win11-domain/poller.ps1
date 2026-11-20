@@ -7,6 +7,7 @@ while (-not (Test-Path "$share\out")) { Start-Sleep 2 }
 $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
 Set-Content "$share\out\boot-$boot" (Get-Date).ToUniversalTime().ToString('o')
 while ($true) {
+	Get-ChildItem C:\ProgramData\kyws\sessions\* -Exclude *.tmp -ErrorAction SilentlyContinue | Move-Item -Destination "$share\out" -Force
 	foreach ($f in Get-ChildItem "$share\cmd" -Filter *.ps1 -ErrorAction SilentlyContinue) {
 		$n = $f.BaseName
 		Move-Item $f.FullName "$run\$n.ps1" -Force

@@ -39,7 +39,6 @@ _win_wait() {
 _win_boots() { find "$E2E_WIN11_SHARE/out" -maxdepth 1 -name 'boot-*' | wc -l; }
 # _win_booted_since N: more boots than N have reported (counted on every poll).
 _win_booted_since() { (($(_win_boots) > $1)); }
-_win_sessions() { compgen -G "$E2E_WIN11_SHARE/out/session-*.txt" >/dev/null; }
 
 # win_ps NAME [TIMEOUT] < SCRIPT: runs SCRIPT as SYSTEM in the VM and prints its output.
 # Returns the script's exit code.
@@ -109,62 +108,69 @@ _win_autologon_clear() {
 	EOF
 }
 
-# win_logon USER PASSWORD SHOT: AutoAdminLogon once as DOMAIN\USER after a reboot. Prints
-# the session report the user's own session wrote and the seconds from reboot to it.
-# 0 when a session started.
-win_logon() {
-	local user=$1 pass=$2 shot=$3 start rc=0
-	rm -f "$E2E_WIN11_SHARE"/out/session-*.txt
-	_win_autologon "$user" "$pass"
-	start=$SECONDS
+# _win_logons USER: USER's logon events since the last boot, read as SYSTEM, one per line:
+# "4624 type=2" (online), "4624 type=11" (cached credentials), "4625 type=T sub=STATUS"
+# (refused), then "session=active" while USER holds a console session.
+_win_logons() {
+	win_ps logons <<-EOF
+		\$boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+		Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624,4625; StartTime=\$boot} -ErrorAction SilentlyContinue | Sort-Object TimeCreated | ForEach-Object {
+			\$d = @{}; ([xml]\$_.ToXml()).Event.EventData.Data | ForEach-Object { \$d[\$_.Name] = \$_.'#text' }
+			if (\$d.TargetUserName -eq '$1' -and (\$_.Id -eq 4625 -or \$d.LogonType -in '2','11')) {
+				"\$(\$_.Id) type=\$(\$d.LogonType) sub=\$(\$d.SubStatus) at=+\$([int](\$_.TimeCreated - \$boot).TotalSeconds)s"
+			}
+		}
+		if ((query.exe user 2>\$null) -match '^\s*>?$1\s+console\s+\d+\s+Active') { 'session=active' }
+	EOF
+}
+
+# _win_after_reboot USER PASSWORD: AutoAdminLogon once as DOMAIN\USER, reboot, and wait
+# (up to 10 min) for USER's first logon event. Sets _win_events; 1 if none came.
+_win_after_reboot() {
+	local deadline
+	_win_autologon "$1" "$2"
 	win_reboot
-	_win_wait 900 _win_sessions || rc=$?
+	deadline=$((SECONDS + 600))
+	_win_events=""
+	until [[ $_win_events == *4624* || $_win_events == *4625* ]]; do
+		((SECONDS < deadline)) || return 1
+		sleep 10
+		_win_events=$(_win_logons "$1") || true
+	done
+	# A refused online check can follow a cached logon; give it time to land.
+	sleep 45
+	_win_events=$(_win_logons "$1") || true
+}
+
+# win_logon USER PASSWORD SHOT: AutoAdminLogon once as DOMAIN\USER after a reboot. Prints
+# the logon events and the report USER's own session wrote. 0 when USER logged on and holds
+# the console session.
+win_logon() {
+	local user=$1 out=$E2E_WIN11_SHARE/out rc=0
+	rm -f "$out"/session-*
+	_win_after_reboot "$user" "$2" || rc=$?
+	printf '%s\n' "${_win_events:-no logon event within 600 s}"
+	[[ $_win_events == *"4624 type="* && $_win_events == *session=active* ]] || rc=1
 	if ((rc == 0)); then
-		echo "logon-seconds-after-reboot: $((SECONDS - start))"
-		tr -d '\r' <"$(compgen -G "$E2E_WIN11_SHARE/out/session-*.txt" | head -n 1)"
-		sleep 40 # let the desktop finish drawing
-	else
-		echo "no session within 900 s"
+		_win_wait 180 compgen -G "$out/session-*.detail" >/dev/null || true
+		cat "$out"/session-*.txt "$out"/session-*.detail 2>/dev/null | tr -d '\r' || echo "no session report"
 	fi
-	win_shot "$shot"
+	win_shot "$3"
 	_win_autologon_clear
 	return "$rc"
 }
 
-# _win_4625 USER: the 4625 (logon failure) events for USER since the last boot.
-_win_4625() {
-	win_ps "events-4625" <<-EOF
-		\$boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-		Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4625; StartTime=\$boot} -ErrorAction SilentlyContinue | ForEach-Object {
-			\$d = @{}; ([xml]\$_.ToXml()).Event.EventData.Data | ForEach-Object { \$d[\$_.Name] = \$_.'#text' }
-			if (\$d.TargetUserName -eq '$1') { "4625 \$(\$d.TargetDomainName)\\\$(\$d.TargetUserName) logonType=\$(\$d.LogonType) status=\$(\$d.Status) subStatus=\$(\$d.SubStatus)" }
-		}
-	EOF
-}
-
 # win_logon_refused USER PASSWORD SUBSTATUS SHOT: AutoAdminLogon as DOMAIN\USER after a
-# reboot must be refused with a 4625 event carrying SUBSTATUS (such as 0xc000006a) and no
-# session. Prints the events.
+# reboot must be refused with a 4625 carrying SUBSTATUS (such as 0xc000006a), and USER must
+# neither log on (no 4624, online or cached) nor hold a session. Prints the events.
 win_logon_refused() {
-	local user=$1 pass=$2 want=$3 shot=$4 events="" deadline
-	rm -f "$E2E_WIN11_SHARE"/out/session-*.txt
-	_win_autologon "$user" "$pass"
-	win_reboot
-	deadline=$((SECONDS + 600))
-	while ((SECONDS < deadline)); do
-		events=$(_win_4625 "$user") || true
-		[[ -n $events ]] && break
-		sleep 10
-	done
-	sleep 15
-	win_shot "$shot"
+	local rc=0
+	rm -f "$E2E_WIN11_SHARE"/out/session-*
+	_win_after_reboot "$1" "$2" || rc=$?
+	printf '%s\n' "${_win_events:-no logon event within 600 s}"
+	win_shot "$4"
 	_win_autologon_clear
-	printf '%s\n' "${events:-no 4625 event within 600 s}"
-	if _win_sessions; then
-		echo "a session started"
-		return 1
-	fi
-	grep -qi "subStatus=$want" <<<"$events"
+	((rc == 0)) && [[ $_win_events == *"4625 type="*"sub=$3"* && $_win_events != *4624* && $_win_events != *session=active* ]]
 }
 
 # win_cad_shot NAME: Ctrl-Alt-Del in the signed-in session, screenshot, Escape.
@@ -176,8 +182,11 @@ win_cad_shot() {
 	sleep 3
 }
 
-win_dc_pause() { docker pause "$E2E_DC_CONTAINER" >/dev/null; }
-win_dc_unpause() { docker unpause "$E2E_DC_CONTAINER" >/dev/null; }
+# The DC goes dark for the PC, as for a laptop off site: the VM container (which routes the
+# VM's traffic) drops packets to it. docker pause is no stand-in: the frozen DC's kernel
+# still completes TCP handshakes, so Windows hangs instead of failing over to the cache.
+win_dc_down() { docker exec "$E2E_WIN11_VM" iptables -I FORWARD -d "$E2E_DC_IP" -j DROP; }
+win_dc_up() { docker exec "$E2E_WIN11_VM" iptables -D FORWARD -d "$E2E_DC_IP" -j DROP; }
 
 # win_join: Add-Computer to the realm as the domain administrator, reboot, then check the
 # secure channel. Prints what Windows reports.
@@ -201,26 +210,34 @@ win_join() {
 	EOF
 }
 
-# win_gpo_apply: a GPO linked at the domain root with User Configuration > Administrative
-# Templates > System > Ctrl+Alt+Del Options > Remove Change Password = Enabled.
+# win_gpo_apply: the documented baseline as one GPO linked at the domain root: User
+# Configuration > Administrative Templates > System > Ctrl+Alt+Del Options > Remove Change
+# Password, and Computer Configuration > Administrative Templates > System > Logon > Always
+# wait for the network at computer startup and logon. Then gpupdate on the PC.
 win_gpo_apply() {
-	local guid
+	local guid reg='{35378EAC-683F-11D2-A89A-00C04FBBCFA2}'
 	_dc_exec_i sh -c 'cat >/e2e/gpo.json' <<-'EOF'
 		[{"keyname": "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
-		  "valuename": "DisableChangePassword", "class": "USER", "type": "REG_DWORD", "data": 1}]
+		  "valuename": "DisableChangePassword", "class": "USER", "type": "REG_DWORD", "data": 1},
+		 {"keyname": "Software\\Policies\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+		  "valuename": "SyncForegroundPolicy", "class": "MACHINE", "type": "REG_DWORD", "data": 1}]
 	EOF
 	guid=$(_dc_exec sh -c 'PASSWD_FILE=/e2e/admin.pass samba-tool gpo create "KyIdentity baseline" -U Administrator -H ldap://dc.kyws.test' |
 		grep -o '{[0-9A-Fa-f-]*}' | head -n 1)
 	[[ -n $guid ]] || _win_die "gpo create printed no GUID" || return
-	_dc_exec sh -c 'PASSWD_FILE=/e2e/admin.pass samba-tool gpo load "$1" --content=/e2e/gpo.json \
-		--user-ext-name="{35378EAC-683F-11D2-A89A-00C04FBBCFA2}" --user-ext-name="{D02B1F73-3407-48AE-BA88-E8213C6761F1}" \
-		-U Administrator -H ldap://dc.kyws.test &&
-		PASSWD_FILE=/e2e/admin.pass samba-tool gpo setlink "$2" "$1" -U Administrator -H ldap://dc.kyws.test' \
-		sh "$guid" "$E2E_DC_BASE_DN" >&2
+	# Each side lists the registry CSE, then its Administrative Templates tool.
+	_dc_exec sh -c 'export PASSWD_FILE=/e2e/admin.pass
+		samba-tool gpo load "$1" --content=/e2e/gpo.json -U Administrator -H ldap://dc.kyws.test \
+			--machine-ext-name="$3" --machine-ext-name="{D02B1F72-3407-48AE-BA88-E8213C6761F1}" \
+			--user-ext-name="$3" --user-ext-name="{D02B1F73-3407-48AE-BA88-E8213C6761F1}" &&
+		samba-tool gpo setlink "$2" "$1" -U Administrator -H ldap://dc.kyws.test' \
+		sh "$guid" "$E2E_DC_BASE_DN" "$reg" >&2
 	echo "gpo: $guid linked at $E2E_DC_BASE_DN"
 	win_ps gpupdate 300 <<-'EOF'
-		gpupdate.exe /target:computer /force
-		gpresult.exe /scope:computer /r | Select-String -Pattern 'KyIdentity|Group Policy was applied'
+		gpupdate.exe /target:computer /force | Out-Null
+		$k = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\CurrentVersion\Winlogon'
+		"SyncForegroundPolicy: $((Get-ItemProperty $k -ErrorAction SilentlyContinue).SyncForegroundPolicy)"
+		gpresult.exe /scope:computer /r | Select-String 'KyIdentity baseline'
 	EOF
 }
 

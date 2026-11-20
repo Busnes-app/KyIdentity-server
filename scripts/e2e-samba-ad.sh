@@ -175,6 +175,7 @@ _dc_delegate() {
 _dc_write_env() {
 	cat >"$E2E_DC_WORKDIR/dc.env" <<-EOF
 		export E2E_DC_WORKDIR='$E2E_DC_WORKDIR'
+		export E2E_DC_CONTAINER='$E2E_DC_CONTAINER'
 		export E2E_DC_IP='$E2E_DC_IP'
 		export E2E_DC_LDAPS_URL='$E2E_DC_LDAPS_URL'
 		export E2E_DC_CA='$E2E_DC_CA'
