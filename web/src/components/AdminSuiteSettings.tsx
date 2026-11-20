@@ -32,21 +32,25 @@ export function AdminSuiteSettings() {
   const [notice, setNotice] = useState<string | null>(null);
   const { requestGrant, stepUpPrompt } = useStepUp();
 
-  const show = (s: SuiteSettings) => {
-    setSaved(s); setTheme(s.defaultTheme); setDomains(s.emailDomains.join('\n'));
-    setSuiteDefaultTheme(s.defaultTheme);
-  };
+  // A save refreshes only the field it saved, so an unsaved edit in the other form survives.
+  const showTheme = (s: SuiteSettings) => { setTheme(s.defaultTheme); setSuiteDefaultTheme(s.defaultTheme); };
+  const showDomains = (s: SuiteSettings) => setDomains(s.emailDomains.join('\n'));
   useEffect(() => {
-    apiJson('/api/admin/suite-settings', parseSuiteSettings).then(show).catch(err => setError(errorMessage(err, 'Could not load suite settings')));
+    apiJson('/api/admin/suite-settings', parseSuiteSettings)
+      .then(s => { setSaved(s); showTheme(s); showDomains(s); })
+      .catch(err => setError(errorMessage(err, 'Could not load suite settings')));
   }, []);
 
-  const run = async (what: string, call: () => Promise<SuiteSettings>) => {
+  const run = async (what: string, call: () => Promise<SuiteSettings>, show: (s: SuiteSettings) => void) => {
     setBusy(true); setError(null); setNotice(null);
-    try { show(await call()); setNotice('Saved.'); } catch (err) { if (!isCancelled(err)) setError(errorMessage(err, what)); } finally { setBusy(false); }
+    try {
+      const s = await call();
+      setSaved(s); show(s); setNotice('Saved.');
+    } catch (err) { if (!isCancelled(err)) setError(errorMessage(err, what)); } finally { setBusy(false); }
   };
   const saveTheme = (e: React.FormEvent) => {
     e.preventDefault();
-    void run('Could not save the default theme', () => apiJson('/api/admin/suite-settings/default-theme', parseSuiteSettings, { method: 'PUT', body: JSON.stringify({ theme }) }));
+    void run('Could not save the default theme', () => apiJson('/api/admin/suite-settings/default-theme', parseSuiteSettings, { method: 'PUT', body: JSON.stringify({ theme }) }), showTheme);
   };
   const path = '/api/admin/suite-settings/email-domains';
   const saveDomains = (e: React.FormEvent) => {
@@ -54,7 +58,7 @@ export function AdminSuiteSettings() {
     void run('Could not save the mail domains', async () => {
       const stepUpToken = await requestGrant('Change the mail domains every suite app reads.', `PUT ${path}`);
       return apiJson(path, parseSuiteSettings, { method: 'PUT', stepUpToken, body: JSON.stringify({ domains: splitDomains(domains) }) });
-    });
+    }, showDomains);
   };
 
   return (

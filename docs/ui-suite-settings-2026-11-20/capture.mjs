@@ -1,11 +1,17 @@
 // Suite settings captures: admin section, then the sign-in page picking up the default.
-// Usage: node capture.mjs <binary> <repo> <port> <out>
+// Usage: KY_REDESIGN=<ky-redesign checkout> node capture.mjs <binary> <repo> <port> <out>
+// KY_REDESIGN defaults to ~/git/ky-redesign; its captures/drivers/lib.mjs and a Playwright
+// install under KyCalendar/web are the shared capture helpers.
 import { randomBytes } from 'node:crypto';
+import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { symlinkSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { secret, tempDir, pw, waitReady, startServer, settle } from '/home/yoshi/git/ky-redesign/captures/drivers/lib.mjs';
+import { pathToFileURL } from 'node:url';
+
+const redesign = resolve(process.env.KY_REDESIGN ?? join(homedir(), 'git/ky-redesign'));
+const { secret, tempDir, pw, waitReady, startServer, settle } = await import(pathToFileURL(join(redesign, 'captures/drivers/lib.mjs')).href);
 
 const { chromium } = await pw('KyCalendar/web');
 const [binary, REPO, PORT, OUT] = process.argv.slice(2).map((a, i) => (i === 2 ? a : resolve(a)));
@@ -31,12 +37,6 @@ try {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 }, colorScheme: 'light', locale: 'en-US' });
   const page = await ctx.newPage();
-  page.addLocatorHandler(page.locator('#admin-stepup-password'), async field => {
-    await page.waitForTimeout(5500);
-    await field.fill(admin.password);
-    await page.getByRole('dialog', { name: /Confirm/ }).getByRole('button', { name: 'Continue' }).click();
-    await field.waitFor({ state: 'detached', timeout: 60000 });
-  });
   await page.goto('/');
   await shot(page, 'signin-before', 'busnes-light');
   await signIn(page);
@@ -46,15 +46,23 @@ try {
   // A refused domain shows the server's reason and changes nothing.
   await page.getByLabel('Mail domains').fill('https://example.com');
   await page.getByRole('button', { name: 'Save domains' }).click();
+  await stepUp(page);
   await page.getByRole('alert').waitFor();
   log.push(`refusal: ${await page.getByRole('alert').innerText()}`);
   await shot(page, 'admin-refused', 'busnes-light');
+  // Saving one form keeps an unsaved edit in the other (PR #277 review).
+  await page.getByLabel('Default theme').selectOption('nord');
   await page.getByLabel('Mail domains').fill('example.com\nBücher.example');
-  await page.getByRole('button', { name: 'Save domains' }).click();
-  await page.getByRole('status').filter({ hasText: 'Saved.' }).waitFor();
+  await saved(page, 'Save domains');
+  const keptTheme = await page.getByLabel('Default theme').inputValue();
+  if (keptTheme !== 'nord') throw new Error(`saving domains reset the unsaved theme to ${keptTheme}`);
+  await page.getByLabel('Mail domains').fill('example.com\nBücher.example\ndraft.example');
   await page.getByLabel('Default theme').selectOption('ocean-pair');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('status').filter({ hasText: 'Saved.' }).waitFor();
+  await saved(page, 'Save');
+  const keptDomains = await page.getByLabel('Mail domains').inputValue();
+  if (!keptDomains.endsWith('draft.example')) throw new Error(`saving the theme reset the unsaved domains to ${JSON.stringify(keptDomains)}`);
+  log.push('unsaved edits survive the other form\'s save');
+  await page.getByLabel('Mail domains').fill('example.com\nxn--bcher-kva.example');
   await shot(page, 'admin-saved', 'white-cliffs');
   log.push(`domains field: ${JSON.stringify(await page.getByLabel('Mail domains').inputValue())}`);
   log.push(`public: ${await (await fetch(`${baseURL}/api/appearance`)).text()}`.trim());
@@ -87,6 +95,23 @@ async function shot(page, view, expectTheme) {
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   log.push(`${path} theme=${theme} overflow=${over}`);
 }
+async function saved(page, button) {
+  const put = page.waitForResponse(r => r.request().method() === 'PUT' && r.url().includes('/api/admin/suite-settings/'), { timeout: 90000 });
+  await page.getByRole('button', { name: button, exact: true }).click();
+  if (button === 'Save domains') await stepUp(page);
+  if (!(await put).ok()) throw new Error(`${button}: ${(await put).status()}`);
+  await page.getByRole('status').filter({ hasText: 'Saved.' }).waitFor();
+  await settle(page, 200);
+}
+// Answers the step-up dialog the domains save opens (the wait matches the existing drivers).
+async function stepUp(page) {
+  const field = page.locator('#admin-stepup-password');
+  await field.waitFor({ timeout: 30000 });
+  await page.waitForTimeout(5500);
+  await field.fill(admin.password);
+  await page.getByRole('dialog', { name: /Confirm/ }).getByRole('button', { name: 'Continue' }).click();
+  await field.waitFor({ state: 'detached', timeout: 60000 });
+}
 async function signIn(page) {
   const login = async () => {
     await page.goto('/');
@@ -103,6 +128,7 @@ async function signIn(page) {
     await page.getByLabel('New password', { exact: true }).fill(admin.replacement);
     await page.getByLabel('Repeat new password').fill(admin.replacement);
     await change.click();
+    await stepUp(page);
     await change.waitFor({ state: 'detached', timeout: 60000 });
     admin.password = admin.replacement;
     const user = page.getByLabel('Username', { exact: true });
