@@ -77,8 +77,8 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
-      # Go's default is 10 minutes per package; the api and store suites under -race now
-      # take close to 20 on a runner. This is a hang detector, not a performance budget.
+      # Go's default is 10 minutes per package; since the tenancy migration the api and store
+      # suites under -race pass 30 on a runner. This is a hang detector, not a performance budget.
       - run: go test -race -count=1 -timeout 50m ./...
       - name: profile preserves Compose configuration
         run: python3 docs/check-strong-crypto-compose.py
