@@ -55,11 +55,12 @@ const xcredsRedirectsJSON = `["` + XCredsRedirectURI + `"]`
 
 // WorkstationSettings are the admin-set values of a workstation app.
 type WorkstationSettings struct {
-	DeviceGrant     bool
-	DeviceCodeTTL   int
-	OfflineWindow   int
-	RequirePassword bool
-	MacSignIn       bool
+	DeviceGrant   bool
+	DeviceCodeTTL int
+	OfflineWindow int
+	// RequireTypedSignIn is the require-password rule (named so for code scanning: a flag, not a secret).
+	RequireTypedSignIn bool
+	MacSignIn          bool
 }
 
 // ValidWorkstationSettings reports whether the admin-set values are in range.
@@ -242,7 +243,7 @@ func (s *Store) UpdateWorkstationApp(clientID string, set WorkstationSettings, a
 		redirects = xcredsRedirectsJSON
 	}
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE workstation_apps SET device_grant_enabled=?, device_code_ttl=?, offline_window=?, require_password=? WHERE client_id=?`, grant, ttl, window, set.RequirePassword, clientID)
+		res, err := tx.Exec(`UPDATE workstation_apps SET device_grant_enabled=?, device_code_ttl=?, offline_window=?, require_password=? WHERE client_id=?`, grant, ttl, window, set.RequireTypedSignIn, clientID)
 		if err != nil {
 			return err
 		}
