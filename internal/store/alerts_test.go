@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -619,5 +620,66 @@ func TestOutageResolutionIsMailed(t *testing.T) {
 	}
 	if len(subjects) != 2 || !strings.Contains(subjects[1], "resolved") || strings.Contains(subjects[0], "resolved") {
 		t.Fatal("one opening mail and one resolution mail", subjects)
+	}
+}
+
+// An install upgrading into org_id_required holds its platform alerts under the default
+// org (the old column default). The next pass must fold into them, not open and mail a
+// second copy of each.
+func TestUpgradeKeepsOnePlatformAlert(t *testing.T) {
+	saved := migrations
+	t.Cleanup(func() { migrations = saved })
+	i := slices.IndexFunc(migrations, func(m migration) bool { return m.name == "org_id_required" })
+	migrations = saved[:i]
+	path := filepath.Join(t.TempDir(), "previous.db")
+	s, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := alertAdmin(t, s, "root")
+	if err := s.SetAlertSettings(AlertSettings{LoginFailureThreshold: 1, LoginFailureWindowSeconds: 600, Recipients: []string{admin.ID}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	provisioningFixture(t, s, "hr")
+	if _, err := s.db.Exec(`UPDATE paired_systems SET status='failing' WHERE id='hr'`); err != nil {
+		t.Fatal(err)
+	}
+	auditedFrom(t, s, "203.0.113.9", "auth.login", "", "", "", "failure", "")
+	evaluate(t, s)
+	// What the code before this version wrote: every alert in the default org.
+	stamp := `DROP TRIGGER alerts_org_immutable; UPDATE alerts SET org_id='` + DefaultOrgID + `'; ` +
+		sqliteTriggerSQL(tenancyTrigger{"alerts_org_immutable", "BEFORE UPDATE OF org_id", "alerts", "", msgOrgChanged}, tenancyRefusals("unixepoch()")["org_changed"])
+	if s.postgres {
+		stamp = `ALTER TABLE alerts DISABLE TRIGGER alerts_org_immutable; UPDATE alerts SET org_id='` + DefaultOrgID + `'; ALTER TABLE alerts ENABLE TRIGGER alerts_org_immutable`
+	}
+	if _, err := s.db.Exec(stamp); err != nil {
+		t.Fatal(err)
+	}
+	const live = `SELECT COUNT(*) FROM alerts WHERE status<>'resolved'`
+	const mail = `SELECT COUNT(*) FROM alert_deliveries`
+	if n := countRows(t, s, live); n != 2 {
+		t.Fatalf("%d live alerts before the upgrade, want the outage and the login alert", n)
+	}
+	mailed := countRows(t, s, mail)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrations = saved
+	s, err = New(path)
+	if err != nil {
+		t.Fatal("upgrade:", err)
+	}
+	defer s.Close()
+	auditedFrom(t, s, "203.0.113.9", "auth.login", "", "", "", "failure", "")
+	evaluate(t, s)
+	if n := countRows(t, s, live); n != 2 {
+		t.Fatalf("%d live alerts after the upgrade, want the same two", n)
+	}
+	if n := countRows(t, s, mail); n != mailed {
+		t.Fatalf("%d alert mails after the upgrade, want the %d from before", n, mailed)
+	}
+	if n := countRows(t, s, `SELECT COUNT(*) FROM alerts WHERE org_id IS NULL`); n != 2 {
+		t.Fatalf("%d platform alerts, want both moved out of the default org", n)
 	}
 }

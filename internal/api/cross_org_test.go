@@ -414,7 +414,7 @@ func crossOrgAlert(t *testing.T, db *store.Store, dbPath string, userB *store.Us
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if err := raw.QueryRow(`SELECT id FROM alerts WHERE org_id IS NOT NULL`).Scan(&id); err != nil {
+	if err := raw.QueryRow(`SELECT a.id FROM alerts a JOIN users u ON u.org_id=a.org_id WHERE u.id=? AND a.rule='recovery_use' AND a.key=?`, userB.ID, userB.ID).Scan(&id); err != nil {
 		t.Fatalf("no alert in B: %v", err)
 	}
 	return id

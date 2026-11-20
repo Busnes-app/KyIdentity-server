@@ -258,18 +258,34 @@ func migrateStaffOrgPostgres(tx *sql.Tx) error {
 // default, so an insert that forgets the org fails instead of landing in the default org.
 // SQLite keeps it: ALTER TABLE cannot drop a column default there. On both, one live alert
 // per rule and key becomes one per org (NULL, a platform alert, counts as one org).
+//
+// Before this version every alert took the default org through the column default. The
+// ones today's code raises as platform alerts (NULL) move there first, or the next pass
+// would not find them, open a second alert and mail it again: delivery outages, and the
+// login and access-removal alerts whose key names no user or group (a source address, the
+// shared key, an application or the directory: their audit row has no org). Connector
+// credential alerts keep the default org: their org is the actor's, which the alert does
+// not record, and an administrator actor is in the default org.
+// The move is the one org_id change allowed, so it runs with alerts_org_immutable lifted.
+const platformAlertsSQL = `UPDATE alerts SET org_id=NULL WHERE org_id='` + DefaultOrgID + `' AND (rule IN ('provisioning_outage','logout_outage')
+ OR (rule IN ('login_failures','access_removal_failed') AND key NOT IN (SELECT id FROM users) AND key NOT IN (SELECT id FROM directory_groups)));
+`
+
 const alertsLivePerOrgSQL = `DROP INDEX IF EXISTS alerts_live;
 CREATE UNIQUE INDEX alerts_live ON alerts(COALESCE(org_id,''), rule, key) WHERE status<>'resolved';
 `
 
 func migrateOrgIDRequired(tx *sql.Tx) error {
-	_, err := tx.Exec(alertsLivePerOrgSQL)
+	immutable := tenancyTrigger{"alerts_org_immutable", "BEFORE UPDATE OF org_id", "alerts", "org_changed", msgOrgChanged}
+	_, err := tx.Exec(`DROP TRIGGER alerts_org_immutable;
+` + platformAlertsSQL + sqliteTriggerSQL(immutable, tenancyRefusals("unixepoch()")[immutable.refusal]) + alertsLivePerOrgSQL)
 	return err
 }
 
 func migrateOrgIDRequiredPostgres(tx *sql.Tx) error {
 	var b strings.Builder
-	b.WriteString(alertsLivePerOrgSQL)
+	b.WriteString("ALTER TABLE alerts DISABLE TRIGGER alerts_org_immutable;\n" + platformAlertsSQL +
+		"ALTER TABLE alerts ENABLE TRIGGER alerts_org_immutable;\n" + alertsLivePerOrgSQL)
 	for _, t := range orgColumnTables {
 		fmt.Fprintf(&b, "ALTER TABLE %s ALTER COLUMN org_id DROP DEFAULT;\n", t)
 	}

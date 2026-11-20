@@ -240,6 +240,7 @@ var orgSQLAllowlist = map[string]string{
 	"Store.changeEnrollmentDevice":                  "platform: enrollment policies are platform-wide (D10)",
 	"Store.evaluateBatch":                           "platform: the alert worker over every org; each alert carries its org_id",
 	"Store.evaluateOutages":                         "platform: the alert worker over every org; each alert carries its org_id",
+	"migrateOrgIDRequiredPostgres":                  "migration: lifts and restores the alerts org_id trigger around the platform-alert move",
 	"Store.migrateAlerts":                           "migration: written before org_id existed",
 	"Store.migrateAppAccess":                        "migration: written before org_id existed",
 	"Store.migrateAuditIndexes":                     "migration: written before org_id existed",
