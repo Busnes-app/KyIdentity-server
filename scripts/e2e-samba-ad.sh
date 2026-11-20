@@ -204,7 +204,7 @@ _dc_write_env() {
 dc_up() {
 	_dc_build_image
 	_dc_remove_objects
-	E2E_DC_WORKDIR=$(mktemp -d -t kyws-windows-dc.XXXXXX)
+	E2E_DC_WORKDIR=$(mktemp -d -t "$E2E_DC_PREFIX-dc.XXXXXX")
 	chmod 700 "$E2E_DC_WORKDIR"
 	E2E_DC_CA=$E2E_DC_WORKDIR/ca.pem
 	E2E_DC_WRONG_CA=$E2E_DC_WORKDIR/wrong-ca.pem
@@ -295,7 +295,7 @@ dc_up() {
 # Removes the $E2E_DC_PREFIX-* container and network and the work dir.
 dc_down() {
 	_dc_remove_objects
-	if [[ -n ${E2E_DC_WORKDIR:-} && -d $E2E_DC_WORKDIR && $E2E_DC_WORKDIR == */kyws-windows-dc.* ]]; then
+	if [[ -n ${E2E_DC_WORKDIR:-} && -d $E2E_DC_WORKDIR && $E2E_DC_WORKDIR == */"$E2E_DC_PREFIX"-dc.* ]]; then
 		rm -rf "$E2E_DC_WORKDIR"
 	fi
 	E2E_DC_WORKDIR=

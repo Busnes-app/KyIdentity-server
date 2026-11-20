@@ -317,14 +317,14 @@ win_down() {
 
 _win_cleanup() {
 	local rc=$?
-	if [[ ${E2E_WIN11_KEEP:-0} == 1 ]]; then
-		_win_log "kept: $E2E_WIN11_VM, $E2E_DC_CONTAINER, $E2E_WIN11_WORKDIR ($E2E_DC_WORKDIR)"
-		return "$rc"
-	fi
 	if [[ -n ${E2E_WIN11_EVIDENCE:-} && -d ${E2E_WIN11_SHOTS:-} ]]; then
 		mkdir -p "$E2E_WIN11_EVIDENCE"
 		cp "$E2E_WIN11_SHOTS"/*.png "$E2E_WIN11_EVIDENCE/" 2>/dev/null || true
 		cp "$E2E_WIN11_SHOTS/run.log" "$E2E_WIN11_EVIDENCE/run-log.txt" 2>/dev/null || true
+	fi
+	if [[ ${E2E_WIN11_KEEP:-0} == 1 ]]; then
+		_win_log "kept: $E2E_WIN11_VM, $E2E_DC_CONTAINER, $E2E_WIN11_WORKDIR ($E2E_DC_WORKDIR)"
+		return "$rc"
 	fi
 	win_down
 	dc_down
