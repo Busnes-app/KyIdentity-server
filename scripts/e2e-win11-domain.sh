@@ -254,6 +254,8 @@ _win_write_env() {
 # win_up: starts a fresh VM on the DC's network, waits for the unattended install (the
 # command channel answering), sets UTC time and makes the DC its DNS server.
 win_up() {
+	# A kept run's VM and disk would collide or boot the old, already joined install.
+	E2E_WIN11_WORKDIR="" win_down
 	E2E_WIN11_WORKDIR=$(mktemp -d -t kyws-win11.XXXXXX)
 	chmod 700 "$E2E_WIN11_WORKDIR"
 	E2E_WIN11_SHARE=$E2E_WIN11_WORKDIR/share
@@ -323,7 +325,7 @@ _win_cleanup() {
 		cp "$E2E_WIN11_SHOTS/run.log" "$E2E_WIN11_EVIDENCE/run-log.txt" 2>/dev/null || true
 	fi
 	if [[ ${E2E_WIN11_KEEP:-0} == 1 ]]; then
-		_win_log "kept: $E2E_WIN11_VM, $E2E_DC_CONTAINER, $E2E_WIN11_WORKDIR ($E2E_DC_WORKDIR)"
+		_win_log "kept: $E2E_WIN11_VM, $E2E_DC_CONTAINER, ${E2E_WIN11_WORKDIR:-} (${E2E_DC_WORKDIR:-})"
 		return "$rc"
 	fi
 	win_down
