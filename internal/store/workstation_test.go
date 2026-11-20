@@ -22,7 +22,7 @@ func TestCreateDeviceCodeGateAndCapacity(t *testing.T) {
 	if err := s.CreateDeviceCode(code(0)); !errors.Is(err, ErrDeviceGrantUnavailable) {
 		t.Fatalf("grant off: %v", err)
 	}
-	if err := s.UpdateWorkstationApp("ws", true, 300, OfflineWindowDefault, nil); err != nil {
+	if err := s.UpdateWorkstationApp("ws", WorkstationSettings{DeviceGrant: true, DeviceCodeTTL: 300, OfflineWindow: OfflineWindowDefault}, nil); err != nil {
 		t.Fatal(err)
 	}
 	tx, err := s.db.Begin()
@@ -45,7 +45,7 @@ func TestCreateDeviceCodeGateAndCapacity(t *testing.T) {
 	if err := s.CreateDeviceCode(code(maxPendingDeviceCodes + 1)); !errors.Is(err, ErrDeviceCodeCapacity) {
 		t.Fatalf("over capacity: %v", err)
 	}
-	if err := s.UpdateWorkstationApp("ws", true, 60, OfflineWindowDefault, nil); err == nil {
+	if err := s.UpdateWorkstationApp("ws", WorkstationSettings{DeviceGrant: true, DeviceCodeTTL: 60, OfflineWindow: OfflineWindowDefault}, nil); err == nil {
 		t.Fatal("a 60-second code lifetime was accepted")
 	}
 }

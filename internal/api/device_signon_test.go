@@ -410,3 +410,26 @@ func TestDeviceSignOnOriginMismatch(t *testing.T) {
 	}
 	t.Fatalf("no failure audit row with the presented origin: %+v", events)
 }
+
+// A workstation app is never signed in to with a phone's push-only assertion, even when
+// an https redirect (so an origin) is registered for it in the client editor.
+func TestDeviceSignOnRefusesWorkstationApp(t *testing.T) {
+	e := newSignOnEnv(t)
+	c := &store.OAuthClient{ID: uuid.NewString(), ClientName: "Macs"}
+	if err := e.db.CreateWorkstationApp(c, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := store.OpenRawForTest(e.server.cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`UPDATE oauth_clients SET redirect_uris_json='["https://app.example/cb"]' WHERE id=?`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	allowTestAppAccess(t, e.db, c.ID)
+	const want = `{"error":"invalid_grant","error_description":"signon_not_permitted"}`
+	if rec := e.post(e.assertion(t, c.ID), c.ID, ""); rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != want {
+		t.Fatalf("workstation app sign-on: status %d body %s", rec.Code, rec.Body.String())
+	}
+}

@@ -924,7 +924,8 @@ export function parseWorkstationApp(value: unknown): WorkstationApp {
   const o = obj(value, 'a workstation app');
   return { clientId: str(o, 'clientId'), clientName: str(o, 'clientName'), appId: str(o, 'appId'), enabled: bool(o, 'enabled'),
     deviceGrantEnabled: bool(o, 'deviceGrantEnabled'), deviceCodeTtl: directoryCount(o, 'deviceCodeTtl'),
-    offlineWindow: directoryCount(o, 'offlineWindow'), groups: strArray(o.groups) };
+    offlineWindow: directoryCount(o, 'offlineWindow'), groups: strArray(o.groups),
+    requirePassword: bool(o, 'requirePassword'), macSignIn: bool(o, 'macSignIn') };
 }
 export function parseWorkstationApps(value: unknown): WorkstationApps {
   const o = obj(value, 'a workstation app list');

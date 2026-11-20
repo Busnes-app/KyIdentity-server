@@ -29,3 +29,63 @@ export function himmelblauConf(issuer: string, app: WorkstationApp): string {
 
 /** Seconds to whole days, for the offline window field. */
 export const days = (seconds: number) => Math.round(seconds / 86400);
+
+/** The loopback redirect XCreds' web view intercepts; registered by the Mac sign-in switch. */
+export const XCREDS_REDIRECT = 'http://127.0.0.1/xcreds';
+
+const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * An XCreds configuration profile (key names from XCreds 5.9 `PrefKeys.swift`). XCreds reads
+ * the typed password only on `idpHostName`, from the field `passwordElementID`; the Mac
+ * account is named after `preferred_username`. No client secret and no ROPG: KyIdentity has
+ * no password grant. `ids` are two distinct UUIDs for the profile and its payload.
+ */
+export function xcredsProfile(issuer: string, app: WorkstationApp, ids: { profile: string; payload: string }): string {
+  const name = xml(app.clientName.replace(/[\r\n]/g, ' '));
+  const keys: [string, string][] = [
+    ['clientID', app.clientId],
+    ['discoveryURL', `${issuer}/.well-known/openid-configuration`],
+    ['idpHostName', new URL(issuer).hostname],
+    ['map_username', 'preferred_username'],
+    ['passwordElementID', 'password'],
+    ['redirectURI', XCREDS_REDIRECT],
+    ['scopes', 'openid profile email offline_access'],
+  ];
+  const id = `app.kyidentity.xcreds.${xml(app.clientId)}`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>PayloadDisplayName</key>
+			<string>XCreds</string>
+			<key>PayloadIdentifier</key>
+			<string>${id}.settings</string>
+			<key>PayloadType</key>
+			<string>com.twocanoes.xcreds</string>
+			<key>PayloadUUID</key>
+			<string>${xml(ids.payload)}</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+${keys.map(([k, v]) => `\t\t\t<key>${k}</key>\n\t\t\t<string>${xml(v)}</string>`).join('\n')}
+		</dict>
+	</array>
+	<key>PayloadDisplayName</key>
+	<string>KyIdentity sign-in: ${name}</string>
+	<key>PayloadIdentifier</key>
+	<string>${id}</string>
+	<key>PayloadScope</key>
+	<string>System</string>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>${xml(ids.profile)}</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>
+`;
+}

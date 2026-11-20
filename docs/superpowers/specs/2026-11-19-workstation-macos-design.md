@@ -96,10 +96,12 @@ No new route or listener.
   sign-in starts with a password today, and a later passwordless sign-in would
   silently pass. Himmelblau desktops do not need the rule. They keep their own app with
   it off. (Owner question 1.)
-- **jwt-bearer refused for every workstation app.** Registering the loopback redirect
-  would otherwise make `http://127.0.0.1` a registered origin for KyAuth phone sign-on,
-  a push-only login with no workstation session. Before this change, workstation apps
-  had no redirect URIs, so this keeps today's behaviour.
+- **jwt-bearer refused for every workstation app.** KyAuth phone sign-on is a push-only
+  login that creates no workstation session. It needs an https origin among the client's
+  redirect URIs, so the loopback redirect never qualifies. An admin could still add an
+  https redirect to a workstation app in the general client editor. Without this check
+  that yields tokens (`TestDeviceSignOnRefusesWorkstationApp` fails with the check
+  removed).
 - **Mac sign-in is a switch, not free-form redirect editing**, so admins cannot mistype
   the URI. XCreds' own sample uses `https://127.0.0.1/xcreds`. The brief chose `http`,
   which is what KyIdentity's loopback rule allows.

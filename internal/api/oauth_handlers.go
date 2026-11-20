@@ -161,6 +161,13 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requirements = requirements.WithAppPolicy(policy)
+	// A require-password app never takes an existing session: the person types a password.
+	if need, err := h.oauthEngine.RequiresPassword(clientID); err != nil {
+		redirectError(w, r, redirectURI, state, "server_error", "Could not check authentication policy")
+		return
+	} else if need {
+		requirements.Fresh = true
+	}
 	if interactionHash != "" {
 		requirements.Fresh = false
 	}

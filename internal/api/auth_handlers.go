@@ -163,6 +163,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Failures clear only when the whole login succeeds (createSessionAndRespond); clearing
 	// here would reset the lockout before every second-factor guess.
 	primaryAt := time.Now().UTC()
+	// A require-password workstation app accepts only an interaction that saw this step.
+	if interaction != nil {
+		if err := h.store.RecordInteractionPassword(interactionHash, h.middleware.authorizationBrowserHash(r), user.ID, primaryAt); err != nil {
+			stepUpInternalError(w)
+			return
+		}
+	}
 
 	// Check if user has enrolled MFA methods
 	mfaMethods, err := h.store.ListUserMFAMethods(user.ID)

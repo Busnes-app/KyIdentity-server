@@ -424,6 +424,7 @@ export interface RateLimitNetworks { networks: string; environment: string; exem
 export interface WorkstationApp {
   clientId: string; clientName: string; appId: string; enabled: boolean;
   deviceGrantEnabled: boolean; deviceCodeTtl: number; offlineWindow: number; groups: string[];
+  requirePassword: boolean; macSignIn: boolean;
 }
 export interface WorkstationApps { apps: WorkstationApp[]; issuer: string }
 // What a user code would sign in to, shown before the user approves it.

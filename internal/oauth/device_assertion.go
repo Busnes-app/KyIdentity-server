@@ -256,6 +256,12 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	if client == nil || !client.Enabled {
 		return nil, who, errUnknownClient
 	}
+	// A workstation app signs in only through its device grant or its own login page.
+	if ws, err := e.store.GetWorkstationApp(clientID); err != nil {
+		return nil, who, err
+	} else if ws != nil {
+		return nil, who, errAppPolicy
+	}
 	// The relay names the client_id; only a registered origin stops one relay from
 	// minting a token for another.
 	if !registeredOrigin(client.RedirectURIsJSON, a.Origin) {

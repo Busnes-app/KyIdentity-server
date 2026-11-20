@@ -128,3 +128,22 @@ func (s *Store) CancelAuthorizationInteraction(hash, browserHash string) error {
 	_, err := s.db.Exec(`DELETE FROM authorization_interactions WHERE hash=? AND browser_hash=?`, hash, browserHash)
 	return err
 }
+
+// RecordInteractionPassword notes that userID's password verified during this interaction,
+// before any session completed it, and binds the interaction to that user.
+func (s *Store) RecordInteractionPassword(hash, browserHash, userID string, at time.Time) error {
+	_, err := s.db.Exec(`UPDATE authorization_interactions SET password_at=?, user_id=? WHERE hash=? AND browser_hash=? AND session_id='' AND expires_at>? AND (user_id='' OR user_id=?)`,
+		at, userID, hash, browserHash, time.Now().UTC(), userID)
+	return err
+}
+
+// InteractionPasswordProven reports whether sessionID completed this interaction after
+// a password step in it. A passkey-only or push-only sign-in records none.
+func (s *Store) InteractionPasswordProven(hash, sessionID string) (bool, error) {
+	var ok bool
+	err := s.db.QueryRow(`SELECT password_at IS NOT NULL AND password_at>=created_at FROM authorization_interactions WHERE hash=? AND session_id=? AND session_id<>'' AND expires_at>?`, hash, sessionID, time.Now().UTC()).Scan(&ok)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return ok, err
+}

@@ -232,6 +232,18 @@ func (e *Engine) CreateAuthorizationCodeForInteraction(clientID, sessionID, redi
 	if !requirements.Satisfied(session.AuthenticationEvidence, time.Now().UTC()) {
 		return "", store.ErrAppAuthentication
 	}
+	if need, err := e.RequiresPassword(clientID); err != nil {
+		return "", err
+	} else if need {
+		// Only this interaction's own password step counts; an earlier session never does.
+		proven, err := e.store.InteractionPasswordProven(interactionHash, session.ID)
+		if err != nil {
+			return "", err
+		}
+		if interactionHash == "" || !proven {
+			return "", store.ErrAppAuthentication
+		}
+	}
 	rawCode, err := crypto.GenerateRandomHex(32)
 	if err != nil {
 		return "", err
@@ -375,6 +387,13 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 	if err != nil {
 		return nil, err
 	}
+	ws, err := e.store.GetWorkstationApp(clientID)
+	if err != nil {
+		return nil, err
+	}
+	if ws != nil && ws.OfflineWindow > 0 {
+		return e.workstationCodeTokens(authCode, user, ws, now)
+	}
 	var family *store.RefreshFamily
 	if policy.RefreshEnabled() && client.ClientType == "confidential" {
 		if family, err = e.newRefreshFamily(authCode, policy, now); err != nil {
@@ -404,6 +423,82 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 		resp.RefreshToken = raw
 	}
 	return resp, nil
+}
+
+// RequiresPassword reports whether clientID is a workstation app that needs a password
+// typed in each sign-in.
+func (e *Engine) RequiresPassword(clientID string) (bool, error) {
+	ws, err := e.store.GetWorkstationApp(clientID)
+	return ws != nil && ws.RequirePassword, err
+}
+
+// workstationCodeTokens answers a spent code for a workstation app with an offline
+// window: a workstation session and refresh family, as a device-code redemption makes.
+func (e *Engine) workstationCodeTokens(code *store.AuthorizationCode, user *store.User, ws *store.WorkstationApp, now time.Time) (*TokenResponse, error) {
+	sessionEnd, err := e.workstationSessionEnd(ws, user.ID, code.AuthenticationEvidence, now)
+	if err != nil {
+		return nil, err
+	}
+	exp := now.Add(AccessTokenTTL)
+	if sessionEnd.Before(exp) {
+		exp = sessionEnd
+	}
+	secret, err := crypto.GenerateRandomHex(32)
+	if err != nil {
+		return nil, err
+	}
+	refresh, err := crypto.GenerateRandomHex(32)
+	if err != nil {
+		return nil, err
+	}
+	sess := &store.Session{ID: uuid.NewString(), SessionTokenHash: crypto.HashSHA256("workstation:" + secret), ExpiresAt: sessionEnd}
+	if browser, err := e.store.GetSessionByID(code.SessionID); err != nil {
+		return nil, err
+	} else if browser != nil {
+		sess.IPAddress, sess.UserAgent = browser.IPAddress, browser.UserAgent
+	}
+	access := &store.IssuedToken{JTI: uuid.NewString(), UserID: user.ID, ClientID: code.ClientID, ExpiresAt: exp}
+	family := &store.RefreshFamily{JTI: uuid.NewString(), UserID: user.ID, ClientID: code.ClientID, Scope: code.Scope,
+		AuthenticationEvidence: code.AuthenticationEvidence,
+		Policy:                 store.AppPolicyBinding{AppID: code.AuthenticationAppID, AuthRevision: code.AuthenticationPolicyRevision, RoleRevision: code.RoleRevision},
+		Idle:                   sessionEnd.Sub(now), ExpiresAt: sessionEnd}
+	access.FamilyJTI = family.JTI
+	if err := e.store.StartCodeWorkstationSession(code, sess, access, family, crypto.HashSHA256(refresh)); err != nil {
+		return nil, fmt.Errorf("workstation session: %w", err)
+	}
+	resp, err := e.tokenResponse(user, code.ClientID, sess.ID, code.Scope, code.AuthenticationEvidence, code.Nonce, access.JTI, exp, now)
+	if err != nil {
+		return nil, err
+	}
+	resp.RefreshToken = refresh
+	return resp, nil
+}
+
+// workstationSessionEnd is now + the offline window (or one access token's life when the
+// window is 0), never past the user's access end or the app policy's re-auth deadline.
+func (e *Engine) workstationSessionEnd(ws *store.WorkstationApp, userID string, ev store.AuthenticationEvidence, now time.Time) (time.Time, error) {
+	end := now.Add(AccessTokenTTL)
+	if ws.OfflineWindow > 0 {
+		end = now.Add(time.Duration(ws.OfflineWindow) * time.Second)
+	}
+	if until, err := e.store.AccessEndsAt(userID, ws.ClientID); err != nil {
+		return end, err
+	} else if until != nil && until.Before(end) {
+		end = *until
+	}
+	policy, err := e.store.ClientAuthenticationPolicy(ws.ClientID)
+	if err != nil {
+		return end, err
+	}
+	if at := policy.Deadline(ev); at != nil {
+		if !at.After(now) {
+			return end, store.ErrAppAuthentication
+		}
+		if at.Before(end) {
+			end = *at
+		}
+	}
+	return end, nil
 }
 
 // newRefreshFamily ends a family at the earliest of the app's refresh lifetime, the
