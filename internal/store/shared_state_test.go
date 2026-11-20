@@ -225,7 +225,7 @@ func TestConcurrentFirstStartMigratesOnce(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					<-start
-					stores[i], errs[i] = NewTest(path)
+					stores[i], errs[i] = New(path)
 				}()
 			}
 			close(start)
@@ -237,7 +237,7 @@ func TestConcurrentFirstStartMigratesOnce(t *testing.T) {
 				defer stores[i].Close()
 			}
 			refPath := filepath.Join(t.TempDir(), "reference.db")
-			ref, err := NewTest(refPath)
+			ref, err := New(refPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -638,7 +638,7 @@ func shiftedClock(t *testing.T, path string, shift string) *Store {
 func TestLeaseFollowsTheDatabaseClockNotTheCallers(t *testing.T) {
 	requirePostgres(t)
 	path := filepath.Join(t.TempDir(), "clock.db")
-	plain, err := NewTest(path)
+	plain, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}

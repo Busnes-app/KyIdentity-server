@@ -13,7 +13,7 @@ import (
 func TestPasswordChangeMigrationFlagsUnchangedBootstrapAdminOnce(t *testing.T) {
 	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "upgrade.db")
-	s, err := NewTest(path)
+	s, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestPasswordChangeMigrationFlagsUnchangedBootstrapAdminOnce(t *testing.T) {
 		}
 	}
 	for range 2 {
-		s, err = NewTest(path)
+		s, err = New(path)
 		if err != nil {
 			t.Fatal(err)
 		}

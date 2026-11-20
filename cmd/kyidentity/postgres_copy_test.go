@@ -67,7 +67,7 @@ func dirNames(t *testing.T, dir string) []string {
 func TestMigrateToPostgres(t *testing.T) {
 	pgTest := onSQLite(t)
 	cfg, _ := commandInstance(t, false)
-	lite, err := store.NewTest(cfg.DBPath)
+	lite, err := store.New(cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}

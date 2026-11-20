@@ -85,7 +85,7 @@ func TestDeleteUserWithSyncEventsMigratesLegacyForeignKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := NewTest(path)
+	s, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestLegacyDevicePairingTokensAreRebuiltWithoutPlaintextPINs(t *testing.T) {
 	if err := legacy.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewTest(path)
+	s, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestNativeDevicePushTokenReplayStateMigrates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := NewTest(path)
+	s, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestOAuthClientLauncherMetadataMigrates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := NewTest(path)
+	s, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestDeviceSignOnColumnsMigrate(t *testing.T) {
 	}
 	legacy.Close()
 
-	s, err := NewTest(path)
+	s, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
