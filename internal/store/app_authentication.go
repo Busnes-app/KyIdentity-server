@@ -219,6 +219,16 @@ func checkCodeAppAuthenticationTx(tx *sql.Tx, code *AuthorizationCode) error {
 	if !p.Valid() || p.EvidenceReason(code.AuthenticationEvidence, time.Now().UTC()) != "" {
 		return ErrAppAuthentication
 	}
+	// A require-password workstation app: only this interaction's own password step counts.
+	// Checked here, under the writer lock, so it cannot race the setting.
+	var proven bool
+	if err := tx.QueryRow(`SELECT NOT EXISTS(SELECT 1 FROM workstation_apps WHERE client_id=? AND require_password) OR EXISTS(SELECT 1 FROM authorization_interactions WHERE hash=? AND session_id=? AND session_id<>'' AND expires_at>? AND password_at IS NOT NULL AND password_at>=created_at)`,
+		code.ClientID, code.InteractionHash, code.SessionID, time.Now().UTC()).Scan(&proven); err != nil {
+		return err
+	}
+	if !proven {
+		return ErrAppAuthentication
+	}
 	if p.Mode == "fresh" {
 		var created time.Time
 		if err := tx.QueryRow(`SELECT created_at FROM authorization_interactions WHERE hash=? AND session_id=? AND expires_at>?`, code.InteractionHash, code.SessionID, time.Now().UTC()).Scan(&created); err != nil {

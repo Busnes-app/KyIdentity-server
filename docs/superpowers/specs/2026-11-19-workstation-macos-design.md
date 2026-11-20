@@ -69,7 +69,7 @@ No new route or listener.
 
 | Route | Change |
 |---|---|
-| `GET /oauth/authorize` | For a require-password app an existing session is not enough: the person signs in again, as for `prompt=login`. The code is issued only if this interaction recorded a password. |
+| `GET /oauth/authorize` | For a require-password app an existing session is not enough: the person signs in again, as for `prompt=login`. The code is issued only if this interaction recorded a password, checked inside the code-insert transaction under the writer lock, so it cannot race the setting. |
 | `POST /api/auth/login` | With an interaction, a verified password records `password_at` on it. |
 | `POST /oauth/token` `authorization_code` | For a workstation app with an offline window above 0, the exchange creates a workstation session (as device redemption does), in one transaction that needs the browser session and the code's policy binding to still hold. It also binds the access token, the refresh family and its first token. `client_id` in the body, no secret, as before. |
 | `POST /oauth/token` `refresh_token` | Unchanged: workstation families slide by the offline window. |

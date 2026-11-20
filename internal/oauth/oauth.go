@@ -232,18 +232,6 @@ func (e *Engine) CreateAuthorizationCodeForInteraction(clientID, sessionID, redi
 	if !requirements.Satisfied(session.AuthenticationEvidence, time.Now().UTC()) {
 		return "", store.ErrAppAuthentication
 	}
-	if need, err := e.RequiresPassword(clientID); err != nil {
-		return "", err
-	} else if need {
-		// Only this interaction's own password step counts; an earlier session never does.
-		proven, err := e.store.InteractionPasswordProven(interactionHash, session.ID)
-		if err != nil {
-			return "", err
-		}
-		if interactionHash == "" || !proven {
-			return "", store.ErrAppAuthentication
-		}
-	}
 	rawCode, err := crypto.GenerateRandomHex(32)
 	if err != nil {
 		return "", err

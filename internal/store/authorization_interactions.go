@@ -136,14 +136,3 @@ func (s *Store) RecordInteractionPassword(hash, browserHash, userID string, at t
 		at, userID, hash, browserHash, time.Now().UTC(), userID)
 	return err
 }
-
-// InteractionPasswordProven reports whether sessionID completed this interaction after
-// a password step in it. A passkey-only or push-only sign-in records none.
-func (s *Store) InteractionPasswordProven(hash, sessionID string) (bool, error) {
-	var ok bool
-	err := s.db.QueryRow(`SELECT password_at IS NOT NULL AND password_at>=created_at FROM authorization_interactions WHERE hash=? AND session_id=? AND session_id<>'' AND expires_at>?`, hash, sessionID, time.Now().UTC()).Scan(&ok)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return ok, err
-}

@@ -330,3 +330,30 @@ func TestRequirePasswordInvalidatesEarlierGrants(t *testing.T) {
 		t.Fatal("a workstation session survived the rule change")
 	}
 }
+
+// The race the store closes: an authorization whose engine checks ran before
+// require-password was turned on reaches the code insert afterwards. The insert itself
+// refuses it, so no code, session or refresh family exists.
+func TestRequirePasswordCheckedAtCodeInsert(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	f.macSignIn = true
+	f.settings(true, 300, 604800)
+	u, cookie := f.assignedUser()
+	sess, _ := f.db.GetSessionByTokenHash(crypto.HashSHA256(cookie), time.Hour)
+	f.requirePassword = true
+	f.settings(true, 300, 604800)
+	code := &store.AuthorizationCode{ID: uuid.NewString(), CodeHash: crypto.HashSHA256(uuid.NewString()), ClientID: f.clientID, UserID: u.ID,
+		RedirectURI: xcredsRedirect, Scope: "openid", CodeChallenge: "challenge", CodeChallengeMethod: "S256", SessionID: sess.ID,
+		AuthenticationEvidence: sess.AuthenticationEvidence, ExpiresAt: time.Now().UTC().Add(time.Minute)}
+	if err := f.db.CreateAuthorizationCode(code); err != store.ErrAppAuthentication {
+		t.Fatalf("code insert after the rule: %v", err)
+	}
+	var codes, families int
+	if err := f.raw.QueryRow(`SELECT (SELECT COUNT(*) FROM authorization_codes WHERE client_id=?), (SELECT COUNT(*) FROM refresh_families)`, f.clientID).Scan(&codes, &families); err != nil {
+		t.Fatal(err)
+	}
+	if codes != 0 || families != 0 || f.workstationSessions(u.ID) != 0 {
+		t.Fatalf("left %d codes, %d families, %d sessions", codes, families, f.workstationSessions(u.ID))
+	}
+}
