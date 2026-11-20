@@ -136,8 +136,8 @@ func TestAuditExportMarksIncompleteOutput(t *testing.T) {
 	}
 	// The bound equals the count taken before the export's own intent row lands: the
 	// stream itself must notice the overflow, and the oldest row must be missing.
-	_, exact, _ := db.SearchAuditEvents(store.AuditFilter{Limit: 1})
-	oldest, _, _ := db.SearchAuditEvents(store.AuditFilter{Limit: 1, Offset: exact - 1})
+	_, exact, _ := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Limit: 1})
+	oldest, _, _ := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Limit: 1, Offset: exact - 1})
 	auditExportMaxRows = exact
 	res = call(t, srv, admin, "GET", "/api/admin/audit-events/export?format=jsonl")
 	m = lastLine(res.Body.String())
@@ -166,11 +166,11 @@ func TestAuditExportMarksIncompleteOutput(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: admin})
 	fw := &failingWriter{ResponseRecorder: *httptest.NewRecorder()}
 	srv.httpServer.Handler.ServeHTTP(fw, req)
-	events, _, _ := db.SearchAuditEvents(store.AuditFilter{Action: "admin.audit_exported", Limit: 5})
+	events, _, _ := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.audit_exported", Limit: 5})
 	if len(events) == 0 || events[0].Outcome != "failure" || !strings.Contains(events[0].DetailsJSON, `"incomplete":"error"`) {
 		t.Fatalf("failed write recorded as: %+v", events)
 	}
-	started, _, _ := db.SearchAuditEvents(store.AuditFilter{Action: "admin.audit_export_started", Limit: 1})
+	started, _, _ := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.audit_export_started", Limit: 1})
 	if len(started) == 0 {
 		t.Fatal("export intent not recorded before streaming")
 	}

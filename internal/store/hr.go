@@ -76,10 +76,11 @@ func (s *Store) HRConnection(id string) (*HRConnection, error) {
 	return c, err
 }
 
-func (s *Store) ConfigureHR(c HRConnection, audit *AuditEvent) error {
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+// Another org's connector is ErrHRConflict, like a missing one.
+func (o *OrgStore) ConfigureHR(c HRConnection, audit *AuditEvent) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
 		var valid bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM scim_connectors c,paired_systems p WHERE c.id=? AND p.id=? AND p.system_type='kypost' AND p.status<>'disabled' AND NOT p.provisioning_hold)`, c.ConnectorID, c.SystemID).Scan(&valid); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM scim_connectors c,paired_systems p WHERE c.org_id=? AND c.id=? AND p.id=? AND p.system_type='kypost' AND p.status<>'disabled' AND NOT p.provisioning_hold)`, o.org, c.ConnectorID, c.SystemID).Scan(&valid); err != nil {
 			return err
 		}
 		if !valid {
@@ -262,7 +263,11 @@ func (s *Store) FinishHR(w *HRWorker, email, safeError string) error {
 			if err = rejectCrossIdentityTx(tx, w.ID, email, email); err != nil {
 				return err
 			}
-			_, err = tx.Exec(`INSERT INTO users(id,username,display_name,email,password_hash,role,status,pending,source_connector_id,external_id,source_active,locally_disabled,created_at,updated_at) VALUES(?,?,?,?,'','user','disabled',TRUE,?,?,?,FALSE,?,?)`, w.ID, email, w.DisplayName, email, w.ConnectorID, w.SourceUID, w.Active, now, now)
+			var org string
+			if org, err = connectorOrgTx(tx, w.ConnectorID); err != nil {
+				return err
+			}
+			_, err = tx.Exec(`INSERT INTO users(org_id,id,username,display_name,email,password_hash,role,status,pending,source_connector_id,external_id,source_active,locally_disabled,created_at,updated_at) VALUES(?,?,?,?,?,'','user','disabled',TRUE,?,?,?,FALSE,?,?)`, org, w.ID, email, w.DisplayName, email, w.ConnectorID, w.SourceUID, w.Active, now, now)
 			if err != nil {
 				return err
 			}

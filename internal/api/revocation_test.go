@@ -209,7 +209,7 @@ func TestUserMutationsAndTheirAuditRowsCommitTogether(t *testing.T) {
 
 func auditRecorded(t *testing.T, db *store.Store, action, targetID string) bool {
 	t.Helper()
-	events, _, err := db.ListAuditEvents(500, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(500, 0)
 	if err != nil {
 		t.Fatalf("ListAuditEvents: %v", err)
 	}

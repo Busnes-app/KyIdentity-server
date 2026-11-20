@@ -211,7 +211,7 @@ func TestDeletedSystemEventsAreRemovedAndNeverRevived(t *testing.T) {
 		t.Fatal("another system's queue or fence changed")
 	}
 	// An orphan left by an older release must not be revived by reconcile...
-	if _, err := s.db.Exec(`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,attempts,status) VALUES('ghost','u1','ghost','user.deleted','{}',5,'failed')`); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO account_sync_events(org_id, id,user_id,system_id,event_type,payload_json,attempts,status) VALUES('00000000-0000-0000-0000-000000000001', 'ghost','u1','ghost','user.deleted','{}',5,'failed')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ReconcileProvisioning(); err != nil {
@@ -265,7 +265,7 @@ func TestResumeSyncDeliveriesReleasesOnlyExpiredAttempts(t *testing.T) {
 		}
 	}
 	// An uncertain-create guard survives bulk resume.
-	if _, err := s.db.Exec(`INSERT INTO scim_user_links(system_id,local_id,remote_id) VALUES('target','expired-a','')`); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO scim_user_links(org_id, system_id,local_id,remote_id) VALUES('00000000-0000-0000-0000-000000000001', 'target','expired-a','')`); err != nil {
 		t.Fatal(err)
 	}
 	audit := &AuditEvent{ID: "bulk", Action: "admin.sync_deliveries_resumed", Outcome: "success", DetailsJSON: `{"systemName":"target"}`}

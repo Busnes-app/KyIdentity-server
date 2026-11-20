@@ -30,11 +30,11 @@ func upstreamWrite(s *Store, u *User) error {
 func TestSCIMConnectorTokensAreHashedScopedAndRevocable(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	c, err := s.CreateSCIMConnector("Upstream", nil)
+	c, err := s.DefaultOrg().CreateSCIMConnector("Upstream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, tok, err := s.IssueSCIMToken(c.ID, "write", nil)
+	raw, tok, err := s.DefaultOrg().IssueSCIMToken(c.ID, "write", nil)
 	if err != nil || !strings.HasPrefix(raw, "scim_") || tok.ID == "" {
 		t.Fatalf("issue: %q %+v %v", raw, tok, err)
 	}
@@ -51,40 +51,40 @@ func TestSCIMConnectorTokensAreHashedScopedAndRevocable(t *testing.T) {
 	if _, _, err := s.AuthenticateSCIMToken("scim_nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown token: %v", err)
 	}
-	readRaw, _, err := s.IssueSCIMToken(c.ID, "read", nil)
+	readRaw, _, err := s.DefaultOrg().IssueSCIMToken(c.ID, "read", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeSCIMToken(c.ID, tok.ID, nil); err != nil {
+	if err := s.DefaultOrg().RevokeSCIMToken(c.ID, tok.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.AuthenticateSCIMToken(raw); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("revoked token still works: %v", err)
 	}
-	if err := s.RevokeSCIMToken(c.ID, tok.ID, nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DefaultOrg().RevokeSCIMToken(c.ID, tok.ID, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("double revoke: %v", err)
 	}
 	if _, scope, err := s.AuthenticateSCIMToken(readRaw); err != nil || scope != "read" {
 		t.Fatalf("read token: %q %v", scope, err)
 	}
-	if err := s.UpdateSCIMConnector(c.ID, "Upstream", "disabled", nil); err != nil {
+	if err := s.DefaultOrg().UpdateSCIMConnector(c.ID, "Upstream", "disabled", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.AuthenticateSCIMToken(readRaw); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("token of a disabled connector still works: %v", err)
 	}
-	if _, _, err := s.IssueSCIMToken("missing", "read", nil); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.DefaultOrg().IssueSCIMToken("missing", "read", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("token for a missing connector: %v", err)
 	}
-	if _, _, err := s.IssueSCIMToken(c.ID, "admin", nil); err == nil {
+	if _, _, err := s.DefaultOrg().IssueSCIMToken(c.ID, "admin", nil); err == nil {
 		t.Fatal("unknown scope accepted")
 	}
 }
 
 func TestIssuingATokenRollsBackWithoutItsAuditRow(t *testing.T) {
 	s, _ := newStoreWithUser(t, "admin")
-	c, _ := s.CreateSCIMConnector("Upstream", nil)
-	if _, _, err := s.IssueSCIMToken(c.ID, "write", poisonedAudit(t, s, "admin.scim_token_issued", c.ID)); err == nil {
+	c, _ := s.DefaultOrg().CreateSCIMConnector("Upstream", nil)
+	if _, _, err := s.DefaultOrg().IssueSCIMToken(c.ID, "write", poisonedAudit(t, s, "admin.scim_token_issued", c.ID)); err == nil {
 		t.Fatal("token issued without its audit row")
 	}
 	if n := count(t, s, `SELECT COUNT(*) FROM scim_connector_tokens`); n != 0 {
@@ -97,8 +97,8 @@ func TestIssuingATokenRollsBackWithoutItsAuditRow(t *testing.T) {
 func TestUpstreamUsersAreKeyedByConnectorAndExternalID(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, _ := s.CreateSCIMConnector("A", nil)
-	b, _ := s.CreateSCIMConnector("B", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
+	b, _ := s.DefaultOrg().CreateSCIMConnector("B", nil)
 	local := createTestUser(t, s)
 	u := upstream(t, s, a.ID, "ext-1", "alice")
 	stored, _ := s.DefaultOrg().GetUserByID(u.ID)
@@ -158,7 +158,7 @@ func TestUpstreamUsersAreKeyedByConnectorAndExternalID(t *testing.T) {
 func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	c, _ := s.CreateSCIMConnector("A", nil)
+	c, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	u := upstream(t, s, c.ID, "ext-1", "alice")
 	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
@@ -233,8 +233,8 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	keep, _ := s.CreateSCIMConnector("Keep", nil)
-	drop, _ := s.CreateSCIMConnector("Drop", nil)
+	keep, _ := s.DefaultOrg().CreateSCIMConnector("Keep", nil)
+	drop, _ := s.DefaultOrg().CreateSCIMConnector("Drop", nil)
 	k := upstream(t, s, keep.ID, "k-1", "kept")
 	d := upstream(t, s, drop.ID, "d-1", "dropped")
 	for _, u := range []*User{k, d} {
@@ -243,11 +243,11 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := s.IssueSCIMToken(keep.ID, "write", nil); err != nil {
+	if _, _, err := s.DefaultOrg().IssueSCIMToken(keep.ID, "write", nil); err != nil {
 		t.Fatal(err)
 	}
 
-	n, err := s.DeleteSCIMConnector(keep.ID, false, nil)
+	n, err := s.DefaultOrg().DeleteSCIMConnector(keep.ID, false, nil)
 	if err != nil || n != 1 {
 		t.Fatalf("transfer: %d %v", n, err)
 	}
@@ -265,7 +265,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(promoted, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DeleteSCIMConnector(drop.ID, true, nil); !errors.Is(err, ErrLastActiveAdmin) {
+	if _, err := s.DefaultOrg().DeleteSCIMConnector(drop.ID, true, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatalf("disconnect disabled the last administrator: %v", err)
 	}
 	if still, _ := s.DefaultOrg().GetUserByID(d.ID); still.Status != "active" || still.SourceConnectorID != drop.ID {
@@ -276,7 +276,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(localAdmin, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	n, err = s.DeleteSCIMConnector(drop.ID, true, nil)
+	n, err = s.DefaultOrg().DeleteSCIMConnector(drop.ID, true, nil)
 	if err != nil || n != 1 {
 		t.Fatalf("deactivate: %d %v", n, err)
 	}
@@ -284,7 +284,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	if after.SourceConnectorID != "" || after.Status != "disabled" {
 		t.Fatalf("deactivated account: %+v", after)
 	}
-	if _, err := s.DeleteSCIMConnector(drop.ID, true, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DefaultOrg().DeleteSCIMConnector(drop.ID, true, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("double delete: %v", err)
 	}
 }
@@ -294,7 +294,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 func TestLocalOverrideSurvivesAConcurrentUpstreamWrite(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	c, _ := s.CreateSCIMConnector("A", nil)
+	c, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	u := upstream(t, s, c.ID, "ext-1", "alice")
 	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
@@ -345,7 +345,7 @@ func TestUpstreamDeactivationSurvivesAConcurrentLocalEdit(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(localAdmin, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	c, _ := s.CreateSCIMConnector("A", nil)
+	c, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	u := upstream(t, s, c.ID, "ext-1", "alice")
 	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
@@ -394,7 +394,7 @@ func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(localAdmin, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	c, _ := s.CreateSCIMConnector("A", nil)
+	c, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	u := upstream(t, s, c.ID, "ext-1", "alice")
 	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "email", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
@@ -449,7 +449,7 @@ func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 func TestUpstreamCannotChangePrivilegedIdentifiers(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	c, _ := s.CreateSCIMConnector("A", nil)
+	c, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	admin := upstream(t, s, c.ID, "ext-1", "alice")
 	admin.Role = "admin"
 	if err := s.UpdateUserWithSyncEvents(admin, false, nil); err != nil {
@@ -499,7 +499,7 @@ func TestUpstreamCannotChangePrivilegedIdentifiers(t *testing.T) {
 func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	c, _ := s.CreateSCIMConnector("A", nil)
+	c, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 
 	inactive := &User{Username: "inactive", DisplayName: "Inactive", Email: "inactive@up.test", SourceConnectorID: c.ID, ExternalID: "ext-i", SourceActive: false}
 	if err := s.CreateUpstreamUser(inactive, nil); err != nil {
@@ -560,7 +560,7 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 func TestDisconnectExpiresLinksOfShutOutInvitees(t *testing.T) {
 	for _, disable := range []bool{false, true} {
 		s, cleanup := setupTestStore(t)
-		c, _ := s.CreateSCIMConnector("Entra", nil)
+		c, _ := s.DefaultOrg().CreateSCIMConnector("Entra", nil)
 		u := upstream(t, s, c.ID, "ext-1", "leaver")
 		raw, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 		if err != nil {
@@ -570,7 +570,7 @@ func TestDisconnectExpiresLinksOfShutOutInvitees(t *testing.T) {
 		if err := upstreamWrite(s, u); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.DeleteSCIMConnector(c.ID, disable, nil); err != nil {
+		if _, err := s.DefaultOrg().DeleteSCIMConnector(c.ID, disable, nil); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err == nil {

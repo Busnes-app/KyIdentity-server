@@ -54,7 +54,7 @@ func TestSetDeviceSignOnTogglesOwnDeviceOnly(t *testing.T) {
 	}
 
 	for _, want := range []string{"success", "failure"} {
-		evs, _, err := db.SearchAuditEvents(store.AuditFilter{Action: "device.sign_on_changed", Limit: 10})
+		evs, _, err := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "device.sign_on_changed", Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -272,7 +272,7 @@ func TestDeviceSignOnAudit(t *testing.T) {
 	if rec := e.post(bad, c.ID, ""); rec.Code != http.StatusBadRequest {
 		t.Fatalf("failure: status %d", rec.Code)
 	}
-	events, _, err := e.db.ListAuditEvents(100, 0)
+	events, _, err := e.db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestDeviceSignOnOriginMismatch(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != generic {
 		t.Fatalf("origin mismatch: status %d body %s", rec.Code, rec.Body.String())
 	}
-	events, _, err := e.db.ListAuditEvents(100, 0)
+	events, _, err := e.db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

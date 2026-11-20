@@ -276,7 +276,7 @@ func TestSuiteGroupIsInItsGroupsOrg(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused(t, s, msgSuiteGroupOrg, `INSERT INTO suite_groups(group_id,slug,name,enabled,created_at,updated_at,org_id) VALUES('g-1','team','Team',TRUE,1,1,'org-b')`)
-	refused(t, s, msgSuiteGroupOrg, `INSERT INTO suite_groups(group_id,slug,name,enabled,created_at,updated_at) VALUES('g-none','none','None',TRUE,1,1)`)
+	refused(t, s, msgSuiteGroupOrg, `INSERT INTO suite_groups(org_id, group_id,slug,name,enabled,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000001', 'g-none','none','None',TRUE,1,1)`)
 	if _, err := s.DefaultOrg().SetSuiteGroup(g.ID, true, nil, nil); err != nil {
 		t.Fatal("the store's own suite group write:", err)
 	}
@@ -292,9 +292,9 @@ func TestMembershipsCannotSpanOrgs(t *testing.T) {
 	newOrgUser(t, s, "u-b", "org-b", "active", false)
 	u := createTestUserNamed(t, s, "alice")
 	tenancyExec(t, s, `INSERT INTO directory_groups(id,name,created_at,updated_at,org_id) VALUES('g-b','B team',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'org-b')`,
-		`INSERT INTO directory_groups(id,name,created_at,updated_at) VALUES('g-a','A team',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+		`INSERT INTO directory_groups(org_id, id,name,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000001', 'g-a','A team',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
 	cross := []string{
-		`INSERT INTO group_memberships(group_id,user_id) VALUES('g-b','` + u.ID + `')`,
+		`INSERT INTO group_memberships(org_id, group_id,user_id) VALUES('00000000-0000-0000-0000-000000000001', 'g-b','` + u.ID + `')`,
 		`INSERT INTO group_memberships(group_id,user_id,org_id) VALUES('g-b','` + u.ID + `','org-b')`,
 		`INSERT INTO group_memberships(group_id,user_id,org_id) VALUES('g-a','u-b','org-b')`,
 	}
@@ -361,16 +361,17 @@ func TestTenancyUpgradeKeepsEveryView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Today's store code names org_id, which the previous schema lacks: lend it the column
-	// for the fixture and take it back, so the upgrade adds it as it would.
-	scoped := []string{"users", "directory_groups", "group_memberships", "suite_groups", "logout_deliveries"}
-	for _, table := range scoped {
+	// Today's store code names org_id and reads orgs, which the previous schema lacks: lend
+	// it both for the fixture and take them back, so the upgrade adds them as it would.
+	tenancyExec(t, s, `CREATE TABLE orgs (id TEXT PRIMARY KEY, kind TEXT NOT NULL)`, `INSERT INTO orgs VALUES ('`+DefaultOrgID+`','default')`)
+	for _, table := range orgColumnTables {
 		tenancyExec(t, s, `ALTER TABLE `+table+` ADD COLUMN org_id TEXT DEFAULT '`+DefaultOrgID+`'`)
 	}
 	copyFixture(t, s)
-	for _, table := range scoped {
+	for _, table := range orgColumnTables {
 		tenancyExec(t, s, `ALTER TABLE `+table+` DROP COLUMN org_id`)
 	}
+	tenancyExec(t, s, `DROP TABLE orgs`)
 	tenancyExec(t, s, `UPDATE enrollment_policies SET required=TRUE WHERE scope='administrators'`,
 		`UPDATE group_memberships SET expires_at=1 WHERE group_id IN (SELECT id FROM directory_groups WHERE name='Staff Ünits')`)
 	if err := s.SetSetting(BrandingNameSetting, "Example Household"); err != nil {

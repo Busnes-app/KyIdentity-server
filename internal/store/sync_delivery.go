@@ -60,8 +60,8 @@ func (s *Store) removalSQL() string {
 // Expiration is a diagnostic/recovery threshold, never permission to send again.
 func (s *Store) BeginSyncDelivery(ev AccountSyncEvent, duration time.Duration) (bool, error) {
 	now := time.Now().UTC()
-	r, err := s.db.Exec(`INSERT INTO sync_delivery_attempts(system_id,user_id,token,event_id,event_type,started_at,recover_after)
- SELECT system_id,user_id,claim_token,id,event_type,?,? FROM account_sync_events
+	r, err := s.db.Exec(`INSERT INTO sync_delivery_attempts(org_id,system_id,user_id,token,event_id,event_type,started_at,recover_after)
+ SELECT org_id,system_id,user_id,claim_token,id,event_type,?,? FROM account_sync_events
  WHERE id=? AND claim_token=? AND claim_token<>'' AND lease_until>? AND status='pending'
  ON CONFLICT(system_id,user_id) DO NOTHING`, now, now.Add(duration), ev.ID, ev.ClaimToken, now)
 	if err != nil {
@@ -387,7 +387,7 @@ func prepareSyncDeliveryTx(tx *sql.Tx, ev *AccountSyncEvent) error {
 	}
 	// Some historical/manual outbox rows have no desired-state record. Their event
 	// revision still supplies the floor, without inventing active/provisioned state.
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(system_id,resource_id,kind,active,revision) VALUES(?,?,'user',FALSE,0)`, ev.SystemID, ev.UserID); err != nil {
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO sync_resource_state(org_id,system_id,resource_id,kind,active,revision) SELECT org_id,system_id,user_id,'user',FALSE,0 FROM account_sync_events WHERE id=?`, ev.ID); err != nil {
 		return err
 	}
 	if err := tx.QueryRow(`UPDATE sync_resource_state SET delivery_revision=CASE WHEN delivery_revision>=revision AND delivery_revision+1>=? THEN delivery_revision+1 WHEN revision+1>=? THEN revision+1 ELSE ? END WHERE system_id=? AND resource_id=? RETURNING delivery_revision`, ev.Revision, ev.Revision, ev.Revision, ev.SystemID, ev.UserID).Scan(&ev.DeliveryRevision); err != nil {

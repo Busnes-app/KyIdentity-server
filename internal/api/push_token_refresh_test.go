@@ -105,7 +105,7 @@ func TestNativeDeviceCanRefreshRotatedPushTokenOnce(t *testing.T) {
 		t.Fatalf("stale request = %d, want 400", rec.Code)
 	}
 
-	events, _, err := db.ListAuditEvents(10, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

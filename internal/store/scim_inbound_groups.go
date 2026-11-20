@@ -129,8 +129,8 @@ func (s *Store) CreateUpstreamGroup(g *Group, members []string, audit *AuditEven
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO directory_groups(id,name,description,source_connector_id,external_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`,
-			g.ID, g.Name, g.Description, g.SourceConnectorID, nullIfEmpty(g.ExternalID), now, now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO directory_groups(org_id,id,name,description,source_connector_id,external_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+			org, g.ID, g.Name, g.Description, g.SourceConnectorID, nullIfEmpty(g.ExternalID), now, now); err != nil {
 			return groupWriteError(err)
 		}
 		for _, uid := range members {

@@ -90,7 +90,7 @@ func TestFinishSyncDeliveryBudgetAndFailingList(t *testing.T) {
 func logoutRow(t *testing.T, s *Store, id, userID, status string) {
 	t.Helper()
 	now := time.Now().UTC()
-	mustExec(t, s, `INSERT INTO logout_deliveries(id,client_id,user_id,sid,status,attempts,claim_token,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,5,'old-claim',?,?,?)`,
+	mustExec(t, s, `INSERT INTO logout_deliveries(org_id, id,client_id,user_id,sid,status,attempts,claim_token,next_attempt_at,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000001', ?,?,?,?,?,5,'old-claim',?,?,?)`,
 		id, "app", userID, "sid-"+id, status, now.Add(time.Hour), now, now)
 }
 
@@ -138,15 +138,15 @@ func TestRetryLogoutDeliveryNow(t *testing.T) {
 func TestListSCIMConnectorsOrdering(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	if got, err := s.ListSCIMConnectors(); err != nil || len(got) != 0 {
+	if got, err := s.DefaultOrg().ListSCIMConnectors(); err != nil || len(got) != 0 {
 		t.Fatal("empty list", got, err)
 	}
 	for _, n := range []string{"zeta", "Alpha", "beta"} {
-		if _, err := s.CreateSCIMConnector(n, nil); err != nil {
+		if _, err := s.DefaultOrg().CreateSCIMConnector(n, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got, err := s.ListSCIMConnectors()
+	got, err := s.DefaultOrg().ListSCIMConnectors()
 	if err != nil || len(got) != 3 || got[0].Name != "Alpha" || got[1].Name != "beta" || got[2].Name != "zeta" {
 		t.Fatalf("connectors = %+v, %v", got, err)
 	}

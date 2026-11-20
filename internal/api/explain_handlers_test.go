@@ -85,7 +85,7 @@ func TestExplanationsFollowViewerPermissions(t *testing.T) {
 	if loc := res.Header().Get("Location"); !strings.Contains(loc, "access_denied") || !strings.Contains(loc, "request+it+from+your+KyIdentity") {
 		t.Fatalf("denial redirect: %d %s", res.Code, loc)
 	}
-	events, _, _ := db.ListAuditEvents(10, 0)
+	events, _, _ := db.DefaultOrg().ListAuditEvents(10, 0)
 	found := false
 	for _, e := range events {
 		if e.Action == "oauth.authorize" && e.Outcome == "denied" && e.TargetID == "app-b" {

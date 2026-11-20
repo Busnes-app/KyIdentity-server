@@ -272,8 +272,8 @@ func TestReconciliationRunsOnEveryStart(t *testing.T) {
 		args []any
 	}{
 		// reconcileSyncEvents: an event whose connector is gone, and exhausted legacy work.
-		{`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,attempts,status) VALUES('ghost','u','gone','user.created','{}',0,'pending')`, nil},
-		{`INSERT INTO account_sync_events(id,user_id,system_id,event_type,payload_json,attempts,status) VALUES('spent','u','sys','user.created','{}',?,'pending')`, []any{SyncAttemptBudget}},
+		{`INSERT INTO account_sync_events(org_id,id,user_id,system_id,event_type,payload_json,attempts,status) VALUES('00000000-0000-0000-0000-000000000001','ghost','u','gone','user.created','{}',0,'pending')`, nil},
+		{`INSERT INTO account_sync_events(org_id,id,user_id,system_id,event_type,payload_json,attempts,status) VALUES('00000000-0000-0000-0000-000000000001','spent','u','sys','user.created','{}',?,'pending')`, []any{SyncAttemptBudget}},
 		// reconcileAuthorizationInteractionsTx: an expired interaction.
 		{`INSERT INTO authorization_interactions(hash,browser_hash,request,created_at,expires_at) VALUES('old','b','{}',?,?)`, []any{past, past}},
 		// backfillAppRegistryTx: a client that lost its app record.

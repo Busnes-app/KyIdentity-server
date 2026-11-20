@@ -74,7 +74,7 @@ func TestSCIMConnectionAdministration(t *testing.T) {
 	if rr.Code != 400 {
 		t.Fatalf("protocol switch accepted: %d", rr.Code)
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

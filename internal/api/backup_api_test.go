@@ -100,7 +100,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 		return w
 	}
 	auditHas := func(action, outcome string) bool {
-		events, _, err := dbStore.ListAuditEvents(100, 0)
+		events, _, err := dbStore.DefaultOrg().ListAuditEvents(100, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -231,7 +231,7 @@ func TestAdminBackupEndpoints(t *testing.T) {
 			t.Error("export not audited")
 		}
 		// restore -expect-digest needs the download's digest kept apart from the file.
-		events, _, err := dbStore.ListAuditEvents(100, 0)
+		events, _, err := dbStore.DefaultOrg().ListAuditEvents(100, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

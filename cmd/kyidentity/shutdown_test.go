@@ -178,7 +178,7 @@ func answeredAt(ch <-chan answer, begun *time.Time) <-chan struct {
 
 func failures(t *testing.T, s *store.Store, action string) int {
 	t.Helper()
-	_, n, err := s.SearchAuditEvents(store.AuditFilter{Action: action, Outcome: "failure", Limit: 1})
+	_, n, err := s.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: action, Outcome: "failure", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

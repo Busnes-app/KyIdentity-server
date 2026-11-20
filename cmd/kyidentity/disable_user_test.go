@@ -160,7 +160,7 @@ func TestDisableUser(t *testing.T) {
 	}
 
 	// An upstream-owned account stays disabled: the local override is set.
-	c, err := s.CreateSCIMConnector("Upstream", nil)
+	c, err := s.DefaultOrg().CreateSCIMConnector("Upstream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

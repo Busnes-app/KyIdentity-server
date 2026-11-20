@@ -33,7 +33,7 @@ func tokenFromLink(t *testing.T, body []byte) string {
 
 func auditContains(t *testing.T, db *store.Store, needle string) bool {
 	t.Helper()
-	events, _, err := db.ListAuditEvents(500, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(500, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestForgotSkipsAnUnverifiedAddress(t *testing.T) {
 	u := newUser(t, db, "user")
 	issued := func() int {
 		n := 0
-		events, _, err := db.ListAuditEvents(200, 0)
+		events, _, err := db.DefaultOrg().ListAuditEvents(200, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

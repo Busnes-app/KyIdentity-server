@@ -66,7 +66,7 @@ func TestSyncDeliveryRecoveryRequiresStepUpAndConfirmation(t *testing.T) {
 	if rr := adminRequest(t, srv, "POST", path, cookie, `{"confirmedQuiescent":true}`); rr.Code != 409 {
 		t.Fatal("stale attempt replay", rr.Code)
 	}
-	audit, _, err := db.ListAuditEvents(100, 0)
+	audit, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestBulkSyncDeliveryResumeKeepsEveryGate(t *testing.T) {
 			t.Fatal(system, left, err)
 		}
 	}
-	audit, _, err := db.ListAuditEvents(100, 0)
+	audit, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func insertSyncEvent(t *testing.T, dbPath string, ev store.AccountSyncEvent) {
 	}
 	defer raw.Close()
 	now := time.Now().UTC()
-	if _, err := raw.Exec(`INSERT INTO account_sync_events (id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	if _, err := raw.Exec(`INSERT INTO account_sync_events (org_id, id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES ('00000000-0000-0000-0000-000000000001', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ev.ID, ev.UserID, ev.SystemID, ev.EventType, ev.PayloadJSON, ev.Attempts, ev.Status, now, now, ev.Revision); err != nil {
 		t.Fatal(err)
 	}

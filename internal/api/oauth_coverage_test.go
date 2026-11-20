@@ -57,7 +57,7 @@ func covOAuthPost(t *testing.T, srv *Server, path string, form url.Values, user,
 // covAuditOutcomes counts audit rows for action by outcome.
 func covAuditOutcomes(t *testing.T, db *store.Store, action string) map[string]int {
 	t.Helper()
-	events, _, err := db.ListAuditEvents(500, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(500, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

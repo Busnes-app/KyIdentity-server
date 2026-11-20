@@ -10,7 +10,7 @@ import (
 func (s *Store) CreateAccountSyncEvent(event *AccountSyncEvent) error {
 	now := time.Now().UTC()
 	event.CreatedAt, event.UpdatedAt = now, now
-	_, err := s.db.Exec(`INSERT INTO account_sync_events (id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.db.Exec(`INSERT INTO account_sync_events (org_id, id, user_id, system_id, event_type, payload_json, attempts, status, created_at, updated_at, revision) VALUES ('00000000-0000-0000-0000-000000000001', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.UserID, event.SystemID, event.EventType, event.PayloadJSON, event.Attempts, event.Status, event.CreatedAt, event.UpdatedAt, event.Revision)
 	return err
 }

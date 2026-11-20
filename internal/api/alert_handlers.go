@@ -40,7 +40,7 @@ func (h *AlertHandler) List(w http.ResponseWriter, r *http.Request) {
 	if o, err := strconv.Atoi(q.Get("offset")); err == nil && o >= 0 {
 		offset = o
 	}
-	alerts, total, err := h.store.ListAlerts(status, limit, offset)
+	alerts, total, err := orgStore(r).ListAlerts(status, limit, offset)
 	if err != nil {
 		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
 		return
@@ -52,7 +52,7 @@ func (h *AlertHandler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 	actor := GetUserFromContext(r.Context())
 	id := r.PathValue("id")
 	event := h.audit.Prepare("admin.alert_acknowledged", actor.ID, actor.Username, id, "alert", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	switch err := h.store.AcknowledgeAlert(id, actor.ID, event.Row); {
+	switch err := orgStore(r).AcknowledgeAlert(id, actor.ID, event.Row); {
 	case errors.Is(err, store.ErrAlertMissing):
 		http.Error(w, `{"error":"alert_not_found"}`, http.StatusNotFound)
 		return

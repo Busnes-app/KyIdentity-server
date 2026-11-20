@@ -45,7 +45,7 @@ func configureInstallerGroups(tx *sql.Tx, p InstallerSetup, everydayID string, i
 				return nil, errors.New("group is not configured")
 			}
 			id = uuid.NewString()
-			if _, err := tx.Exec(`INSERT INTO directory_groups(id,name,description,created_at,updated_at) VALUES(?,?,?,?,?)`, id, g.Name, g.Description, now, now); err != nil {
+			if _, err := tx.Exec(`INSERT INTO directory_groups(org_id,id,name,description,created_at,updated_at) VALUES(?,?,?,?,?,?)`, DefaultOrgID, id, g.Name, g.Description, now, now); err != nil {
 				return nil, groupWriteError(err)
 			}
 			// Reuse native policy and role hooks; new groups start with no MFA requirement.

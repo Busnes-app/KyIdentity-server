@@ -213,7 +213,7 @@ func TestDepositCommandWritesALocalCopyAndAudits(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	events, _, err := s.SearchAuditEvents(store.AuditFilter{Limit: 50})
+	events, _, err := s.DefaultOrg().SearchAuditEvents(store.AuditFilter{Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestBackupLoopStopsOnShutdown(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("a cancelled scheduler kept running")
 	}
-	events, _, err := s.ListAuditEvents(500, 0)
+	events, _, err := s.DefaultOrg().ListAuditEvents(500, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -57,7 +57,7 @@ func TestPairingTokenHandlerSignOnBody(t *testing.T) {
 				t.Fatalf("response signOn=%v, want %v", resp.SignOn, tc.want)
 			}
 
-			events, _, err := db.SearchAuditEvents(store.AuditFilter{Action: "device.pairing_token_generated", Limit: 10})
+			events, _, err := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "device.pairing_token_generated", Limit: 10})
 			if err != nil || len(events) != 1 {
 				t.Fatalf("audit events=%d err=%v", len(events), err)
 			}

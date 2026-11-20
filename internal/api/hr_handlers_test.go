@@ -59,7 +59,7 @@ func TestHRAPIAuthenticationOwnershipAndVersioning(t *testing.T) {
 	if got := scimCall(t, srv, other, "GET", "/hr/v1/workers?sourceUid=WID-1", ""); got.Code != 404 {
 		t.Fatal("cross-source read", got.Code)
 	}
-	read, _, err := db.IssueSCIMToken(c, "read", nil)
+	read, _, err := db.DefaultOrg().IssueSCIMToken(c, "read", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -399,3 +399,168 @@ func TestLogoutDeliveriesCarryTheUsersOrg(t *testing.T) {
 		t.Errorf("B's own listing: %v %v", got, err)
 	}
 }
+
+// Audit and alerts: a row is in the org of its target or actor, and an org reads only its
+// own rows. Platform rows (NULL) are read by the org that administers the install.
+func TestAuditAndAlertsAreReadPerOrg(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	a, b, staff := testOrg(t, s, "household"), testOrg(t, s, "household"), testOrg(t, s, "staff")
+	userA, userB := testOrgUser(t, a, "user"), testOrgUser(t, b, "user")
+	for _, e := range []*AuditEvent{
+		{ID: "on-b", ActorID: userA.ID, Action: "x.on_b", TargetID: userB.ID, TargetType: "user", Outcome: "success"},
+		{ID: "by-b", ActorID: userB.ID, Action: "x.by_b", TargetID: "settings", TargetType: "settings", Outcome: "success"},
+		{ID: "platform", Action: "x.platform", Outcome: "success"},
+	} {
+		if err := s.RecordAuditEvent(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var orgs []string
+	if err := readPairs(s.db, `SELECT id, COALESCE(org_id,'') FROM audit_events WHERE id IN ('on-b','by-b','platform') ORDER BY id`, func(id, org string) error {
+		orgs = append(orgs, id+"="+org)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"by-b=" + b.org, "on-b=" + b.org, "platform="}; !slices.Equal(orgs, want) {
+		t.Fatalf("audit orgs %v, want %v", orgs, want)
+	}
+	seen := func(o *OrgStore) []string {
+		events, _, err := o.SearchAuditEvents(AuditFilter{Action: "x.", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, e := range events {
+			ids = append(ids, e.ID)
+		}
+		slices.Sort(ids)
+		return ids
+	}
+	if got := seen(a); len(got) != 0 {
+		t.Errorf("A reads %v", got)
+	}
+	if got := seen(b); !slices.Equal(got, []string{"by-b", "on-b"}) {
+		t.Errorf("B reads %v", got)
+	}
+	if got := seen(staff); !slices.Equal(got, []string{"platform"}) {
+		t.Errorf("staff reads %v", got)
+	}
+	if n, err := a.CountAuditEvents(t.Context(), AuditFilter{Action: "x."}); err != nil || n != 0 {
+		t.Errorf("A counts %d %v", n, err)
+	}
+	streamed := 0
+	if _, err := a.StreamAuditEvents(t.Context(), AuditFilter{Action: "x."}, 50, func(AuditEvent) error { streamed++; return nil }); err != nil || streamed != 0 {
+		t.Errorf("A streams %d %v", streamed, err)
+	}
+
+	// The same rule and key in two orgs are two alerts, each read only in its org.
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := alertSpec{"login_failures", "same-key", "warning", "t", "s", 1}
+	for _, o := range []*OrgStore{a, b} {
+		if err := raiseAlertTx(tx, now, spec, nil, sql.NullString{String: o.org, Valid: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	listA, totalA, err := a.ListAlerts("all", 50, 0)
+	if err != nil || totalA != 1 {
+		t.Fatalf("A alerts %v %d %v", listA, totalA, err)
+	}
+	listB, _, err := b.ListAlerts("all", 50, 0)
+	if err != nil || len(listB) != 1 || listB[0].ID == listA[0].ID {
+		t.Fatalf("B alerts %v %v", listB, err)
+	}
+	if err := a.AcknowledgeAlert(listB[0].ID, userA.ID, nil); !errors.Is(err, ErrAlertMissing) {
+		t.Errorf("A acknowledged B's alert: %v", err)
+	}
+	if again, _, _ := b.ListAlerts("all", 50, 0); again[0].Status != "open" {
+		t.Errorf("B's alert changed: %+v", again[0])
+	}
+}
+
+// An inbound SCIM connector is its org's: another org cannot see, change, token or delete
+// it, and what it creates lands in its org.
+func TestSCIMConnectorsArePerOrg(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	a, b := testOrg(t, s, "household"), testOrg(t, s, "household")
+	c, err := b.CreateSCIMConnector("b-directory", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := a.GetSCIMConnector(c.ID); err != nil || got != nil {
+		t.Errorf("GetSCIMConnector: %v %v", got, err)
+	}
+	if list, err := a.ListSCIMConnectors(); err != nil || len(list) != 0 {
+		t.Errorf("ListSCIMConnectors: %v %v", list, err)
+	}
+	if err := a.UpdateSCIMConnector(c.ID, "taken", "disabled", nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("UpdateSCIMConnector: %v", err)
+	}
+	if _, _, err := a.IssueSCIMToken(c.ID, "read", nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("IssueSCIMToken: %v", err)
+	}
+	if err := a.RevokeSCIMToken(c.ID, "x", nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("RevokeSCIMToken: %v", err)
+	}
+	if _, err := a.DeleteSCIMConnector(c.ID, false, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("DeleteSCIMConnector: %v", err)
+	}
+	if err := a.ConfigureHR(HRConnection{ConnectorID: c.ID, SystemID: "x"}, nil); !errors.Is(err, ErrHRConflict) {
+		t.Errorf("ConfigureHR: %v", err)
+	}
+	if got, err := b.GetSCIMConnector(c.ID); err != nil || got == nil || got.Name != "b-directory" || got.Status != "active" {
+		t.Fatalf("B's connector changed: %+v %v", got, err)
+	}
+	u := &User{ID: uuid.NewString(), Username: "upstream-b", DisplayName: "u", Email: "upstream-b@test.invalid", Role: "user", Status: "disabled", Pending: true, SourceConnectorID: c.ID, ExternalID: "ext-1", SourceActive: true}
+	if err := s.CreateUpstreamUser(u, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.GetUserByID(u.ID); err != nil || got == nil {
+		t.Fatalf("the connector's user is not in its org: %v %v", got, err)
+	}
+}
+
+// Provisioning rows take the org of their resource, and on Postgres no org_id column keeps
+// a default: an insert that forgets the org fails.
+func TestProvisioningRowsAreInTheResourcesOrg(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	b := testOrg(t, s, "household")
+	userB := testOrgUser(t, b, "user")
+	provisioningFixture(t, s, "target")
+	if err := s.SaveSCIMUserLink("target", userB.ID, "remote-b"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := queueDesiredStateTx(tx, desiredState{systemID: "target", resourceID: userB.ID, kind: "user", active: true, payload: []byte(`{}`)}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"scim_user_links WHERE local_id=?", "sync_resource_state WHERE resource_id=?", "account_sync_events WHERE user_id=?"} {
+		var org string
+		if err := s.db.QueryRow(`SELECT org_id FROM `+table, userB.ID).Scan(&org); err != nil || org != b.org {
+			t.Errorf("%s: org %q (%v), want B", table, org, err)
+		}
+	}
+	if !s.postgres {
+		return
+	}
+	var defaults int
+	if err := s.db.QueryRow(`SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND column_name='org_id' AND column_default IS NOT NULL`).Scan(&defaults); err != nil || defaults != 0 {
+		t.Fatalf("%d org_id columns keep a default (%v)", defaults, err)
+	}
+}

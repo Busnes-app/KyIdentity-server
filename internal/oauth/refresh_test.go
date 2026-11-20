@@ -241,7 +241,7 @@ func TestRefreshRevokedByEveryLifecyclePath(t *testing.T) {
 			}
 		},
 		"SCIM deprovisioned": func(f *refreshFixture, _ string) {
-			c, err := f.db.CreateSCIMConnector("Upstream", nil)
+			c, err := f.db.DefaultOrg().CreateSCIMConnector("Upstream", nil)
 			if err != nil {
 				t.Fatal(err)
 			}

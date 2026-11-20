@@ -84,7 +84,7 @@ func TestAppRegistryAdminAPI(t *testing.T) {
 	if r := adminRequest(t, srv, "POST", linkPath, cookie, `{"sourceId":"","targetRevision":1,"sourceRevision":1}`); r.Code != 400 {
 		t.Fatal("invalid source allowed")
 	}
-	events, _, err := db.ListAuditEvents(100, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

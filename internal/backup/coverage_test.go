@@ -32,7 +32,7 @@ func drillChecks(t *testing.T, dataDir string, payload *backup.Payload, files []
 
 func TestDrillChecksHRWritebackTokenBinding(t *testing.T) {
 	cfg, st := instance(t)
-	c, err := st.CreateSCIMConnector("HR", nil)
+	c, err := st.DefaultOrg().CreateSCIMConnector("HR", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestDrillChecksHRWritebackTokenBinding(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := st.ConfigureHR(store.HRConnection{ConnectorID: c.ID, SystemID: "hr-post", Domain: "example.test", WritebackURL: "https://hr.example/writeback", WritebackSecret: sealed}, nil); err != nil {
+		if err := st.DefaultOrg().ConfigureHR(store.HRConnection{ConnectorID: c.ID, SystemID: "hr-post", Domain: "example.test", WritebackURL: "https://hr.example/writeback", WritebackSecret: sealed}, nil); err != nil {
 			t.Fatal(err)
 		}
 		payload, err := backup.CollectSealable(cfg, st, "1.0.0")

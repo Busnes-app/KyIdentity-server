@@ -41,7 +41,7 @@ func TestRecordPersistsAndEmitsInfo(t *testing.T) {
 	if err := l.Record("admin.user_created", "a1", "admin", "u1", "user", "10.0.0.1", "ua", "success", map[string]any{"k": "v"}); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	rows, total, err := s.ListAuditEvents(10, 0)
+	rows, total, err := s.DefaultOrg().ListAuditEvents(10, 0)
 	if err != nil || total != 1 || len(rows) != 1 {
 		t.Fatalf("rows=%d total=%d err=%v", len(rows), total, err)
 	}
@@ -135,7 +135,7 @@ func TestRecordUnserializableDetailsKeepsEvent(t *testing.T) {
 	if err := l.Record("admin.odd", "", "", "", "", "", "", "success", map[string]any{"ch": make(chan int)}); err != nil {
 		t.Fatal(err)
 	}
-	rows, _, err := s.ListAuditEvents(1, 0)
+	rows, _, err := s.DefaultOrg().ListAuditEvents(1, 0)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("event lost: %v", err)
 	}

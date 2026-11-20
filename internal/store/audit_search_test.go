@@ -48,7 +48,7 @@ func TestAuditPagingIsStableUnderTiedTimestamps(t *testing.T) {
 	seedAudit(t, s, 60, time.Now().UTC().Truncate(time.Second), false)
 	seen := map[string]bool{}
 	for offset := 0; offset < 60; offset += 25 {
-		page, total, err := s.SearchAuditEvents(AuditFilter{Limit: 25, Offset: offset})
+		page, total, err := s.DefaultOrg().SearchAuditEvents(AuditFilter{Limit: 25, Offset: offset})
 		if err != nil || total != 60 {
 			t.Fatalf("page at %d: %d %v", offset, total, err)
 		}
@@ -94,7 +94,7 @@ func TestAuditFiltersAndIndexes(t *testing.T) {
 	}{"time range", AuditFilter{From: &from, To: &to}, 100})
 	for _, c := range cases {
 		c.filter.Limit = 10
-		_, total, err := s.SearchAuditEvents(c.filter)
+		_, total, err := s.DefaultOrg().SearchAuditEvents(c.filter)
 		if err != nil || total != c.want {
 			t.Fatalf("%s: total %d %v, want %d", c.name, total, err, c.want)
 		}
@@ -133,7 +133,7 @@ func TestAuditExportIsBoundedAndRedacted(t *testing.T) {
 	defer cleanup()
 	seedAudit(t, s, 30, time.Now().UTC().Truncate(time.Second), true)
 	var got []AuditEvent
-	n, err := s.StreamAuditEvents(context.Background(), AuditFilter{Action: "oauth."}, 5, func(e AuditEvent) error { got = append(got, e); return nil })
+	n, err := s.DefaultOrg().StreamAuditEvents(context.Background(), AuditFilter{Action: "oauth."}, 5, func(e AuditEvent) error { got = append(got, e); return nil })
 	if err != nil || n != 5 || len(got) != 5 {
 		t.Fatalf("bounded stream = %d %v", n, err)
 	}
@@ -143,13 +143,13 @@ func TestAuditExportIsBoundedAndRedacted(t *testing.T) {
 		}
 	}
 	stop := errors.New("client gone")
-	if n, err := s.StreamAuditEvents(context.Background(), AuditFilter{}, 100, func(AuditEvent) error { return stop }); !errors.Is(err, stop) || n != 0 {
+	if n, err := s.DefaultOrg().StreamAuditEvents(context.Background(), AuditFilter{}, 100, func(AuditEvent) error { return stop }); !errors.Is(err, stop) || n != 0 {
 		t.Fatalf("sink refusal not honoured: %d %v", n, err)
 	}
 	// A deadline that has already passed reaches the query itself.
 	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	if n, err := s.StreamAuditEvents(expired, AuditFilter{}, 100, func(AuditEvent) error { return nil }); err == nil || n != 0 {
+	if n, err := s.DefaultOrg().StreamAuditEvents(expired, AuditFilter{}, 100, func(AuditEvent) error { return nil }); err == nil || n != 0 {
 		t.Fatalf("expired context ignored by the query: %d %v", n, err)
 	}
 	red := RedactAuditDetails(got[0].DetailsJSON)

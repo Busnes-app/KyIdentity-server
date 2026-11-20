@@ -108,7 +108,7 @@ func TestInstallerAmendmentRefusals(t *testing.T) {
 			case "foreign-client":
 				mustExec(t, s, `INSERT INTO oauth_clients(id,client_name,client_type,client_secret_hash,redirect_uris_json,allowed_scopes_json,enabled,created_at,post_logout_redirect_uris_json) VALUES('kyrecovery','Foreign','confidential','x','[]','["openid"]',TRUE,CURRENT_TIMESTAMP,'[]')`)
 			case "foreign-group":
-				mustExec(t, s, `INSERT INTO directory_groups(id,name,description,created_at,updated_at) VALUES('g','Foreign','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+				mustExec(t, s, `INSERT INTO directory_groups(org_id, id,name,description,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000001', 'g','Foreign','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
 				a.Clients[0].Groups = []string{"Foreign"}
 			case "accounts":
 				a.Admin = parent.Admin

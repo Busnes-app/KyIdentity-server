@@ -56,7 +56,7 @@ func putLogo(t *testing.T, srv *Server, cookie, contentType string, data []byte)
 
 func brandingAudits(t *testing.T, db *store.Store, action string) []store.AuditEvent {
 	t.Helper()
-	rows, _, err := db.SearchAuditEvents(store.AuditFilter{Action: action, Limit: 10})
+	rows, _, err := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: action, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -83,7 +83,7 @@ func copyFixture(t *testing.T, s *Store) {
 	}
 	now := time.Now().UTC()
 	for _, q := range []string{
-		`INSERT INTO alerts(id,rule,key,severity,status,title,summary,count,first_seen,last_seen) VALUES('al-1','r','k','critical','open','t','d',1,?,?)`,
+		`INSERT INTO alerts(org_id, id,rule,key,severity,status,title,summary,count,first_seen,last_seen) VALUES('00000000-0000-0000-0000-000000000001', 'al-1','r','k','critical','open','t','d',1,?,?)`,
 		`INSERT INTO alert_deliveries(alert_id,user_id,kind,status,next_attempt_at,created_at,updated_at) VALUES('al-1','u','opened','pending',?,?,?)`,
 		`INSERT INTO alert_deliveries(alert_id,user_id,kind,status,next_attempt_at,created_at,updated_at) VALUES('al-1','v','opened','pending',?,?,?)`,
 	} {
@@ -123,7 +123,7 @@ func copyFixture(t *testing.T, s *Store) {
 	if _, err := s.CreateReconcileJob("hr", "preview", admin.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	inbound, err := s.CreateSCIMConnector("Inbound", nil)
+	inbound, err := s.DefaultOrg().CreateSCIMConnector("Inbound", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func copyFixture(t *testing.T, s *Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	must(s.ConfigureHR(HRConnection{ConnectorID: inbound.ID, SystemID: "hr-mail", Domain: "example.test", WritebackURL: "https://hr.test/work-email", WritebackSecret: writeback}, nil))
+	must(s.DefaultOrg().ConfigureHR(HRConnection{ConnectorID: inbound.ID, SystemID: "hr-mail", Domain: "example.test", WritebackURL: "https://hr.test/work-email", WritebackSecret: writeback}, nil))
 	if _, err := s.ImportHR(inbound.ID, HRInput{SourceUID: "employee-Ä", PreferredName: "round.trip", DisplayName: "Pending hire 🙂", Active: true, SourceVersion: 7}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func copyFixture(t *testing.T, s *Store) {
 	}{
 		{`INSERT INTO recovery_codes(id,user_id,code_hash,used_at,created_at) VALUES('rc-1',?,'h1',NULL,?),('rc-2',?,'h2',?,?)`, []any{user.ID, now, user.ID, now, now}},
 		{`INSERT INTO device_signon_jtis(jti,expires_at) VALUES('jti-x',?)`, []any{now.Add(time.Minute)}},
-		{`INSERT INTO sync_delivery_attempts(system_id,user_id,token,event_id,event_type,started_at,recover_after) VALUES('hr',?,'tok','ev-0','user.updated',?,?)`, []any{user.ID, now, now}},
+		{`INSERT INTO sync_delivery_attempts(org_id, system_id,user_id,token,event_id,event_type,started_at,recover_after) VALUES('00000000-0000-0000-0000-000000000001', 'hr',?,'tok','ev-0','user.updated',?,?)`, []any{user.ID, now, now}},
 		{`INSERT INTO enrollment_deadlines(user_id,scope,due_at) SELECT ?, scope, 1700000000 FROM enrollment_policies LIMIT 1`, []any{user.ID}},
 		{`INSERT INTO scim_connector_tokens(id,connector_id,token_hash,scope,created_at) VALUES('sct-1',?,'th','write',?)`, []any{inbound.ID, now}},
 		{`INSERT INTO access_requests(id,app_id,user_id,reason,status,created_at,expires_at) VALUES('ar-1',?,?,'need it','pending',?,1900000000)`, []any{app, user.ID, now}},
@@ -541,7 +541,7 @@ func TestImportLeavesPostgresUnchangedOnFailure(t *testing.T) {
 	}
 	o.Close()
 	rawSQLite(t, other, `DELETE FROM enrollment_policies`, `DELETE FROM system_settings`,
-		`INSERT INTO users(id,username,display_name,email,password_hash,role,status) VALUES('u-other','other','Other','other@test.invalid','x','user','active')`)
+		`INSERT INTO users(org_id, id,username,display_name,email,password_hash,role,status) VALUES('00000000-0000-0000-0000-000000000001', 'u-other','other','Other','other@test.invalid','x','user','active')`)
 	if _, err := ImportSQLite(url, other, ImportOptions{}); err == nil || !strings.Contains(err.Error(), "not empty") {
 		t.Fatalf("an import over rows: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestImportMovesIdentitiesPastImportedRows(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM account_sync_events WHERE id='ev-1'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO alerts(id,rule,key,severity,status,title,summary,first_seen,last_seen) VALUES('al','r','k','warning','open','t','s',?,?)`, now, now); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO alerts(org_id, id,rule,key,severity,status,title,summary,first_seen,last_seen) VALUES('00000000-0000-0000-0000-000000000001', 'al','r','k','warning','open','t','s',?,?)`, now, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`INSERT INTO alert_deliveries(id,alert_id,user_id,kind,status,next_attempt_at,created_at,updated_at) VALUES(9,'al','u','opened','pending',?,?,?)`, now, now, now); err != nil {

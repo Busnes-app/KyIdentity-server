@@ -35,8 +35,10 @@ func likePrefix(s string) string {
 	return r.Replace(s) + "%"
 }
 
-func (f AuditFilter) where() (string, []any) {
-	clauses, args := []string{"1=1"}, []any{}
+// where filters the trail for one org: its own rows, and platform rows (NULL) for the org
+// that administers the install (the default org, or the staff org).
+func (f AuditFilter) where(org string) (string, []any) {
+	clauses, args := []string{`(org_id=? OR org_id IS NULL AND EXISTS(SELECT 1 FROM orgs o WHERE o.id=? AND o.kind IN ('default','staff')))`}, []any{org, org}
 	if f.Actor != "" {
 		clauses, args = append(clauses, "(actor_id=? OR actor_username=?)"), append(args, f.Actor, f.Actor)
 	}
@@ -75,21 +77,23 @@ func scanAuditEvent(rows *sql.Rows) (AuditEvent, error) {
 }
 
 // SearchAuditEvents pages the filtered trail with its total.
-func (s *Store) SearchAuditEvents(f AuditFilter) ([]AuditEvent, int, error) {
-	return s.SearchAuditEventsContext(context.Background(), f)
+func (o *OrgStore) SearchAuditEvents(f AuditFilter) ([]AuditEvent, int, error) {
+	return o.SearchAuditEventsContext(context.Background(), f)
 }
 
 // CountAuditEvents counts the filtered trail under the caller's deadline.
-func (s *Store) CountAuditEvents(ctx context.Context, f AuditFilter) (int, error) {
-	where, args := f.where()
+func (o *OrgStore) CountAuditEvents(ctx context.Context, f AuditFilter) (int, error) {
+	s := o.s
+	where, args := f.where(o.org)
 	var total int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events`+where, args...).Scan(&total)
 	return total, err
 }
 
 // SearchAuditEventsContext is SearchAuditEvents under the caller's deadline.
-func (s *Store) SearchAuditEventsContext(ctx context.Context, f AuditFilter) ([]AuditEvent, int, error) {
-	where, args := f.where()
+func (o *OrgStore) SearchAuditEventsContext(ctx context.Context, f AuditFilter) ([]AuditEvent, int, error) {
+	s := o.s
+	where, args := f.where(o.org)
 	var total int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
@@ -110,15 +114,16 @@ func (s *Store) SearchAuditEventsContext(ctx context.Context, f AuditFilter) ([]
 	return events, total, rows.Err()
 }
 
-func (s *Store) ListAuditEvents(limit, offset int) ([]AuditEvent, int, error) {
-	return s.SearchAuditEvents(AuditFilter{Limit: limit, Offset: offset})
+func (o *OrgStore) ListAuditEvents(limit, offset int) ([]AuditEvent, int, error) {
+	return o.SearchAuditEvents(AuditFilter{Limit: limit, Offset: offset})
 }
 
 // StreamAuditEvents hands the filtered trail to fn in page order, at most maxRows of it,
 // under the caller's deadline, and stops early when fn returns an error (a client gone
 // or a deadline passed).
-func (s *Store) StreamAuditEvents(ctx context.Context, f AuditFilter, maxRows int, fn func(AuditEvent) error) (int, error) {
-	where, args := f.where()
+func (o *OrgStore) StreamAuditEvents(ctx context.Context, f AuditFilter, maxRows int, fn func(AuditEvent) error) (int, error) {
+	s := o.s
+	where, args := f.where(o.org)
 	rows, err := s.db.QueryContext(ctx, auditSelect+where+auditOrder+` LIMIT ?`, append(args, maxRows)...)
 	if err != nil {
 		return 0, err

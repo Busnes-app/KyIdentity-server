@@ -32,7 +32,7 @@ func TestAlertPassReturnsAtItsBudget(t *testing.T) {
 		}
 	}
 	e.runAlerts(context.Background())
-	alerts, _, err := db.ListAlerts("open", 10, 0)
+	alerts, _, err := db.DefaultOrg().ListAlerts("open", 10, 0)
 	if err != nil || len(alerts) != 3 {
 		t.Fatal(alerts, err)
 	}
@@ -54,7 +54,7 @@ func TestAlertPassReturnsAtItsBudget(t *testing.T) {
 		}
 	}
 	e.runAlerts(ctx)
-	alerts, _, err = db.ListAlerts("open", 10, 0)
+	alerts, _, err = db.DefaultOrg().ListAlerts("open", 10, 0)
 	if err != nil || len(alerts) != 3 {
 		t.Fatal(alerts, err)
 	}

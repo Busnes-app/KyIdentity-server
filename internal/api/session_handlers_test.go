@@ -281,7 +281,7 @@ func TestSessionRoutesRejectMissingCSRF(t *testing.T) {
 
 func countAudit(t *testing.T, db *store.Store, action string) int {
 	t.Helper()
-	events, _, err := db.ListAuditEvents(200, 0)
+	events, _, err := db.DefaultOrg().ListAuditEvents(200, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

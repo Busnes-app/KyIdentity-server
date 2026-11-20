@@ -59,7 +59,7 @@ func TestDeviceMutationsRequireStepUp(t *testing.T) {
 			if !tc.changed(device()) {
 				t.Fatal("device unchanged with step-up")
 			}
-			events, _, err := db.SearchAuditEvents(store.AuditFilter{Action: tc.action, Outcome: "success", Limit: 10})
+			events, _, err := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: tc.action, Outcome: "success", Limit: 10})
 			if err != nil || len(events) != 1 || events[0].TargetID != "dev-1" || events[0].ActorID != u.ID {
 				t.Fatalf("audit %+v err=%v", events, err)
 			}
@@ -86,7 +86,7 @@ func TestDeleteUnknownDeviceIsNotFound(t *testing.T) {
 	if d, _ := db.GetNativeDevice("theirs"); d == nil {
 		t.Fatal("another user's device was deleted")
 	}
-	if events, _, _ := db.SearchAuditEvents(store.AuditFilter{Action: "device.deleted", Limit: 10}); len(events) != 0 {
+	if events, _, _ := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "device.deleted", Limit: 10}); len(events) != 0 {
 		t.Fatalf("a delete that matched nothing was audited as success: %+v", events)
 	}
 }

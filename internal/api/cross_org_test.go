@@ -15,43 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// crossOrgSteps names, per admin path prefix, the build plan step (tenancy design, PR 2)
-// whose rows TestCrossOrgMatrix runs on that route. "2a" marks covered routes (2a's and
-// the later steps' as they land); a later step moves its prefixes there as it scopes
-// them. A route under no prefix fails.
-var crossOrgSteps = []struct{ prefix, step string }{
-	{"/api/admin/users", "2a"},
-	{"/api/admin/groups", "2a"},
-	{"/api/admin/app-registry", "2a"},
-	{"/api/admin/clients", "2b"},
-	{"/api/admin/workstation-apps", "2b"},
-	{"/api/admin/applications", "2b"},
-	{"/api/admin/icons", "2b"},
-	{"/api/admin/proxy-apps", "2b"},
-	{"/api/admin/access-requests", "2a"},
-	{"/api/admin/enrollment-policies", "2b"},
-	{"/api/admin/mail", "2b"},
-	{"/api/admin/session-settings", "2b"},
-	{"/api/admin/rate-limit-networks", "2b"},
-	{"/api/admin/attestation", "2b"},
-	{"/api/admin/branding", "2b"},
-	{"/api/admin/backup", "2b"},
-	{"/api/admin/alerts/settings", "2b"},
-	{"/api/admin/alerts", "2d"},
-	{"/api/admin/audit-events", "2d"},
-	{"/api/admin/scim-connectors", "2d"},
-	{"/api/admin/systems", "2d"},
-}
-
-func crossOrgStep(path string) string {
-	for _, s := range crossOrgSteps {
-		if path == s.prefix || strings.HasPrefix(path, s.prefix+"/") {
-			return s.step
-		}
-	}
-	return ""
-}
-
 func newOrgUser(t *testing.T, db *store.Store, org store.OrgID, role string) *store.User {
 	t.Helper()
 	name := "u" + uuid.NewString()[:8]
@@ -61,6 +24,9 @@ func newOrgUser(t *testing.T, db *store.Store, org store.OrgID, role string) *st
 	}
 	return u
 }
+
+// takesID: an org route whose path names a user, group, request, connector or alert.
+var takesID = regexp.MustCompile(`\{(principal|userId)\}|/(users|groups|access-requests|scim-connectors|alerts)/\{id\}`)
 
 // The cross-org matrix (tenancy design, "Isolation enforcement"). Orgs A and B, and a staff
 // org with an admin, a helpdesk and an auditor. Until staff select an org (build plan PR
@@ -106,6 +72,14 @@ func TestCrossOrgMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	app, req := crossOrgApps(t, db, orgB, userB, groupB)
+	connB, err := db.Org(orgB).CreateSCIMConnector("b-directory", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alertB := crossOrgAlert(t, db, srv.cfg.DBPath, userB)
+	if err := db.RecordAuditEvent(&store.AuditEvent{ID: "b-audit-" + uuid.NewString(), ActorID: userB.ID, ActorUsername: userB.Username, Action: "b.private", TargetID: userB.ID, TargetType: "user", Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
 	staffGroup := &store.Group{ID: uuid.NewString(), Name: "staff-" + uuid.NewString()[:8]}
 	if err := db.Org(staffOrg).CreateGroup(staffGroup, nil); err != nil {
 		t.Fatal(err)
@@ -131,7 +105,10 @@ func TestCrossOrgMatrix(t *testing.T) {
 		access, err6 := b.ListAppAccessUsers(app.app, "", "", nil, 100, 0)
 		roles, err7 := b.ListAppRoles(app.app)
 		requests, _, err8 := b.ListAccessRequests(store.AccessRequestFilter{UserID: userB.ID, Limit: 100})
-		for _, err := range []error{err1, err2, err3, err4, err5, err6, err7, err8} {
+		conns, err9 := b.ListSCIMConnectors()
+		alerts, _, err10 := b.ListAlerts("all", 100, 0)
+		audit, _, err11 := b.SearchAuditEvents(store.AuditFilter{Action: "b.", Limit: 100})
+		for _, err := range []error{err1, err2, err3, err4, err5, err6, err7, err8, err9, err10, err11} {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,7 +117,7 @@ func TestCrossOrgMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, _ := json.Marshal([]any{users, groups, members, suite, d, sess != nil, access.Users, roles, requests})
+		out, _ := json.Marshal([]any{users, groups, members, suite, d, sess != nil, access.Users, roles, requests, conns, alerts, audit})
 		return string(out)
 	}
 	before := snapshotB()
@@ -150,7 +127,7 @@ func TestCrossOrgMatrix(t *testing.T) {
 	}
 	// fill puts user, group (or, on a groups {kind}, group as the principal) and request
 	// into the path; apps and roles are global, so they are real ones.
-	fill := func(rt adminRoute, kind, user, group, request string) string {
+	fill := func(rt adminRoute, kind, user, group, request, other string) string {
 		p := strings.Replace(rt.path, "{kind}", kind, 1)
 		principal := user
 		if kind == "groups" {
@@ -163,40 +140,42 @@ func TestCrossOrgMatrix(t *testing.T) {
 			p = strings.Replace(p, "{id}", app.app, 1)
 		case strings.HasPrefix(p, "/api/admin/access-requests/"):
 			p = strings.Replace(p, "{id}", request, 1)
+		case strings.HasPrefix(p, "/api/admin/scim-connectors/"), strings.HasPrefix(p, "/api/admin/alerts/"):
+			p = strings.Replace(p, "{id}", other, 1)
 		}
 		p = strings.NewReplacer("{id}", user, "{userId}", user, "{principal}", principal, "{roleId}", app.role).Replace(p)
-		for _, ph := range []string{"{sid}", "{clientId}", "{deliveryId}"} {
+		for _, ph := range []string{"{sid}", "{clientId}", "{deliveryId}", "{tokenId}"} {
 			p = strings.Replace(p, ph, "x", 1)
 		}
 		return p
 	}
-	names := []string{userB.ID, userB.Username, groupB.ID, groupB.Name, req}
+	names := []string{userB.ID, userB.Username, groupB.ID, groupB.Name, req, connB.ID, connB.Name, alertB, "b.private"}
 
 	covered := 0
 	for _, rt := range srv.adminRoutes {
-		step := crossOrgStep(rt.path)
-		if step == "" {
-			t.Errorf("%s %s: no build plan step in crossOrgSteps", rt.method, rt.path)
-			continue
-		}
 		for name, cookie := range customers {
-			if code, body := call(rt, fill(rt, "users", userB.ID, groupB.ID, req), cookie); code != http.StatusForbidden || !strings.Contains(body, `"error":"forbidden"`) {
+			if code, body := call(rt, fill(rt, "users", userB.ID, groupB.ID, req, connB.ID), cookie); code != http.StatusForbidden || !strings.Contains(body, `"error":"forbidden"`) {
 				t.Errorf("%s %s as A's %s: %d %s", rt.method, rt.path, name, code, body)
 			}
 		}
 		// Platform routes change what every org shares; TestPlatformRoutesNeedAnAdministrator
 		// covers them.
-		if step != "2a" || rt.scope != orgRoute {
+		if rt.scope != orgRoute {
 			continue
 		}
 		covered++
-		names_b := regexp.MustCompile(`\{(principal|userId|access-requests)\}`)
-		takesB := names_b.MatchString(rt.path) || strings.Contains(rt.path, "/users/{id}") || strings.Contains(rt.path, "/groups/{id}") || strings.Contains(rt.path, "/access-requests/{id}")
+		takesB := takesID.MatchString(rt.path)
 		for name, cookie := range staff {
 			if !takesB {
 				// Lists, creates and app-wide routes: nothing of B's comes back.
-				_, body := call(rt, fill(rt, "users", userB.ID, groupB.ID, req), cookie)
-				for _, id := range names {
+				_, body := call(rt, fill(rt, "users", userB.ID, groupB.ID, req, connB.ID), cookie)
+				check := names
+				if strings.HasPrefix(rt.path, "/api/admin/audit-events") {
+					// Staff's own refused attempts on B's IDs are audited in the staff org,
+					// naming those IDs; only what staff never sent may not appear.
+					check = []string{userB.Username, groupB.Name, connB.Name, "b.private"}
+				}
+				for _, id := range check {
 					if strings.Contains(body, id) {
 						t.Errorf("%s %s as staff %s answered with B's %q", rt.method, rt.path, name, id)
 					}
@@ -208,15 +187,18 @@ func TestCrossOrgMatrix(t *testing.T) {
 				kinds = append(kinds, "groups")
 			}
 			for _, kind := range kinds {
-				wantCode, wantBody := call(rt, fill(rt, kind, uuid.NewString(), uuid.NewString(), uuid.NewString()), cookie)
-				targets := [][3]string{{userB.ID, groupB.ID, req}}
+				wantCode, wantBody := call(rt, fill(rt, kind, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()), cookie)
+				targets := [][4]string{{userB.ID, groupB.ID, req, connB.ID}}
 				if strings.Contains(rt.path, "{userId}") {
-					targets = append(targets, [3]string{userB.ID, staffGroup.ID, req})
+					targets = append(targets, [4]string{userB.ID, staffGroup.ID, req, connB.ID})
+				}
+				if strings.HasPrefix(rt.path, "/api/admin/alerts/") {
+					targets = [][4]string{{userB.ID, groupB.ID, req, alertB}}
 				}
 				for _, tg := range targets {
-					code, body := call(rt, fill(rt, kind, tg[0], tg[1], tg[2]), cookie)
+					code, body := call(rt, fill(rt, kind, tg[0], tg[1], tg[2], tg[3]), cookie)
 					// A missing ID's error names the ID asked for; compare the rest.
-					body = strings.NewReplacer(tg[0], "ID", tg[1], "ID", tg[2], "ID").Replace(body)
+					body = strings.NewReplacer(tg[0], "ID", tg[1], "ID", tg[2], "ID", tg[3], "ID").Replace(body)
 					if code != wantCode || code == http.StatusOK || code/100 == 5 || !sameShape(body, wantBody) {
 						t.Errorf("%s %s (%s) as staff %s with B's IDs: %d %s, a missing ID answers %d %s", rt.method, rt.path, kind, name, code, body, wantCode, wantBody)
 					}
@@ -227,7 +209,7 @@ func TestCrossOrgMatrix(t *testing.T) {
 			t.Fatalf("%s %s changed org B:\n before %s\n after  %s", rt.method, rt.path, before, after)
 		}
 	}
-	if covered < 34 {
+	if covered < 45 {
 		t.Fatalf("only %d routes covered", covered)
 	}
 
@@ -415,4 +397,25 @@ func TestPlatformRoutesNeedAnAdministrator(t *testing.T) {
 	if platform < 60 || reachedByDelegate < 10 {
 		t.Fatalf("platform routes %d, org routes a delegate reaches %d", platform, reachedByDelegate)
 	}
+}
+
+// crossOrgAlert raises a recovery-use alert in B's org, through the alert worker.
+func crossOrgAlert(t *testing.T, db *store.Store, dbPath string, userB *store.User) string {
+	t.Helper()
+	if err := db.RecordAuditEvent(&store.AuditEvent{ID: uuid.NewString(), ActorID: userB.ID, ActorUsername: userB.Username, Action: "auth.mfa_recovery_consumed", TargetID: userB.ID, TargetType: "user", Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.EvaluateAlerts(time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	raw, err := store.OpenRawForTest(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if err := raw.QueryRow(`SELECT a.id FROM alerts a JOIN users u ON u.org_id=a.org_id WHERE u.id=? AND a.rule='recovery_use' AND a.key=?`, userB.ID, userB.ID).Scan(&id); err != nil {
+		t.Fatalf("no alert in B: %v", err)
+	}
+	return id
 }

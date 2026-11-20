@@ -11,54 +11,54 @@ import (
 func TestSCIMConnectorDisableBlocksTokens(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	c, err := s.CreateSCIMConnector("  HR  ", nil)
+	c, err := s.DefaultOrg().CreateSCIMConnector("  HR  ", nil)
 	if err != nil || c.Name != "HR" {
 		t.Fatal(c, err)
 	}
-	if _, err := s.CreateSCIMConnector("   ", nil); err == nil {
+	if _, err := s.DefaultOrg().CreateSCIMConnector("   ", nil); err == nil {
 		t.Fatal("blank connector name accepted")
 	}
-	raw, _, err := s.IssueSCIMToken(c.ID, "write", nil)
+	raw, _, err := s.DefaultOrg().IssueSCIMToken(c.ID, "write", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.IssueSCIMToken(c.ID, "admin", nil); err == nil {
+	if _, _, err := s.DefaultOrg().IssueSCIMToken(c.ID, "admin", nil); err == nil {
 		t.Fatal("unknown scope issued")
 	}
-	if _, _, err := s.IssueSCIMToken("missing", "read", nil); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.DefaultOrg().IssueSCIMToken("missing", "read", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal("token issued for unknown connector", err)
 	}
 	if _, _, err := s.AuthenticateSCIMToken("scim_"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("empty bearer", err)
 	}
-	if err := s.UpdateSCIMConnector(c.ID, "HR", "paused", nil); err == nil {
+	if err := s.DefaultOrg().UpdateSCIMConnector(c.ID, "HR", "paused", nil); err == nil {
 		t.Fatal("unknown status accepted")
 	}
-	if err := s.UpdateSCIMConnector(c.ID, " ", "disabled", nil); err == nil {
+	if err := s.DefaultOrg().UpdateSCIMConnector(c.ID, " ", "disabled", nil); err == nil {
 		t.Fatal("blank name accepted")
 	}
-	if err := s.UpdateSCIMConnector("missing", "HR", "disabled", nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DefaultOrg().UpdateSCIMConnector("missing", "HR", "disabled", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal("unknown connector updated", err)
 	}
-	if err := s.UpdateSCIMConnector(c.ID, "HR", "disabled", poisonedAudit(t, s, "admin.scim_connector_updated", c.ID)); err == nil {
+	if err := s.DefaultOrg().UpdateSCIMConnector(c.ID, "HR", "disabled", poisonedAudit(t, s, "admin.scim_connector_updated", c.ID)); err == nil {
 		t.Fatal("update ignored audit failure")
 	}
 	if _, _, err := s.AuthenticateSCIMToken(raw); err != nil {
 		t.Fatal("failed disable blocked the token", err)
 	}
-	if err := s.UpdateSCIMConnector(c.ID, "HR", "disabled", nil); err != nil {
+	if err := s.DefaultOrg().UpdateSCIMConnector(c.ID, "HR", "disabled", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.AuthenticateSCIMToken(raw); !errors.Is(err, ErrNotFound) {
 		t.Fatal("disabled connector authenticated", err)
 	}
-	if err := s.UpdateSCIMConnector(c.ID, "HR", "active", nil); err != nil {
+	if err := s.DefaultOrg().UpdateSCIMConnector(c.ID, "HR", "active", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, scope, err := s.AuthenticateSCIMToken(raw); err != nil || got.ID != c.ID || scope != "write" {
 		t.Fatal("re-enabled connector refused", err)
 	}
-	if err := s.RevokeSCIMToken(c.ID, "missing", nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DefaultOrg().RevokeSCIMToken(c.ID, "missing", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal("unknown token revoked", err)
 	}
 }
@@ -69,8 +69,8 @@ func TestSCIMConnectorDisableBlocksTokens(t *testing.T) {
 func TestListUpstreamUsersFiltersAndPaging(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, _ := s.CreateSCIMConnector("A", nil)
-	b, _ := s.CreateSCIMConnector("B", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
+	b, _ := s.DefaultOrg().CreateSCIMConnector("B", nil)
 	alice := upstream(t, s, a.ID, "ext-a", "alice")
 	upstream(t, s, a.ID, "ext-b", "bob")
 	other := upstream(t, s, b.ID, "ext-o", "other")

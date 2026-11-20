@@ -294,7 +294,7 @@ func TestStepUpAuditsDeniedAndPending(t *testing.T) {
 			if r.Code != expected {
 				t.Fatalf("request: %d %s", r.Code, r.Body.String())
 			}
-			events, _, err := f.store.ListAuditEvents(100, 0)
+			events, _, err := f.store.DefaultOrg().ListAuditEvents(100, 0)
 			if err != nil {
 				t.Fatal(err)
 			}

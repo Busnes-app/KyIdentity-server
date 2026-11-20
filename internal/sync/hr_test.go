@@ -80,11 +80,11 @@ func TestHRCallsKyPostBeforeCreatingSSOIdentity(t *testing.T) {
 	if err := s.CreatePairedSystem(&store.PairedSystem{ID: "post", Name: "KyPost", SystemType: "kypost", CallbackURL: target.URL + "/api/sync/webhook", HMACSecretEncrypted: encrypted, Status: "active"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	c, err := s.CreateSCIMConnector("HR", nil)
+	c, err := s.DefaultOrg().CreateSCIMConnector("HR", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ConfigureHR(store.HRConnection{ConnectorID: c.ID, SystemID: "post", Domain: "example.test", WritebackURL: target.URL + "/writeback"}, "HR-target-secret", nil); err != nil {
+	if err := e.ConfigureHR(s.DefaultOrg(), store.HRConnection{ConnectorID: c.ID, SystemID: "post", Domain: "example.test", WritebackURL: target.URL + "/writeback"}, "HR-target-secret", nil); err != nil {
 		t.Fatal(err)
 	}
 	input := store.HRInput{SourceUID: "employee-1", PreferredName: "alice", DisplayName: "Alice", Active: true, SourceVersion: 1}
@@ -129,12 +129,12 @@ func TestHRTransportRefusesRedirectAndUnsafeConfiguration(t *testing.T) {
 	if _, err := e.hrRequest(context.Background(), "PUT", target.URL+"/writeback", []byte(`{}`), func(*http.Request) {}); err == nil || redirected {
 		t.Fatal("redirect followed", err)
 	}
-	c, err := s.CreateSCIMConnector("HR", nil)
+	c, err := s.DefaultOrg().CreateSCIMConnector("HR", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, endpoint := range []string{"http://hr.example/writeback", "https://user:password@hr.example/writeback", "https://hr.example/writeback?token=secret"} {
-		if err := e.ConfigureHR(store.HRConnection{ConnectorID: c.ID, SystemID: "post", Domain: "example.test", WritebackURL: endpoint}, "secret", nil); err == nil {
+		if err := e.ConfigureHR(s.DefaultOrg(), store.HRConnection{ConnectorID: c.ID, SystemID: "post", Domain: "example.test", WritebackURL: endpoint}, "secret", nil); err == nil {
 			t.Fatal("unsafe configuration accepted", endpoint)
 		}
 	}

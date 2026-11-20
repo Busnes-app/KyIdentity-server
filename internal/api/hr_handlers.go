@@ -37,7 +37,7 @@ func (s *Server) configureHR(w http.ResponseWriter, r *http.Request) {
 	actor := GetUserFromContext(r.Context())
 	c := store.HRConnection{ConnectorID: id, SystemID: req.SystemID, Domain: req.Domain, WritebackURL: req.WritebackURL}
 	pending := s.audit.Prepare("admin.hr_configured", actor.ID, actor.Username, id, "scim_connector", s.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	if err := s.syncEngine.ConfigureHR(c, req.WritebackToken, pending.Row); err != nil {
+	if err := s.syncEngine.ConfigureHR(orgStore(r), c, req.WritebackToken, pending.Row); err != nil {
 		if auditErr := s.audit.Record("admin.hr_configured", actor.ID, actor.Username, id, "scim_connector", s.middleware.ClientIP(r), r.UserAgent(), "failure", nil); auditErr != nil {
 			http.Error(w, `{"error":"internal_error"}`, 500)
 			return
@@ -51,6 +51,14 @@ func (s *Server) configureHR(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) hrStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// Another org's connector answers as a missing one does.
+	if conn, err := orgStore(r).GetSCIMConnector(id); err != nil {
+		writeInputError(w, "internal_error", err)
+		return
+	} else if conn == nil {
+		http.NotFound(w, r)
+		return
+	}
 	c, err := s.store.HRConnection(id)
 	if errors.Is(err, store.ErrNotFound) {
 		http.NotFound(w, r)

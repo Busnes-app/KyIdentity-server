@@ -342,7 +342,7 @@ func TestAcceptReplicaConfig(t *testing.T) {
 	if _, err := startCheck(t); !errors.Is(err, errReplicaConfig) {
 		t.Fatalf("the old configuration still starts: %v", err)
 	}
-	events, _, err := s.SearchAuditEvents(store.AuditFilter{Action: "admin.replica_config_accepted", Limit: 5})
+	events, _, err := s.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.replica_config_accepted", Limit: 5})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("audit rows: %d %v", len(events), err)
 	}

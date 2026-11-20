@@ -22,7 +22,7 @@ import (
 
 // ConfigureHR uses the existing source connector/token management and the
 // paired KyPost credential. Only the writeback credential is additional.
-func (e *Engine) ConfigureHR(c store.HRConnection, token string, audit *store.AuditEvent) error {
+func (e *Engine) ConfigureHR(org *store.OrgStore, c store.HRConnection, token string, audit *store.AuditEvent) error {
 	if err := netguard.ValidateURL(c.WritebackURL, "writebackUrl"); err != nil {
 		return err
 	}
@@ -51,7 +51,7 @@ func (e *Engine) ConfigureHR(c store.HRConnection, token string, audit *store.Au
 	if err != nil {
 		return err
 	}
-	return e.store.ConfigureHR(c, audit)
+	return org.ConfigureHR(c, audit)
 }
 
 // hrRequest never returns response text or transport errors to logs/status:

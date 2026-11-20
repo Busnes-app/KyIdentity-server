@@ -36,8 +36,8 @@ func replaceGroup(s *Store, connectorID string, g *Group, members []string, expe
 func TestUpstreamGroupsHoldOnlyTheConnectorsAccounts(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, _ := s.CreateSCIMConnector("A", nil)
-	b, _ := s.CreateSCIMConnector("B", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
+	b, _ := s.DefaultOrg().CreateSCIMConnector("B", nil)
 	alice := activated(t, s, a.ID, "ext-a", "alice")
 	bob := activated(t, s, a.ID, "ext-b", "bob")
 	other := activated(t, s, b.ID, "ext-o", "other")
@@ -112,7 +112,7 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
-	a, _ := s.CreateSCIMConnector("A", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	alice := activated(t, s, a.ID, "ext-a", "alice")
 	g := &Group{Name: "Staff", SourceConnectorID: a.ID}
 	if err := s.CreateUpstreamGroup(g, nil, nil); err != nil {
@@ -157,7 +157,7 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 	if err := s.CreateUpstreamGroup(g2, []string{alice.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DeleteSCIMConnector(a.ID, false, nil); err != nil {
+	if _, err := s.DefaultOrg().DeleteSCIMConnector(a.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	groups, _, _ := s.DefaultOrg().ListGroups("Kept", "", 10, 0)
@@ -168,7 +168,7 @@ func TestUpstreamGroupMembershipDrivesAccessAndDeletionKeepsUsers(t *testing.T) 
 
 func TestUpstreamGroupCreateRollsBackWithoutItsAuditRow(t *testing.T) {
 	s, _ := newStoreWithUser(t, "admin")
-	a, _ := s.CreateSCIMConnector("A", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	alice := activated(t, s, a.ID, "ext-a", "alice")
 	g := &Group{Name: "Audited", SourceConnectorID: a.ID}
 	if err := s.CreateUpstreamGroup(g, []string{alice.ID}, poisonedAudit(t, s, "scim.group_created", "")); err == nil {
@@ -184,7 +184,7 @@ func TestUpstreamGroupBulkMembershipReconcilesOnce(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	provisioningFixture(t, s, "target")
-	a, _ := s.CreateSCIMConnector("A", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	members := make([]string, 0, 200)
 	for i := 0; i < 200; i++ {
 		u := upstream(t, s, a.ID, "ext-"+string(rune('a'+i%26))+strconvItoa(i), "bulk"+strconvItoa(i))
@@ -238,7 +238,7 @@ func TestUpstreamRenameOfMFARequiredGroupIsRefused(t *testing.T) {
 	if err := s.CreateSession(&Session{ID: "admin-session", UserID: admin.ID, SessionTokenHash: "admin-session", ExpiresAt: at.Add(time.Hour), AuthenticationEvidence: AuthenticationEvidence{PrimaryAuthenticatedAt: &at, FactorAuthenticatedAt: &at, FactorMethod: "totp"}}); err != nil {
 		t.Fatal(err)
 	}
-	a, _ := s.CreateSCIMConnector("A", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	alice := activated(t, s, a.ID, "ext-a", "alice")
 	g := &Group{Name: "Secure", SourceConnectorID: a.ID}
 	if err := s.CreateUpstreamGroup(g, []string{alice.ID}, nil); err != nil {
@@ -265,7 +265,7 @@ func TestUpstreamRenameOfMFARequiredGroupIsRefused(t *testing.T) {
 func TestUpstreamGroupReplaceRejectsStaleVersion(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, _ := s.CreateSCIMConnector("A", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	alice := activated(t, s, a.ID, "ext-a", "alice")
 	g := &Group{Name: "Versioned", SourceConnectorID: a.ID}
 	if err := s.CreateUpstreamGroup(g, nil, nil); err != nil {
@@ -301,8 +301,8 @@ func TestUpstreamGroupReplaceRejectsStaleVersion(t *testing.T) {
 func TestLocallyAddedMemberDoesNotBlockUpstreamEdits(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, _ := s.CreateSCIMConnector("A", nil)
-	b, _ := s.CreateSCIMConnector("B", nil)
+	a, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
+	b, _ := s.DefaultOrg().CreateSCIMConnector("B", nil)
 	alice := activated(t, s, a.ID, "ext-a", "alice")
 	bob := activated(t, s, a.ID, "ext-b", "bob")
 	other := activated(t, s, b.ID, "ext-o", "other")

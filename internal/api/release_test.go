@@ -127,7 +127,7 @@ func TestReleaseRestoreScenario(t *testing.T) {
 	}
 
 	// And the restore is in the trail, with what it invalidated.
-	events, _, err := db.SearchAuditEvents(store.AuditFilter{Action: "admin.reconcile_requested", Limit: 5})
+	events, _, err := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.reconcile_requested", Limit: 5})
 	if err != nil || len(events) == 0 {
 		t.Fatalf("reconciliation audit: %d %v", len(events), err)
 	}

@@ -117,7 +117,7 @@ func TestDisableUserByNameRetiresLiveLinkOfDisabledAccount(t *testing.T) {
 // override, which the upstream can then not lift.
 func TestDisableUserByNameSetsLocalOverrideOnUpstreamAccount(t *testing.T) {
 	s, _, _ := disableFixture(t)
-	c, err := s.CreateSCIMConnector("Upstream", nil)
+	c, err := s.DefaultOrg().CreateSCIMConnector("Upstream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

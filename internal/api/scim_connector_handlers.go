@@ -36,7 +36,7 @@ func (h *SCIMHandler) view(c *store.SCIMConnector) (*connectorView, error) {
 }
 
 func (h *SCIMHandler) AdminList(w http.ResponseWriter, r *http.Request) {
-	list, err := h.store.ListSCIMConnectors()
+	list, err := orgStore(r).ListSCIMConnectors()
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -63,7 +63,7 @@ func (h *SCIMHandler) AdminCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending := h.audit.Prepare("admin.scim_connector_created", admin.ID, admin.Username, "", "scim_connector", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"name": req.Name})
-	c, err := h.store.CreateSCIMConnector(req.Name, pending.Row)
+	c, err := orgStore(r).CreateSCIMConnector(req.Name, pending.Row)
 	if err != nil {
 		writeInputError(w, "invalid_request", err)
 		return
@@ -89,7 +89,7 @@ func (h *SCIMHandler) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending := h.audit.Prepare("admin.scim_connector_updated", admin.ID, admin.Username, id, "scim_connector", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"name": req.Name, "status": req.Status})
-	err := h.store.UpdateSCIMConnector(id, req.Name, req.Status, pending.Row)
+	err := orgStore(r).UpdateSCIMConnector(id, req.Name, req.Status, pending.Row)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, `{"error":"connector_not_found"}`, http.StatusNotFound)
 		return
@@ -99,7 +99,7 @@ func (h *SCIMHandler) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending.Committed()
-	c, _ := h.store.GetSCIMConnector(id)
+	c, _ := orgStore(r).GetSCIMConnector(id)
 	v, err := h.view(c)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -120,7 +120,7 @@ func (h *SCIMHandler) AdminIssueToken(w http.ResponseWriter, r *http.Request) {
 		req.Scope = "write"
 	}
 	pending := h.audit.Prepare("admin.scim_token_issued", admin.ID, admin.Username, id, "scim_connector", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"scope": req.Scope})
-	raw, tok, err := h.store.IssueSCIMToken(id, req.Scope, pending.Row)
+	raw, tok, err := orgStore(r).IssueSCIMToken(id, req.Scope, pending.Row)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, `{"error":"connector_not_found"}`, http.StatusNotFound)
 		return
@@ -137,7 +137,7 @@ func (h *SCIMHandler) AdminRevokeToken(w http.ResponseWriter, r *http.Request) {
 	admin := GetUserFromContext(r.Context())
 	id, tokenID := r.PathValue("id"), r.PathValue("tokenId")
 	pending := h.audit.Prepare("admin.scim_token_revoked", admin.ID, admin.Username, id, "scim_connector", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"tokenId": tokenID})
-	err := h.store.RevokeSCIMToken(id, tokenID, pending.Row)
+	err := orgStore(r).RevokeSCIMToken(id, tokenID, pending.Row)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, `{"error":"token_not_found"}`, http.StatusNotFound)
 		return
@@ -164,7 +164,7 @@ func (h *SCIMHandler) AdminDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending := h.audit.Prepare("admin.scim_connector_deleted", admin.ID, admin.Username, id, "scim_connector", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"users": req.Users})
-	n, err := h.store.DeleteSCIMConnector(id, req.Users == "disable", pending.Row)
+	n, err := orgStore(r).DeleteSCIMConnector(id, req.Users == "disable", pending.Row)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, `{"error":"connector_not_found"}`, http.StatusNotFound)
 		return

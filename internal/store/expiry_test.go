@@ -147,7 +147,7 @@ func TestRunDueExpiriesRevokesAndDeprovisions(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM app_user_assignments WHERE user_id=?`, other.ID).Scan(&otherLeft); err != nil || otherLeft != 1 {
 		t.Fatal("extension undone by the run", otherLeft, err)
 	}
-	events, _, _ := s.ListAuditEvents(20, 0)
+	events, _, _ := s.DefaultOrg().ListAuditEvents(20, 0)
 	expired := 0
 	for _, e := range events {
 		if strings.HasSuffix(e.Action, "_expired") && e.ActorUsername == "expiry" {
@@ -219,7 +219,7 @@ func TestAccountEndDate(t *testing.T) {
 	if got.Status != "active" || got.EndsAt != nil {
 		t.Fatalf("last admin not preserved: %+v", got)
 	}
-	events, _, _ := s.ListAuditEvents(10, 0)
+	events, _, _ := s.DefaultOrg().ListAuditEvents(10, 0)
 	denied := false
 	for _, e := range events {
 		if e.Action == "account.end_refused" && e.Outcome == "denied" && e.TargetID == admin.ID {
@@ -312,7 +312,7 @@ func TestRunDueExpiriesIsolatesFailures(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM app_user_assignments`).Scan(&left); err != nil || left != 1 {
 		t.Fatalf("assignments left = %d %v", left, err)
 	}
-	events, _, _ := s.ListAuditEvents(20, 0)
+	events, _, _ := s.DefaultOrg().ListAuditEvents(20, 0)
 	failed := 0
 	for _, e := range events {
 		if e.Action == "app.assignment_expiry_failed" && e.Outcome == "failure" && e.TargetID == apps[0].ID {
@@ -415,7 +415,7 @@ func TestUnchangedScheduleDoesNotTripTheGuard(t *testing.T) {
 func TestEndDatedAdministratorIsNoCoverForTheLast(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	c, _ := s.CreateSCIMConnector("A", nil)
+	c, _ := s.DefaultOrg().CreateSCIMConnector("A", nil)
 	permanent := upstream(t, s, c.ID, "ext-1", "permanent")
 	if _, err := s.db.Exec(`UPDATE users SET role='admin', status='active', pending=FALSE, password_hash='x' WHERE id=?`, permanent.ID); err != nil {
 		t.Fatal(err)
@@ -437,7 +437,7 @@ func TestEndDatedAdministratorIsNoCoverForTheLast(t *testing.T) {
 	if err := s.DefaultOrg().DeleteUserWithSyncEvents(permanent.ID, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatalf("deleting the only administrator without an end date: %v", err)
 	}
-	if _, err := s.DeleteSCIMConnector(c.ID, true, nil); !errors.Is(err, ErrLastActiveAdmin) {
+	if _, err := s.DefaultOrg().DeleteSCIMConnector(c.ID, true, nil); !errors.Is(err, ErrLastActiveAdmin) {
 		t.Fatalf("disabling the connector's administrator: %v", err)
 	}
 	if got, _ := s.DefaultOrg().GetUserByID(permanent.ID); got == nil || got.Role != "admin" || got.Status != "active" || got.EndsAt != nil {
@@ -449,7 +449,7 @@ func TestEndDatedAdministratorIsNoCoverForTheLast(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(spare, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DeleteSCIMConnector(c.ID, true, nil); err != nil {
+	if _, err := s.DefaultOrg().DeleteSCIMConnector(c.ID, true, nil); err != nil {
 		t.Fatalf("disabling with a spare administrator: %v", err)
 	}
 }
