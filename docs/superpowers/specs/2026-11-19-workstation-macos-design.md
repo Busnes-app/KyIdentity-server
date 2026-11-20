@@ -75,7 +75,7 @@ No new route or listener.
 | `POST /oauth/token` `refresh_token` | Unchanged: workstation families slide by the offline window. |
 | `POST /oauth/token` jwt-bearer | Refused for a workstation app. |
 | `POST /api/device/decision` | Approval refused for a require-password app (`sign_in_again`). |
-| `PUT /api/admin/workstation-apps/{id}` | `permAdmin` + step-up (existing). Adds required `requirePassword` and `macSignIn`. Audited with the other settings. |
+| `PUT /api/admin/workstation-apps/{id}` | `permAdmin` + step-up (existing). Adds required `requirePassword` and `macSignIn`. Audited with the other settings. Changing `requirePassword` is a policy edit: the app's policy revision bumps, and its interactions, unused codes, unredeemed device codes, issued tokens and workstation sessions end in the same transaction. Every code, approval and refresh family binds that revision, so a grant racing the change fails at redemption. |
 | `GET /api/admin/workstation-apps` | `permRead` (existing). Adds `requirePassword` and `macSignIn`. |
 
 ## Defaults

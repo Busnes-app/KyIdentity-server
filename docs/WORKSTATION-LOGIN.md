@@ -161,7 +161,8 @@ authorization, even in a web view that is already signed in; MFA after the passw
 works. A sign-in that types none (a passkey-only or push-only sign-in, an existing session,
 KyAuth phone sign-on) is refused, so XCreds never ends up with no password to set. The rule
 also refuses device-code approvals for that app, which is why Linux desktops need their own
-app.
+app. Turning the rule on or off ends the app's open sessions and withdraws sign-ins in
+progress, as any change to an app's sign-in policy does; everyone signs in again.
 
 **Sessions.** A Mac sign-in creates a workstation session, as a device code does, with a
 refresh token that rotates on each use and slides by the offline window. Everything in

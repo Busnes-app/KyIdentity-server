@@ -292,3 +292,41 @@ func TestWorkstationMacSettings(t *testing.T) {
 		t.Fatal("settings changes not audited")
 	}
 }
+
+// Turning require-password on withdraws everything authorized under the old rule: an
+// unredeemed code, an approved device code and open workstation sessions.
+func TestRequirePasswordInvalidatesEarlierGrants(t *testing.T) {
+	f, done := newWSFixture(t)
+	defer done()
+	f.macSignIn = true
+	f.settings(true, 300, 604800)
+	u, cookie := f.assignedUser()
+	open := f.codeLogin(cookie)
+
+	verifier := uuid.NewString() + uuid.NewString()
+	req := httptest.NewRequest("GET", "/oauth/authorize?"+xcredsAuthorize(f.clientID, verifier).Encode(), nil)
+	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
+	rr := httptest.NewRecorder()
+	f.srv.httpServer.Handler.ServeHTTP(rr, req)
+	code := xcredsCode(t, rr.Header().Get("Location"))
+	device, userCode := f.start()
+	if rr := f.decide(cookie, userCode, true); rr.Code != http.StatusOK {
+		t.Fatalf("approve: %d %s", rr.Code, rr.Body.String())
+	}
+
+	f.requirePassword = true
+	f.settings(true, 300, 604800)
+
+	if status, body := f.exchange(code, verifier); status != 400 || body["error"] != "invalid_grant" {
+		t.Fatalf("code from before the rule: %d %v", status, body)
+	}
+	if status, body := f.poll(f.clientID, device); status == 200 {
+		t.Fatalf("approval from before the rule: %d %v", status, body)
+	}
+	if status, body := f.refresh(open["refresh_token"].(string)); status != 400 || body["error"] != "invalid_grant" {
+		t.Fatalf("session from before the rule: %d %v", status, body)
+	}
+	if f.workstationSessions(u.ID) != 0 {
+		t.Fatal("a workstation session survived the rule change")
+	}
+}

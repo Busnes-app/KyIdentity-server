@@ -243,12 +243,23 @@ func (s *Store) UpdateWorkstationApp(clientID string, set WorkstationSettings, a
 		redirects = xcredsRedirectsJSON
 	}
 	return s.auditedTx(audit, func(tx *sql.Tx) error {
+		var was bool
+		if err := tx.QueryRow(`SELECT require_password FROM workstation_apps WHERE client_id=?`, clientID).Scan(&was); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
 		res, err := tx.Exec(`UPDATE workstation_apps SET device_grant_enabled=?, device_code_ttl=?, offline_window=?, require_password=? WHERE client_id=?`, grant, ttl, window, set.RequireTypedSignIn, clientID)
 		if err != nil {
 			return err
 		}
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return ErrNotFound
+		}
+		if was != set.RequireTypedSignIn {
+			if err = invalidateAppGrantsTx(tx, clientID); err != nil {
+				return err
+			}
 		}
 		if _, err = tx.Exec(`UPDATE oauth_clients SET redirect_uris_json=? WHERE id=?`, redirects, clientID); err != nil {
 			return err
@@ -275,6 +286,28 @@ func (s *Store) UpdateWorkstationApp(clientID string, set WorkstationSettings, a
 		_, err = tx.Exec(`UPDATE refresh_tokens SET expires_at=? WHERE expires_at>? AND family_jti IN (SELECT jti FROM issued_tokens WHERE session_id IN (`+live+`))`, end, end, clientID)
 		return err
 	})
+}
+
+// invalidateAppGrantsTx is a policy edit's revocation for a workstation app: a new policy
+// revision (which every code, approval and refresh family binds), and nothing issued or
+// approved under the old rule survives. Changing it back revives nothing.
+func invalidateAppGrantsTx(tx *sql.Tx, clientID string) error {
+	now := time.Now().UTC()
+	for _, q := range []string{
+		`UPDATE app_registry SET auth_revision=auth_revision+1, revision=revision+1 WHERE client_id=?`,
+		`DELETE FROM authorization_interactions WHERE client_id=?`,
+		`DELETE FROM authorization_codes WHERE client_id=? AND used_at IS NULL`,
+		`UPDATE device_codes SET status='denied' WHERE client_id=? AND status IN ('pending','approved') AND redeemed_at IS NULL`,
+	} {
+		if _, err := tx.Exec(q, clientID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE issued_tokens SET revoked_at=? WHERE client_id=? AND revoked_at IS NULL`, now, clientID); err != nil {
+		return err
+	}
+	_, err := revokeSessionsTx(tx, now, `workstation_client_id=?`, clientID)
+	return err
 }
 
 // DeviceCode is one RFC 8628 grant. Only hashes of the codes are stored.
