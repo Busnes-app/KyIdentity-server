@@ -32,8 +32,26 @@ func TestTimedOutWriteBlocksLaterDelivery(t *testing.T) {
 	}))
 	defer remote.Close()
 	defer close(release)
+	// The write times out only once the remote holds it. A client timeout would also
+	// bound dial and TLS, which a loaded runner can spend before the handler is entered.
 	e.httpClient = remote.Client()
-	e.httpClient.Timeout = 50 * time.Millisecond
+	base := e.httpClient.Transport
+	var sent atomic.Int32
+	e.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if sent.Add(1) > 1 {
+			return base.RoundTrip(r) // a later write must reach the remote to be caught
+		}
+		ctx, timeout := context.WithCancel(r.Context())
+		defer timeout()
+		go func() {
+			select {
+			case <-entered:
+				timeout()
+			case <-ctx.Done():
+			}
+		}()
+		return base.RoundTrip(r.WithContext(ctx))
+	})
 	target, _, err := e.CreateSystem(&CreateSystemRequest{Name: "target", SystemType: "suite_webhook", CallbackURL: remote.URL}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -53,8 +71,8 @@ func TestTimedOutWriteBlocksLaterDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempts, err := s.ListSyncDeliveryAttempts(target.ID)
-	if err != nil || len(attempts) != 1 || calls.Load() != 1 {
-		t.Fatal("later write bypassed uncertain request", attempts, calls.Load(), err)
+	if err != nil || len(attempts) != 1 || calls.Load() != 1 || sent.Load() != 1 {
+		t.Fatal("later write bypassed uncertain request", attempts, calls.Load(), sent.Load(), err)
 	}
 	// Read-back of suite protocols is explicitly unavailable, never an unblock.
 	result, err := e.ReadBackSyncResource(context.Background(), target, "user.created", u.ID)
@@ -62,6 +80,10 @@ func TestTimedOutWriteBlocksLaterDelivery(t *testing.T) {
 		t.Fatal(result, err)
 	}
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestDeliveryOutcomeClassification(t *testing.T) {
 	for _, code := range []int{200, 201, 204, 202, 400, 408, 409, 429, 500, 503} {

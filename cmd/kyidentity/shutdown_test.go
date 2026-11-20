@@ -43,13 +43,15 @@ func TestShutdownBudgetFitsTheGracePeriods(t *testing.T) {
 }
 
 // blocker is a deposit or drill that runs until its context ends.
-type blocker struct{ entered chan struct{} }
+// ended carries the cause each run ended with.
+type blocker struct{ entered, ended chan error }
 
-func newBlocker() *blocker { return &blocker{entered: make(chan struct{}, 8)} }
+func newBlocker() *blocker { return &blocker{entered: make(chan error, 8), ended: make(chan error, 8)} }
 
 func (b *blocker) block(ctx context.Context) error {
-	b.entered <- struct{}{}
+	b.entered <- nil
 	<-ctx.Done()
+	b.ended <- context.Cause(ctx)
 	return context.Cause(ctx)
 }
 
