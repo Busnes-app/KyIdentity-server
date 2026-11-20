@@ -5,6 +5,8 @@
 #   scripts/e2e-win11-domain.sh        (E2E_WIN11_KEEP=1 keeps the VM, DC and work dir)
 #   E2E_WIN11_EVIDENCE=DIR             copies the screenshots and the log there
 # Needs docker, /dev/kvm and internet access to Microsoft's download servers.
+# Do not wrap it in flock /tmp/ky-integ-test.lock: it takes that lock for its builds and
+# would wait on itself.
 # Every docker object is kyws-win11-*; nothing else is touched.
 # Guest-side PowerShell is single-quoted on purpose.
 # shellcheck disable=SC2016

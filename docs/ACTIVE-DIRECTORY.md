@@ -217,6 +217,9 @@ object is `kyws-win11-*` and is removed at the end; `E2E_WIN11_KEEP=1` keeps the
 E2E_WIN11_EVIDENCE=docs/ui-active-directory-win11-<date> scripts/e2e-win11-domain.sh
 ```
 
+It takes `/tmp/ky-integ-test.lock` itself for its builds, so do not run it under that lock;
+`scripts/e2e-samba-ad-kyidentity.sh` does the same when it has to build the DC image.
+
 The script drives Windows through its own shared folder: a SYSTEM task runs the commands it
 drops there. A logon counts only from the Security log (4624 logon type 2 online, 11 cached;
 4625 with its status) and the console session, read after each reboot.
