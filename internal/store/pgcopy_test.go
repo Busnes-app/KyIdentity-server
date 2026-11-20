@@ -136,9 +136,16 @@ func copyFixture(t *testing.T, s *Store) {
 	if _, err := s.ImportHR(inbound.ID, HRInput{SourceUID: "employee-Ä", PreferredName: "round.trip", DisplayName: "Pending hire 🙂", Active: true, SourceVersion: 7}, nil); err != nil {
 		t.Fatal(err)
 	}
-	must(s.CreateADSystem(&PairedSystem{ID: "ad-1", Name: "Directory", SystemType: "active_directory", CallbackURL: "ldaps://dc.example.test", HMACSecretEncrypted: "sealed", Status: "active"},
-		&ADConnector{BindDN: "CN=sync,DC=example,DC=test", BaseDN: "OU=KyIdentity,DC=example,DC=test", CAPEM: "pem", AgentPublicKey: "x25519:key", AgentKeyMAC: "mac", PasswordTTLMinutes: 60}, nil))
-	must(s.SetADAgentToken("ad-1", "kyad_fixture", nil))
+	// Absent from a database built only up to an earlier migration (the tenancy upgrade test).
+	hasAD := s.db.QueryRow(`SELECT count(*) FROM ad_connectors`).Scan(new(int)) == nil
+	if hasAD {
+		must(s.CreateADSystem(&PairedSystem{ID: "ad-1", Name: "Directory", SystemType: "active_directory", CallbackURL: "ldaps://dc.example.test", HMACSecretEncrypted: "sealed", Status: "active"},
+			&ADConnector{BindDN: "CN=sync,DC=example,DC=test", BaseDN: "OU=KyIdentity,DC=example,DC=test", CAPEM: "pem", AgentPublicKey: "x25519:key", AgentKeyMAC: "mac", PasswordTTLMinutes: 60}, nil))
+		must(s.SetADAgentToken("ad-1", "kyad_fixture", nil))
+		if _, err := s.db.Exec(`INSERT INTO ad_passwords(system_id,user_id,seq,ciphertext,signature,expires_at,password_tag,delivered_seq,delivered_at) VALUES('ad-1',?,5,'ct','sig',?,'tag',4,?)`, user.ID, now.Add(time.Hour), now); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// The rest have no method that writes them outside a longer flow.
 	for _, q := range []struct {
 		sql  string
@@ -150,7 +157,6 @@ func copyFixture(t *testing.T, s *Store) {
 		{`INSERT INTO enrollment_deadlines(user_id,scope,due_at) SELECT ?, scope, 1700000000 FROM enrollment_policies LIMIT 1`, []any{user.ID}},
 		{`INSERT INTO scim_connector_tokens(id,connector_id,token_hash,scope,created_at) VALUES('sct-1',?,'th','write',?)`, []any{inbound.ID, now}},
 		{`INSERT INTO access_requests(id,app_id,user_id,reason,status,created_at,expires_at) VALUES('ar-1',?,?,'need it','pending',?,1900000000)`, []any{app, user.ID, now}},
-		{`INSERT INTO ad_passwords(system_id,user_id,seq,ciphertext,signature,expires_at,password_tag,delivered_seq,delivered_at) VALUES('ad-1',?,5,'ct','sig',?,'tag',4,?)`, []any{user.ID, now.Add(time.Hour), now}},
 		{`INSERT INTO installer_setup_resources(kind,name,setup_id,object_id,contract) VALUES('group','Ops','setup-1','obj-1','c')`, nil},
 		{`INSERT INTO workstation_apps(client_id,device_grant_enabled,device_code_ttl,offline_window) VALUES('client-2',TRUE,600,0)`, nil},
 		{`INSERT INTO device_codes(id,client_id,device_code_hash,user_code_hash,scope,ip_address,user_agent,interval_seconds,status,user_id,factor_method,expires_at,created_at) VALUES('dc-1','client-2','dch','uch','openid','203.0.113.9','ua',5,'approved',?,'totp',?,?)`, []any{user.ID, now.Add(time.Minute), now}},
@@ -160,6 +166,7 @@ func copyFixture(t *testing.T, s *Store) {
 		}
 	}
 	seedEphemeral(t, s, user.ID, "client-1")
+	tenancyFixture(t, s, app)
 }
 
 // openSQLiteForTest opens a SQLite file read-only, whatever backend the suite runs on.

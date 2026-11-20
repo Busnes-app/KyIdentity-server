@@ -135,6 +135,9 @@ func main() {
 	if err == nil {
 		err = checkReplicaConfig(cfg, dbStore, keys)
 	}
+	if err == nil {
+		err = checkTenancy(cfg, dbStore)
+	}
 	if err != nil {
 		log.Fatalf("Refusing to start: %v", err)
 	}

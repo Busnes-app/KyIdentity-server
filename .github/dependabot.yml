@@ -46,7 +46,9 @@ updates:
       prefix: "chore(ci)"
 
   - package-ecosystem: docker
-    directory: /
+    directories:
+      - /
+      - /scripts/e2e-himmelblau
     schedule:
       interval: weekly
     cooldown:

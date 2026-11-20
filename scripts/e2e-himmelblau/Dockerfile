@@ -2,7 +2,7 @@
 # Stable repositories need a subscription token; nightly is built from Himmelblau main.
 # No systemd: rootless containers cannot give the units the namespaces they ask for, so the
 # script runs himmelblaud directly as its own unprivileged user.
-FROM debian:13
+FROM debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gpg pamtester procps \
  && curl -fsSL https://packages.himmelblau-idm.org/himmelblau.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/himmelblau.gpg \
  && echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/himmelblau.gpg] https://packages.himmelblau-idm.org/nightly/latest/deb/debian13 ./" > /etc/apt/sources.list.d/himmelblau.list \

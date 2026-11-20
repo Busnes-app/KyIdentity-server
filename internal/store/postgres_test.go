@@ -166,7 +166,8 @@ func TestPostgresErrorsNeverRepeatThePassword(t *testing.T) {
 // The two schemas enforce the same uniqueness and the same foreign keys: a unique index or
 // a cascade present on one backend only would change who can sign in or what a delete removes.
 // Primary keys are left out (SQLite lists none for a rowid key), and so is the identity
-// column standing in for SQLite's rowid.
+// column standing in for SQLite's rowid. The tenancy keys SQLite cannot have (D2) are
+// named in pgOnlyKeys and sqliteOnlyKeys.
 func TestBackendsHaveTheSameUniqueIndexesAndForeignKeys(t *testing.T) {
 	requirePostgres(t)
 	lite, err := newSQLite(filepath.Join(t.TempDir(), "sqlite.db"))
@@ -195,6 +196,12 @@ func TestBackendsHaveTheSameUniqueIndexesAndForeignKeys(t *testing.T) {
 		want, got := columnSets(t, lite.db, q[0]), columnSets(t, pg.db, q[1])
 		if len(want) < 10 {
 			t.Fatalf("%s: only %d SQLite tables read", what, len(want))
+		}
+		for table, keys := range pgOnlyKeys[what] {
+			got[table] = withoutKeys(t, what, table, got[table], keys)
+		}
+		for table, keys := range sqliteOnlyKeys[what] {
+			want[table] = withoutKeys(t, what, table, want[table], keys)
 		}
 		for table := range got {
 			if _, ok := want[table]; !ok {
