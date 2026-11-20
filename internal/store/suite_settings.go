@@ -88,8 +88,10 @@ func truncateRunes(s string, n int) string {
 }
 
 // SuiteEmailDomains reads the suite's mail domains; none set is an empty list.
-func (s *Store) SuiteEmailDomains() ([]string, error) {
-	raw, err := s.GetSetting(SuiteEmailDomainsSetting)
+func (s *Store) SuiteEmailDomains() ([]string, error) { return suiteEmailDomains(s) }
+
+func suiteEmailDomains(st Settings) ([]string, error) {
+	raw, err := st.GetSetting(SuiteEmailDomainsSetting)
 	if errors.Is(err, ErrNotFound) {
 		return []string{}, nil
 	}
@@ -100,41 +102,81 @@ func (s *Store) SuiteEmailDomains() ([]string, error) {
 	return out, json.Unmarshal([]byte(raw), &out)
 }
 
-// SetSuiteEmailDomains validates and stores the list (empty clears it) with its audit row,
-// and returns what was stored.
-func (s *Store) SetSuiteEmailDomains(domains []string, audit *AuditEvent) ([]string, error) {
+// errSettingUnchanged rolls back an edit that would store the value already there, so it
+// writes no audit row.
+var errSettingUnchanged = errors.New("setting unchanged")
+
+// setSettingAuditDetails records the old and new values, read under the edit's writer lock
+// so concurrent saves each record the value they actually replaced.
+func setSettingAuditDetails(audit *AuditEvent, old, new any) {
+	if audit != nil {
+		b, _ := json.Marshal(map[string]any{"old": old, "new": new}) // strings and string slices
+		audit.DetailsJSON = string(b)
+	}
+}
+
+// SetSuiteEmailDomains validates and stores the list (empty clears it) with its audit row.
+// It returns what was stored and whether it changed; an unchanged save writes nothing.
+func (s *Store) SetSuiteEmailDomains(domains []string, audit *AuditEvent) ([]string, bool, error) {
 	clean, err := NormalizeEmailDomains(domains)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	raw, _ := json.Marshal(clean)
-	return clean, s.EditSettings(audit, func(st Settings) error {
+	err = s.EditSettings(audit, func(st Settings) error {
+		old, err := suiteEmailDomains(st)
+		if err != nil {
+			return err
+		}
+		if slices.Equal(old, clean) {
+			return errSettingUnchanged
+		}
+		setSettingAuditDetails(audit, old, clean)
 		if len(clean) == 0 {
 			return st.DeleteSetting(SuiteEmailDomainsSetting)
 		}
 		return st.SetSetting(SuiteEmailDomainsSetting, string(raw))
 	})
+	if errors.Is(err, errSettingUnchanged) {
+		return clean, false, nil
+	}
+	return clean, err == nil, err
 }
 
 // SuiteDefaultTheme reads the suite default theme; unset (or a value a later catalog
 // dropped) is "system".
-func (s *Store) SuiteDefaultTheme() (string, error) {
-	id, err := s.GetSetting(SuiteDefaultThemeSetting)
+func (s *Store) SuiteDefaultTheme() (string, error) { return suiteDefaultTheme(s) }
+
+func suiteDefaultTheme(st Settings) (string, error) {
+	id, err := st.GetSetting(SuiteDefaultThemeSetting)
 	if errors.Is(err, ErrNotFound) || err == nil && !ValidSuiteTheme(id) {
 		return "system", nil
 	}
 	return id, err
 }
 
-// SetSuiteDefaultTheme stores a ky-ui choice ID with its audit row; "system" clears it.
-func (s *Store) SetSuiteDefaultTheme(id string, audit *AuditEvent) error {
+// SetSuiteDefaultTheme stores a ky-ui choice ID with its audit row; "system" clears it. It
+// reports whether the value changed; an unchanged save writes nothing.
+func (s *Store) SetSuiteDefaultTheme(id string, audit *AuditEvent) (bool, error) {
 	if !ValidSuiteTheme(id) {
-		return InputError("Unknown theme")
+		return false, InputError("Unknown theme")
 	}
-	return s.EditSettings(audit, func(st Settings) error {
+	err := s.EditSettings(audit, func(st Settings) error {
+		old, err := suiteDefaultTheme(st)
+		if err != nil {
+			return err
+		}
+		if old == id {
+			return errSettingUnchanged
+		}
+		setSettingAuditDetails(audit, old, id)
 		if id == "system" {
 			return st.DeleteSetting(SuiteDefaultThemeSetting)
 		}
 		return st.SetSetting(SuiteDefaultThemeSetting, id)
 	})
+	if errors.Is(err, errSettingUnchanged) {
+		return false, nil
+	}
+	return err == nil, err
 }

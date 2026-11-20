@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"slices"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
@@ -82,20 +81,13 @@ func (h *SuiteSettingsHandler) PutEmailDomains(w http.ResponseWriter, r *http.Re
 		writeInputError(w, "invalid_request", err)
 		return
 	}
-	old, err := h.store.SuiteEmailDomains()
-	if err != nil {
-		log.Printf("suite domains read failed: %v", err)
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
+	// The store reads the old value and skips an unchanged save under its writer lock.
+	actor := GetUserFromContext(r.Context())
+	event := h.audit.Prepare("admin.suite_email_domains_changed", actor.ID, actor.Username, "suite_settings", "email_domains", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if _, changed, err := h.store.SetSuiteEmailDomains(clean, event.Row); err != nil {
+		writeInputError(w, "invalid_request", err)
 		return
-	}
-	if !slices.Equal(old, clean) {
-		actor := GetUserFromContext(r.Context())
-		event := h.audit.Prepare("admin.suite_email_domains_changed", actor.ID, actor.Username, "suite_settings", "email_domains", h.middleware.ClientIP(r), r.UserAgent(), "success",
-			map[string]any{"old": old, "new": clean})
-		if _, err := h.store.SetSuiteEmailDomains(clean, event.Row); err != nil {
-			writeInputError(w, "invalid_request", err)
-			return
-		}
+	} else if changed {
 		event.Committed()
 	}
 	h.Get(w, r)
@@ -116,20 +108,12 @@ func (h *SuiteSettingsHandler) PutDefaultTheme(w http.ResponseWriter, r *http.Re
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "Unknown theme")
 		return
 	}
-	old, err := h.store.SuiteDefaultTheme()
-	if err != nil {
-		log.Printf("suite theme read failed: %v", err)
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
+	actor := GetUserFromContext(r.Context())
+	event := h.audit.Prepare("admin.suite_default_theme_changed", actor.ID, actor.Username, "suite_settings", "default_theme", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
+	if changed, err := h.store.SetSuiteDefaultTheme(*req.Theme, event.Row); err != nil {
+		writeInputError(w, "invalid_request", err)
 		return
-	}
-	if old != *req.Theme {
-		actor := GetUserFromContext(r.Context())
-		event := h.audit.Prepare("admin.suite_default_theme_changed", actor.ID, actor.Username, "suite_settings", "default_theme", h.middleware.ClientIP(r), r.UserAgent(), "success",
-			map[string]any{"old": old, "new": *req.Theme})
-		if err := h.store.SetSuiteDefaultTheme(*req.Theme, event.Row); err != nil {
-			writeInputError(w, "invalid_request", err)
-			return
-		}
+	} else if changed {
 		event.Committed()
 	}
 	h.Get(w, r)
