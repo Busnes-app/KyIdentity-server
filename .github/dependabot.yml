@@ -49,6 +49,7 @@ updates:
     directories:
       - /
       - /scripts/e2e-himmelblau
+      - /scripts/e2e-samba-ad
     schedule:
       interval: weekly
     cooldown:
