@@ -22,7 +22,7 @@ func TestSetupCommandProtectsSecretsAndChecksRealDatabase(t *testing.T) {
 func testSetupProtectedConnector(t *testing.T, protocol string) {
 	dir := t.TempDir()
 	db := filepath.Join(dir, "identity.db")
-	s, err := store.New(db)
+	s, err := store.NewTest(db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func testSetupProtectedConnector(t *testing.T, protocol string) {
 			}
 		}
 	}
-	s, err = store.New(db)
+	s, err = store.NewTest(db)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -93,7 +93,7 @@ func setupTestSyncEngine(t *testing.T) (*Engine, *store.Store, *store.User, func
 	}
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	dbStore, err := store.New(dbPath)
+	dbStore, err := store.NewTest(dbPath)
 	if err != nil {
 		t.Fatalf("store.New failed: %v", err)
 	}

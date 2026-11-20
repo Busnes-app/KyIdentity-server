@@ -19,7 +19,7 @@ func TestRestoreHelpUsesStableServiceIdentity(t *testing.T) {
 
 func testStore(t *testing.T) *store.Store {
 	t.Helper()
-	db, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.NewTest(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

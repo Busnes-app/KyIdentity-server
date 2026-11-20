@@ -10,7 +10,7 @@ import (
 // BenchmarkMutationReconcile times one access mutation, whose transaction reconciles
 // provisioning for the whole directory, against 3,000 held users.
 func BenchmarkMutationReconcile(b *testing.B) {
-	s, err := New(filepath.Join(b.TempDir(), "bench.db"))
+	s, err := NewTest(filepath.Join(b.TempDir(), "bench.db"))
 	if err != nil {
 		b.Fatal(err)
 	}

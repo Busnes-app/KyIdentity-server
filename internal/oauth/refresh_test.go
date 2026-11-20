@@ -32,7 +32,7 @@ var refreshPolicy = store.AppAuthenticationPolicy{Mode: "reuse", Factor: "passwo
 func newRefreshFixture(t *testing.T) *refreshFixture {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := store.New(filepath.Join(dir, "test.db"))
+	db, err := store.NewTest(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

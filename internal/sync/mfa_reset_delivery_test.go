@@ -150,7 +150,7 @@ func TestSignedMFAResetDelivery(t *testing.T) {
 				if err = s.Close(); err != nil {
 					t.Fatal(err)
 				}
-				s, err = store.New(path)
+				s, err = store.NewTest(path)
 				if err != nil {
 					t.Fatal(err)
 				}

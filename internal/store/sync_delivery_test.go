@@ -9,7 +9,7 @@ import (
 
 func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "delivery.db")
-	s, err := New(path)
+	s, err := NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestSyncDeliveryOrderingAndCrashRecovery(t *testing.T) {
 	}
 	// Expiration and process restart do not mean a remote write has stopped.
 	s.Close()
-	s, err = New(path)
+	s, err = NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestSyncDeliveryBackoffHoldsLaterEvents(t *testing.T) {
 
 func TestDeletedSystemEventsAreRemovedAndNeverRevived(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "orphans.db")
-	s, err := New(path)
+	s, err := NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestDeletedSystemEventsAreRemovedAndNeverRevived(t *testing.T) {
 	// ...and is removed at the next start, idempotently.
 	for range 2 {
 		s.Close()
-		if s, err = New(path); err != nil {
+		if s, err = NewTest(path); err != nil {
 			t.Fatal(err)
 		}
 		if count("account_sync_events", "ghost") != 0 || count("account_sync_events", "kept") != 2 {

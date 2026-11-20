@@ -14,7 +14,7 @@ import (
 // captureLogger returns a logger on a real store whose console copies land in buffers.
 func captureLogger(t *testing.T) (*Logger, *store.Store, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
-	s, err := store.New(filepath.Join(t.TempDir(), "audit.db"))
+	s, err := store.NewTest(filepath.Join(t.TempDir(), "audit.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

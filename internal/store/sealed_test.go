@@ -13,7 +13,7 @@ import (
 // old backup capsule does: TOTP for u1, connector sys1, and mail settings.
 func legacyStore(t *testing.T, key []byte) *Store {
 	t.Helper()
-	s, err := New(filepath.Join(t.TempDir(), "sealed.db"))
+	s, err := NewTest(filepath.Join(t.TempDir(), "sealed.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,7 +10,7 @@ import (
 
 func TestHousekeepingPurgesExpiredStepUpGrants(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "identity.db")
-	s, err := store.New(path)
+	s, err := store.NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}

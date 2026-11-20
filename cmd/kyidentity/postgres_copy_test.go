@@ -67,7 +67,7 @@ func dirNames(t *testing.T, dir string) []string {
 func TestMigrateToPostgres(t *testing.T) {
 	pgTest := onSQLite(t)
 	cfg, _ := commandInstance(t, false)
-	lite, err := store.New(cfg.DBPath)
+	lite, err := store.NewTest(cfg.DBPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestRestoreIntoPostgres(t *testing.T) {
 				t.Setenv("KYIDENTITY_TEST_DATABASE_URL", pgTest)
 			}
 			cfg, priv := commandInstance(t, true)
-			s, err := store.New(cfg.DBPath)
+			s, err := store.NewTest(cfg.DBPath)
 			if err != nil {
 				t.Fatal(err)
 			}

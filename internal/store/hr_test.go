@@ -9,7 +9,7 @@ import (
 
 func hrFixture(t *testing.T) (*Store, string) {
 	t.Helper()
-	s, err := New(filepath.Join(t.TempDir(), "hr.db"))
+	s, err := NewTest(filepath.Join(t.TempDir(), "hr.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestHRRestartAndWritebackRetry(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := New(filename)
+	reopened, err := NewTest(filename)
 	if err != nil {
 		t.Fatal(err)
 	}

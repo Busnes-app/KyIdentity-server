@@ -10,7 +10,7 @@ import (
 
 func TestInstallerPreparationOwnershipAndAtomicAudit(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "identity.db")
-	s, err := New(dbPath)
+	s, err := NewTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

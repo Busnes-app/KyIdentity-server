@@ -15,7 +15,7 @@ import (
 func restoredDataDir(t *testing.T) (string, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := store.New(filepath.Join(dir, "kysignon.db"))
+	s, err := store.NewTest(filepath.Join(dir, "kysignon.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

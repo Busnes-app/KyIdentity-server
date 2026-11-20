@@ -19,7 +19,7 @@ func replicaLimiters(t *testing.T, n int) []*MiddlewareManager {
 	path := filepath.Join(t.TempDir(), "shared.db")
 	out := make([]*MiddlewareManager, n)
 	for i := range out {
-		s, err := store.New(path)
+		s, err := store.NewTest(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +80,7 @@ func TestUnsharedLimiterNeverUsesTheDatabase(t *testing.T) {
 // A limiter that cannot reach its database refuses; it never waves requests through.
 func TestSharedLimiterFailsClosed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.db")
-	s, err := store.New(path)
+	s, err := store.NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}

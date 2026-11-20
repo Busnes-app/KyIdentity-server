@@ -20,7 +20,7 @@ import (
 // ID and its app ID.
 func syncTarget(t *testing.T, dbPath, callback string) (*store.Store, *sync.Engine, string, string) {
 	t.Helper()
-	s, err := store.New(dbPath)
+	s, err := store.NewTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

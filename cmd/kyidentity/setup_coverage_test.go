@@ -356,7 +356,7 @@ func TestSetupDatabasePathResolution(t *testing.T) {
 	if got := setupDatabasePath(""); got != legacy {
 		t.Fatalf("legacy database not reused: %q", got)
 	}
-	s, err := store.New(filepath.Join(dir, "kyidentity.db"))
+	s, err := store.NewTest(filepath.Join(dir, "kyidentity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

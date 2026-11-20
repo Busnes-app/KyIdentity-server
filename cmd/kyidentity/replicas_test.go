@@ -20,7 +20,7 @@ func handles(t *testing.T, path string, n int) []*store.Store {
 	t.Helper()
 	out := make([]*store.Store, n)
 	for i := range out {
-		s, err := store.New(path)
+		s, err := store.NewTest(path)
 		if err != nil {
 			t.Fatal(err)
 		}

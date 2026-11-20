@@ -19,7 +19,7 @@ func TestResyncSystem(t *testing.T) {
 	t.Setenv("KYIDENTITY_DB_PATH", "")
 	resyncPoll = 5 * time.Millisecond
 	dbPath := filepath.Join(dir, "kyidentity.db")
-	s, err := store.New(dbPath)
+	s, err := store.NewTest(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

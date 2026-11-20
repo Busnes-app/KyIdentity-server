@@ -11,7 +11,7 @@ import (
 func TestAuthenticationEvidenceMigration(t *testing.T) {
 	SkipOnPostgres(t, "exercises a SQLite legacy migration (pre-version schema, pragma_table_info or sqlite_master)")
 	path := filepath.Join(t.TempDir(), "legacy.db")
-	s, err := New(path)
+	s, err := NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestAuthenticationEvidenceMigration(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = New(path)
+	s, err = NewTest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
