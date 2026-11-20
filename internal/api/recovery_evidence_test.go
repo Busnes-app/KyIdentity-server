@@ -27,7 +27,7 @@ func TestRecoveryEvidenceAdminExportAndSignature(t *testing.T) {
 	if err != nil || len(apps) != 1 {
 		t.Fatal("app", apps, err)
 	}
-	if err := db.SetAppAssignment(apps[0].ID, "users", user.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetAppAssignment(apps[0].ID, "users", user.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	path := "/api/admin/systems/" + sys.ID + "/recovery-evidence"

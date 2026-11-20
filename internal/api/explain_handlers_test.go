@@ -34,7 +34,7 @@ func TestExplanationsFollowViewerPermissions(t *testing.T) {
 	if err := db.DefaultOrg().CreateGroup(&store.Group{ID: "secret", Name: "Secret Project"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetAppAssignment(appA[0].ID, "groups", "secret", true, nil); err != nil {
+	if err := db.DefaultOrg().SetAppAssignment(appA[0].ID, "groups", "secret", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.DefaultOrg().SetGroupMembership("secret", u.ID, true, nil); err != nil {

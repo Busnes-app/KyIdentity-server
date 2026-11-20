@@ -53,7 +53,7 @@ func BenchmarkMutationReconcile(b *testing.B) {
 	runs := reconcileRuns.Load()
 	b.ResetTimer()
 	for i := range b.N {
-		if err := s.SetAppAssignment(app, "users", "u0", i%2 == 0, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, "users", "u0", i%2 == 0, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

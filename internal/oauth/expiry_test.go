@@ -19,7 +19,7 @@ func TestTokensEndWithTheAccessTheyCarry(t *testing.T) {
 		t.Fatal(err)
 	}
 	until := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
-	if err := db.SetAppAssignmentUntil(app.ID, "users", user.ID, &until, nil); err != nil {
+	if err := db.DefaultOrg().SetAppAssignmentUntil(app.ID, "users", user.ID, &until, nil); err != nil {
 		t.Fatal(err)
 	}
 	verifier, challenge := pkcePair()
@@ -42,7 +42,7 @@ func TestTokensEndWithTheAccessTheyCarry(t *testing.T) {
 		t.Fatalf("id token exp = %v, want %d", claims["exp"], until.Unix())
 	}
 	// An unbounded grant keeps the default lifetime.
-	if err := db.SetAppAssignment(app.ID, "users", user.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetAppAssignment(app.ID, "users", user.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	verifier, challenge = pkcePair()

@@ -141,7 +141,7 @@ func suiteFixture(t *testing.T) (*Engine, *store.Store, *store.User, *store.Pair
 		t.Fatal(err)
 	}
 	u := member(t, s)
-	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	return e, s, u, sys, recv
@@ -182,7 +182,7 @@ func TestRemovalRetriesUntilReceiverReturns(t *testing.T) {
 				t.Fatal(err)
 			}
 			u := member(t, s)
-			if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+			if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 			dispatch(t, e)
@@ -327,7 +327,7 @@ func TestHeldWriteHoldsRemoval(t *testing.T) {
 				t.Fatal(err)
 			}
 			u := member(t, s)
-			if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+			if err := s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 			dispatch(t, e)

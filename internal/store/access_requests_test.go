@@ -61,13 +61,13 @@ func TestAccessRequestsExposeOnlyRequestableApps(t *testing.T) {
 	if apps, _ = s.RequestableApps(u.ID); !apps[0].Pending {
 		t.Fatal("pending request not reflected")
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if apps, _ = s.RequestableApps(u.ID); len(apps) != 0 {
 		t.Fatal("app still offered to a user who has it")
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The cap counts pending requests across apps.
@@ -112,17 +112,17 @@ func TestAccessRequestDecisionsAreRecheckedUnderTheLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DecideAccessRequest(req.ID, u.ID, true, "", nil); !errors.Is(err, ErrSelfApproval) {
+	if _, err := s.DefaultOrg().DecideAccessRequest(req.ID, u.ID, true, "", nil); !errors.Is(err, ErrSelfApproval) {
 		t.Fatalf("self-approval: %v", err)
 	}
-	if _, err := s.DecideAccessRequest(req.ID, other.ID, true, "", nil); !errors.Is(err, ErrCannotDecide) {
+	if _, err := s.DefaultOrg().DecideAccessRequest(req.ID, other.ID, true, "", nil); !errors.Is(err, ErrCannotDecide) {
 		t.Fatalf("bystander decided: %v", err)
 	}
 	// Ownership withdrawn between form and submit: the stale form grants nothing.
 	if err := s.DefaultOrg().SetDelegations(owner.ID, Delegations{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DecideAccessRequest(req.ID, owner.ID, true, "", nil); !errors.Is(err, ErrCannotDecide) {
+	if _, err := s.DefaultOrg().DecideAccessRequest(req.ID, owner.ID, true, "", nil); !errors.Is(err, ErrCannotDecide) {
 		t.Fatalf("former owner decided: %v", err)
 	}
 	if err := s.DefaultOrg().SetDelegations(owner.ID, Delegations{AppOwner: []string{a.ID}}, nil); err != nil {
@@ -133,14 +133,14 @@ func TestAccessRequestDecisionsAreRecheckedUnderTheLock(t *testing.T) {
 	if err := s.SetAppRequestable(a.ID, false, a.Revision, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DecideAccessRequest(req.ID, owner.ID, true, "", nil); !errors.Is(err, ErrAppNotRequestable) {
+	if _, err := s.DefaultOrg().DecideAccessRequest(req.ID, owner.ID, true, "", nil); !errors.Is(err, ErrAppNotRequestable) {
 		t.Fatalf("closed app approved: %v", err)
 	}
 	a, _ = s.GetAppRecord(a.ID)
 	if err := s.SetAppRequestable(a.ID, true, a.Revision, nil); err != nil {
 		t.Fatal(err)
 	}
-	decided, err := s.DecideAccessRequest(req.ID, owner.ID, true, "ok for the quarter", nil)
+	decided, err := s.DefaultOrg().DecideAccessRequest(req.ID, owner.ID, true, "ok for the quarter", nil)
 	if err != nil || decided.Status != "approved" || decided.DecidedBy != owner.ID {
 		t.Fatalf("approval = %+v %v", decided, err)
 	}
@@ -151,18 +151,18 @@ func TestAccessRequestDecisionsAreRecheckedUnderTheLock(t *testing.T) {
 	if end == nil || end.Sub(time.Now().UTC()) > time.Hour || end.Sub(time.Now().UTC()) < 59*time.Minute {
 		t.Fatalf("approval expiry = %v, want about an hour", end)
 	}
-	page, _ := s.ListAppAccessUsers(a.ID, u.Username, "", nil, 10, 0)
+	page, _ := s.DefaultOrg().ListAppAccessUsers(a.ID, u.Username, "", nil, 10, 0)
 	if len(page.Users) != 1 || !page.Users[0].Direct || page.Users[0].DirectExpiresAt == nil {
 		t.Fatalf("approval is not an ordinary bounded assignment: %+v", page.Users)
 	}
-	if _, err := s.DecideAccessRequest(req.ID, admin.ID, true, "", nil); !errors.Is(err, ErrRequestNotPending) {
+	if _, err := s.DefaultOrg().DecideAccessRequest(req.ID, admin.ID, true, "", nil); !errors.Is(err, ErrRequestNotPending) {
 		t.Fatalf("second decision: %v", err)
 	}
-	if _, err := s.DecideAccessRequest(req.ID, admin.ID, false, "", nil); !errors.Is(err, ErrRequestNotPending) {
+	if _, err := s.DefaultOrg().DecideAccessRequest(req.ID, admin.ID, false, "", nil); !errors.Is(err, ErrRequestNotPending) {
 		t.Fatalf("denial after approval: %v", err)
 	}
 	// A cancelled request cannot be approved afterwards; an administrator may deny any.
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	second, err := s.CreateAccessRequest(u.ID, a.ID, "again", 0, nil)
@@ -172,25 +172,25 @@ func TestAccessRequestDecisionsAreRecheckedUnderTheLock(t *testing.T) {
 	if err := s.CancelAccessRequest(second.ID, u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DecideAccessRequest(second.ID, admin.ID, true, "", nil); !errors.Is(err, ErrRequestNotPending) {
+	if _, err := s.DefaultOrg().DecideAccessRequest(second.ID, admin.ID, true, "", nil); !errors.Is(err, ErrRequestNotPending) {
 		t.Fatalf("cancelled request approved: %v", err)
 	}
 	if allowed, _ := s.ClientAccessAllowed(u.ID, "client"); allowed {
 		t.Fatal("cancelled request granted access")
 	}
 	third, _ := s.CreateAccessRequest(u.ID, a.ID, "third", 0, nil)
-	if d, err := s.DecideAccessRequest(third.ID, admin.ID, false, "no", nil); err != nil || d.Status != "denied" {
+	if d, err := s.DefaultOrg().DecideAccessRequest(third.ID, admin.ID, false, "no", nil); err != nil || d.Status != "denied" {
 		t.Fatalf("admin denial = %+v %v", d, err)
 	}
 	// Inbox scoping: the owner sees requests for their app; a bystander sees none.
-	inbox, total, _ := s.ListAccessRequests(AccessRequestFilter{ActorID: owner.ID, Limit: 10})
+	inbox, total, _ := s.DefaultOrg().ListAccessRequests(AccessRequestFilter{ActorID: owner.ID, Limit: 10})
 	if total != 3 || len(inbox) != 3 {
 		t.Fatalf("owner inbox = %d", total)
 	}
-	if _, total, _ = s.ListAccessRequests(AccessRequestFilter{ActorID: other.ID, Limit: 10}); total != 0 {
+	if _, total, _ = s.DefaultOrg().ListAccessRequests(AccessRequestFilter{ActorID: other.ID, Limit: 10}); total != 0 {
 		t.Fatalf("bystander inbox = %d", total)
 	}
-	if mine, total, _ := s.ListAccessRequests(AccessRequestFilter{UserID: u.ID, Status: "denied", Limit: 10}); total != 1 || mine[0].ID != third.ID {
+	if mine, total, _ := s.DefaultOrg().ListAccessRequests(AccessRequestFilter{UserID: u.ID, Status: "denied", Limit: 10}); total != 1 || mine[0].ID != third.ID {
 		t.Fatalf("own listing = %+v %d", mine, total)
 	}
 	// An unanswered request expires with the other due work and can no longer be approved.
@@ -198,13 +198,13 @@ func TestAccessRequestDecisionsAreRecheckedUnderTheLock(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE access_requests SET expires_at=unixepoch()-1 WHERE id=?`, fourth.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, total, _ := s.ListAccessRequests(AccessRequestFilter{ActorID: admin.ID, Status: "pending", Limit: 10}); total != 0 {
+	if _, total, _ := s.DefaultOrg().ListAccessRequests(AccessRequestFilter{ActorID: admin.ID, Status: "pending", Limit: 10}); total != 0 {
 		t.Fatalf("expired request still listed as pending: %d", total)
 	}
-	if _, err := s.RunDueExpiries(time.Now().UTC()); err != nil {
+	if _, err := s.Platform().RunDueExpiries(time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DecideAccessRequest(fourth.ID, admin.ID, true, "", nil); !errors.Is(err, ErrRequestNotPending) {
+	if _, err := s.DefaultOrg().DecideAccessRequest(fourth.ID, admin.ID, true, "", nil); !errors.Is(err, ErrRequestNotPending) {
 		t.Fatalf("expired request approved: %v", err)
 	}
 }
@@ -220,10 +220,10 @@ func TestApprovalNeverShortensADirectGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DecideAccessRequest(req.ID, admin.ID, true, "", nil); err != nil {
+	if _, err := s.DefaultOrg().DecideAccessRequest(req.ID, admin.ID, true, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if end, err := s.AccessEndsAt(u.ID, "client"); err != nil || end != nil {

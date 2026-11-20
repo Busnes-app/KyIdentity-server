@@ -192,7 +192,7 @@ func TestUpgradeFromPreFeatureDatabase(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT access_mode FROM app_registry WHERE client_id='c-wiki'`).Scan(&mode); err != nil || mode != "all_active_users" {
 		t.Fatalf("legacy access mode: %q %v", mode, err)
 	}
-	explained, err := s.ExplainClientAccess("u-staff", "c-wiki")
+	explained, err := s.DefaultOrg().ExplainClientAccess("u-staff", "c-wiki")
 	if err != nil || !explained.Allowed {
 		t.Fatalf("legacy user lost access across the upgrade: %+v %v", explained, err)
 	}

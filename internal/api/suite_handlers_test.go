@@ -88,7 +88,7 @@ func assignApp(t *testing.T, db *store.Store, id, userID string) {
 	}
 	for _, a := range recs {
 		if a.ClientID == id {
-			if err := db.SetAppAssignment(a.ID, "users", userID, true, nil); err != nil {
+			if err := db.DefaultOrg().SetAppAssignment(a.ID, "users", userID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 			return

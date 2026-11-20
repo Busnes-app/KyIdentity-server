@@ -440,7 +440,7 @@ func (h *OAuthHandler) denyAccess(w http.ResponseWriter, r *http.Request, user *
 	details := map[string]any{"reason": "app_access_denied"}
 	// Relying parties may show only this text, so it names the next step.
 	description := "You do not have access to this application. Ask an administrator for access"
-	if e, err := h.store.ExplainClientAccess(user.ID, clientID); err == nil {
+	if e, err := h.store.Org(user.Org()).ExplainClientAccess(user.ID, clientID); err == nil {
 		details = map[string]any{"reason": e.Reason, "revision": e.Revision, "authenticationRevision": e.AuthRevision, "roleRevision": e.RoleRevision}
 		if e.Requestable {
 			description = "You do not have access to this application. You can request it from your KyIdentity dashboard"

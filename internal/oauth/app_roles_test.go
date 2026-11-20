@@ -69,7 +69,7 @@ func TestIDTokenCarriesOnlyThisAppsRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetAppRoleAssignment(billing.ID, role.ID, "groups", "finance", true, nil); err != nil {
+	if err := db.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "groups", "finance", true, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -136,7 +136,7 @@ func TestRoleChangesBlockExchangeAndOversizedClaimsAreRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := testUser(t, db)
-	if err := db.SetAppRoleAssignment(billing.ID, role.ID, "users", other.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetAppRoleAssignment(billing.ID, role.ID, "users", other.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.ExchangeAuthorizationCode(code, "billing", "", "https://app/cb", verifier); err == nil {
@@ -148,7 +148,7 @@ func TestRoleChangesBlockExchangeAndOversizedClaimsAreRefused(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := db.SetAppRoleAssignment(billing.ID, r.ID, "users", user.ID, true, nil); err != nil {
+		if err := db.DefaultOrg().SetAppRoleAssignment(billing.ID, r.ID, "users", user.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

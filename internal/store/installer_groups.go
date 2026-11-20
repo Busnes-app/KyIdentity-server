@@ -91,7 +91,7 @@ func configureInstallerAppGroups(tx *sql.Tx, c InstallerClient, appID string, gr
 				return errors.New("owned app group assignment drift")
 			}
 		} else {
-			if _, err := applyAppAssignmentTx(tx, appID, "groups", id, true, nil); err != nil {
+			if _, err := applyAppAssignmentTx(tx, DefaultOrgID, appID, "groups", id, true, nil); err != nil {
 				return err
 			}
 			if err := audit("group_assignment", c.ID+"/"+name, id); err != nil {

@@ -91,7 +91,7 @@ func TestPendingUsersAreNotProvisionedUntilActivation(t *testing.T) {
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	u := pendingUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 0 {

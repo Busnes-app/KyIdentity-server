@@ -134,13 +134,13 @@ func TestReconcileDriftRepairsManagedAccountsOnly(t *testing.T) {
 	app := provisioningFixture(t, s, "target")
 	wanted, orphan, stale := createTestUserNamed(t, s, "wanted"), createTestUserNamed(t, s, "orphan"), createTestUserNamed(t, s, "stale")
 	for _, u := range []*User{wanted, stale, orphan} {
-		if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
 	deliverAll(t, s)
 	// The connector held orphan's account; access was revoked, but the target kept it active.
-	if err := s.SetAppAssignment(app, "users", orphan.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", orphan.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
@@ -217,7 +217,7 @@ func TestReconcilePreviewWritesNothingAndManagedIsConnectorScoped(t *testing.T) 
 	app := provisioningFixture(t, s, "target")
 	provisioningFixture(t, s, "other")
 	stranger, held := createTestUserNamed(t, s, "stranger"), createTestUserNamed(t, s, "held")
-	if err := s.SetAppAssignment(app, "users", held.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", held.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
@@ -276,11 +276,11 @@ func TestReconcileReportBoundsRemoteText(t *testing.T) {
 	huge := strings.Repeat("x", 200000)
 	for i := 0; i < 5; i++ {
 		u := createTestUser(t, s)
-		if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 		deliverAll(t, s)
-		if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
 			t.Fatal(err)
 		}
 		deliverAll(t, s)
@@ -327,7 +327,7 @@ func TestReconcileDriftUnsupportedAndGroups(t *testing.T) {
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
@@ -343,7 +343,7 @@ func TestReconcileDriftUnsupportedAndGroups(t *testing.T) {
 	if err := s.DefaultOrg().CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ConfigureSystem("target", "scim", "scim", "secret", true, 0, nil); err != nil {
@@ -389,7 +389,7 @@ func TestRetryProvisioningRequeuesDesiredState(t *testing.T) {
 	if err := s.RetryProvisioning("target", u.ID, nil); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("retry for a user outside scope with no state", err)
 	}
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	events, _ := s.ClaimDueSyncEvents(10, time.Minute)
@@ -423,7 +423,7 @@ func TestReconcileDriftComparesBoundedText(t *testing.T) {
 	if err := s.UpdateUserWithSyncEvents(u, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)

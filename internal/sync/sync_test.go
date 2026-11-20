@@ -383,7 +383,7 @@ func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
 	}
 	secret = token
 	app := appRecordFor(t, s, sys.ID)
-	if err := s.SetAppAssignment(app.ID, "users", admin.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", admin.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	check := func(want string, active bool) {
@@ -414,7 +414,7 @@ func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(`"roles":[]`, true)
-	if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", admin.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, role.ID, "users", admin.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	check(`"roles":[{"value":"admin","primary":true}]`, true)
@@ -423,7 +423,7 @@ func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
 	}
 	check(`"roles":[]`, true)
 	// All newly generated inactive paths must also stay app-scoped.
-	if err := s.SetAppAssignment(app.ID, "users", admin.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", admin.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	check(`"roles":[]`, false)
@@ -436,7 +436,7 @@ func TestAppWebhookGlobalAdminRequiresExplicitRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(`"roles":[]`, false)
-	if err := s.SetAppAssignment(app.ID, "users", admin.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", admin.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	check(`"roles":[]`, true)
@@ -488,11 +488,11 @@ func TestLegacyQueuedWebhookRoles(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := s.SetAppRoleAssignment(app.ID, role.ID, "users", admin.ID, true, nil); err != nil {
+					if err := s.DefaultOrg().SetAppRoleAssignment(app.ID, role.ID, "users", admin.ID, true, nil); err != nil {
 						t.Fatal(err)
 					}
 				}
-				if err := s.SetAppAssignment(app.ID, "users", admin.ID, true, nil); err != nil {
+				if err := s.DefaultOrg().SetAppAssignment(app.ID, "users", admin.ID, true, nil); err != nil {
 					t.Fatal(err)
 				}
 				drain(t, e)

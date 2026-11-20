@@ -137,7 +137,7 @@ func TestInstallerGroupAssignmentAndDefinitionDriftAreNotRepaired(t *testing.T) 
 			var err error
 			switch cause {
 			case "assignment":
-				err = s.SetAppAssignment(appID, "groups", groupID, false, nil)
+				err = s.DefaultOrg().SetAppAssignment(appID, "groups", groupID, false, nil)
 			case "claim":
 				_, err = s.db.Exec(`UPDATE app_registry SET groups_claim=FALSE WHERE id=?`, appID)
 			case "definition":

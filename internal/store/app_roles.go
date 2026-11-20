@@ -109,8 +109,8 @@ func scanAppRole(row interface{ Scan(...any) error }) (*AppRole, error) {
 	return r, err
 }
 
-func principalsTx(tx *sql.Tx, query, roleID string) ([]AppRolePrincipal, error) {
-	rows, err := tx.Query(query, roleID)
+func principalsTx(tx *sql.Tx, query, roleID, org string) ([]AppRolePrincipal, error) {
+	rows, err := tx.Query(query, roleID, org)
 	if err != nil {
 		return nil, err
 	}
@@ -126,12 +126,13 @@ func principalsTx(tx *sql.Tx, query, roleID string) ([]AppRolePrincipal, error) 
 	return out, rows.Err()
 }
 
-const roleUsersSQL = `SELECT u.id,u.username FROM app_role_user_assignments a JOIN users u ON u.id=a.user_id WHERE a.role_id=? ORDER BY u.username`
-const roleGroupsSQL = `SELECT g.id,g.name FROM app_role_group_assignments a JOIN directory_groups g ON g.id=a.group_id WHERE a.role_id=? ORDER BY g.name`
+// A role is global; its mappings are listed for one org.
+const roleUsersSQL = `SELECT u.id,u.username FROM app_role_user_assignments a JOIN users u ON u.id=a.user_id WHERE a.role_id=? AND u.org_id=? ORDER BY u.username`
+const roleGroupsSQL = `SELECT g.id,g.name FROM app_role_group_assignments a JOIN directory_groups g ON g.id=a.group_id WHERE a.role_id=? AND g.org_id=? ORDER BY g.name`
 
 // ListAppRoles returns an app's roles with their explicit mappings.
-func (s *Store) ListAppRoles(appID string) ([]AppRole, error) {
-	tx, err := s.db.Begin()
+func (o *OrgStore) ListAppRoles(appID string) ([]AppRole, error) {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
@@ -162,10 +163,10 @@ func (s *Store) ListAppRoles(appID string) ([]AppRole, error) {
 	}
 	out := make([]AppRole, 0, len(roles))
 	for _, r := range roles {
-		if r.Users, err = principalsTx(tx, roleUsersSQL, r.ID); err != nil {
+		if r.Users, err = principalsTx(tx, roleUsersSQL, r.ID, o.org); err != nil {
 			return nil, err
 		}
-		if r.Groups, err = principalsTx(tx, roleGroupsSQL, r.ID); err != nil {
+		if r.Groups, err = principalsTx(tx, roleGroupsSQL, r.ID, o.org); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -315,7 +316,9 @@ func (s *Store) DeleteAppRole(appID, roleID string, audit *AuditEvent) error {
 
 // SetAppRoleAssignment maps a user or a group to a role, or unmaps it. The users whose
 // effective roles change lose their live grants for the app.
-func (s *Store) SetAppRoleAssignment(appID, roleID, kind, principal string, assigned bool, audit *AuditEvent) error {
+// SetAppRoleAssignment maps a global role to one of the org's users or groups; another
+// org's principal is ErrAppRecordMissing, like a missing one.
+func (o *OrgStore) SetAppRoleAssignment(appID, roleID, kind, principal string, assigned bool, audit *AuditEvent) error {
 	table, column, source, name := "", "", "", ""
 	switch kind {
 	case "users":
@@ -326,7 +329,7 @@ func (s *Store) SetAppRoleAssignment(appID, roleID, kind, principal string, assi
 		return ErrAppLinkConflict
 	}
 	now := time.Now().UTC()
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
 		app, err := lockAppForRoles(tx, appID)
 		if err != nil {
 			return err
@@ -338,7 +341,7 @@ func (s *Store) SetAppRoleAssignment(appID, roleID, kind, principal string, assi
 			}
 			return err
 		}
-		if err := tx.QueryRow(`SELECT `+name+` FROM `+source+` WHERE id=?`, principal).Scan(&principalName); err != nil {
+		if err := tx.QueryRow(`SELECT `+name+` FROM `+source+` WHERE org_id=? AND id=?`, o.org, principal).Scan(&principalName); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrAppRecordMissing
 			}

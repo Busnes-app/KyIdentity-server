@@ -21,7 +21,7 @@ func TestRunDueExpiriesIsolatesAccountFailures(t *testing.T) {
 	past := time.Now().Add(-time.Minute).Unix()
 	mustExec(t, s, `UPDATE users SET ends_at=? WHERE id IN (?,?)`, past, stuck.ID, due.ID)
 	mustExec(t, s, `CREATE TRIGGER block_end BEFORE UPDATE OF status ON users WHEN NEW.id='`+stuck.ID+`' AND NEW.status='disabled' BEGIN SELECT RAISE(ABORT,'blocked'); END`)
-	run, err := s.RunDueExpiries(time.Now().UTC())
+	run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 	if err == nil || !strings.Contains(err.Error(), "account.end_failed "+stuck.ID) {
 		t.Fatalf("failure not reported: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestRunDueExpiriesIsolatesAccountFailures(t *testing.T) {
 // re-proved), with an expiry audit row. A failed removal is audited and kept.
 func TestRunDueExpiriesMembershipUnderRequiredPolicy(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, g := range []string{"required", "plain"} {
@@ -65,7 +65,7 @@ func TestRunDueExpiriesMembershipUnderRequiredPolicy(t *testing.T) {
 	mustExec(t, s, `UPDATE enrollment_policies SET required=TRUE, grace_seconds=3600 WHERE group_id='required'`)
 	mustExec(t, s, `UPDATE group_memberships SET expires_at=? WHERE user_id=?`, time.Now().Add(-time.Minute).Unix(), u.ID)
 	mustExec(t, s, `CREATE TRIGGER block_plain BEFORE DELETE ON group_memberships WHEN OLD.group_id='plain' BEGIN SELECT RAISE(ABORT,'blocked'); END`)
-	run, err := s.RunDueExpiries(time.Now().UTC())
+	run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 	if err == nil || !strings.Contains(err.Error(), "group.membership_expiry_failed plain") {
 		t.Fatalf("membership failure not reported: %v", err)
 	}
@@ -85,12 +85,12 @@ func TestRunDueExpiriesMembershipUnderRequiredPolicy(t *testing.T) {
 // failure and reported, not silently skipped.
 func TestRunDueExpiriesAssignmentFailureAudited(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignmentUntil(a.ID, "users", u.ID, future(time.Hour), nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignmentUntil(a.ID, "users", u.ID, future(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
 	mustExec(t, s, `UPDATE app_user_assignments SET expires_at=? WHERE user_id=?`, time.Now().Add(-time.Minute).Unix(), u.ID)
 	mustExec(t, s, `CREATE TRIGGER block_assignment BEFORE DELETE ON app_user_assignments BEGIN SELECT RAISE(ABORT,'blocked'); END`)
-	run, err := s.RunDueExpiries(time.Now().UTC())
+	run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 	if err == nil || run.Assignments != 0 {
 		t.Fatalf("run = %+v, %v", run, err)
 	}

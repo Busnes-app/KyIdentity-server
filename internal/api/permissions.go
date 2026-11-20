@@ -87,7 +87,7 @@ func writeForbidden(w http.ResponseWriter) {
 
 // require gates an admin route on a permission, then optionally on a step-up grant.
 // Authorization runs before the grant is spent: a forbidden call must not consume one.
-func (s *Server) require(p permission, stepUp bool, h http.Handler) http.Handler {
+func (s *Server) require(p permission, scope routeScope, stepUp bool, h http.Handler) http.Handler {
 	return s.middleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := GetUserFromContext(r.Context())
 		a, err := accessFor(s.store, user)
@@ -95,7 +95,7 @@ func (s *Server) require(p permission, stepUp bool, h http.Handler) http.Handler
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 			return
 		}
-		if !a.allows(p, r) {
+		if !a.allows(p, r) || scope == platformRoute && s.cfg.Tenancy == "multi" && !a.Admin {
 			writeForbidden(w)
 			return
 		}
@@ -130,9 +130,23 @@ func (s *Server) require(p permission, stepUp bool, h http.Handler) http.Handler
 	}))
 }
 
+// routeScope says which store an admin route works on (tenancy design, "Route classes").
+// Every route names one: the zero value is refused when the routes are registered.
+type routeScope int
+
+const (
+	// orgRoute works on one org's directory: the caller's own, until staff select an org
+	// (build plan PR 5).
+	orgRoute routeScope = iota + 1
+	// platformRoute changes what every org shares: apps, policies, settings. In a
+	// multi-tenant install only global administrators may call it. Single-tenant: no change.
+	platformRoute
+)
+
 type adminRoute struct {
 	method, path string
 	perm         permission
+	scope        routeScope
 	stepUp       bool
 	h            http.Handler
 }

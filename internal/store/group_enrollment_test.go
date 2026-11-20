@@ -151,7 +151,7 @@ func TestGroupEnrollmentMutationRevokesAndNeverRevives(t *testing.T) {
 		t.Run(remove, func(t *testing.T) {
 			s, u, _ := enrollmentFixture(t)
 			apps, _, _ := s.ListAppRecords("client", 25, 0)
-			if err := s.SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
+			if err := s.DefaultOrg().SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 			p := testEnrollmentGroup(t, s, "a")
@@ -297,7 +297,7 @@ func TestGroupEnrollmentMembershipAuditRollback(t *testing.T) {
 func TestGroupEnrollmentMembershipTokenRace(t *testing.T) {
 	s, u, _ := enrollmentFixture(t)
 	apps, _, _ := s.ListAppRecords("client", 25, 0)
-	if err := s.SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(apps[0].ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	p := testEnrollmentGroup(t, s, "a")

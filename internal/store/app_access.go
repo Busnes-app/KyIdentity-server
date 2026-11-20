@@ -162,29 +162,32 @@ func (s *Store) SetAppPolicy(id, mode string, enabled bool, revision int, audit 
 	}
 	return tx.Commit()
 }
-func (s *Store) SetAppAssignment(id, kind, principal string, assigned bool, audit *AuditEvent) error {
-	return s.setAppAssignment(id, kind, principal, assigned, nil, audit)
+
+// SetAppAssignment grants or removes a global app for one of the org's users or groups;
+// another org's principal is ErrAppRecordMissing, like a missing one.
+func (o *OrgStore) SetAppAssignment(id, kind, principal string, assigned bool, audit *AuditEvent) error {
+	return o.setAppAssignment(id, kind, principal, assigned, nil, audit)
 }
 
 // SetAppAssignmentUntil grants until an instant (nil = no bound); repeating it moves the
 // instant. Only direct user grants carry one.
-func (s *Store) SetAppAssignmentUntil(id, kind, principal string, expiresAt *time.Time, audit *AuditEvent) error {
+func (o *OrgStore) SetAppAssignmentUntil(id, kind, principal string, expiresAt *time.Time, audit *AuditEvent) error {
 	if kind != "users" && expiresAt != nil {
 		return ErrAppLinkConflict
 	}
 	if err := checkExpiry(expiresAt, time.Now().UTC()); err != nil {
 		return err
 	}
-	return s.setAppAssignment(id, kind, principal, true, expiresAt, audit)
+	return o.setAppAssignment(id, kind, principal, true, expiresAt, audit)
 }
 
-func (s *Store) setAppAssignment(id, kind, principal string, assigned bool, expiresAt *time.Time, audit *AuditEvent) error {
-	tx, err := s.db.Begin()
+func (o *OrgStore) setAppAssignment(id, kind, principal string, assigned bool, expiresAt *time.Time, audit *AuditEvent) error {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	principalName, err := applyAppAssignmentTx(tx, id, kind, principal, assigned, expiresAt)
+	principalName, err := applyAppAssignmentTx(tx, o.org, id, kind, principal, assigned, expiresAt)
 	if err != nil {
 		return err
 	}
@@ -226,8 +229,10 @@ type AppAccessUsers struct {
 	App           AppRecord `json:"app"`
 }
 
-func (s *Store) ListAppAccessUsers(id, query, previewMode string, previewEnabled *bool, limit, offset int) (*AppAccessUsers, error) {
-	tx, err := s.db.Begin()
+// ListAppAccessUsers pages the org's users with their access to a global app; the loss
+// and gain counts are the org's too.
+func (o *OrgStore) ListAppAccessUsers(id, query, previewMode string, previewEnabled *bool, limit, offset int) (*AppAccessUsers, error) {
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
@@ -249,18 +254,18 @@ func (s *Store) ListAppAccessUsers(id, query, previewMode string, previewEnabled
 	p := &AppAccessUsers{Users: []AppAccessUser{}, Limit: limit, Offset: offset, App: app}
 	current, proposed := appAllowedSQL("f.access_mode", "f.enabled"), appAllowedSQL("?", "?")
 	// Predicate placeholders appear in enabled, mode order.
-	if err = tx.QueryRow(`SELECT COUNT(*) FROM app_access_facts f WHERE f.app_id=? AND (`+current+`) AND NOT (`+proposed+`)`, id, enabled, mode).Scan(&p.LosingAccess); err != nil {
+	if err = tx.QueryRow(`SELECT COUNT(*) FROM app_access_facts f JOIN users u ON u.id=f.user_id AND u.org_id=? WHERE f.app_id=? AND (`+current+`) AND NOT (`+proposed+`)`, o.org, id, enabled, mode).Scan(&p.LosingAccess); err != nil {
 		return nil, err
 	}
-	if err = tx.QueryRow(`SELECT COUNT(*) FROM app_access_facts f WHERE f.app_id=? AND NOT (`+current+`) AND (`+proposed+`)`, id, enabled, mode).Scan(&p.GainingAccess); err != nil {
+	if err = tx.QueryRow(`SELECT COUNT(*) FROM app_access_facts f JOIN users u ON u.id=f.user_id AND u.org_id=? WHERE f.app_id=? AND NOT (`+current+`) AND (`+proposed+`)`, o.org, id, enabled, mode).Scan(&p.GainingAccess); err != nil {
 		return nil, err
 	}
-	from := ` FROM users u JOIN app_access_facts f ON f.user_id=u.id WHERE f.app_id=? AND (instr(lower(u.username),lower(?))>0 OR instr(lower(u.display_name),lower(?))>0)`
-	if err = tx.QueryRow(`SELECT COUNT(*)`+from, id, query, query).Scan(&p.Total); err != nil {
+	search := ` AND (instr(lower(u.username),lower(?))>0 OR instr(lower(u.display_name),lower(?))>0)`
+	if err = tx.QueryRow(`SELECT COUNT(*) FROM users u JOIN app_access_facts f ON f.user_id=u.id WHERE u.org_id=? AND f.app_id=?`+search, o.org, id, query, query).Scan(&p.Total); err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(`SELECT u.id,u.username,u.display_name,u.status,f.direct,f.group_assigned,(`+current+`),(`+proposed+`),`+accessReasonSQL+`,
- (SELECT d.expires_at FROM app_user_assignments d WHERE d.app_id=f.app_id AND d.user_id=u.id)`+from+` ORDER BY u.username,u.id LIMIT ? OFFSET ?`, enabled, mode, id, query, query, limit, offset)
+ (SELECT d.expires_at FROM app_user_assignments d WHERE d.app_id=f.app_id AND d.user_id=u.id) FROM users u JOIN app_access_facts f ON f.user_id=u.id WHERE u.org_id=? AND f.app_id=?`+search+` ORDER BY u.username,u.id LIMIT ? OFFSET ?`, enabled, mode, o.org, id, query, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -288,8 +293,8 @@ type AppAccessGroup struct {
 	Assigned bool   `json:"assigned"`
 }
 
-func (s *Store) ListAppAccessGroups(id, query string, limit, offset int) ([]AppAccessGroup, int, error) {
-	tx, err := s.rdb.Begin()
+func (o *OrgStore) ListAppAccessGroups(id, query string, limit, offset int) ([]AppAccessGroup, int, error) {
+	tx, err := o.s.rdb.Begin()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -302,11 +307,11 @@ func (s *Store) ListAppAccessGroups(id, query string, limit, offset int) ([]AppA
 		return nil, 0, ErrAppRecordMissing
 	}
 	var total int
-	where := ` WHERE instr(lower(g.name),lower(?))>0`
-	if err = tx.QueryRow(`SELECT COUNT(*) FROM directory_groups g`+where, query).Scan(&total); err != nil {
+	search := ` AND instr(lower(g.name),lower(?))>0`
+	if err = tx.QueryRow(`SELECT COUNT(*) FROM directory_groups g WHERE g.org_id=?`+search, o.org, query).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := tx.Query(`SELECT g.id,g.name,EXISTS(SELECT 1 FROM app_group_assignments x WHERE x.app_id=? AND x.group_id=g.id) FROM directory_groups g`+where+` ORDER BY g.name,g.id LIMIT ? OFFSET ?`, id, query, limit, offset)
+	rows, err := tx.Query(`SELECT g.id,g.name,EXISTS(SELECT 1 FROM app_group_assignments x WHERE x.app_id=? AND x.group_id=g.id) FROM directory_groups g WHERE g.org_id=?`+search+` ORDER BY g.name,g.id LIMIT ? OFFSET ?`, id, o.org, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -353,7 +358,7 @@ func ensureAppLinkPoliciesTx(tx *sql.Tx, target, source AppRecord) error {
 // applyAppAssignmentTx is the one way a grant row is written: it bumps the app's
 // revision, writes or removes the row, and runs the grant and provisioning follow-up.
 // Manual grants and approved access requests both come through here.
-func applyAppAssignmentTx(tx *sql.Tx, id, kind, principal string, assigned bool, expiresAt *time.Time) (string, error) {
+func applyAppAssignmentTx(tx *sql.Tx, org, id, kind, principal string, assigned bool, expiresAt *time.Time) (string, error) {
 	table, column, source, name := "", "", "", ""
 	switch kind {
 	case "users":
@@ -371,7 +376,8 @@ func applyAppAssignmentTx(tx *sql.Tx, id, kind, principal string, assigned bool,
 		return "", ErrAppRecordMissing
 	}
 	var principalName string
-	if err = tx.QueryRow(`SELECT `+name+` FROM `+source+` WHERE id=?`, principal).Scan(&principalName); err != nil {
+	// The principal is resolved in the org; the app is global (org_apps gates access).
+	if err = tx.QueryRow(`SELECT `+name+` FROM `+source+` WHERE org_id=? AND id=?`, org, principal).Scan(&principalName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrAppRecordMissing
 		}

@@ -119,7 +119,7 @@ func TestProofSyncEventsAreClaimedOnce(t *testing.T) {
 	for _, system := range []string{"alpha", "beta"} {
 		app := provisioningFixture(t, s, system)
 		for range 12 {
-			if err := s.SetAppAssignment(app, "users", createTestUser(t, s).ID, true, nil); err != nil {
+			if err := s.DefaultOrg().SetAppAssignment(app, "users", createTestUser(t, s).ID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -202,7 +202,7 @@ func TestProofLogoutDeliveriesAreClaimedOnce(t *testing.T) {
 
 func TestProofAuthorizationCodeIsSpentOnce(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	accessCode(t, s, u, "code")
@@ -456,7 +456,7 @@ func TestProofConcurrentWorkerPassesDoNotDuplicate(t *testing.T) {
 		past := now.Add(-time.Minute)
 		for range 8 {
 			u := createTestUser(t, s)
-			if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+			if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.db.Exec(`UPDATE app_user_assignments SET expires_at=? WHERE app_id=? AND user_id=?`, past.Unix(), app, u.ID); err != nil {
@@ -465,7 +465,7 @@ func TestProofConcurrentWorkerPassesDoNotDuplicate(t *testing.T) {
 		}
 		var expired atomic.Int32
 		noErrors(t, "RunDueExpiries", race(stores, 2, func(_ int, s *Store) error {
-			run, err := s.RunDueExpiries(time.Now().UTC())
+			run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 			expired.Add(int32(run.Assignments))
 			return err
 		}))
@@ -477,7 +477,7 @@ func TestProofConcurrentWorkerPassesDoNotDuplicate(t *testing.T) {
 	t.Run("ReconcileProvisioning", func(t *testing.T) {
 		app := provisioningFixture(t, s, "reconciled")
 		for range 8 {
-			if err := s.SetAppAssignment(app, "users", createTestUser(t, s).ID, true, nil); err != nil {
+			if err := s.DefaultOrg().SetAppAssignment(app, "users", createTestUser(t, s).ID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 		}

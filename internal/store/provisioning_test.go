@@ -82,7 +82,7 @@ func TestProvisioningFollowsEffectiveAccess(t *testing.T) {
 	}
 	assign := func(kind, principal string, on bool) {
 		t.Helper()
-		if err := s.SetAppAssignment(app, kind, principal, on, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, kind, principal, on, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -145,7 +145,7 @@ func TestProvisioningLossBehindFence(t *testing.T) {
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	events, err := s.ClaimDueSyncEvents(50, time.Minute)
@@ -156,7 +156,7 @@ func TestProvisioningLossBehindFence(t *testing.T) {
 		t.Fatal(ok, err)
 	}
 	// The create may already have reached the receiver, so the disable queues behind it.
-	if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 2 || got[1] != (queued{"user.updated", 2, false}) {
@@ -183,7 +183,7 @@ func TestResyncNeverProvisionsUnassignedUsers(t *testing.T) {
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	assigned, other := createTestUser(t, s), createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", assigned.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", assigned.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
@@ -208,7 +208,7 @@ func TestDeleteUserNotifiesEveryConnector(t *testing.T) {
 	provisioningFixture(t, s, "legacy")
 	provisioningFixture(t, s, "stranger")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
@@ -252,7 +252,7 @@ func TestReconcileDiscardsSupersededFailedCreate(t *testing.T) {
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	creates, err := s.ClaimDueSyncEvents(10, time.Minute)
@@ -263,7 +263,7 @@ func TestReconcileDiscardsSupersededFailedCreate(t *testing.T) {
 		t.Fatal(ok, err)
 	}
 	// Revoked while the create is fenced: the disable queues behind it.
-	if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.FinishSyncDelivery(creates[0], "failed", "boom", 5, nil); err != nil {
@@ -290,11 +290,11 @@ func TestProvisioningRevivesExhaustedWork(t *testing.T) {
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	events, err := s.ClaimDueSyncEvents(10, time.Minute)
@@ -334,7 +334,7 @@ func TestGroupDeliveryFollowsAssignmentsAndMembers(t *testing.T) {
 	if err := s.DefaultOrg().SetGroupMembership(g.ID, u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", g.ID); len(got) != 0 {
@@ -384,7 +384,7 @@ func TestGroupDeliveryFollowsAssignmentsAndMembers(t *testing.T) {
 	if got := pendingFor(t, s, "target", u.ID); len(got) != 1 || got[0] != (queued{"user.updated", 2, false}) {
 		t.Fatal("member lost scope", got)
 	}
-	if err := s.SetAppAssignment(app, "groups", g.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "groups", g.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := pendingFor(t, s, "target", g.ID); len(got) != 1 || got[0].Type != "group.deleted" {
@@ -435,7 +435,7 @@ func TestResyncReplaysRemovals(t *testing.T) {
 	app := provisioningFixture(t, s, "target")
 	kept, disabled, unassigned, deleted, reassigned, never, linked := createTestUser(t, s), createTestUser(t, s), createTestUser(t, s), createTestUser(t, s), createTestUser(t, s), createTestUser(t, s), createTestUser(t, s)
 	for _, u := range []*User{kept, disabled, unassigned, deleted, reassigned} {
-		if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -445,7 +445,7 @@ func TestResyncReplaysRemovals(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, u := range []*User{unassigned, reassigned} {
-		if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -453,7 +453,7 @@ func TestResyncReplaysRemovals(t *testing.T) {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
-	if err := s.SetAppAssignment(app, "users", reassigned.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", reassigned.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
@@ -504,7 +504,7 @@ func TestResyncKeepsMappedInScopeAccount(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE paired_systems SET status='disabled' WHERE id='target'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SaveSCIMUserLink("target", u.ID, "remote"); err != nil {
@@ -572,12 +572,12 @@ func TestRemovalBeforeCreateIsDelivered(t *testing.T) {
 		},
 		"unassign": {
 			func(t *testing.T, s *Store, app string, u *User) {
-				if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+				if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
 					t.Fatal(err)
 				}
 			},
 			func(t *testing.T, s *Store, app string, u *User) {
-				if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+				if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -590,7 +590,7 @@ func TestRemovalBeforeCreateIsDelivered(t *testing.T) {
 				defer cleanup()
 				app := provisioningFixture(t, s, "target")
 				u := createTestUser(t, s)
-				if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+				if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 					t.Fatal(err)
 				}
 				window(t, s)
@@ -634,10 +634,10 @@ func TestExhaustedRemovalBeforeCreateRetries(t *testing.T) {
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	ev, _ := s.ClaimDueSyncEvents(10, time.Minute)

@@ -109,7 +109,7 @@ func TestLauncherAdminClientsFallsBackToGlobalAdmin(t *testing.T) {
 	if got, _ := s.LauncherAdminClients(admin.ID); got["client"] {
 		t.Fatal("global admin without the administrator role still counted")
 	}
-	if err := s.SetAppRoleAssignment(recs[0].ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(recs[0].ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.LauncherAdminClients(u.ID); !got["client"] {

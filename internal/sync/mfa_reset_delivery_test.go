@@ -93,11 +93,11 @@ func TestSignedMFAResetDelivery(t *testing.T) {
 					t.Fatal(roleErr)
 				}
 				appRoleID = role.ID
-				if err = s.SetAppRoleAssignment(app.ID, appRoleID, "users", u.ID, true, nil); err != nil {
+				if err = s.DefaultOrg().SetAppRoleAssignment(app.ID, appRoleID, "users", u.ID, true, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err = s.SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
+			if err = s.DefaultOrg().SetAppAssignment(app.ID, "users", u.ID, true, nil); err != nil {
 				t.Fatal(err)
 			}
 			dispatch(t, e)
@@ -132,7 +132,7 @@ func TestSignedMFAResetDelivery(t *testing.T) {
 				// The receiver committed before its incomplete response. Recovery must
 				// deliver a fresh version with current roles, rather than conflict.
 				sessions, passwords = 1, 1
-				if err = s.SetAppRoleAssignment(app.ID, appRoleID, "users", u.ID, false, nil); err != nil {
+				if err = s.DefaultOrg().SetAppRoleAssignment(app.ID, appRoleID, "users", u.ID, false, nil); err != nil {
 					t.Fatal(err)
 				}
 				attempts, listErr := s.ListSyncDeliveryAttempts(sys.ID)

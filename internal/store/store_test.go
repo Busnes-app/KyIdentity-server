@@ -686,7 +686,7 @@ func TestAttestationWritesAreBoundToTheGradedKey(t *testing.T) {
 
 func TestRecordIssuedTokenChecksAttestedLevel(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UpsertNativeDevice(&NativeDevice{ID: "d1", UserID: u.ID, DeviceName: "p", DeviceIdentifier: "i", PublicKey: "pk", IsMFAApprover: true, CanSignOn: true}); err != nil {

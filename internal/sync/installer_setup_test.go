@@ -71,7 +71,7 @@ func TestInstallerSCIMNativeDeliveryAndAccessLoss(t *testing.T) {
 			}
 			switch cause {
 			case "unassign":
-				err = s.SetAppAssignment(app.ID, "users", day.ID, false, nil)
+				err = s.DefaultOrg().SetAppAssignment(app.ID, "users", day.ID, false, nil)
 			case "disable":
 				_, err = s.DefaultOrg().EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil })
 			case "account-end":
@@ -79,16 +79,16 @@ func TestInstallerSCIMNativeDeliveryAndAccessLoss(t *testing.T) {
 				_, err = s.DefaultOrg().EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.EndsAt = &end; return true, nil })
 				if err == nil {
 					time.Sleep(1200 * time.Millisecond)
-					_, err = s.RunDueExpiries(time.Now())
+					_, err = s.Platform().RunDueExpiries(time.Now())
 				}
 			case "delete":
 				err = s.DefaultOrg().DeleteUserWithSyncEvents(day.ID, nil)
 			case "expiry":
 				expiry := time.Now().Add(1100 * time.Millisecond)
-				err = s.SetAppAssignmentUntil(app.ID, "users", day.ID, &expiry, nil)
+				err = s.DefaultOrg().SetAppAssignmentUntil(app.ID, "users", day.ID, &expiry, nil)
 				if err == nil {
 					time.Sleep(1200 * time.Millisecond)
-					_, err = s.RunDueExpiries(time.Now())
+					_, err = s.Platform().RunDueExpiries(time.Now())
 				}
 			}
 			if err != nil {
@@ -138,7 +138,7 @@ func TestInstallerRemovalBeforeFirstDelivery(t *testing.T) {
 			}
 			remote.users["setup-made"] = scim.User{ID: "setup-made", ExternalID: day.ID, UserName: "owner", Active: true}
 			if cause == "unassign" {
-				err = s.SetAppAssignment(appRecordFor(t, s, systemID).ID, "users", day.ID, false, nil)
+				err = s.DefaultOrg().SetAppAssignment(appRecordFor(t, s, systemID).ID, "users", day.ID, false, nil)
 			} else {
 				_, err = s.DefaultOrg().EditUser(day.ID, nil, func(u *store.User) (bool, error) { u.Status = "disabled"; return true, nil })
 			}

@@ -16,43 +16,43 @@ func roleRevision(t *testing.T, s *Store, appID string) int {
 // role revision nor revokes the holder's tokens.
 func TestSetAppRoleAssignmentRefusalsAndNoop(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, err := s.CreateAppRole(a.ID, "operator", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ListAppRoles("missing"); !errors.Is(err, ErrAppRecordMissing) {
+	if _, err := s.DefaultOrg().ListAppRoles("missing"); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatal("roles of missing app", err)
 	}
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "devices", u.ID, true, nil); !errors.Is(err, ErrAppLinkConflict) {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "devices", u.ID, true, nil); !errors.Is(err, ErrAppLinkConflict) {
 		t.Fatal("unknown kind", err)
 	}
-	if err := s.SetAppRoleAssignment(a.ID, "other-role", "users", u.ID, true, nil); !errors.Is(err, ErrAppRecordMissing) {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, "other-role", "users", u.ID, true, nil); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatal("unknown role", err)
 	}
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "users", "nobody", true, nil); !errors.Is(err, ErrAppRecordMissing) {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "users", "nobody", true, nil); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatal("unknown user", err)
 	}
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "groups", "nogroup", true, nil); !errors.Is(err, ErrAppRecordMissing) {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "groups", "nogroup", true, nil); !errors.Is(err, ErrAppRecordMissing) {
 		t.Fatal("unknown group", err)
 	}
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {
 		t.Fatal(err)
 	}
 	before := roleRevision(t, s, a.ID)
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if roleRevision(t, s, a.ID) != before {
 		t.Fatal("no-op mapping bumped the role revision")
 	}
 	assertRevoked(t, s, "tok", false)
-	roles, err := s.ListAppRoles(a.ID)
+	roles, err := s.DefaultOrg().ListAppRoles(a.ID)
 	if err != nil || len(roles) != 1 || len(roles[0].Users) != 1 || roles[0].Users[0].ID != u.ID {
 		t.Fatalf("roles = %+v, %v", roles, err)
 	}
@@ -63,11 +63,11 @@ func TestSetAppRoleAssignmentRefusalsAndNoop(t *testing.T) {
 // before it cannot be exchanged; a failed audit rolls the deletion back.
 func TestDeleteAppRoleRevokesHolders(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	role, _ := s.CreateAppRole(a.ID, "operator", "", nil)
-	if err := s.SetAppRoleAssignment(a.ID, role.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppRoleAssignment(a.ID, role.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {
@@ -90,7 +90,7 @@ func TestDeleteAppRoleRevokesHolders(t *testing.T) {
 	if err := s.DeleteAppRole(a.ID, role.ID, poisonedAudit(t, s, "admin.app_role_deleted", role.ID)); err == nil {
 		t.Fatal("delete ignored audit failure")
 	}
-	if roles, _ := s.ListAppRoles(a.ID); len(roles) != 1 {
+	if roles, _ := s.DefaultOrg().ListAppRoles(a.ID); len(roles) != 1 {
 		t.Fatal("failed delete removed the role")
 	}
 	assertRevoked(t, s, "tok", false)
@@ -98,7 +98,7 @@ func TestDeleteAppRoleRevokesHolders(t *testing.T) {
 	if err := s.DeleteAppRole(a.ID, role.ID, audit); err != nil {
 		t.Fatal(err)
 	}
-	if roles, _ := s.ListAppRoles(a.ID); len(roles) != 0 {
+	if roles, _ := s.DefaultOrg().ListAppRoles(a.ID); len(roles) != 0 {
 		t.Fatal("role not deleted")
 	}
 	if roleRevision(t, s, a.ID) <= before {
@@ -114,7 +114,7 @@ func TestDeleteAppRoleRevokesHolders(t *testing.T) {
 // shape revokes every live grant for the app; a stale revision is refused.
 func TestSetAppClaimSettingsRevokesOnlyOnChange(t *testing.T) {
 	s, u, a := appAccessFixture(t)
-	if err := s.SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(a.ID, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecordIssuedToken(accessToken(u, "tok", "")); err != nil {

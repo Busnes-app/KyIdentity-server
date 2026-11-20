@@ -51,7 +51,7 @@ func TestDirectoryPasswordQueueSealsForManagedUsersOnly(t *testing.T) {
 	defer cleanup()
 	k, app := adStoreFixture(t, s, "ad-1")
 	managed, outsider := createTestUser(t, s), createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", managed.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", managed.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := s.QueueDirectoryPassword(testKeys, outsider.ID, outsider.PasswordHash, []byte("Outsider-pass-1"), queuedAudit); err != nil || n != 0 {
@@ -119,7 +119,7 @@ func TestDirectoryPasswordQueueExpiresAndRejects(t *testing.T) {
 	defer cleanup()
 	_, app := adStoreFixture(t, s, "ad-1")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ := s.ADPasswordStatuses("ad-1"); st[0].State != "missing" {
@@ -183,7 +183,7 @@ func TestDirectoryAgentTokensAndKeysAreScopedToOneConnector(t *testing.T) {
 	_, app1 := adStoreFixture(t, s, "ad-1")
 	_, _ = adStoreFixture(t, s, "ad-2")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app1, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app1, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetADAgentToken("ad-1", "kyad_one", nil); err != nil {
@@ -247,7 +247,7 @@ func TestDirectoryPasswordQueueRefusesATamperedAgentKeyAndSignsEntries(t *testin
 	defer cleanup()
 	_, app := adStoreFixture(t, s, "ad-1")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Signed-pass-1"), queuedAudit); err != nil {
@@ -295,7 +295,7 @@ func TestDirectoryPasswordRetriesDoNotBlockTheQueue(t *testing.T) {
 	var users []*User
 	for i := 0; i < 3; i++ {
 		u := createTestUser(t, s)
-		if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Queued-pass-1"), queuedAudit); err != nil {
@@ -323,7 +323,7 @@ func TestDirectoryPasswordStatusShowsTheLock(t *testing.T) {
 	defer cleanup()
 	_, app := adStoreFixture(t, s, "ad-1")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE users SET password_change_required=TRUE WHERE id=?`, u.ID); err != nil {
@@ -352,7 +352,7 @@ func TestDirectoryPasswordsAfterARestore(t *testing.T) {
 	defer cleanup()
 	_, app := adStoreFixture(t, s, "ad-1")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Capsule-pass-1"), queuedAudit); err != nil {
@@ -395,7 +395,7 @@ func TestDirectoryPasswordTamperedConnectorSkipsOnlyItself(t *testing.T) {
 	_, bad := adStoreFixture(t, s, "ad-2")
 	u := createTestUser(t, s)
 	for _, app := range []string{good, bad} {
-		if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+		if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -423,7 +423,7 @@ func TestDirectoryPasswordReachesADisabledAccount(t *testing.T) {
 	defer cleanup()
 	_, app := adStoreFixture(t, s, "ad-1")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("First-pass-1"), queuedAudit); err != nil {
@@ -478,7 +478,7 @@ func TestDirectoryPasswordsFollowCurrentAccess(t *testing.T) {
 	defer cleanup()
 	k, app := adStoreFixture(t, s, "ad-1")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	open := func() string {
@@ -504,7 +504,7 @@ func TestDirectoryPasswordsFollowCurrentAccess(t *testing.T) {
 	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Assigned-pass-1"), queuedAudit); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if e, _ := s.PendingADPasswords("ad-1", time.Now(), 10); len(e) != 0 {
@@ -525,7 +525,7 @@ func TestDirectoryPasswordsFollowCurrentAccess(t *testing.T) {
 		t.Fatal("a lock counts as the user's current password")
 	}
 	// Assigned again but disabled: a reset is the real password.
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DefaultOrg().EditUser(u.ID, nil, func(x *User) (bool, error) { x.Status = "disabled"; return true, nil }); err != nil {
@@ -547,7 +547,7 @@ func TestDirectoryPasswordUnacknowledgedWriteIsBehind(t *testing.T) {
 	defer cleanup()
 	_, app := adStoreFixture(t, s, "ad-1")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("First-pass-1"), queuedAudit); err != nil {

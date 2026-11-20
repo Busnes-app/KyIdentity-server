@@ -53,10 +53,10 @@ func copyFixture(t *testing.T, s *Store) {
 	if _, err := s.DefaultOrg().SetSuiteGroup(g.ID, true, map[string]bool{"kypost": true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "groups", g.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAppAssignment(app, "users", admin.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", admin.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
@@ -102,8 +102,8 @@ func copyFixture(t *testing.T, s *Store) {
 			t.Fatal(err)
 		}
 	}
-	must(s.SetAppRoleAssignment(app, role.ID, "users", user.ID, true, nil))
-	must(s.SetAppRoleAssignment(app, role.ID, "groups", g.ID, true, nil))
+	must(s.DefaultOrg().SetAppRoleAssignment(app, role.ID, "users", user.ID, true, nil))
+	must(s.DefaultOrg().SetAppRoleAssignment(app, role.ID, "groups", g.ID, true, nil))
 	must(s.DefaultOrg().SetDelegations(user.ID, Delegations{Helpdesk: true, AppOwner: []string{app}}, nil))
 	must(s.CreateApplication(&Application{ID: uuid.NewString(), Name: "Wiki", URL: "https://wiki.test", IconName: "book", Enabled: false, CreatedAt: now}, nil))
 	must(s.CreateLauncherIcon(&LauncherIcon{ID: uuid.NewString(), ContentType: "image/png", Data: []byte{1, 2, 3}, CreatedAt: now}, nil))

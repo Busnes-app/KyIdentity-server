@@ -10,7 +10,7 @@ func TestDeliveryVersionsPreserveDesiredStateAndUncertainEvidence(t *testing.T) 
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	first := deliverAll(t, s)
@@ -77,7 +77,7 @@ func TestLegacyDeliveryVersionMigration(t *testing.T) {
 	defer cleanup()
 	app := provisioningFixture(t, s, "target")
 	u := createTestUser(t, s)
-	if err := s.SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)

@@ -150,7 +150,7 @@ func TestSambaADEndToEnd(t *testing.T) {
 			app = a.ID
 		}
 	}
-	if err := db.SetAppAssignment(app, "groups", group.ID, true, nil); err != nil {
+	if err := db.DefaultOrg().SetAppAssignment(app, "groups", group.ID, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	dispatch()
