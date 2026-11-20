@@ -3023,13 +3023,17 @@ func (s *Store) SnapshotTo(destPath string) error {
 // backing, in one transaction. A partial reset that reports success is the worst outcome
 // here: the admin believes the account is locked down while the attacker is still holding a
 // live session.
-func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
+// ResetUserMFA strips one of the org's users of every factor; another org's is ErrNotFound.
+func (o *OrgStore) ResetUserMFA(userID string, audit *AuditEvent) error {
 	now := time.Now().UTC()
-	tx, err := s.db.Begin()
+	tx, err := o.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := requireOrgUserTx(tx, o.org, userID); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(`UPDATE enrollment_deadlines SET due_at=0 WHERE user_id=?`, userID); err != nil {
 		return err
 	}
@@ -3049,7 +3053,7 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 	if err := revokeUserAccessTx(tx, userID, now); err != nil {
 		return err
 	}
-	if u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, userID)); err != nil {
+	if u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id=? AND id=?`, o.org, userID)); err != nil {
 		return err
 	} else if u != nil {
 		if err := queueUserNotificationTx(tx, u, "user.mfa_reset", now); err != nil {
@@ -3065,8 +3069,12 @@ func (s *Store) ResetUserMFA(userID string, audit *AuditEvent) error {
 // RevokeUserAccess deletes browser sessions, revokes issued access tokens and pending
 // codes/interactions, expires unused device pairing tokens, and burns unused step-up
 // tokens, in one transaction with its audit row.
-func (s *Store) RevokeUserAccess(userID string, audit *AuditEvent) error {
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+// RevokeUserAccess ends every grant of one of the org's users; another org's is ErrNotFound.
+func (o *OrgStore) RevokeUserAccess(userID string, audit *AuditEvent) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+		if err := requireOrgUserTx(tx, o.org, userID); err != nil {
+			return err
+		}
 		return revokeUserAccessTx(tx, userID, time.Now().UTC())
 	})
 }

@@ -39,12 +39,14 @@ func (s *Store) migrateOnboarding() error {
 // IssueAccountToken mints a link token for userID and retires any earlier link of the
 // same kind. Activation needs a pending account; reset needs an active one. The raw
 // token is returned once and never stored.
-func (s *Store) IssueAccountToken(userID, kind, delivery string, ttl time.Duration, audit *AuditEvent) (string, error) {
+// Another org's user is ErrNotFound, as an ineligible one is.
+func (o *OrgStore) IssueAccountToken(userID, kind, delivery string, ttl time.Duration, audit *AuditEvent) (string, error) {
+	s := o.s
 	// An owned account the upstream marks inactive, or a local override holds down, gets
 	// no activation link: redeeming it could only produce a disabled account.
-	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)))`
+	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)))`
 	if kind == "reset" {
-		eligible = `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND NOT pending)`
+		eligible = `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND status='active' AND NOT pending)`
 	}
 	raw, err := crypto.GenerateRandomHex(32)
 	if err != nil {
@@ -53,7 +55,7 @@ func (s *Store) IssueAccountToken(userID, kind, delivery string, ttl time.Durati
 	now := time.Now().UTC()
 	err = s.auditedTx(audit, func(tx *sql.Tx) error {
 		var ok bool
-		if err := tx.QueryRow(eligible, userID).Scan(&ok); err != nil {
+		if err := tx.QueryRow(eligible, o.org, userID).Scan(&ok); err != nil {
 			return err
 		}
 		if !ok {
@@ -143,13 +145,13 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 
 // ChangePassword sets a new password for a signed-in owner: the session that proved
 // itself stays, every other session, token, code and outstanding link ends.
-func (s *Store) ChangePassword(userID, keepSessionID, passwordHash string, audit *AuditEvent) error {
+func (o *OrgStore) ChangePassword(userID, keepSessionID, passwordHash string, audit *AuditEvent) error {
 	now := time.Now().UTC()
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
 		// The session that proved itself must still be live under the write lock: a request
 		// held open past a reset or revocation must not overwrite the recovered password.
-		res, err := tx.Exec(`UPDATE users SET password_hash=?, password_change_required=FALSE, updated_at=? WHERE id=? AND status='active' AND NOT pending
- AND EXISTS(SELECT 1 FROM sessions WHERE id=? AND user_id=? AND expires_at>?)`, passwordHash, now, userID, keepSessionID, userID, now)
+		res, err := tx.Exec(`UPDATE users SET password_hash=?, password_change_required=FALSE, updated_at=? WHERE org_id=? AND id=? AND status='active' AND NOT pending
+ AND EXISTS(SELECT 1 FROM sessions WHERE id=? AND user_id=? AND expires_at>?)`, passwordHash, now, o.org, userID, keepSessionID, userID, now)
 		if err != nil {
 			return err
 		}

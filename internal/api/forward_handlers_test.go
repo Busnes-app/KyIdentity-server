@@ -363,7 +363,7 @@ func TestForwardCodeBinding(t *testing.T) {
 	}
 	// Signing out of KyIdentity before redemption kills the code.
 	nonce, code = f.code(appHost, "/", f.userSS)
-	if err := f.db.RevokeUserAccess(f.user.ID, nil); err != nil {
+	if err := f.db.DefaultOrg().RevokeUserAccess(f.user.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if rr := f.callback(appHost, code, nonce); rr.Code != http.StatusBadRequest {
@@ -413,7 +413,7 @@ func TestForwardRevocationWithin30Seconds(t *testing.T) {
 			}
 		}, http.StatusForbidden},
 		{"signed out everywhere", func(u *store.User) {
-			if err := f.db.RevokeUserAccess(u.ID, nil); err != nil {
+			if err := f.db.DefaultOrg().RevokeUserAccess(u.ID, nil); err != nil {
 				t.Fatal(err)
 			}
 		}, http.StatusUnauthorized},
@@ -598,7 +598,7 @@ func TestForwardRevokeOtherSessionsAfterLoginPurged(t *testing.T) {
 	if err != nil || current == nil {
 		t.Fatalf("current session: %v", err)
 	}
-	if err := f.db.RevokeOtherSessions(f.user.ID, current.ID, nil); err != nil {
+	if err := f.db.DefaultOrg().RevokeOtherSessions(f.user.ID, current.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	f.skew += 31 * time.Second

@@ -42,18 +42,18 @@ type sessionView struct {
 // App entries come from the token registry, not from the apps themselves, so they are
 // not a complete inventory of downstream app sessions. Delivery errors name receiver
 // hosts, so only an administrator's view carries them.
-func (h *SessionHandler) writeInventory(w http.ResponseWriter, userID, currentSessionID string, admin bool) {
-	sessions, err := h.store.ListUserSessions(userID, h.store.SessionLimits().IdleTTL())
+func (h *SessionHandler) writeInventory(w http.ResponseWriter, org *store.OrgStore, userID, currentSessionID string, admin bool) {
+	sessions, err := org.ListUserSessions(userID, h.store.SessionLimits().IdleTTL())
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	apps, err := h.store.ListUserAppGrants(userID)
+	apps, err := org.ListUserAppGrants(userID)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	deliveries, err := h.store.ListLogoutDeliveries(userID, 50)
+	deliveries, err := org.ListLogoutDeliveries(userID, 50)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
@@ -102,7 +102,7 @@ func (h *SessionHandler) AdminRetryLogout(w http.ResponseWriter, r *http.Request
 	admin := GetUserFromContext(r.Context())
 	userID, id := r.PathValue("id"), r.PathValue("deliveryId")
 	pending := h.audit.Prepare("admin.logout_retry", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"deliveryId": id})
-	found, err := h.store.RetryLogoutDeliveryNow(userID, id, pending.Row)
+	found, err := orgStore(r).RetryLogoutDeliveryNow(userID, id, pending.Row)
 	if err != nil {
 		log.Printf("logout retry failed: %v", err)
 		stepUpInternalError(w)
@@ -117,7 +117,7 @@ func (h *SessionHandler) AdminRetryLogout(w http.ResponseWriter, r *http.Request
 }
 
 func (h *SessionHandler) ListOwn(w http.ResponseWriter, r *http.Request) {
-	h.writeInventory(w, GetUserFromContext(r.Context()).ID, GetSessionFromContext(r.Context()).ID, false)
+	h.writeInventory(w, orgStore(r), GetUserFromContext(r.Context()).ID, GetSessionFromContext(r.Context()).ID, false)
 }
 
 // RevokeOwn signs out one of the caller's sessions. Revoking the current one also clears
@@ -126,7 +126,7 @@ func (h *SessionHandler) RevokeOwn(w http.ResponseWriter, r *http.Request) {
 	user, sess := GetUserFromContext(r.Context()), GetSessionFromContext(r.Context())
 	target := r.PathValue("id")
 	pending := h.audit.Prepare("user.session_revoked", user.ID, user.Username, target, "session", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"current": target == sess.ID})
-	if !h.revoke(w, r, pending, func() error { return h.store.RevokeSession(user.ID, target, pending.Row) }) {
+	if !h.revoke(w, r, pending, func() error { return orgStore(r).RevokeSession(user.ID, target, pending.Row) }) {
 		return
 	}
 	if target == sess.ID {
@@ -138,7 +138,7 @@ func (h *SessionHandler) RevokeOwn(w http.ResponseWriter, r *http.Request) {
 func (h *SessionHandler) RevokeOthers(w http.ResponseWriter, r *http.Request) {
 	user, sess := GetUserFromContext(r.Context()), GetSessionFromContext(r.Context())
 	pending := h.audit.Prepare("user.other_sessions_revoked", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	if h.revoke(w, r, pending, func() error { return h.store.RevokeOtherSessions(user.ID, sess.ID, pending.Row) }) {
+	if h.revoke(w, r, pending, func() error { return orgStore(r).RevokeOtherSessions(user.ID, sess.ID, pending.Row) }) {
 		writeSuccess(w)
 	}
 }
@@ -147,14 +147,14 @@ func (h *SessionHandler) AdminList(w http.ResponseWriter, r *http.Request) {
 	if !h.userExists(w, r, r.PathValue("id")) {
 		return
 	}
-	h.writeInventory(w, r.PathValue("id"), "", true)
+	h.writeInventory(w, orgStore(r), r.PathValue("id"), "", true)
 }
 
 func (h *SessionHandler) AdminRevokeSession(w http.ResponseWriter, r *http.Request) {
 	admin := GetUserFromContext(r.Context())
 	userID, target := r.PathValue("id"), r.PathValue("sid")
 	pending := h.audit.Prepare("admin.session_revoked", admin.ID, admin.Username, target, "session", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"userId": userID})
-	if h.revoke(w, r, pending, func() error { return h.store.RevokeSession(userID, target, pending.Row) }) {
+	if h.revoke(w, r, pending, func() error { return orgStore(r).RevokeSession(userID, target, pending.Row) }) {
 		writeSuccess(w)
 	}
 }
@@ -166,7 +166,7 @@ func (h *SessionHandler) AdminRevokeApp(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	pending := h.audit.Prepare("admin.app_access_revoked", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"clientId": clientID})
-	if h.revoke(w, r, pending, func() error { return h.store.RevokeUserClientAccess(userID, clientID, pending.Row) }) {
+	if h.revoke(w, r, pending, func() error { return orgStore(r).RevokeUserClientAccess(userID, clientID, pending.Row) }) {
 		writeSuccess(w)
 	}
 }

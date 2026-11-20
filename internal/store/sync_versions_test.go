@@ -17,7 +17,7 @@ func TestDeliveryVersionsPreserveDesiredStateAndUncertainEvidence(t *testing.T) 
 	if len(first) != 1 {
 		t.Fatal(first)
 	}
-	if err := s.ResetUserMFA(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().ResetUserMFA(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	events, err := s.ClaimDueSyncEvents(50, time.Minute)
@@ -81,7 +81,7 @@ func TestLegacyDeliveryVersionMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	deliverAll(t, s)
-	if err := s.ResetUserMFA(u.ID, nil); err != nil {
+	if err := s.DefaultOrg().ResetUserMFA(u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Simulate the exact pre-upgrade schema, with a failed reset sharing revision 1.

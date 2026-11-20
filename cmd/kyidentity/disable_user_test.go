@@ -130,7 +130,7 @@ func TestDisableUser(t *testing.T) {
 	if got.Role != "admin" || got.PasswordHash != "hash-kyq-bootstrap" {
 		t.Fatal("disable changed role or password")
 	}
-	if live, err := s.ListUserSessions(bootstrap.ID, time.Hour); err != nil || len(live) != 0 {
+	if live, err := s.DefaultOrg().ListUserSessions(bootstrap.ID, time.Hour); err != nil || len(live) != 0 {
 		t.Fatalf("sessions survived: %v %v", live, err)
 	}
 	var details string
@@ -198,7 +198,7 @@ func TestDisableUser(t *testing.T) {
 	if err := s.DefaultOrg().CreateUser(invited); err != nil {
 		t.Fatal(err)
 	}
-	link, err := s.IssueAccountToken(invited.ID, "activation", "manual", time.Hour, nil)
+	link, err := s.DefaultOrg().IssueAccountToken(invited.ID, "activation", "manual", time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

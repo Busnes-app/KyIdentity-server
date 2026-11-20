@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -299,5 +300,102 @@ func TestOrgStoreAppsRefuseAnotherOrgsIDs(t *testing.T) {
 	}
 	if list, total, err := b.ListAccessRequests(AccessRequestFilter{Limit: 50}); err != nil || total != 1 || list[0].ID != req.ID {
 		t.Errorf("B's own ListAccessRequests: %v %d %v", list, total, err)
+	}
+}
+
+// Sessions and credentials belong to a user, so a handle bound to A reaches none of B's:
+// no listing, no revocation, no link, no MFA reset, no password change.
+func TestOrgStoreSessionsRefuseAnotherOrgsIDs(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	a, b := testOrg(t, s, "household"), testOrg(t, s, "household")
+	userB := testOrgUser(t, b, "user")
+	sessB := &Session{ID: uuid.NewString(), UserID: userB.ID, SessionTokenHash: uuid.NewString(), IPAddress: "1.2.3.4", UserAgent: "t", ExpiresAt: time.Now().UTC().Add(time.Hour)}
+	if err := s.CreateSession(sessB); err != nil {
+		t.Fatal(err)
+	}
+	pending := &User{ID: uuid.NewString(), Username: "pending-b", DisplayName: "p", Email: "pending-b@test.invalid", Role: "user", Status: "disabled", Pending: true}
+	if err := b.CreateUser(pending); err != nil {
+		t.Fatal(err)
+	}
+	live := func() int {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id=?`, userB.ID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if got, err := a.ListUserSessions(userB.ID, time.Hour); err != nil || len(got) != 0 {
+		t.Errorf("ListUserSessions: %v %v", got, err)
+	}
+	if got, err := a.ListUserAppGrants(userB.ID); err != nil || len(got) != 0 {
+		t.Errorf("ListUserAppGrants: %v %v", got, err)
+	}
+	for name, err := range map[string]error{
+		"RevokeSession":          a.RevokeSession(userB.ID, sessB.ID, nil),
+		"RevokeOtherSessions":    a.RevokeOtherSessions(userB.ID, "", nil),
+		"RevokeUserClientAccess": a.RevokeUserClientAccess(userB.ID, "x", nil),
+		"RevokeUserAccess":       a.RevokeUserAccess(userB.ID, nil),
+		"ResetUserMFA":           a.ResetUserMFA(userB.ID, nil),
+		"ChangePassword":         a.ChangePassword(userB.ID, sessB.ID, "taken", nil),
+	} {
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s on B's user: %v", name, err)
+		}
+	}
+	for _, kind := range []string{"reset", "activation"} {
+		target := userB.ID
+		if kind == "activation" {
+			target = pending.ID
+		}
+		if _, err := a.IssueAccountToken(target, kind, "email", time.Hour, nil); !errors.Is(err, ErrNotFound) {
+			t.Errorf("IssueAccountToken %s: %v", kind, err)
+		}
+	}
+	if found, err := a.RetryLogoutDeliveryNow(userB.ID, "x", nil); err != nil || found {
+		t.Errorf("RetryLogoutDeliveryNow: %v %v", found, err)
+	}
+	if n := live(); n != 1 {
+		t.Fatalf("B's session gone: %d", n)
+	}
+	var tokens int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM account_tokens`).Scan(&tokens); err != nil || tokens != 0 {
+		t.Fatalf("account tokens issued: %d %v", tokens, err)
+	}
+	if u, err := b.GetUserByID(userB.ID); err != nil || u.PasswordHash == "taken" {
+		t.Fatalf("B's password changed: %v", err)
+	}
+}
+
+// A back-channel logout queued for a user carries that user's org, so it can be scoped
+// after the user is gone.
+func TestLogoutDeliveriesCarryTheUsersOrg(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	b := testOrg(t, s, "household")
+	userB := testOrgUser(t, b, "user")
+	c := &OAuthClient{ID: "bcl", ClientName: "bcl", ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true, BackchannelLogoutURI: "https://a/logout"}
+	if err := s.CreateOAuthClient(c, nil); err != nil {
+		t.Fatal(err)
+	}
+	sess := &Session{ID: uuid.NewString(), UserID: userB.ID, SessionTokenHash: uuid.NewString(), IPAddress: "1.2.3.4", UserAgent: "t", ExpiresAt: time.Now().UTC().Add(time.Hour)}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureClientSession("bcl", sess.ID, userB.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RevokeSession(userB.ID, sess.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	var org string
+	if err := s.db.QueryRow(`SELECT org_id FROM logout_deliveries WHERE user_id=?`, userB.ID).Scan(&org); err != nil || org != b.org {
+		t.Fatalf("delivery org %q (%v), want %q", org, err, b.org)
+	}
+	if got, err := s.DefaultOrg().ListLogoutDeliveries(userB.ID, 10); err != nil || len(got) != 0 {
+		t.Errorf("another org listed B's delivery: %v %v", got, err)
+	}
+	if got, err := b.ListLogoutDeliveries(userB.ID, 10); err != nil || len(got) != 1 {
+		t.Errorf("B's own listing: %v %v", got, err)
 	}
 }

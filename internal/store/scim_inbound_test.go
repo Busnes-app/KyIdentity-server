@@ -160,7 +160,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	defer cleanup()
 	c, _ := s.CreateSCIMConnector("A", nil)
 	u := upstream(t, s, c.ID, "ext-1", "alice")
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestUpstreamActiveFlagRespectsTheLocalOverride(t *testing.T) {
 	if stored.Status != "active" && stored.Status != "disabled" || stored.Status != "disabled" {
 		t.Fatalf("upstream deactivation: %+v", stored)
 	}
-	if left, _ := s.ListUserSessions(u.ID, time.Hour); len(left) != 0 {
+	if left, _ := s.DefaultOrg().ListUserSessions(u.ID, time.Hour); len(left) != 0 {
 		t.Fatal("session survived upstream deactivation")
 	}
 	stored.SourceActive = true
@@ -238,7 +238,7 @@ func TestDeletingAConnectorTransfersOrDisablesItsUsers(t *testing.T) {
 	k := upstream(t, s, keep.ID, "k-1", "kept")
 	d := upstream(t, s, drop.ID, "d-1", "dropped")
 	for _, u := range []*User{k, d} {
-		raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+		raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 		if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 			t.Fatal(err)
 		}
@@ -296,7 +296,7 @@ func TestLocalOverrideSurvivesAConcurrentUpstreamWrite(t *testing.T) {
 	defer cleanup()
 	c, _ := s.CreateSCIMConnector("A", nil)
 	u := upstream(t, s, c.ID, "ext-1", "alice")
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestUpstreamDeactivationSurvivesAConcurrentLocalEdit(t *testing.T) {
 	}
 	c, _ := s.CreateSCIMConnector("A", nil)
 	u := upstream(t, s, c.ID, "ext-1", "alice")
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestUpstreamProfileSurvivesAConcurrentLocalEdit(t *testing.T) {
 	}
 	c, _ := s.CreateSCIMConnector("A", nil)
 	u := upstream(t, s, c.ID, "ext-1", "alice")
-	raw, _ := s.IssueAccountToken(u.ID, "activation", "email", time.Hour, nil)
+	raw, _ := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "email", time.Hour, nil)
 	if _, err := s.RedeemAccountToken(raw, "activation", "hash", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -505,13 +505,13 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 	if err := s.CreateUpstreamUser(inactive, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.IssueAccountToken(inactive.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DefaultOrg().IssueAccountToken(inactive.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("activation link issued for an upstream-inactive account: %v", err)
 	}
 
 	// A link issued while the upstream wanted the account active, then deactivated.
 	flipped := upstream(t, s, c.ID, "ext-f", "flipped")
-	raw, err := s.IssueAccountToken(flipped.ID, "activation", "manual", time.Hour, nil)
+	raw, err := s.DefaultOrg().IssueAccountToken(flipped.ID, "activation", "manual", time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 
 	// The same with a local override in force.
 	held := upstream(t, s, c.ID, "ext-h", "held")
-	raw, _ = s.IssueAccountToken(held.ID, "activation", "manual", time.Hour, nil)
+	raw, _ = s.DefaultOrg().IssueAccountToken(held.ID, "activation", "manual", time.Hour, nil)
 	if _, err := s.db.Exec(`UPDATE users SET locally_disabled=TRUE WHERE id=?`, held.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func TestActivationDerivesStatusFromSourceState(t *testing.T) {
 	if got, _ = s.DefaultOrg().GetUserByID(held.ID); got.Pending || got.Status != "disabled" || !got.LocallyDisabled {
 		t.Fatalf("activation outranked a local override: %+v", got)
 	}
-	if _, err := s.IssueAccountToken(held.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DefaultOrg().IssueAccountToken(held.ID, "activation", "manual", time.Hour, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("activation link issued for a locally disabled account: %v", err)
 	}
 
@@ -562,7 +562,7 @@ func TestDisconnectExpiresLinksOfShutOutInvitees(t *testing.T) {
 		s, cleanup := setupTestStore(t)
 		c, _ := s.CreateSCIMConnector("Entra", nil)
 		u := upstream(t, s, c.ID, "ext-1", "leaver")
-		raw, err := s.IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
+		raw, err := s.DefaultOrg().IssueAccountToken(u.ID, "activation", "manual", time.Hour, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

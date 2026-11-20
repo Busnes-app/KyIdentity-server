@@ -104,7 +104,7 @@ func TestSignedMFAResetDelivery(t *testing.T) {
 			if !active || sessions != 1 || passwords != 1 {
 				t.Fatal("initial profile not applied")
 			}
-			if err = e.ResetUserMFAAndRevoke(u.ID, nil); err != nil {
+			if err = e.ResetUserMFAAndRevoke(s.DefaultOrg(), u.ID, nil); err != nil {
 				t.Fatal(err)
 			}
 			switch scenario {

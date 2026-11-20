@@ -163,7 +163,7 @@ func TestRestoreAnnouncesTheLoginsItEnds(t *testing.T) {
 	// Both are deliverable: one per client, which is the worker's own limit.
 	seen := map[string]bool{}
 	for i := 0; i < 2; i++ {
-		d, err := s.ClaimLogoutDelivery(time.Minute)
+		d, err := s.Platform().ClaimLogoutDelivery(time.Minute)
 		if err != nil || d == nil {
 			t.Fatalf("claim %d: %+v %v", i, d, err)
 		}

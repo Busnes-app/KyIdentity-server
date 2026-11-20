@@ -200,7 +200,7 @@ func TestExchangeAuthorizationCodeRefusals(t *testing.T) {
 	t.Run("session ended before refresh family", func(t *testing.T) {
 		f := newRefreshFixture(t)
 		code, verifier := f.covCodeFor("openid")
-		if err := f.db.RevokeSession(f.user.ID, f.session, nil); err != nil {
+		if err := f.db.DefaultOrg().RevokeSession(f.user.ID, f.session, nil); err != nil {
 			t.Fatal(err)
 		}
 		resp, err := f.e.ExchangeAuthorizationCode(code, f.client.ID, f.secret, "https://app.example/cb", verifier)

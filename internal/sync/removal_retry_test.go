@@ -381,7 +381,7 @@ func TestRemovalGoesAheadOfUndeliveredMFAReset(t *testing.T) {
 	recv.fence = true
 	dispatch(t, e)
 	recv.down.Store(true)
-	if err := e.ResetUserMFAAndRevoke(u.ID, nil); err != nil {
+	if err := e.ResetUserMFAAndRevoke(s.DefaultOrg(), u.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	dispatch(t, e)

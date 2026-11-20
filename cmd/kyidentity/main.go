@@ -1198,7 +1198,7 @@ func purgeExpired(s *store.Store, now time.Time) {
 		{"step-up tokens", s.DeleteExpiredStepUpTokens},
 		{"forward-auth codes and sessions", s.DeleteExpiredForwardRows},
 		{"delivered sync events", func() error { return s.DeleteDeliveredSyncEvents(now.Add(-7 * 24 * time.Hour)) }},
-		{"logout deliveries", func() error { return s.DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)) }},
+		{"logout deliveries", func() error { return s.Platform().DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)) }},
 		{"audit events", func() error { return s.DeleteAuditEventsOlderThan(now.Add(-auditRetention)) }},
 		{"alerts", func() error { return s.DeleteAlertsOlderThan(now.Add(-auditRetention)) }},
 		{"orphaned launcher icons", func() error { _, err := s.DeleteOrphanedLauncherIcons(time.Hour); return err }},

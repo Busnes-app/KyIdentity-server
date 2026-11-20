@@ -109,7 +109,7 @@ func (h *OAuthHandler) EndSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pending := h.audit.Prepare("auth.logout", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"clientId": clientID, "initiator": "rp"})
-	if err := h.store.RevokeSession(user.ID, sess.ID, pending.Row); err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err := h.store.Org(user.Org()).RevokeSession(user.ID, sess.ID, pending.Row); err != nil && !errors.Is(err, store.ErrNotFound) {
 		log.Printf("rp-initiated logout failed: %v", err)
 		stepUpInternalError(w)
 		return

@@ -87,11 +87,11 @@ func TestInventoryShowsLogoutDeliveriesAndAdminCanRetry(t *testing.T) {
 		t.Fatalf("own inventory logouts = %+v", own)
 	}
 
-	d, err := db.ClaimLogoutDelivery(time.Minute)
+	d, err := db.Platform().ClaimLogoutDelivery(time.Minute)
 	if err != nil || d == nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if err := db.FinishLogoutDelivery(d, errors.New("receiver answered 503")); err != nil {
+	if err := db.Platform().FinishLogoutDelivery(d, errors.New("receiver answered 503")); err != nil {
 		t.Fatal(err)
 	}
 	adminRows := decodeLogouts(t, call(t, srv, admin, "GET", "/api/admin/users/"+u.ID+"/sessions").Body.Bytes())
@@ -150,11 +150,11 @@ func TestReplacingAFactorQueuesLogoutForSiblingSessions(t *testing.T) {
 	if r := f.post(t, "/api/user/mfa/totp/enable", map[string]string{"secret": secret, "code": testTOTPCode(t, secret)}, grant); r.Code != http.StatusOK {
 		t.Fatalf("enable: %d %s", r.Code, r.Body.String())
 	}
-	rows, err := f.store.ListLogoutDeliveries(f.user.ID, 10)
+	rows, err := f.store.DefaultOrg().ListLogoutDeliveries(f.user.ID, 10)
 	if err != nil || len(rows) != 1 || rows[0].ClientID != "kynotes" || rows[0].Status != "queued" {
 		t.Fatalf("deliveries after factor replacement = %+v %v", rows, err)
 	}
-	if left, _ := f.store.ListUserSessions(f.user.ID, time.Hour); len(left) != 1 {
+	if left, _ := f.store.DefaultOrg().ListUserSessions(f.user.ID, time.Hour); len(left) != 1 {
 		t.Fatalf("sibling session survived: %d", len(left))
 	}
 }

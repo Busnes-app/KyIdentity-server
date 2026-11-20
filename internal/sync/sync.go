@@ -62,8 +62,8 @@ func (e *Engine) CreateUserAndQueueSyncEvents(org *store.OrgStore, user *store.U
 
 // ResetUserMFAAndRevoke atomically strips every factor, revokes everything those factors
 // were protecting, and notifies every connector holding the account.
-func (e *Engine) ResetUserMFAAndRevoke(userID string, audit *store.AuditEvent) error {
-	return e.store.ResetUserMFA(userID, audit)
+func (e *Engine) ResetUserMFAAndRevoke(org *store.OrgStore, userID string, audit *store.AuditEvent) error {
+	return org.ResetUserMFA(userID, audit)
 }
 
 // DeleteUserAndQueueSyncEvents removes a user and queues its deletion atomically, so a

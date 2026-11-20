@@ -469,7 +469,7 @@ func TestMFAWipesRemovePasskeys(t *testing.T) {
 		name string
 		wipe func(*Store, string) error
 	}{
-		{"ResetUserMFA", func(s *Store, uid string) error { return s.ResetUserMFA(uid, nil) }},
+		{"ResetUserMFA", func(s *Store, uid string) error { return s.DefaultOrg().ResetUserMFA(uid, nil) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, cleanup := setupTestStore(t)

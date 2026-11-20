@@ -763,7 +763,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	if sess != nil && user != nil {
 		pending := h.audit.Prepare("auth.logout", user.ID, user.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-		if err := h.store.RevokeSession(user.ID, sess.ID, pending.Row); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if err := h.store.Org(user.Org()).RevokeSession(user.ID, sess.ID, pending.Row); err != nil && !errors.Is(err, store.ErrNotFound) {
 			log.Printf("logout for user %s failed: %v", user.ID, err)
 			stepUpInternalError(w)
 			return

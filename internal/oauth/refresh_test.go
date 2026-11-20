@@ -205,12 +205,12 @@ func TestRefreshScopeNarrowsOnly(t *testing.T) {
 func TestRefreshRevokedByEveryLifecyclePath(t *testing.T) {
 	for name, revoke := range map[string]func(f *refreshFixture, token string){
 		"logout": func(f *refreshFixture, _ string) {
-			if err := f.db.RevokeSession(f.user.ID, f.session, nil); err != nil {
+			if err := f.db.DefaultOrg().RevokeSession(f.user.ID, f.session, nil); err != nil {
 				t.Fatal(err)
 			}
 		},
 		"app access revoked": func(f *refreshFixture, _ string) {
-			if err := f.db.RevokeUserClientAccess(f.user.ID, f.client.ID, nil); err != nil {
+			if err := f.db.DefaultOrg().RevokeUserClientAccess(f.user.ID, f.client.ID, nil); err != nil {
 				t.Fatal(err)
 			}
 		},

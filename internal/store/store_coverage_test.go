@@ -202,7 +202,7 @@ func TestResetUserMFARemovesEveryFactor(t *testing.T) {
 	if err := s.CreateSession(&Session{ID: "sess", UserID: u.ID, SessionTokenHash: "sh", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResetUserMFA(u.ID, &AuditEvent{ID: "reset", Action: "admin.mfa_reset", Outcome: "success", CreatedAt: time.Now().UTC()}); err != nil {
+	if err := s.DefaultOrg().ResetUserMFA(u.ID, &AuditEvent{ID: "reset", Action: "admin.mfa_reset", Outcome: "success", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	if count(t, s, `SELECT COUNT(*) FROM mfa_methods WHERE user_id=?`, u.ID)+count(t, s, `SELECT COUNT(*) FROM recovery_codes WHERE user_id=?`, u.ID) != 0 {

@@ -145,7 +145,7 @@ func (o *OrgStore) UserOffboarding(userID string) (*Offboarding, error) {
 	// The list is a display page; completion is decided over every delivery.
 	// A user's deliveries are all in the user's org.
 	if logouts {
-		if off.Logouts, err = s.ListLogoutDeliveries(userID, 50); err != nil {
+		if off.Logouts, err = o.ListLogoutDeliveries(userID, 50); err != nil {
 			return nil, err
 		}
 	}

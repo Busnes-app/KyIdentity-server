@@ -363,7 +363,7 @@ func TestTenancyUpgradeKeepsEveryView(t *testing.T) {
 	}
 	// Today's store code names org_id, which the previous schema lacks: lend it the column
 	// for the fixture and take it back, so the upgrade adds it as it would.
-	scoped := []string{"users", "directory_groups", "group_memberships", "suite_groups"}
+	scoped := []string{"users", "directory_groups", "group_memberships", "suite_groups", "logout_deliveries"}
 	for _, table := range scoped {
 		tenancyExec(t, s, `ALTER TABLE `+table+` ADD COLUMN org_id TEXT DEFAULT '`+DefaultOrgID+`'`)
 	}

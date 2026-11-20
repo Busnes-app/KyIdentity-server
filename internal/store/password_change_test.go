@@ -128,7 +128,7 @@ func TestChoosingAPasswordClearsTheFlag(t *testing.T) {
 			t.Fatal("flag not stored at creation")
 		}
 		if viaLink {
-			raw, err := s.IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil)
+			raw, err := s.DefaultOrg().IssueAccountToken(u.ID, "reset", "manual", time.Hour, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,7 +140,7 @@ func TestChoosingAPasswordClearsTheFlag(t *testing.T) {
 			if err := s.db.QueryRow(`SELECT target_id FROM audit_events WHERE id=?`, event.ID).Scan(&target); err != nil || target != u.ID {
 				t.Fatalf("reset audit row names %q, want %q (%v)", target, u.ID, err)
 			}
-		} else if err := s.ChangePassword(u.ID, seedSession(t, s, u.ID, time.Now().UTC().Add(time.Hour), time.Now().UTC()), "new", nil); err != nil {
+		} else if err := s.DefaultOrg().ChangePassword(u.ID, seedSession(t, s, u.ID, time.Now().UTC().Add(time.Hour), time.Now().UTC()), "new", nil); err != nil {
 			t.Fatal(err)
 		}
 		got, _ := s.DefaultOrg().GetUserByID(u.ID)

@@ -384,7 +384,7 @@ func TestExchangeDeviceAssertionRefusedWhereMFAIsRequired(t *testing.T) {
 	f := newSignOnFixture(t)
 	// Push allowed: the device is a compliant factor, so grace does not apply.
 	f.requireOrganizationMFA(t, []string{"totp", "push"}, 3600)
-	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	before, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestExchangeDeviceAssertionRefusedWhereMFAIsRequired(t *testing.T) {
 	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, store.ErrAppAccessDenied) || !errors.Is(err, ErrDeviceSignOnNotPermitted) {
 		t.Fatalf("MFA-required user: %v", err)
 	}
-	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	after, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func TestExchangeDeviceAssertionRequiresApprover(t *testing.T) {
 
 func TestExchangeDeviceAssertionRefusedAfterMFAReset(t *testing.T) {
 	f := newSignOnFixture(t)
-	if err := f.db.ResetUserMFA(f.user.ID, nil); err != nil {
+	if err := f.db.DefaultOrg().ResetUserMFA(f.user.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	compact := signDeviceAssertionForTest(t, f.priv, testHeader("dev-1"), f.claims(nil))
@@ -640,7 +640,7 @@ func TestExchangeDeviceAssertionRefusesUserWithoutAppAccess(t *testing.T) {
 	if err := f.db.SetAppPolicy(rows[0].ID, "assigned_only", true, rows[0].Revision, nil); err != nil {
 		t.Fatal(err)
 	}
-	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	before, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +648,7 @@ func TestExchangeDeviceAssertionRefusesUserWithoutAppAccess(t *testing.T) {
 	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, store.ErrAppAccessDenied) {
 		t.Fatalf("unassigned user: %v", err)
 	}
-	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	after, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +686,7 @@ func raceAppEdit(t *testing.T, edit func(f *signOnFixture, app store.AppRecord) 
 		}
 	}
 	t.Cleanup(func() { beforeDeviceTokenRecord = func() {} })
-	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	before, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +694,7 @@ func raceAppEdit(t *testing.T, edit func(f *signOnFixture, app store.AppRecord) 
 	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, store.ErrAppAccessDenied) {
 		t.Fatalf("token issued across an app edit: %v", err)
 	}
-	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	after, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -754,7 +754,7 @@ func raceDeviceEdit(t *testing.T, edit func(f *signOnFixture) error) {
 		}
 	}
 	t.Cleanup(func() { beforeDeviceTokenRecord = func() {} })
-	before, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	before, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -762,7 +762,7 @@ func raceDeviceEdit(t *testing.T, edit func(f *signOnFixture) error) {
 	if _, _, err := f.engine.ExchangeDeviceAssertion(compact, f.client.ID, "127.0.0.1", "test"); !errors.Is(err, ErrDeviceSignOnDisabled) || errors.Is(err, ErrDeviceSignOnNotPermitted) {
 		t.Fatalf("token issued or misnamed across a device change: %v", err)
 	}
-	after, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	after, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +775,7 @@ func raceDeviceEdit(t *testing.T, edit func(f *signOnFixture) error) {
 }
 
 func TestExchangeDeviceAssertionRefusesMFAResetBeforeIssue(t *testing.T) {
-	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.ResetUserMFA(f.user.ID, nil) })
+	raceDeviceEdit(t, func(f *signOnFixture) error { return f.db.DefaultOrg().ResetUserMFA(f.user.ID, nil) })
 }
 
 func TestExchangeDeviceAssertionRefusesSignOnDisabledBeforeIssue(t *testing.T) {
@@ -920,7 +920,7 @@ func TestExchangeDeviceAssertionRefusesClientWithoutHTTPSRedirect(t *testing.T) 
 
 func (f *signOnFixture) sessionCount(t *testing.T) int {
 	t.Helper()
-	s, err := f.db.ListUserSessions(f.user.ID, time.Hour)
+	s, err := f.db.DefaultOrg().ListUserSessions(f.user.ID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

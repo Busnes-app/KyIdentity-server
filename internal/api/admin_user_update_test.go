@@ -49,7 +49,7 @@ func TestAdminUserEditsDoNotRevertConcurrentChanges(t *testing.T) {
 		var changeErr error
 		together(
 			put(&renamed, `{"displayName":"`+name+`"}`, mintStepUp(t, srv, admin, "PUT "+path)),
-			func() { changeErr = db.ChangePassword(target.ID, keep, hash, nil) },
+			func() { changeErr = db.DefaultOrg().ChangePassword(target.ID, keep, hash, nil) },
 		)
 		if renamed.Code != http.StatusOK || changeErr != nil {
 			t.Fatalf("round %d: %d %s / %v", i, renamed.Code, renamed.Body.String(), changeErr)

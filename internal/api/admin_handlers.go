@@ -309,7 +309,7 @@ func (h *AdminHandler) ResetUserMFA(w http.ResponseWriter, r *http.Request) {
 	reset := h.audit.Prepare("admin.user_mfa_reset", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
 		"username": user.Username,
 	})
-	if err := h.syncEngine.ResetUserMFAAndRevoke(user.ID, reset.Row); err != nil {
+	if err := h.syncEngine.ResetUserMFAAndRevoke(orgStore(r), user.ID, reset.Row); err != nil {
 		log.Printf("MFA reset for user %s failed: %v", user.ID, err)
 		h.audit.Observe("admin.user_mfa_reset", admin.ID, admin.Username, user.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{
 			"username": user.Username,
@@ -336,7 +336,7 @@ func (h *AdminHandler) RevokeUserSessions(w http.ResponseWriter, r *http.Request
 	// Revocation is the one place where reporting an unearned success is worse than
 	// reporting failure: the admin stops looking.
 	revoked := h.audit.Prepare("admin.sessions_revoked", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	if err := h.store.RevokeUserAccess(userID, revoked.Row); err != nil {
+	if err := orgStore(r).RevokeUserAccess(userID, revoked.Row); err != nil {
 		log.Printf("session revocation for user %s failed: %v", userID, err)
 		h.audit.Observe("admin.sessions_revoked", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{
 			"error": err.Error(),
