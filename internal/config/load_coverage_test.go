@@ -41,6 +41,8 @@ func TestLoadFailsClosedOnMalformedValues(t *testing.T) {
 		{"port with sign", map[string]string{"KYIDENTITY_PORT": "+5867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
 		{"port with leading zero", map[string]string{"KYIDENTITY_PORT": "05867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
 		{"port with space", map[string]string{"KYIDENTITY_PORT": " 5867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
+		{"tenancy multi", map[string]string{"KYIDENTITY_TENANCY": "multi"}, "KYIDENTITY_TENANCY=multi is not available"},
+		{"tenancy unknown", map[string]string{"KYIDENTITY_TENANCY": "Single"}, "KYIDENTITY_TENANCY must be single or multi"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -155,5 +157,17 @@ func TestLoadAcceptsPortRangeBounds(t *testing.T) {
 				t.Fatalf("cfg %+v err = %v, want port %q", cfg, err, port)
 			}
 		})
+	}
+}
+
+// An install that names no tenancy mode is single-tenant.
+func TestLoadDefaultsToSingleTenancy(t *testing.T) {
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+	for _, v := range []string{"", "single"} {
+		t.Setenv("KYIDENTITY_TENANCY", v)
+		cfg, err := Load()
+		if err != nil || cfg.Tenancy != "single" {
+			t.Fatalf("KYIDENTITY_TENANCY=%q: %v %v", v, cfg, err)
+		}
 	}
 }

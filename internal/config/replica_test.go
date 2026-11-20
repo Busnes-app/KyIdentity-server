@@ -29,6 +29,7 @@ func replicaConfig(t *testing.T) (*Config, ReplicaKeys) {
 		BackupDepositInterval: 24 * time.Hour, BackupDir: "/backups", BackupKeep: 7, RecoveryKeyID: "key-1",
 		AttestationExtraRoots: roots, AttestationStatusURL: "https://status.example",
 		KyAuthCertSHA256: []string{strings.Repeat("a", 64)}, AppAttestAppIDs: []string{"TEAM.app"},
+		Tenancy: "single",
 	}, ReplicaKeys{
 		RSAPublic: []byte("rsa public"), VAPIDPublic: []byte("vapid public"),
 	}

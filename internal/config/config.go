@@ -137,6 +137,10 @@ type Config struct {
 	AppAttestAppIDs []string
 	// AppAttestAllowDevelopment also accepts the development App Attest environment.
 	AppAttestAllowDevelopment bool
+	// Tenancy is KYIDENTITY_TENANCY: "single" (the default), or "multi" for the hosted
+	// multi-tenant service, which this release refuses. The database records the mode, and
+	// a start with the other one refuses.
+	Tenancy string
 }
 
 var certDigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -316,6 +320,14 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	tenancy := getEnv("KYIDENTITY_TENANCY", "single")
+	switch tenancy {
+	case "single":
+	case "multi":
+		return nil, errors.New("KYIDENTITY_TENANCY=multi is not available in this release; unset it or set single")
+	default:
+		return nil, fmt.Errorf("KYIDENTITY_TENANCY must be single or multi, not %q", tenancy)
+	}
 	if replicated && databaseURL == "" {
 		return nil, errors.New("KYIDENTITY_REPLICATED is set but the database is a local SQLite file: replicas must share one database, so set KYIDENTITY_DATABASE_URL or KYIDENTITY_DATABASE_URL_FILE")
 	}
@@ -361,6 +373,7 @@ func Load() (*Config, error) {
 		KyAuthCertSHA256:           kyAuthCertSHA256,
 		AppAttestAppIDs:            appAttestAppIDs,
 		AppAttestAllowDevelopment:  appAttestAllowDevelopment,
+		Tenancy:                    tenancy,
 	}, nil
 }
 

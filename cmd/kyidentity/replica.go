@@ -40,6 +40,19 @@ func replicaKeys(km *crypto.JWTKeyManager, vapid *mfa.UnifiedPushSender) (config
 	return config.ReplicaKeys{RSAPublic: spki, VAPIDPublic: vapid.VAPIDPublicKey()}, nil
 }
 
+// checkTenancy refuses a start whose KYIDENTITY_TENANCY differs from the mode the database
+// recorded when it was created: the mode decides who an account belongs to.
+func checkTenancy(cfg *config.Config, s *store.Store) error {
+	mode, err := s.GetSetting(store.TenancySetting)
+	if err != nil {
+		return fmt.Errorf("reading the recorded tenancy mode: %w", err)
+	}
+	if mode != cfg.Tenancy {
+		return fmt.Errorf("KYIDENTITY_TENANCY is %s but this database was created %s-tenant; the mode cannot change on an existing install", cfg.Tenancy, mode)
+	}
+	return nil
+}
+
 // checkReplicaConfig records the shared-configuration fingerprint on the first start against
 // a PostgreSQL database and refuses a later start that differs, naming fields only. SQLite
 // is one server and records nothing.

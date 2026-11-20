@@ -156,6 +156,7 @@ func copyFixture(t *testing.T, s *Store) {
 		}
 	}
 	seedEphemeral(t, s, user.ID, "client-1")
+	tenancyFixture(t, s, app)
 }
 
 // openSQLiteForTest opens a SQLite file read-only, whatever backend the suite runs on.
