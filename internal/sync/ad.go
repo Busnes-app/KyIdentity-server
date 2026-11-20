@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,10 +26,11 @@ import (
 // Design: docs/superpowers/specs/2026-11-19-active-directory-design.md.
 
 const (
-	adSystemType  = "active_directory"
-	uacNormal     = "512" // NORMAL_ACCOUNT
-	uacDisabled   = "514" // NORMAL_ACCOUNT | ACCOUNTDISABLE
-	adGlobalGroup = "-2147483646"
+	adSystemType      = "active_directory"
+	uacNormal         = "512" // NORMAL_ACCOUNT
+	uacNormalBits     = 512
+	uacAccountDisable = 0x2 // ACCOUNTDISABLE
+	adGlobalGroup     = "-2147483646"
 )
 
 var (
@@ -268,6 +270,9 @@ func (e *Engine) deliverAD(ctx context.Context, sys *store.PairedSystem, secret,
 		return err
 	}
 	defer conn.Close()
+	// The connection never sees ctx; closing it ends whichever operation is waiting, so a
+	// delivery cannot outlive its deadline or the worker's shutdown.
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	if strings.HasPrefix(eventType, "group.") {
 		return e.deliverADGroup(conn, sys, c, eventType, localID)
 	}
@@ -288,7 +293,13 @@ func (e *Engine) deliverAD(ctx context.Context, sys *store.PairedSystem, secret,
 		}
 		return e.createADUser(conn, sys, c, localID, &desired)
 	}
-	if active && found.GetAttributeValue("userAccountControl") == uacDisabled {
+	// userAccountControl is a bitmask: only ACCOUNTDISABLE is KyIdentity's, every other flag
+	// an operator set is kept.
+	uacBits, err := strconv.ParseInt(found.GetAttributeValue("userAccountControl"), 10, 64)
+	if err != nil {
+		uacBits = uacNormalBits
+	}
+	if active && uacBits&uacAccountDisable != 0 {
 		if behind, err := e.store.ADPasswordBehind(sys.ID, localID); err != nil {
 			return err
 		} else if behind {
@@ -301,13 +312,13 @@ func (e *Engine) deliverAD(ctx context.Context, sys *store.PairedSystem, secret,
 		}
 	}
 	mod := ldap.NewModifyRequest(found.DN, nil)
-	uac := uacDisabled
+	uacBits |= uacAccountDisable
 	if active {
-		uac = uacNormal
+		uacBits &^= uacAccountDisable
 		mod.Replace("displayName", nonEmpty(desired.DisplayName))
 		mod.Replace("mail", nonEmpty(primaryEmail(&desired)))
 	}
-	mod.Replace("userAccountControl", []string{uac})
+	mod.Replace("userAccountControl", []string{strconv.FormatInt(uacBits, 10)})
 	return e.adWrite(func() error { return conn.Modify(mod) })
 }
 
@@ -428,6 +439,18 @@ func (e *Engine) adRename(conn *ldap.Conn, found *ldap.Entry, baseDN, marker, na
 	if !validSAM(name, limit) {
 		return nil, errADName
 	}
+	cnSame := strings.EqualFold(cn.Type, "CN") && cn.Value == name
+	newDN := "CN=" + ldap.EscapeDN(name) + parentDN(found.DN)
+	if !cnSame && !strings.EqualFold(newDN, found.DN) {
+		// Checked before any write, so a CN another object holds leaves both names unchanged.
+		res, err := conn.Search(ldap.NewSearchRequest(newDN, ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, 10, false, "(objectClass=*)", []string{"dn"}, nil))
+		if err == nil && len(res.Entries) > 0 {
+			return nil, errADConflict
+		}
+		if err != nil && !ldap.IsErrorWithCode(err, ldap.LDAPResultNoSuchObject) {
+			return nil, err
+		}
+	}
 	if !samSame {
 		mod := ldap.NewModifyRequest(found.DN, nil)
 		mod.Replace("sAMAccountName", []string{name})
@@ -438,7 +461,7 @@ func (e *Engine) adRename(conn *ldap.Conn, found *ldap.Entry, baseDN, marker, na
 			return nil, adNameError(err)
 		}
 	}
-	if !strings.EqualFold(cn.Type, "CN") || cn.Value != name {
+	if !cnSame {
 		req := ldap.NewModifyDNRequest(found.DN, "CN="+ldap.EscapeDN(name), true, "")
 		if err := e.adWrite(func() error { return conn.ModifyDN(req) }); err != nil {
 			return nil, adNameError(err)
@@ -500,4 +523,17 @@ func adDeliveryError(err error) (string, bool) {
 		return fmt.Sprintf("LDAP result %d (%s)", lerr.ResultCode, ldap.LDAPResultCodeMap[lerr.ResultCode]), true
 	}
 	return "", false
+}
+
+// parentDN is dn without its first RDN, from the first comma that is not escaped.
+func parentDN(dn string) string {
+	for i := 0; i < len(dn); i++ {
+		switch dn[i] {
+		case '\\':
+			i++
+		case ',':
+			return dn[i:]
+		}
+	}
+	return ""
 }

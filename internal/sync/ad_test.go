@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -277,13 +278,17 @@ func adEnableWaitsForReset(t *testing.T, ackFirst bool) {
 	}
 	edit(func(x *store.User) { x.Status = "disabled" })
 	drain(t, e)
+	// An operator set DONT_EXPIRE_PASSWORD on the disabled account: 66050 = 0x10000|512|2.
+	acct := adUser(t, dc, sys.ID, u.ID)
+	acct.Attrs["userAccountControl"] = []string{"66050"}
+	dc.Put(acct.DN, acct.Attrs)
 	edit(func(x *store.User) { x.PasswordHash = "reset-hash" })
 	if n, err := s.QueueDirectoryPassword(e.DirectoryKeys(), u.ID, "reset-hash", []byte("Reset-Pass-2"), nil); err != nil || n != 1 {
 		t.Fatal("reset not queued for the disabled account", n, err)
 	}
 	edit(func(x *store.User) { x.Status = "active" })
 	drain(t, e)
-	if got := adUser(t, dc, sys.ID, u.ID); first(got, "userAccountControl") != "514" {
+	if got := adUser(t, dc, sys.ID, u.ID); first(got, "userAccountControl") != "66050" {
 		t.Fatal("enabled while the directory still holds the replaced password", got.Attrs)
 	}
 	waiting := false
@@ -296,8 +301,8 @@ func adEnableWaitsForReset(t *testing.T, ackFirst bool) {
 	}
 	apply()
 	drain(t, e)
-	if got := adUser(t, dc, sys.ID, u.ID); first(got, "userAccountControl") != "512" {
-		t.Fatal("not enabled once the reset was applied", got.Attrs)
+	if got := adUser(t, dc, sys.ID, u.ID); first(got, "userAccountControl") != "66048" {
+		t.Fatal("not enabled once the reset was applied, or another flag was lost", got.Attrs)
 	}
 }
 
@@ -337,6 +342,13 @@ func TestADRenameFollowsKyIdentity(t *testing.T) {
 		t.Fatal("group member not following the rename", grp.Attrs["member"])
 	}
 
+	// CN=bob is a contact with no sAMAccountName: the logon name is free, the CN is not.
+	dc.Put("CN=bob,"+adOU, map[string][]string{"objectClass": {"contact"}})
+	rename("bob")
+	if acct := adUser(t, dc, sys.ID, u.ID); acct.DN != "CN=alice2,"+adOU || first(acct, "sAMAccountName") != "alice2" || first(acct, "userPrincipalName") != "alice2@kyws.test" {
+		t.Fatalf("a CN collision left a half-renamed account: %s %+v", acct.DN, acct.Attrs)
+	}
+
 	rename("squatter")
 	if acct := adUser(t, dc, sys.ID, u.ID); first(acct, "sAMAccountName") != "alice2" {
 		t.Fatal("took a name an unmanaged object holds", acct.Attrs)
@@ -360,5 +372,29 @@ func TestADRenameFollowsKyIdentity(t *testing.T) {
 	drain(t, e)
 	if grp := dc.Find("adminDescription", adpass.Marker(sys.ID, "group", group.ID))[0]; grp.DN != "CN=pc-staff,"+adOU || first(grp, "sAMAccountName") != "pc-staff" {
 		t.Fatalf("group rename not applied: %s %+v", grp.DN, grp.Attrs)
+	}
+}
+
+// A delivery ends with its context even when the directory stalls mid-operation.
+func TestADDeliveryEndsWithItsContext(t *testing.T) {
+	e, s, _, dc, sys := adFixture(t)
+	u := &store.User{ID: uuid.NewString(), Username: "carol", DisplayName: "Carol", Email: "carol@example.com", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := s.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppAssignment(appRecordFor(t, s, sys.ID).ID, "users", u.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, e)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	dc.ModifyResult = func(string, []string) uint16 { <-release; return 0 }
+	payload, _ := json.Marshal(SCIMUserResource{UserName: "carol", DisplayName: "Carol B", Active: true})
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := e.deliverAD(ctx, sys, "bind-secret", "user.updated", u.ID, payload)
+	if err == nil || time.Since(start) > 3*time.Second {
+		t.Fatal("a stalled directory held the delivery past its deadline", err, time.Since(start))
 	}
 }

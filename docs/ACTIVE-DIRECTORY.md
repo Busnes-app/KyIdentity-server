@@ -45,8 +45,9 @@ Read these before you turn it on.
 - Who is synced: users with access to the connector's app (App access), and groups assigned
   to that app with their in-scope members. A managed group's `member` list is replaced by
   KyIdentity's; members added by hand in AD are removed.
-- Disabled, deleted or unassigned users get `userAccountControl` 514 (disabled). Nothing
-  is deleted. An unassigned group is emptied and kept.
+- Disabled, deleted or unassigned users get the ACCOUNTDISABLE bit (0x2) of
+  `userAccountControl` set, and enabling clears only that bit: other flags an AD operator
+  set are kept. Nothing is deleted. An unassigned group is emptied and kept.
 - LDAPS only. The certificate you paste (the DC's CA, or the DC's own certificate) is the
   only trust anchor; system roots are never used and verification cannot be skipped. A DC
   on a private network needs `KYIDENTITY_ALLOW_PRIVATE_CALLBACKS=true`, as private SCIM
