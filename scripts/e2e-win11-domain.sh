@@ -37,6 +37,8 @@ _win_wait() {
 }
 
 _win_boots() { find "$E2E_WIN11_SHARE/out" -maxdepth 1 -name 'boot-*' | wc -l; }
+# _win_booted_since N: more boots than N have reported (counted on every poll).
+_win_booted_since() { (($(_win_boots) > $1)); }
 _win_sessions() { compgen -G "$E2E_WIN11_SHARE/out/session-*.txt" >/dev/null; }
 
 # win_ps NAME [TIMEOUT] < SCRIPT: runs SCRIPT as SYSTEM in the VM and prints its output.
@@ -48,7 +50,8 @@ win_ps() {
 	mv "$d/cmd/.$name" "$d/cmd/$name.ps1"
 	_win_wait "$timeout" test -s "$d/out/$name.rc" || _win_die "$name: no answer in ${timeout}s" || return
 	sleep 1
-	tr -d '\r' <"$d/out/$name.txt"
+	# A script with no output leaves no .txt (Set-Content of nothing writes no file).
+	if [[ -f $d/out/$name.txt ]]; then tr -d '\r' <"$d/out/$name.txt"; fi
 	rc=$(tr -dc '0-9' <"$d/out/$name.rc")
 	rm -f "$d/out/$name.txt" "$d/out/$name.rc"
 	return "${rc:-1}"
@@ -84,7 +87,7 @@ win_reboot() {
 	local n
 	n=$(_win_boots)
 	printf 'shutdown.exe /r /t 5 /f\n' | win_ps reboot >/dev/null
-	_win_wait 900 test "$(_win_boots)" -gt "$n" || _win_die "the VM did not come back within 15 min"
+	_win_wait 900 _win_booted_since "$n" || _win_die "the VM did not come back within 15 min"
 }
 
 _win_autologon() {
@@ -183,6 +186,7 @@ win_join() {
 	pass=$(cat "$E2E_DC_ADMIN_PWFILE")
 	win_ps join 600 <<-EOF
 		\$ErrorActionPreference = 'Stop'
+		if ((Get-CimInstance Win32_ComputerSystem).Domain -eq '${E2E_DC_REALM,,}') { 'already joined'; exit 0 }
 		\$c = New-Object PSCredential('$E2E_DC_DOMAIN\\Administrator', (ConvertTo-SecureString '$pass' -AsPlainText -Force))
 		Add-Computer -DomainName '${E2E_DC_REALM,,}' -Credential \$c -Force
 		'Add-Computer: ok'
@@ -256,9 +260,14 @@ win_up() {
 		-v "$E2E_WIN11_VOLUME:/storage" -v "$E2E_WIN11_WORKDIR/oem:/oem:ro" -v "$E2E_WIN11_SHARE:/shared" \
 		--stop-timeout 120 "$E2E_WIN11_IMAGE" >/dev/null
 	_win_log "viewer: http://$(docker port "$E2E_WIN11_VM" 8006/tcp | head -n 1)"
-	_win_wait "${E2E_WIN11_INSTALL_TIMEOUT:-5400}" test "$(_win_boots)" -gt 0 ||
+	_win_wait "${E2E_WIN11_INSTALL_TIMEOUT:-5400}" _win_booted_since 0 ||
 		_win_die "install did not finish; docker logs $E2E_WIN11_VM" || return
 	_win_log "install finished; command channel up"
+	_win_setup
+}
+
+# _win_setup: UTC time from the host and the DC as the DNS server; prints the edition.
+_win_setup() {
 	win_ps setup-clock-dns <<-EOF
 		\$ErrorActionPreference = 'Stop'
 		Set-TimeZone -Id UTC

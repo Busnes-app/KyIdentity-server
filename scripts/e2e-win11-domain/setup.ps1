@@ -6,6 +6,9 @@ $ip = [Net.Dns]::GetHostAddresses('host.lan') | Where-Object AddressFamily -EQ '
 Add-Content "$env:windir\System32\drivers\etc\hosts" "`r`n$ip host.lan"
 # Refused logons must reach the Security log (4625) for the harness to read.
 auditpol.exe /set /subcategory:"Logon" /success:enable /failure:enable | Out-Null
+# The host writes into the share behind Samba's back, so no lease break tells Windows to
+# refresh: without this SYSTEM's cached listing of cmd\ goes stale after the domain join.
+Set-SmbClientConfiguration -DirectoryCacheLifetime 0 -FileInfoCacheLifetime 0 -FileNotFoundCacheLifetime 0 -Confirm:$false
 # Skip the first-logon animation so a new domain user's desktop comes up quickly.
 $sys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 Set-ItemProperty $sys EnableFirstLogonAnimation 0 -Type DWord
