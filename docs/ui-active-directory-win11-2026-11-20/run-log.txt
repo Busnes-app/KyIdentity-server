@@ -1,0 +1,392 @@
+=== RUN   TestWin11DomainEndToEnd
+{"timestamp":"2026-11-20T05:51:06.562582832Z","level":"INFO","action":"admin.system_created","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"74bfd8ff-c05d-41db-bfd3-0e888568ee6a","targetType":"system","ipAddress":"192.0.2.1","outcome":"success","details":{"systemName":"Samba","systemType":"active_directory"}}
+{"timestamp":"2026-11-20T05:51:06.59583555Z","level":"INFO","action":"admin.system_tested","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"74bfd8ff-c05d-41db-bfd3-0e888568ee6a","targetType":"system","ipAddress":"192.0.2.1","outcome":"success"}
+    samba_e2e_test.go:72: PASS: Test connection binds and reads the OU over pinned LDAPS
+{"timestamp":"2026-11-20T05:51:06.597367803Z","level":"INFO","action":"admin.ad_agent_token_issued","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"74bfd8ff-c05d-41db-bfd3-0e888568ee6a","targetType":"system","ipAddress":"192.0.2.1","outcome":"success","details":{"systemName":"Samba"}}
+{"timestamp":"2026-11-20T05:51:06.664258001Z","level":"INFO","action":"admin.user_created","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"passwordChangeRequired":true,"pending":false,"role":"user","username":"winuser"}}
+{"timestamp":"2026-11-20T05:51:06.931503184Z","level":"INFO","action":"user.password_changed","actorId":"fd4d14bd-47e1-4700-a998-ef376e42db45","actorUsername":"winuser","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"required":true}}
+{"timestamp":"2026-11-20T05:51:06.932725505Z","level":"INFO","action":"directory.password_queued","actorId":"fd4d14bd-47e1-4700-a998-ef376e42db45","actorUsername":"winuser","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"seq":1795153866932,"superseded":false,"systemId":"74bfd8ff-c05d-41db-bfd3-0e888568ee6a"}}
+    win11_e2e_test.go:40: PASS: the agent set the new password in AD
+    win11_e2e_test.go:26: win_join (1m3s):
+        WARNING: The changes will take effect after you restart the computer WIN-0A3EL3VEVNG.
+        Add-Computer: ok
+        computer: WIN-0A3EL3VEVNG partOfDomain=True domain=kyws.test
+        secureChannel: True
+                   DC: \\dc.kyws.test
+              Address: \\172.28.0.2
+             Dom Guid: a42d1b83-72ed-4d87-9d2a-50d07472f4e6
+             Dom Name: kyws.test
+          Forest Name: kyws.test
+         Dc Site Name: Default-First-Site-Name
+        Our Site Name: Default-First-Site-Name
+                Flags: PDC GC DS LDAP KDC TIMESERV GTIMESERV WRITABLE DNS_DC DNS_DOMAIN DNS_FOREST CLOSE_SITE FULL_SECRET
+        The command completed successfully
+    win11_e2e_test.go:56: PASS: 1. Windows 11 joins the domain and holds a secure channel
+[e2e-win11] screenshot 02-logon-desktop.png
+    win11_e2e_test.go:26: win_logon (2m15s):
+        4624 type=2 sub= at=+4s
+        session=active
+        time: 20261120T055308577Z
+        whoami: kyws\winuser
+        DisableChangePassword: 
+        upn: winuser@kyws.test
+        --- klist
+        
+        Current LogonId is 0:0x26b36
+        
+        Cached Tickets: (6)
+        
+        #0>	Client: winuser @ KYWS.TEST
+        	Server: krbtgt/KYWS.TEST @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x60ac0000 -> forwardable forwarded renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:52:51 (local)
+        	End Time:   11/20/2026 15:52:51 (local)
+        	Renew Time: 11/27/2026 5:52:51 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0x2 -> DELEGATION 
+        	Kdc Called: dc.kyws.test
+        
+        #1>	Client: winuser @ KYWS.TEST
+        	Server: krbtgt/KYWS.TEST @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40e10000 -> forwardable renewable initial pre_authent name_canonicalize 
+        	Start Time: 11/20/2026 5:52:51 (local)
+        	End Time:   11/20/2026 15:52:51 (local)
+        	Renew Time: 11/27/2026 5:52:51 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0x1 -> PRIMARY 
+        	Kdc Called: DC
+        
+        #2>	Client: winuser @ KYWS.TEST
+        	Server: ProtectedStorage/dc.kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:52:52 (local)
+        	End Time:   11/20/2026 15:52:51 (local)
+        	Renew Time: 11/27/2026 5:52:51 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+        
+        #3>	Client: winuser @ KYWS.TEST
+        	Server: cifs/dc.kyws.test/kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:52:51 (local)
+        	End Time:   11/20/2026 15:52:51 (local)
+        	Renew Time: 11/27/2026 5:52:51 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+        
+        #4>	Client: winuser @ KYWS.TEST
+        	Server: cifs/DC @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:52:51 (local)
+        	End Time:   11/20/2026 15:52:51 (local)
+        	Renew Time: 11/27/2026 5:52:51 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+        
+        #5>	Client: winuser @ KYWS.TEST
+        	Server: LDAP/dc.kyws.test/kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:52:51 (local)
+        	End Time:   11/20/2026 15:52:51 (local)
+        	Renew Time: 11/27/2026 5:52:51 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+    win11_e2e_test.go:59: PASS: 2. interactive logon as the KyIdentity user, online, with a UPN and a Kerberos TGT in the session
+{"timestamp":"2026-11-20T05:54:25.394069962Z","level":"INFO","action":"user.password_changed","actorId":"fd4d14bd-47e1-4700-a998-ef376e42db45","actorUsername":"winuser","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"required":false}}
+{"timestamp":"2026-11-20T05:54:25.395355848Z","level":"INFO","action":"directory.password_queued","actorId":"fd4d14bd-47e1-4700-a998-ef376e42db45","actorUsername":"winuser","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"seq":1795154065395,"superseded":false,"systemId":"74bfd8ff-c05d-41db-bfd3-0e888568ee6a"}}
+    win11_e2e_test.go:61: PASS: the agent set the new password in AD
+[e2e-win11] screenshot 03-old-password-refused.png
+    win11_e2e_test.go:26: win_logon_refused (1m50s):
+        4625 type=2 sub=0xc000006a at=+5s
+    win11_e2e_test.go:63: PASS: 3. after a KyIdentity password change the old password is refused (0xC000006A)
+[e2e-win11] screenshot 03-new-password-desktop.png
+    win11_e2e_test.go:26: win_logon (1m45s):
+        4624 type=2 sub= at=+4s
+        session=active
+        time: 20261120T055643374Z
+        whoami: kyws\winuser
+        DisableChangePassword: 
+        upn: winuser@kyws.test
+        --- klist
+        
+        Current LogonId is 0:0x2693c
+        
+        Cached Tickets: (6)
+        
+        #0>	Client: winuser @ KYWS.TEST
+        	Server: krbtgt/KYWS.TEST @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x60ac0000 -> forwardable forwarded renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:56:36 (local)
+        	End Time:   11/20/2026 15:56:36 (local)
+        	Renew Time: 11/27/2026 5:56:36 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0x2 -> DELEGATION 
+        	Kdc Called: dc.kyws.test
+        
+        #1>	Client: winuser @ KYWS.TEST
+        	Server: krbtgt/KYWS.TEST @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40e10000 -> forwardable renewable initial pre_authent name_canonicalize 
+        	Start Time: 11/20/2026 5:56:36 (local)
+        	End Time:   11/20/2026 15:56:36 (local)
+        	Renew Time: 11/27/2026 5:56:36 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0x1 -> PRIMARY 
+        	Kdc Called: DC
+        
+        #2>	Client: winuser @ KYWS.TEST
+        	Server: cifs/dc.kyws.test/kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:56:36 (local)
+        	End Time:   11/20/2026 15:56:36 (local)
+        	Renew Time: 11/27/2026 5:56:36 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+        
+        #3>	Client: winuser @ KYWS.TEST
+        	Server: LDAP/dc.kyws.test/kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:56:36 (local)
+        	End Time:   11/20/2026 15:56:36 (local)
+        	Renew Time: 11/27/2026 5:56:36 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+        
+        #4>	Client: winuser @ KYWS.TEST
+        	Server: ProtectedStorage/dc.kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:56:36 (local)
+        	End Time:   11/20/2026 15:56:36 (local)
+        	Renew Time: 11/27/2026 5:56:36 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+        
+        #5>	Client: winuser @ KYWS.TEST
+        	Server: cifs/dc.kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 5:56:36 (local)
+        	End Time:   11/20/2026 15:56:36 (local)
+        	Renew Time: 11/27/2026 5:56:36 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+    win11_e2e_test.go:65: PASS: 3. the new password logs on online
+[e2e-win11] screenshot 06-ctrl-alt-del-before-baseline.png
+    win11_e2e_test.go:26: win_cad_shot (9s):
+    win11_e2e_test.go:67: PASS: 6. Ctrl-Alt-Del screen captured before the baseline GPO
+{"timestamp":"2026-11-20T05:58:10.244993123Z","level":"INFO","action":"admin.user_updated","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"accessRevoked":true,"demoted":false,"endsAt":null,"endsAtBefore":null,"passwordSet":false,"role":"user","roleChanged":false,"status":"disabled","username":"winuser"}}
+    win11_e2e_test.go:71: PASS: userAccountControl is 514
+[e2e-win11] screenshot 04-disabled-default-policy.png
+    win11_e2e_test.go:26: win_logon_refused (1m50s):
+        4624 type=11 sub= at=+4s
+        4625 type=7 sub=0xc0000072 at=+4s
+        session=active
+    win11_e2e_test.go:73: MEASURED: 4. disabled in KyIdentity, DC reachable, default policy: refused=false cachedLogon=true
+{"timestamp":"2026-11-20T06:00:00.597533633Z","level":"INFO","action":"admin.user_updated","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"accessRevoked":false,"demoted":false,"endsAt":null,"endsAtBefore":null,"passwordSet":false,"role":"user","roleChanged":false,"status":"active","username":"winuser"}}
+    win11_e2e_test.go:76: PASS: userAccountControl is 512
+Added/Updated GPO link
+GPO(s) linked to DN DC=kyws,DC=test
+    GPO     : {664904B8-E370-4517-83D1-EFEAD23C5206}
+    Name    : KyIdentity baseline
+    Options : NONE
+
+    GPO     : {31B2F340-016D-11D2-945F-00C04FB984F9}
+    Name    : Default Domain Policy
+    Options : NONE
+
+    win11_e2e_test.go:26: win_gpo_apply (12s):
+        gpo: {664904B8-E370-4517-83D1-EFEAD23C5206} linked at DC=kyws,DC=test
+        SyncForegroundPolicy: 1
+        
+                KyIdentity baseline
+        
+        
+    win11_e2e_test.go:78: PASS: 6. the baseline GPO is created, loaded, linked and applied to the computer
+[e2e-win11] screenshot 06-logon-with-baseline.png
+    win11_e2e_test.go:26: win_logon (1m50s):
+        4624 type=2 sub= at=+4s
+        session=active
+        time: 20261120T060044769Z
+        whoami: kyws\winuser
+        DisableChangePassword: 1
+        upn: winuser@kyws.test
+        --- klist
+        
+        Current LogonId is 0:0x321f7
+        
+        Cached Tickets: (4)
+        
+        #0>	Client: winuser @ KYWS.TEST
+        	Server: krbtgt/KYWS.TEST @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x60ac0000 -> forwardable forwarded renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 6:00:40 (local)
+        	End Time:   11/20/2026 16:00:39 (local)
+        	Renew Time: 11/27/2026 6:00:39 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0x2 -> DELEGATION 
+        	Kdc Called: dc.kyws.test
+        
+        #1>	Client: winuser @ KYWS.TEST
+        	Server: krbtgt/KYWS.TEST @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40e10000 -> forwardable renewable initial pre_authent name_canonicalize 
+        	Start Time: 11/20/2026 6:00:39 (local)
+        	End Time:   11/20/2026 16:00:39 (local)
+        	Renew Time: 11/27/2026 6:00:39 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0x1 -> PRIMARY 
+        	Kdc Called: DC
+        
+        #2>	Client: winuser @ KYWS.TEST
+        	Server: cifs/dc.kyws.test/kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 6:00:40 (local)
+        	End Time:   11/20/2026 16:00:39 (local)
+        	Renew Time: 11/27/2026 6:00:39 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+        
+        #3>	Client: winuser @ KYWS.TEST
+        	Server: LDAP/dc.kyws.test/kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 6:00:40 (local)
+        	End Time:   11/20/2026 16:00:39 (local)
+        	Renew Time: 11/27/2026 6:00:39 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+    win11_e2e_test.go:80: PASS: 6. at logon the user hive holds Remove Change Password (DisableChangePassword=1)
+[e2e-win11] screenshot 06-ctrl-alt-del-with-baseline.png
+    win11_e2e_test.go:26: win_cad_shot (9s):
+    win11_e2e_test.go:82: PASS: 6. Ctrl-Alt-Del screen captured with the baseline GPO
+{"timestamp":"2026-11-20T06:02:12.426355641Z","level":"INFO","action":"admin.user_updated","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"accessRevoked":true,"demoted":false,"endsAt":null,"endsAtBefore":null,"passwordSet":false,"role":"user","roleChanged":false,"status":"disabled","username":"winuser"}}
+    win11_e2e_test.go:85: PASS: userAccountControl is 514
+[e2e-win11] screenshot 04-disabled-refused.png
+    win11_e2e_test.go:26: win_logon_refused (1m45s):
+        4625 type=2 sub=0xc0000072 at=+5s
+    win11_e2e_test.go:87: PASS: 4. with the baseline, disabling in KyIdentity refuses the logon (0xC0000072), cached or not
+{"timestamp":"2026-11-20T06:03:57.747481842Z","level":"INFO","action":"admin.user_updated","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"accessRevoked":false,"demoted":false,"endsAt":null,"endsAtBefore":null,"passwordSet":false,"role":"user","roleChanged":false,"status":"active","username":"winuser"}}
+    win11_e2e_test.go:90: PASS: userAccountControl is 512
+[e2e-win11] screenshot 05-online-logon.png
+    win11_e2e_test.go:26: win_logon (1m45s):
+        4624 type=2 sub= at=+5s
+        session=active
+        time: 20261120T060424044Z
+        whoami: kyws\winuser
+        DisableChangePassword: 1
+        upn: winuser@kyws.test
+        --- klist
+        
+        Current LogonId is 0:0x364d9
+        
+        Cached Tickets: (4)
+        
+        #0>	Client: winuser @ KYWS.TEST
+        	Server: krbtgt/KYWS.TEST @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x60ac0000 -> forwardable forwarded renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 6:04:20 (local)
+        	End Time:   11/20/2026 16:04:20 (local)
+        	Renew Time: 11/27/2026 6:04:20 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0x2 -> DELEGATION 
+        	Kdc Called: dc.kyws.test
+        
+        #1>	Client: winuser @ KYWS.TEST
+        	Server: krbtgt/KYWS.TEST @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40e10000 -> forwardable renewable initial pre_authent name_canonicalize 
+        	Start Time: 11/20/2026 6:04:20 (local)
+        	End Time:   11/20/2026 16:04:20 (local)
+        	Renew Time: 11/27/2026 6:04:20 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0x1 -> PRIMARY 
+        	Kdc Called: DC
+        
+        #2>	Client: winuser @ KYWS.TEST
+        	Server: cifs/dc.kyws.test/kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 6:04:20 (local)
+        	End Time:   11/20/2026 16:04:20 (local)
+        	Renew Time: 11/27/2026 6:04:20 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+        
+        #3>	Client: winuser @ KYWS.TEST
+        	Server: LDAP/dc.kyws.test/kyws.test @ KYWS.TEST
+        	KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        	Ticket Flags 0x40ac0000 -> forwardable renewable pre_authent ok_as_delegate 0x80000
+        	Start Time: 11/20/2026 6:04:20 (local)
+        	End Time:   11/20/2026 16:04:20 (local)
+        	Renew Time: 11/27/2026 6:04:20 (local)
+        	Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        	Cache Flags: 0 
+        	Kdc Called: dc.kyws.test
+    win11_e2e_test.go:92: PASS: 5. online logon after re-enabling (caches the credential)
+    win11_e2e_test.go:26: win_dc_down (0s):
+    win11_e2e_test.go:94: PASS: the DC is unreachable from the PC
+[e2e-win11] screenshot 05-cached-logon-dc-down.png
+    win11_e2e_test.go:26: win_logon (2m6s):
+        4624 type=11 sub= at=+27s
+        session=active
+        time: 20261120T060633755Z
+        whoami: kyws\winuser
+        DisableChangePassword: 1
+        upn: winuser@kyws.test
+        --- klist
+        
+        Current LogonId is 0:0x440e6
+        
+        Cached Tickets: (0)
+    win11_e2e_test.go:96: MEASURED: 5. DC unreachable, active user: loggedOn=true cachedLogon=true
+    win11_e2e_test.go:26: win_dc_up (0s):
+    win11_e2e_test.go:98: PASS: the DC is reachable again
+{"timestamp":"2026-11-20T06:07:49.415816858Z","level":"INFO","action":"admin.user_updated","actorId":"a0b6b601-3d7d-4867-91eb-a1909ddc17f8","actorUsername":"ubacc89fa","targetId":"fd4d14bd-47e1-4700-a998-ef376e42db45","targetType":"user","ipAddress":"192.0.2.1","outcome":"success","details":{"accessRevoked":true,"demoted":false,"endsAt":null,"endsAtBefore":null,"passwordSet":false,"role":"user","roleChanged":false,"status":"disabled","username":"winuser"}}
+    win11_e2e_test.go:101: PASS: userAccountControl is 514
+    win11_e2e_test.go:26: win_dc_down (0s):
+    win11_e2e_test.go:103: PASS: the DC is unreachable from the PC
+[e2e-win11] screenshot 05-cached-logon-disabled-dc-down.png
+    win11_e2e_test.go:26: win_logon (2m6s):
+        4624 type=11 sub= at=+33s
+        session=active
+        time: 20261120T060840146Z
+        whoami: kyws\winuser
+        DisableChangePassword: 1
+        upn: winuser@kyws.test
+        --- klist
+        
+        Current LogonId is 0:0x425d7
+        
+        Cached Tickets: (0)
+    win11_e2e_test.go:105: MEASURED: 5. DC unreachable, user disabled in KyIdentity after their last online logon: loggedOn=true cachedLogon=true
+    win11_e2e_test.go:26: win_dc_up (0s):
+    win11_e2e_test.go:107: PASS: the DC is reachable again
+    win11_e2e_test.go:109: PASS: the agent log holds no agent token
+    win11_e2e_test.go:109: PASS: the agent log holds no first password
+    win11_e2e_test.go:109: PASS: the agent log holds no second password
+--- PASS: TestWin11DomainEndToEnd (1129.57s)
+PASS

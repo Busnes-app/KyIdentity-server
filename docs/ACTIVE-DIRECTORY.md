@@ -226,7 +226,7 @@ Results of 2026-11-20 (Windows 11 Pro 10.0.26200, Samba 4.23.8; screenshots in
 
 | Step | Result | Evidence |
 |---|---|---|
-| 1. Join (`Add-Computer`, reboot) | Joined; secure channel true; `nltest /dsgetdc` finds the DC by DNS | `run.log` |
+| 1. Join (`Add-Computer`, reboot) | Joined; secure channel true; `nltest /dsgetdc` finds the DC by DNS | [run log](ui-active-directory-win11-2026-11-20/run-log.txt) |
 | 2. Logon as the KyIdentity user (password the user set) | Online logon (4624 type 2) 4 s after boot; `whoami /upn` = `winuser@kyws.test`; `klist` holds `krbtgt/KYWS.TEST` (AES-256) | [desktop](ui-active-directory-win11-2026-11-20/02-logon-desktop.png) |
 | 3. Password changed in KyIdentity, agent delivers | Old password refused (4625 `0xC000006A`); new password logs on online | [refused](ui-active-directory-win11-2026-11-20/03-old-password-refused.png), [desktop](ui-active-directory-win11-2026-11-20/03-new-password-desktop.png) |
 | 4. Disabled in KyIdentity, DC reachable, Windows default policy | **Not refused**: desktop from cached credentials (4624 type 11), then a background 4625 `0xC0000072` that leaves the session up | [desktop](ui-active-directory-win11-2026-11-20/04-disabled-default-policy.png) |
