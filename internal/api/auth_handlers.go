@@ -165,7 +165,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	primaryAt := time.Now().UTC()
 	// A require-password workstation app accepts only an interaction that saw this step.
 	if interaction != nil {
-		if err := h.store.RecordInteractionPassword(interactionHash, h.middleware.authorizationBrowserHash(r), user.ID, primaryAt); err != nil {
+		if err := h.store.RecordInteractionPassword(interactionHash, h.middleware.authorizationBrowserHash(r), user.ID, primaryAt); errors.Is(err, store.ErrAuthorizationInteraction) {
+			http.Error(w, `{"error":"invalid_interaction","error_description":"Restart authorization with the original account and browser"}`, 400)
+			return
+		} else if err != nil {
 			stepUpInternalError(w)
 			return
 		}

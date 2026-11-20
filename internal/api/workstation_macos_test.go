@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -238,30 +239,34 @@ func TestInteractionPasswordScopeAndCap(t *testing.T) {
 		}
 		return hash
 	}
-	bound := func(hash, browser string) bool {
+	bound := func(hash, browser string) (bool, error) {
 		t.Helper()
-		if err := f.db.RecordInteractionPassword(hash, browser, u.ID, now); err != nil {
-			t.Fatal(err)
-		}
+		recordErr := f.db.RecordInteractionPassword(hash, browser, u.ID, now)
 		i, err := f.db.GetAuthorizationInteraction(hash, browser)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return i.UserID == u.ID
+		return i.UserID == u.ID, recordErr
 	}
-	if bound(interaction("off", ""), "off") {
-		t.Fatal("bound to the account although the app does not require a password")
+	if ok, err := bound(interaction("off", ""), "off"); ok || err != nil {
+		t.Fatalf("app without require-password: bound=%t err=%v", ok, err)
 	}
 	f.requirePassword = true
 	f.settings(true, 300, 604800)
-	if !bound(interaction("on", ""), "on") {
-		t.Fatal("not bound for a require-password app")
+	if ok, err := bound(interaction("on", ""), "on"); !ok || err != nil {
+		t.Fatalf("require-password app: bound=%t err=%v", ok, err)
 	}
 	for i := 0; i < 9; i++ {
 		interaction(fmt.Sprintf("owned-%d", i), u.ID)
 	}
-	if bound(interaction("over", ""), "over") {
-		t.Fatal("bound past the per-account cap")
+	// At the cap the step is refused out loud, so the login says to restart.
+	if ok, err := bound(interaction("over", ""), "over"); ok || !errors.Is(err, store.ErrAuthorizationInteraction) {
+		t.Fatalf("past the per-account cap: bound=%t err=%v", ok, err)
+	}
+	verifier := uuid.NewString() + uuid.NewString()
+	browser, _, raw := xcredsBrowser(t, f, verifier)
+	if r := browser("POST", "/api/auth/login", map[string]string{"username": u.Username, "password": "correct-horse-battery", "interaction": raw}); r.Code != http.StatusBadRequest || !strings.Contains(r.Body.String(), "invalid_interaction") {
+		t.Fatalf("login past the cap: %d %s", r.Code, r.Body.String())
 	}
 }
 
