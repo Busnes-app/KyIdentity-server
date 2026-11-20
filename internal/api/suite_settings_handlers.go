@@ -34,6 +34,7 @@ func (h *SuiteSettingsHandler) Appearance(w http.ResponseWriter, r *http.Request
 func (h *SuiteHandler) EmailDomains(w http.ResponseWriter, r *http.Request, _ *store.OAuthClient) {
 	domains, err := h.store.SuiteEmailDomains()
 	if err != nil {
+		log.Printf("suite domains read failed: %v", err)
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}

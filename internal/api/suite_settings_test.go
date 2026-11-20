@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
+	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 func readAppearance(t *testing.T, srv *Server) string {
@@ -120,5 +121,24 @@ func TestSuiteSettingsNeedAdministrator(t *testing.T) {
 	}
 	if n := len(brandingAudits(t, db, "admin.suite_")); n != 0 {
 		t.Fatalf("refused writes audited: %d", n)
+	}
+}
+
+// A store failure on the suite route is logged before the generic 500 (AGENTS.md).
+func TestSuiteEmailDomainsLogsReadFailure(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	createClient(t, db, "kypost", "confidential", crypto.HashSHA256("post-secret"), "", "https://mail.example.test/cb")
+	if err := db.SetSetting(store.SuiteEmailDomainsSetting, "not json"); err != nil {
+		t.Fatal(err)
+	}
+	output := captureOutput(t)
+	rr := suiteGet(t, srv, "/api/suite/email-domains", "kypost", "post-secret")
+	logged := output()
+	if rr.Code != http.StatusInternalServerError || strings.TrimSpace(rr.Body.String()) != `{"error":"internal_error"}` {
+		t.Fatalf("corrupt row: %d %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(logged, "suite domains read failed") {
+		t.Fatalf("500 not logged; output: %q", logged)
 	}
 }
