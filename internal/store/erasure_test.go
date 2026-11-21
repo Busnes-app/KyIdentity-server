@@ -392,3 +392,32 @@ func TestEraseNoticesAreRetriedUntilSent(t *testing.T) {
 		t.Errorf("%d notices still owed after a send", n)
 	}
 }
+
+// A member whose username is a common detail value takes only the rows that name them as a
+// person, matched exactly.
+func TestEraseMemberKeepsRowsThatOnlyShareAValue(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	erasureOrg(t, s, "home", map[string]string{"kid": "active"})
+	tenancyExec(t, s, `UPDATE users SET username='user' WHERE id='home-kid'`)
+	row := func(id, details string) string {
+		return `INSERT INTO audit_events(id,actor_id,actor_username,action,target_id,target_type,ip_address,user_agent,outcome,details_json,created_at,org_id)
+ VALUES('` + id + `','home-holder','','admin.change','g1','group','','','success','` + details + `',CURRENT_TIMESTAMP,'home')`
+	}
+	tenancyExec(t, s,
+		row("ae-role", `{"role":"user"}`),
+		row("ae-key", `{"user":"home-holder"}`),
+		row("ae-other-key", `{"scope":"self","note":"user"}`),
+		row("ae-case", `{"username":"User"}`),
+		row("ae-list", `{"members":["home-holder","user"]}`),
+		row("ae-nested", `{"change":{"userId":"home-kid"}}`))
+	session, hash := erasureGrant(t, s, "home-kid", "totp")
+	if _, err := s.Org(OrgID{"home"}).Erase("home-kid", session, hash, testEraseOp, nil); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]int{"ae-role": 1, "ae-key": 1, "ae-other-key": 1, "ae-case": 1, "ae-list": 0, "ae-nested": 0} {
+		if n := rowCount(t, s, `SELECT COUNT(*) FROM audit_events WHERE id='`+id+`'`); n != want {
+			t.Errorf("%s: %d rows, want %d", id, n, want)
+		}
+	}
+}
