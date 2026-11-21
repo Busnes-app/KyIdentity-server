@@ -343,11 +343,10 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 		}
 	}()
 	// An export-only session reaches apps only through the code flow, with its claim.
-	if exportOnly, err := e.exportOnly(sess.ID); err != nil || exportOnly {
-		if err == nil {
-			err = store.ErrOrgSuspended
-		}
-		return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnNotPermitted, err)
+	if exportOnly, err := e.exportOnly(sess.ID); err != nil {
+		return nil, who, err
+	} else if exportOnly {
+		return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnNotPermitted, store.ErrOrgSuspended)
 	}
 	accessJTI := uuid.NewString()
 	beforeDeviceTokenRecord()
