@@ -266,24 +266,22 @@ func eraseUserTx(tx *sql.Tx, org string, u *User, audit *AuditEvent, now time.Ti
 	if err := offboardErasedTx(tx, org, u.ID, now); err != nil {
 		return err
 	}
-	// Audit rows and alerts that name them go too: as actor or target, or as a whole JSON
-	// string value in an audit row's details (a group change records its members'
-	// usernames), and alerts keyed by them, whose text names them. Exact values only, so a
-	// short username never takes other people's rows; the display name is never matched.
-	for _, name := range slices.Compact(slices.Sorted(slices.Values([]string{u.ID, u.Username, u.Email}))) {
-		if name == "" {
-			continue
-		}
-		quoted, err := json.Marshal(name)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`DELETE FROM audit_events WHERE org_id=? AND (actor_id=? OR target_id=? OR details_json LIKE ? ESCAPE '\')`, org, name, name, "%"+likePrefix(string(quoted))); err != nil {
+	// Audit rows and alerts that name them go too: as actor or target, or in an audit row's
+	// details as the exact value of a key that names a person (a group change records its
+	// members' usernames), and alerts keyed by them, whose text names them. Case-sensitive,
+	// whole values under personKeys only, so a username such as "user" never takes other
+	// people's rows; the display name is never matched.
+	names := slices.DeleteFunc(slices.Compact(slices.Sorted(slices.Values([]string{u.ID, u.Username, u.Email}))), func(n string) bool { return n == "" })
+	for _, name := range names {
+		if _, err := tx.Exec(`DELETE FROM audit_events WHERE org_id=? AND (actor_id=? OR target_id=?)`, org, name, name); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM alerts WHERE org_id=? AND key=?`, org, name); err != nil {
 			return err
 		}
+	}
+	if err := deleteAuditNamingTx(tx, org, names); err != nil {
+		return err
 	}
 	// The audit row is written while the user still names the org.
 	if err := recordAuditTx(tx, audit); err != nil {
@@ -296,6 +294,68 @@ func eraseUserTx(tx *sql.Tx, org string, u *User, audit *AuditEvent, now time.Ti
 		return err
 	}
 	return reconcileProvisioningTx(tx, now)
+}
+
+// personKeys are the audit detail keys whose values name a person.
+var personKeys = map[string]bool{"member": true, "members": true, "user": true, "users": true, "userId": true, "userIds": true,
+	"username": true, "usernames": true, "email": true, "emails": true, "recipients": true}
+
+// deleteAuditNamingTx deletes the org's audit rows whose details name one of names under a
+// personKeys key. LIKE only narrows the rows (it folds case); namesPerson decides exactly.
+func deleteAuditNamingTx(tx *sql.Tx, org string, names []string) error {
+	var ids []string
+	for _, name := range names {
+		quoted, err := json.Marshal(name)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(`SELECT id,details_json FROM audit_events WHERE org_id=? AND details_json LIKE ? ESCAPE '\'`, org, "%"+likePrefix(string(quoted)))
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id, details string
+			if err := rows.Scan(&id, &details); err != nil {
+				rows.Close()
+				return err
+			}
+			var v any
+			if json.Unmarshal([]byte(details), &v) == nil && namesPerson(v, names, false) {
+				ids = append(ids, id)
+			}
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(`DELETE FROM audit_events WHERE org_id=? AND id=?`, org, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// namesPerson reports whether v holds one of names as a string under a personKeys key, at
+// any depth; person says v is already such a key's value.
+func namesPerson(v any, names []string, person bool) bool {
+	switch v := v.(type) {
+	case string:
+		return person && slices.Contains(names, v)
+	case []any:
+		for _, e := range v {
+			if namesPerson(e, names, person) {
+				return true
+			}
+		}
+	case map[string]any:
+		for k, e := range v {
+			if namesPerson(e, names, personKeys[k]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // offboardErasedTx ends a user's access, queuing the back-channel logouts owed, and tells
