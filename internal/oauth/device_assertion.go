@@ -331,7 +331,9 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 		IPAddress: ip, UserAgent: userAgent, ExpiresAt: now.Add(AccessTokenTTL), CreatedAt: now, LastActiveAt: now,
 		AuthenticationEvidence: evidence,
 	}
-	if err := e.store.CreateSession(sess); err != nil {
+	if err := e.store.CreateSession(sess); errors.Is(err, store.ErrOrgSuspended) {
+		return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnNotPermitted, err)
+	} else if err != nil {
 		return nil, who, err
 	}
 	issued := false
@@ -340,6 +342,13 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 			_ = e.store.DeleteSession(sess.ID)
 		}
 	}()
+	// An export-only session reaches apps only through the code flow, with its claim.
+	if exportOnly, err := e.exportOnly(sess.ID); err != nil || exportOnly {
+		if err == nil {
+			err = store.ErrOrgSuspended
+		}
+		return nil, who, fmt.Errorf("%w: %w", ErrDeviceSignOnNotPermitted, err)
+	}
 	accessJTI := uuid.NewString()
 	beforeDeviceTokenRecord()
 	// Binding the evaluated revisions and device refuses the token if a policy or role

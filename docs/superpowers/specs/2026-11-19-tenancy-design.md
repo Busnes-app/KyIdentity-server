@@ -896,11 +896,12 @@ tests.
 8. **Delete everything** (amendment). Stacked PRs, each multi-tenant only:
    - (a) This amendment, `org_erasures`, `erased_subjects` and their triggers, the holder's
      two paths and the sweep, `user.erased`, `POST /api/user/erase` and
-     `GET /api/suite/erased`. Session creation does not yet read `active_principals`, so until
-     (b) nothing stops a member of a `deletion_scheduled` org from signing in. Multi-tenant
-     mode is refused at startup until PR 6, so that is reachable only in tests.
-   - (b) Session creation through `active_principals`, the export-only session for the cases
-     above, and the `export_only` claim.
+     `GET /api/suite/erased`.
+   - (b) The org gate at session creation, the export-only session for the cases above, and
+     the `export_only` claim. Ahead of PR 4, the gate is one SQL condition at the choke points
+     every grant passes (session creation, code creation, token registration and the token
+     check) rather than a read of the `active_principals` view: the same rows, and the
+     `credential_principals` naming stays PR 4's.
    - (c) The account page button and dialog.
 
 ## Owner answers

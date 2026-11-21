@@ -321,7 +321,8 @@ func forwardAccess(q interface {
 	QueryRow(string, ...any) *sql.Row
 }, appID, userID string) (ForwardAccess, error) {
 	var a ForwardAccess
-	err := q.QueryRow(`SELECT (u.status='active' AND NOT u.password_change_required AND (u.ends_at IS NULL OR u.ends_at>unixepoch())),
+	err := q.QueryRow(`SELECT (u.status='active' AND NOT u.password_change_required AND (u.ends_at IS NULL OR u.ends_at>unixepoch())
+ AND EXISTS(SELECT 1 FROM orgs o WHERE o.id=u.org_id AND o.status='active')),
  EXISTS(SELECT 1 FROM effective_app_access e WHERE e.app_id=r.id AND e.user_id=u.id),
  r.auth_mode,r.auth_primary_max_age,r.auth_factor,r.auth_factor_max_age,
  er.required,er.allowed_mask,er.due_at,COALESCE((SELECT SUM(f.bit) FROM enrolled_factors f WHERE f.user_id=u.id),0)

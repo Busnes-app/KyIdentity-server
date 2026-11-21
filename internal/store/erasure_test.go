@@ -329,8 +329,9 @@ func TestErasureRefusals(t *testing.T) {
 	if _, err := erase(t, s, DefaultOrgID, u.ID, "totp"); !errors.Is(err, ErrErasureRefused) {
 		t.Errorf("default org: %v", err)
 	}
+	session, hash = erasureGrant(t, s, "home-kid", "totp")
 	tenancyExec(t, s, `UPDATE orgs SET status='suspended' WHERE id='home'`)
-	if _, err := erase(t, s, "home", "home-kid", "totp"); !errors.Is(err, ErrErasureRefused) {
+	if _, err := s.Org(OrgID{"home"}).Erase("home-kid", session, hash, testEraseOp, nil); !errors.Is(err, ErrErasureRefused) {
 		t.Errorf("suspended org: %v", err)
 	}
 	if n := rowCount(t, s, `SELECT COUNT(*) FROM org_erasures`) + rowCount(t, s, `SELECT COUNT(*) FROM erased_subjects`); n != 0 {

@@ -132,6 +132,18 @@ func enrollmentRouteAllowed(method, path string) bool {
 	}
 	return false
 }
+
+// An export-only session (tenancy design, Views) may see who it is, list the apps it can
+// open to export from, and leave. /oauth/authorize takes no RequireAuth, and the store
+// gates its codes and tokens.
+func exportRouteAllowed(method, path string) bool {
+	switch method + " " + path {
+	case "GET /api/auth/me", "POST /api/auth/logout", "GET /api/user/applications":
+		return true
+	}
+	return false
+}
+
 func enrollmentOperationAllowed(operation string) bool {
 	switch operation {
 	case "POST /api/user/mfa/totp/enable", "POST /api/user/passkeys/register/finish", "POST /api/user/devices/pairing-token":

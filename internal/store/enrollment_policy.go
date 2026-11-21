@@ -62,20 +62,23 @@ type EnrollmentStatus struct {
 	Deadline       int64    `json:"deadline"`
 	Enrolled       bool     `json:"enrolled"`
 	Restricted     bool     `json:"restricted"`
+	// ExportOnly: the session reaches only the export routes (tenancy design, Views).
+	ExportOnly bool `json:"exportOnly,omitempty"`
 }
 
 func enrollmentStatus(row interface{ Scan(...any) error }) (EnrollmentStatus, error) {
 	var s EnrollmentStatus
 	var mask int
-	err := row.Scan(&s.Required, &mask, &s.Deadline, &s.Enrolled, &s.Restricted)
+	err := row.Scan(&s.Required, &mask, &s.Deadline, &s.Enrolled, &s.Restricted, &s.ExportOnly)
 	s.AllowedMethods = factorNames(mask)
 	return s, err
 }
 
-const enrollmentStatusSQL = `SELECT r.required,r.allowed_mask,r.due_at,EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=r.user_id AND (f.bit&r.allowed_mask)<>0),NOT COALESCE((SELECT allowed FROM mfa_session_access WHERE id=? AND user_id=r.user_id),FALSE) FROM enrollment_requirements r WHERE r.user_id=?`
+const enrollmentStatusSQL = `SELECT r.required,r.allowed_mask,r.due_at,EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=r.user_id AND (f.bit&r.allowed_mask)<>0),NOT COALESCE((SELECT allowed FROM mfa_session_access WHERE id=? AND user_id=r.user_id),FALSE),
+ COALESCE((SELECT export_only FROM sessions WHERE id=? AND user_id=r.user_id),FALSE) FROM enrollment_requirements r WHERE r.user_id=?`
 
 func (s *Store) SessionEnrollmentStatus(userID, sessionID string) (EnrollmentStatus, error) {
-	return enrollmentStatus(s.db.QueryRow(enrollmentStatusSQL, sessionID, userID))
+	return enrollmentStatus(s.db.QueryRow(enrollmentStatusSQL, sessionID, sessionID, userID))
 }
 func (s *Store) ListEnrollmentPolicies() ([]EnrollmentPolicy, error) {
 	rows, err := s.db.Query(`SELECT scope,required,allowed_mask,grace_seconds,revision FROM enrollment_policies WHERE group_id IS NULL ORDER BY scope`)
