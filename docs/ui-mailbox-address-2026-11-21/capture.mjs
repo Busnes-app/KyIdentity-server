@@ -68,13 +68,13 @@ try {
         await page.getByRole('button', { name: 'Mailbox address for sam@outlook.example' }).waitFor();
         await shot(page, 'hosted-menu', size, scheme);
         await page.getByRole('button', { name: 'Mailbox address for sam@outlook.example' }).click();
-        await page.getByLabel('Mailbox address').fill('sam@ky.example');
+        await page.getByRole('textbox', { name: 'Mailbox address' }).fill('sam@ky.example');
         await shot(page, 'hosted-set', size, scheme);
         await page.getByRole('button', { name: 'Cancel' }).click();
         await page.getByRole('button', { name: 'More actions for robin@gmail.example' }).click();
         await page.getByRole('button', { name: 'Mailbox address for robin@gmail.example' }).click();
-        await page.getByLabel('Mailbox address').waitFor();
-        if (await page.getByLabel('Mailbox address').inputValue() !== 'robin@ky.example') throw new Error('the current address is not prefilled');
+        await page.getByRole('textbox', { name: 'Mailbox address' }).waitFor();
+        if (await page.getByRole('textbox', { name: 'Mailbox address' }).inputValue() !== 'robin@ky.example') throw new Error('the current address is not prefilled');
         await shot(page, 'hosted-change', size, scheme);
       }
       await ctx.close();
