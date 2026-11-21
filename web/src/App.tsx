@@ -8,6 +8,7 @@ import { LoginView } from './components/LoginView';
 import { UserDashboard } from './components/UserDashboard';
 import { DeviceSettings } from './components/DeviceSettings';
 import { Settings } from './components/Settings';
+import { ExportOnly } from './components/EraseAccount';
 import { SettingsSection, hashFor, tabFromHash } from './route';
 import { AdminAppRegistry } from './components/AdminAppRegistry';
 import { AdminEnrollmentPolicies } from './components/AdminEnrollmentPolicies';
@@ -130,6 +131,10 @@ export const App: React.FC = () => {
   if (currentUser.passwordChangeRequired) {
     return <>{logoutAlert}<PasswordChangeRequired user={currentUser} onLogout={handleLogout} onChanged={() => { setActiveTab('dashboard'); checkSession(); }} /></>;
   }
+
+  // After enrollment and a required password change, which an export-only session may
+  // also need before it can get a code.
+  if (currentUser.enrollment?.exportOnly) return <main className="ky-content">{logoutAlert}<ExportOnly onLogout={handleLogout} /></main>;
 
   // Workstation sign-in (RFC 8628): approve a code a computer shows.
   if (window.location.pathname === '/device') return <DeviceApproval user={currentUser} />;

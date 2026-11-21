@@ -4,6 +4,7 @@ import { SETTINGS_SECTIONS, SettingsSection } from '../route';
 import { PageHead } from './PageHead';
 import { DeviceSettings } from './DeviceSettings';
 import { Appearance } from './Appearance';
+import { EraseAccount } from './EraseAccount';
 
 const INTRO: Record<SettingsSection, React.ReactNode> = {
   account: <>Your password, passkeys and codes, and where you are signed in. Phones that approve sign-ins are under <a href="#/settings/devices">Phones &amp; apps</a>.</>,
@@ -26,6 +27,7 @@ export const Settings: React.FC<{ section: SettingsSection; user: User; onUserUp
       <div role="region" aria-label={label}>
         <p className="settings-intro">{INTRO[section]}</p>
         {section === 'appearance' ? <Appearance /> : <DeviceSettings key={section} section={section} user={user} onUserUpdate={onUserUpdate} />}
+        {section === 'account' && <EraseAccount user={user} />}
       </div>
     </>
   );

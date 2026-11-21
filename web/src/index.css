@@ -1264,6 +1264,15 @@ dialog.modal-backdrop::backdrop {
   display: none;
 }
 
+/* Delete everything: the only destructive buttons that are not row actions. */
+.secondary-btn.danger, .primary-btn.danger { color: var(--danger); border: 1px solid var(--danger); background: transparent; }
+.primary-btn.danger:not(:disabled) { background: var(--danger-soft); }
+.secondary-btn.danger:hover:not(:disabled), .primary-btn.danger:hover:not(:disabled) { background: var(--danger-soft); box-shadow: none; }
+.primary-btn.danger:disabled { color: var(--ink); border-color: var(--line-strong); }
+.erase-step { margin: 1rem 0 0.5rem; font-size: 0.9rem; }
+.erase-apps { margin: 0; padding-left: 1.25rem; display: grid; gap: 0.35rem; }
+.erase-apps a { overflow-wrap: anywhere; }
+
 .icon-danger-btn {
   background: transparent;
   border: 1px solid transparent;
