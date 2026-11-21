@@ -686,10 +686,10 @@ org_erasures (org_id TEXT PRIMARY KEY REFERENCES orgs(id), holder_user_id TEXT N
    removal: retried until delivered, never fenced, and a `404` acknowledges it.
 4. Add the subject to `erased_subjects`.
 5. Delete the org's audit rows and alerts that name the user, and their delivered sync events,
-   which hold their name and email. An audit row names them as actor or target, or by ID,
-   username or email in its details (a group change records its members' usernames). An alert
-   names them by its key or by its text. The display name is not matched, because a common
-   name would take other people's rows. Write one `account.erased` row in the org's log naming only the
+   which hold their name and email. An audit row names them as actor or target, or by a
+   whole JSON string value equal to their ID, username or email in its details (a group change
+   records its members' usernames). An alert names them by its key. Only exact values match.
+   Matching a display name or a part of a value would take other people's rows. Write one `account.erased` row in the org's log naming only the
    opaque user ID. This is a third named audit-deletion path, beside
    `DeleteAuditEventsOlderThan` and org deletion.
 6. Delete the `users` row, which cascades to every derived row.

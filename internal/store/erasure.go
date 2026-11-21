@@ -268,19 +268,22 @@ func eraseUserTx(tx *sql.Tx, org string, u *User, audit *AuditEvent, now time.Ti
 	if err := offboardErasedTx(tx, org, u.ID, now); err != nil {
 		return err
 	}
-	// Audit rows and alerts that name them go too: as actor or target, or by ID, username
-	// or email anywhere in an audit row's details or an alert's text (a group change
-	// records its members' usernames). The display name is not matched: a common name would
-	// take other people's rows.
+	// Audit rows and alerts that name them go too: as actor or target, or as a whole JSON
+	// string value in an audit row's details (a group change records its members'
+	// usernames), and alerts keyed by them, whose text names them. Exact values only, so a
+	// short username never takes other people's rows; the display name is never matched.
 	for _, name := range slices.Compact(slices.Sorted(slices.Values([]string{u.ID, u.Username, u.Email}))) {
 		if name == "" {
 			continue
 		}
-		like := "%" + likePrefix(name)
-		if _, err := tx.Exec(`DELETE FROM audit_events WHERE org_id=? AND (actor_id=? OR target_id=? OR details_json LIKE ? ESCAPE '\')`, org, name, name, like); err != nil {
+		quoted, err := json.Marshal(name)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`DELETE FROM alerts WHERE org_id=? AND (key=? OR title LIKE ? ESCAPE '\' OR summary LIKE ? ESCAPE '\')`, org, name, like, like); err != nil {
+		if _, err := tx.Exec(`DELETE FROM audit_events WHERE org_id=? AND (actor_id=? OR target_id=? OR details_json LIKE ? ESCAPE '\')`, org, name, name, "%"+likePrefix(string(quoted))); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM alerts WHERE org_id=? AND key=?`, org, name); err != nil {
 			return err
 		}
 	}
