@@ -31,6 +31,12 @@ func sessionOrgSQL(s string) string {
  AND (oo.status='active' OR ` + s + `.export_only AND ` + exportOnlySQL("ou", "oo") + `))`
 }
 
+// exportOnlyNowSQL: session s is export-only now. The stored flag holds only while its
+// user's org is still not active, so a resumed org's sessions are whole again.
+func exportOnlyNowSQL(s string) string {
+	return `(` + s + `.export_only AND EXISTS(SELECT 1 FROM users eu JOIN orgs eo ON eo.id=eu.org_id WHERE eu.id=` + s + `.user_id AND eo.status<>'active'))`
+}
+
 func migrateExportOnly(tx *sql.Tx) error {
 	var n int
 	if err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info('sessions') WHERE name='export_only'`).Scan(&n); err != nil || n == 1 {
@@ -54,10 +60,10 @@ func orgRefusedTx(tx *sql.Tx, userID string) (bool, error) {
 	return refused, err
 }
 
-// SessionExportOnly reports whether the session is export-only.
+// SessionExportOnly reports whether the session is export-only now.
 func (s *Store) SessionExportOnly(sessionID string) (bool, error) {
 	var on bool
-	err := s.db.QueryRow(`SELECT export_only FROM sessions WHERE id=?`, sessionID).Scan(&on)
+	err := s.db.QueryRow(`SELECT `+exportOnlyNowSQL("sessions")+` FROM sessions WHERE id=?`, sessionID).Scan(&on)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
