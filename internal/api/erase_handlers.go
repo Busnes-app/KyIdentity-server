@@ -3,25 +3,23 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
-	"github.com/Busnes-app/kyidentity-server/internal/mail"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
 // EraseHandler is Delete everything (tenancy design, amendment 2026-11-21). Multi-tenant
 // only: a single-tenant install answers 404 on both routes.
 type EraseHandler struct {
-	store         *store.Store
-	audit         *audit.Logger
-	middleware    *MiddlewareManager
-	issuerURL     string
-	encryptionKey []byte
-	multiTenant   bool
+	store       *store.Store
+	audit       *audit.Logger
+	middleware  *MiddlewareManager
+	multiTenant bool
 }
 
 // eraseOperation is the step-up operation the grant must name.
@@ -83,22 +81,24 @@ func (h *EraseHandler) Erase(w http.ResponseWriter, r *http.Request) {
 	}
 	pending := h.audit.Prepare("account.erased", user.ID, "", user.ID, "user", ip, ua, "success", nil)
 	out, err := orgStore(r).Erase(user.ID, sess.ID, crypto.HashSHA256(raw), eraseOperation, pending.Row)
-	switch {
-	case errors.Is(err, store.ErrErasureStepUp):
-		h.audit.Observe("account.erased", user.ID, "", user.ID, "user", ip, ua, "denied", map[string]any{"reason": "step_up"})
-		writeAPIError(w, http.StatusForbidden, "step_up_required", "Confirm with your password and a second factor")
-		return
-	case errors.Is(err, store.ErrErasureRefused):
-		writeAPIError(w, http.StatusNotFound, "not_found", "")
-		return
-	case errors.Is(err, store.ErrOrgErased):
-		writeAPIError(w, http.StatusConflict, "org_erased", "")
-		return
-	case errors.Is(err, store.ErrAccountHolder):
-		writeAPIError(w, http.StatusConflict, "account_holder", "")
-		return
-	case err != nil:
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
+	if err != nil {
+		// Every refusal commits nothing, so each is observed.
+		outcome, code, status, msg := "denied", "internal_error", http.StatusInternalServerError, ""
+		switch {
+		case errors.Is(err, store.ErrErasureStepUp):
+			code, status, msg = "step_up_required", http.StatusForbidden, "Confirm with your password and a second factor"
+		case errors.Is(err, store.ErrErasureRefused):
+			code, status = "not_found", http.StatusNotFound
+		case errors.Is(err, store.ErrOrgErased):
+			code, status = "org_erased", http.StatusConflict
+		case errors.Is(err, store.ErrAccountHolder):
+			code, status = "account_holder", http.StatusConflict
+		default:
+			outcome = "failure"
+			log.Printf("erase: %v", err)
+		}
+		h.audit.Observe("account.erased", user.ID, "", user.ID, "user", ip, ua, outcome, map[string]any{"reason": code})
+		writeAPIError(w, status, code, msg)
 		return
 	}
 	pending.Committed()
@@ -109,32 +109,4 @@ func (h *EraseHandler) Erase(w http.ResponseWriter, r *http.Request) {
 		body["deleteAfter"] = out.DeleteAfter.Format(time.RFC3339)
 	}
 	writeJSON(w, http.StatusOK, body)
-	if len(out.Notify) > 0 {
-		go h.notify(user.ID, ip, ua, out)
-	}
-}
-
-// notify mails each other member that the org will be deleted. A failure is audited with
-// no address.
-func (h *EraseHandler) notify(holderID, ip, ua string, out *store.Erasure) {
-	settings, err := mail.Load(h.store, h.encryptionKey)
-	if err != nil || settings == nil {
-		h.audit.Observe("account.erase_notice", holderID, "", holderID, "user", ip, ua, "failure", map[string]any{"reason": "mail_not_configured", "members": len(out.Notify)})
-		return
-	}
-	failed := 0
-	for _, n := range out.Notify {
-		if settings.Send(n.Email, "Your household is being deleted", eraseNoticeBody(n.Name, h.issuerURL, out.DeleteAfter)) != nil {
-			failed++
-		}
-	}
-	if failed > 0 {
-		h.audit.Observe("account.erase_notice", holderID, "", holderID, "user", ip, ua, "failure", map[string]any{"members": len(out.Notify), "failed": failed})
-	}
-}
-
-func eraseNoticeBody(name, issuer string, at time.Time) string {
-	return "Hello " + name + ",\r\n\r\nThe account holder of your household asked for everything in it to be deleted. " +
-		"Your account and everything in it will be deleted on " + at.UTC().Format("2 January 2006") + ". This cannot be undone.\r\n\r\n" +
-		"Until then you can sign in at " + issuer + " and export your data from each app. Mail sent to you is no longer delivered.\r\n"
 }

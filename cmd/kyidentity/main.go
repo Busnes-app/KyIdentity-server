@@ -175,6 +175,7 @@ func main() {
 	}
 	syncEngine := sync.NewEngine(dbStore, cfg.EncryptionKey)
 	syncEngine.SetMultiTenant(cfg.Tenancy == "multi")
+	syncEngine.SetIssuerURL(cfg.IssuerURL)
 	mfaEngine := mfa.NewEngine(dbStore, cfg.EncryptionKey)
 	relaySender, err := mfa.NewRelaySender(
 		mfa.RelayConfig{

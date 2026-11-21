@@ -29,7 +29,12 @@ type Engine struct {
 	encryptionKey []byte
 	// multiTenant adds org_id to signed suite webhook bodies; see SetMultiTenant.
 	multiTenant bool
+	// issuerURL is where an erase notice tells members to sign in; see SetIssuerURL.
+	issuerURL string
 }
+
+// SetIssuerURL sets the sign-in address erase notices give. Call it before the worker.
+func (e *Engine) SetIssuerURL(u string) { e.issuerURL = u }
 
 // SetMultiTenant turns on org_id in signed suite webhook bodies. Call it before the worker.
 func (e *Engine) SetMultiTenant(on bool) { e.multiTenant = on }
@@ -696,6 +701,9 @@ func (e *Engine) StartWorker(ctx context.Context) {
 				if _, err := e.store.Platform().FinishDueErasures(); err != nil && ctx.Err() == nil {
 					log.Printf("erasure follow-up failed: %v", err)
 				}
+				if err := e.SendEraseNotices(time.Now().UTC()); err != nil && ctx.Err() == nil {
+					log.Printf("erase notices failed: %v", err)
+				}
 			}
 			if err := e.store.ReconcileProvisioning(); err != nil && ctx.Err() == nil {
 				log.Printf("provisioning reconcile failed: %v", err)
@@ -715,4 +723,26 @@ func (e *Engine) StartWorker(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// SendEraseNotices mails the members owed a notice that their org will be deleted. Mail
+// that is not set up yet counts as a failed send, so the notice waits for it.
+func (e *Engine) SendEraseNotices(now time.Time) error {
+	settings, err := mail.Load(e.store, e.encryptionKey)
+	if err != nil {
+		return err
+	}
+	_, err = e.store.Platform().SendEraseNotices(now, func(n store.EraseNotice) error {
+		if settings == nil {
+			return errors.New("mail not configured")
+		}
+		return settings.Send(n.Email, "Your household is being deleted", eraseNoticeBody(n.Name, e.issuerURL, n.DeleteAfter))
+	})
+	return err
+}
+
+func eraseNoticeBody(name, issuer string, at time.Time) string {
+	return "Hello " + name + ",\r\n\r\nThe account holder of your household asked for everything in it to be deleted. " +
+		"Your account and everything in it will be deleted on " + at.UTC().Format("2 January 2006") + ". This cannot be undone.\r\n\r\n" +
+		"Until then you can sign in at " + issuer + " and export your data from each app. Mail sent to you is no longer delivered.\r\n"
 }
