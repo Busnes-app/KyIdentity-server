@@ -683,6 +683,9 @@ func (e *Engine) StartWorker(ctx context.Context) {
 	defer reconcile.Stop()
 	go e.reconcileWorker(ctx)
 	go e.alertWorker(ctx)
+	if e.multiTenant {
+		go e.eraseNoticeWorker(ctx)
+	}
 	go e.hrWorker(ctx)
 	// Overdue expiries are applied at start, so a restart drains them before anything else.
 	if _, err := e.store.Platform().RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
@@ -700,9 +703,6 @@ func (e *Engine) StartWorker(ctx context.Context) {
 			if e.multiTenant {
 				if _, err := e.store.Platform().FinishDueErasures(); err != nil && ctx.Err() == nil {
 					log.Printf("erasure follow-up failed: %v", err)
-				}
-				if err := e.SendEraseNotices(time.Now().UTC()); err != nil && ctx.Err() == nil {
-					log.Printf("erase notices failed: %v", err)
 				}
 			}
 			if err := e.store.ReconcileProvisioning(); err != nil && ctx.Err() == nil {
@@ -725,14 +725,33 @@ func (e *Engine) StartWorker(ctx context.Context) {
 	}
 }
 
+// eraseNoticeWorker mails Delete everything notices on its own goroutine, each pass under
+// alertPassBudget, so a slow relay never holds up the dispatch loop.
+func (e *Engine) eraseNoticeWorker(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pass, cancel := context.WithTimeout(ctx, alertPassBudget)
+			if err := e.SendEraseNotices(pass, time.Now().UTC()); err != nil && ctx.Err() == nil {
+				log.Printf("erase notices failed: %v", err)
+			}
+			cancel()
+		}
+	}
+}
+
 // SendEraseNotices mails the members owed a notice that their org will be deleted. Mail
 // that is not set up yet counts as a failed send, so the notice waits for it.
-func (e *Engine) SendEraseNotices(now time.Time) error {
+func (e *Engine) SendEraseNotices(ctx context.Context, now time.Time) error {
 	settings, err := mail.Load(e.store, e.encryptionKey)
 	if err != nil {
 		return err
 	}
-	_, err = e.store.Platform().SendEraseNotices(now, func(n store.EraseNotice) error {
+	_, err = e.store.Platform().SendEraseNotices(ctx, now, func(n store.EraseNotice) error {
 		if settings == nil {
 			return errors.New("mail not configured")
 		}
