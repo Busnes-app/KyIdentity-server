@@ -218,3 +218,23 @@ func mustOrgUser(t *testing.T, db *store.Store, org store.OrgID, id string) *sto
 	}
 	return u
 }
+
+// With no suite domains set, a customer org's list says [] (never null), so the dialog
+// can say none is set.
+func TestMailboxDomainsAreAnEmptyListWhenUnset(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServerWith(t, func(c *config.Config) { c.Tenancy = "multi" })
+	defer cleanup()
+	staffOrg, err := store.CreateOrgForTest(db, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	org, err := store.CreateOrgForTest(db, "person")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &AdminHandler{store: db, audit: srv.audit, middleware: srv.middleware, multiTenant: true}
+	rr := boundTo(h.ListUsers, db, org, newOrgUser(t, db, staffOrg, "admin"), "GET", "/api/admin/users", "", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"mailboxDomains":[]`) {
+		t.Errorf("%d %s", rr.Code, rr.Body)
+	}
+}

@@ -107,6 +107,7 @@ describe('parseUser', () => {
     expect(hosted.mailboxDomains).toEqual(['example.com']);
     expect(hosted.users[0]!.mailboxAddress).toBe('a@example.com');
     expect(parseUserDirectory({ users: [], mailboxDomains: [] }).mailboxDomains).toEqual([]);
+    expect(parseUserDirectory({ users: [], mailboxDomains: null }).mailboxDomains).toEqual([]);
   });
 });
 
