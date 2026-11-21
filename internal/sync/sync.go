@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	stdsync "sync"
 	"time"
@@ -464,8 +465,11 @@ func (e *Engine) dispatchSystem(ctx context.Context, events []store.AccountSyncE
 				scimUser.Roles = []SCIMRole{}
 			}
 			// The event row's org, from its user when queued; syncauth.Sign covers the body.
+			// The mailbox address goes only there, beside it (tenancy design).
 			if e.multiTenant && sys.SystemType != "scim" && sys.SystemType != adSystemType {
 				scimUser.OrgID = ev.OrgID
+			} else {
+				scimUser.Emails = slices.DeleteFunc(scimUser.Emails, func(m SCIMEmail) bool { return m.Type == store.MailboxEmailType })
 			}
 			payloadBytes, merr = json.Marshal(scimUser)
 		} else {

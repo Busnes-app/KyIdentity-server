@@ -14,6 +14,11 @@ export function parseEraseScope(value: unknown): EraseScope {
   return { holder: value.holder, otherMembers: value.otherMembers };
 }
 
+/** What the clicker types, as the server checks it: the mailbox address, else the sign-in email. */
+export function eraseAddress(user: Pick<User, 'email' | 'mailboxAddress'>): string {
+  return user.mailboxAddress || user.email;
+}
+
 /** The typed address confirms only a non-empty address, ignoring case and outer spaces. */
 export function confirmsAddress(typed: string, address: string): boolean {
   return address !== '' && typed.trim().toLowerCase() === address.toLowerCase();
@@ -79,7 +84,7 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
   }, []);
 
   if (!scope) return null;
-  const address = user.email;
+  const address = eraseAddress(user);
   const matches = confirmsAddress(typed, address);
 
   const close = () => { if (!busy) { setOpen(false); setTyped(''); setError(null); } };

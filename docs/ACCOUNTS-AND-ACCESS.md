@@ -108,7 +108,18 @@ app reads (contract: `docs/SUITE-DIRECTORY.md`). *Mail domains* lists the domain
 addresses use (for example `example.com`; IDNs are stored in punycode, at most 50, no
 duplicates); changing it asks for step-up, is audited as `admin.suite_email_domains_changed`
 and reaches apps only through the authenticated `GET /api/suite/email-domains`. KyIdentity
-does not refuse addresses outside the list. *Default theme* picks the theme every app applies
+does not refuse sign-in addresses outside the list. On the hosted (multi-tenant) platform the
+list also bounds members' mailbox addresses (below), and a domain one of them uses cannot be
+removed until staff move those addresses.
+
+**Mailbox address (hosted platform only).** A member of a hosted person or household org may
+have a mailbox address: where KyPost delivers their hosted mail. It is separate from the
+sign-in email, which still receives activation and reset mail. It must be on a suite mail
+domain and unique across the platform, including against every other account's sign-in
+email. It is set once when the member is added; afterwards only staff change it, under
+Users › ⋯ › *Mailbox address*, with step-up, audited as `admin.user_mailbox_address_changed`
+(old and new domains only). It cannot be cleared. A single-tenant install never shows or
+stores one. Contract: `docs/SUITE-DIRECTORY.md`, "Mailbox address". *Default theme* picks the theme every app applies
 until a user picks their own; the user's choice always wins. It is display only, so no
 step-up is asked; it is audited as `admin.suite_default_theme_changed` and public at
 `GET /api/appearance`, which the sign-in page reads.

@@ -195,3 +195,25 @@ func TestEraseHolderOverHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestEraseConfirmsTheMailboxAddress(t *testing.T) {
+	srv, db, orgA, _, cleanup := multiSuite(t)
+	defer cleanup()
+	holder, _ := eraseMember(t, srv, db, orgA, "a-holder")
+	if err := store.SetAccountHolderForTest(db, orgA, holder.ID); err != nil {
+		t.Fatal(err)
+	}
+	kid, cookie := eraseMember(t, srv, db, orgA, "a-kid")
+	if _, _, err := db.SetSuiteEmailDomains([]string{"mail.example"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.Org(orgA).SetMailboxAddress(kid.ID, "kid@mail.example", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := erasePost(t, srv, cookie, kid.Email, eraseGrant(t, srv, cookie, "totp")); code != 400 || out["error"] != "address_mismatch" {
+		t.Fatalf("sign-in email: %d %v", code, out)
+	}
+	if code, out := erasePost(t, srv, cookie, "Kid@Mail.example", eraseGrant(t, srv, cookie, "totp")); code != 200 || out["deleted"] != true {
+		t.Fatalf("mailbox address: %d %v", code, out)
+	}
+}

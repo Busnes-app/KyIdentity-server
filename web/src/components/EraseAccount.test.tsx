@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ExportLinks, confirmsAddress, eraseSummary, parseEraseScope } from './EraseAccount';
+import { ExportLinks, confirmsAddress, eraseAddress, eraseSummary, parseEraseScope } from './EraseAccount';
 import { parseEnrollmentStatus } from '../parsers';
 
 describe('Delete everything', () => {
@@ -35,6 +35,11 @@ describe('Delete everything', () => {
     expect(render([])).toContain('You have no apps to export from.');
     expect(render([{ id: 'kypost', key: 'client:kypost', name: 'KyPost', url: 'https://mail.example.test/', iconName: '', enabled: true }]))
       .toContain('<a href="https://mail.example.test/" target="_blank" rel="noopener noreferrer">Export from KyPost</a>');
+  });
+
+  it('asks for the mailbox address when there is one, else the sign-in email', () => {
+    expect(eraseAddress({ email: 'alex@home.example', mailboxAddress: 'alex@mail.example' })).toBe('alex@mail.example');
+    expect(eraseAddress({ email: 'alex@home.example' })).toBe('alex@home.example');
   });
 
   it('confirms only the exact address, and never an empty one', () => {
