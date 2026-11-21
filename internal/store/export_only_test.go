@@ -119,6 +119,14 @@ func TestGrantsNeedAnActiveOrgOrExportOnly(t *testing.T) {
 	if err := code(); !errors.Is(err, ErrAppAccessDenied) {
 		t.Fatalf("code from a full session of a non-active org: %v", err)
 	}
+	// The browser session itself is refused too; resuming the org restores it.
+	if got, err := s.GetSessionByTokenHash(full.SessionTokenHash, time.Hour); err != nil || got != nil {
+		t.Fatalf("browser session of a non-active org: %+v %v", got, err)
+	}
+	tenancyExec(t, s, `UPDATE orgs SET status='active', delete_after=NULL WHERE id='home'`)
+	if got, err := s.GetSessionByTokenHash(full.SessionTokenHash, time.Hour); err != nil || got == nil {
+		t.Fatalf("browser session after the resume: %+v %v", got, err)
+	}
 }
 
 // A session that was export-only is whole again once billing resumes its org.
@@ -130,6 +138,9 @@ func TestExportOnlyEndsWhenTheOrgResumes(t *testing.T) {
 	sess, err := newSessionFor(s, "billed-holder")
 	if err != nil || !exportOnly(t, s, sess) {
 		t.Fatalf("scheduled: %v", err)
+	}
+	if got, err := s.GetSessionByTokenHash(sess.SessionTokenHash, time.Hour); err != nil || got == nil {
+		t.Fatalf("export-only browser session: %+v %v", got, err)
 	}
 	tenancyExec(t, s, `UPDATE orgs SET status='active', delete_after=NULL WHERE id='billed'`)
 	if exportOnly(t, s, sess) {
