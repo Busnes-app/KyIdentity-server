@@ -1,5 +1,7 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { eraseSummary, parseEraseScope } from './EraseAccount';
+import { ExportLinks, eraseSummary, parseEraseScope } from './EraseAccount';
 import { parseEnrollmentStatus } from '../parsers';
 
 describe('Delete everything', () => {
@@ -22,5 +24,16 @@ describe('Delete everything', () => {
     expect(parseEnrollmentStatus(base)).toEqual(base);
     expect(parseEnrollmentStatus({ ...base, exportOnly: true })).toEqual({ ...base, exportOnly: true });
     expect(parseEnrollmentStatus({ ...base, exportOnly: 'yes' })).toEqual(base);
+  });
+
+  it('never shows a failed or loading app list as nothing to export', () => {
+    const render = (apps: Parameters<typeof ExportLinks>[0]['apps']) => renderToStaticMarkup(createElement(ExportLinks, { apps, retry: () => {} }));
+    expect(render('loading')).toContain('Loading your apps');
+    expect(render('failed')).toContain('could not be loaded');
+    expect(render('failed')).toContain('Try again');
+    for (const state of ['loading', 'failed'] as const) expect(render(state)).not.toContain('no apps');
+    expect(render([])).toContain('You have no apps to export from.');
+    expect(render([{ id: 'kypost', key: 'client:kypost', name: 'KyPost', url: 'https://mail.example.test/', iconName: '', enabled: true }]))
+      .toContain('<a href="https://mail.example.test/" target="_blank" rel="noopener noreferrer">Export from KyPost</a>');
   });
 });
