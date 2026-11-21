@@ -110,6 +110,7 @@ func (s *Server) routes() *http.ServeMux {
 	authH := NewAuthHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.SecureCookies)
 	devH := NewDeviceHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	adminH := NewAdminHandler(s.store, s.syncEngine, s.audit, s.middleware, s.cfg.IssuerURL)
+	adminH.multiTenant = s.cfg.Tenancy == "multi"
 	onboardH := NewOnboardingHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL, s.cfg.EncryptionKey)
 	requestH := NewAccessRequestHandler(s.store, s.audit, s.middleware, s.cfg.EncryptionKey)
 	alertH := NewAlertHandler(s.store, s.audit, s.middleware)
@@ -274,6 +275,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"GET", "/api/admin/users", permDirectory, orgRoute, false, http.HandlerFunc(adminH.ListUsers)},
 		{"POST", "/api/admin/users", permAdmin, orgRoute, true, http.HandlerFunc(adminH.CreateUser)},
 		{"PUT", "/api/admin/users/{id}", permAdmin, orgRoute, true, http.HandlerFunc(adminH.UpdateUser)},
+		{"PUT", "/api/admin/users/{id}/mailbox-address", permAdmin, orgRoute, true, http.HandlerFunc(adminH.PutMailboxAddress)},
 		{"POST", "/api/admin/users/{id}/reset-mfa", permRecovery, orgRoute, true, http.HandlerFunc(adminH.ResetUserMFA)},
 		{"POST", "/api/admin/users/{id}/revoke-sessions", permRecovery, orgRoute, false, http.HandlerFunc(adminH.RevokeUserSessions)},
 		{"GET", "/api/admin/users/{id}/sessions", permUserRead, orgRoute, false, http.HandlerFunc(sessH.AdminList)},

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,6 +117,7 @@ func setSettingAuditDetails(audit *AuditEvent, old, new any) {
 }
 
 // SetSuiteEmailDomains validates and stores the list (empty clears it) with its audit row.
+// Removing a domain a mailbox address uses is a *DomainInUseError.
 // It returns what was stored and whether it changed; an unchanged save writes nothing.
 func (s *Store) SetSuiteEmailDomains(domains []string, audit *AuditEvent) ([]string, bool, error) {
 	clean, err := NormalizeEmailDomains(domains)
@@ -123,13 +125,17 @@ func (s *Store) SetSuiteEmailDomains(domains []string, audit *AuditEvent) ([]str
 		return nil, false, err
 	}
 	raw, _ := json.Marshal(clean)
-	err = s.EditSettings(audit, func(st Settings) error {
+	err = s.auditedTx(audit, func(tx *sql.Tx) error {
+		st := settingsTx{tx}
 		old, err := suiteEmailDomains(st)
 		if err != nil {
 			return err
 		}
 		if slices.Equal(old, clean) {
 			return errSettingUnchanged
+		}
+		if err := refuseRemovingUsedDomainsTx(tx, old, clean); err != nil {
+			return err
 		}
 		setSettingAuditDetails(audit, old, clean)
 		if len(clean) == 0 {

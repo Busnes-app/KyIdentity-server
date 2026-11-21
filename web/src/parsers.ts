@@ -137,12 +137,19 @@ export function parseUser(value: unknown): User {
     createdAt: optStr(o, 'createdAt'),
     recoveryCodesNeedRegeneration: o.recoveryCodesNeedRegeneration === true,
     passwordChangeRequired: o.passwordChangeRequired === true,
+    mailboxAddress: optStr(o, 'mailboxAddress'),
   };
 }
 
 export function parseUsers(value: unknown): User[] {
   const o = obj(value, 'a users response');
   return list(o.users, parseUser);
+}
+
+/** The users list; a hosted customer org's also names the domains its mailbox addresses may use. */
+export function parseUserDirectory(value: unknown): { users: User[]; mailboxDomains?: string[] } {
+  const o = obj(value, 'a users response');
+  return { users: list(o.users, parseUser), mailboxDomains: o.mailboxDomains === undefined ? undefined : strArray(o.mailboxDomains) };
 }
 
 /** /api/auth/me returns the user either bare or wrapped. */

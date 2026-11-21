@@ -36,6 +36,9 @@ type User struct {
 	EndsAt    *time.Time `json:"endsAt,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
+	// MailboxAddress is a hosted member's mailbox (multi-tenant only), separate from the
+	// sign-in Email. Only SetMailboxAddress writes it.
+	MailboxAddress string `json:"mailboxAddress,omitempty"`
 	// orgID is set only by the store, so Org cannot name an org a caller chose.
 	orgID string
 }

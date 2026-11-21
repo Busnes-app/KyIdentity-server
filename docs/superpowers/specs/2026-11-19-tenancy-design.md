@@ -2,7 +2,8 @@
 
 Date: 2026-11-19. Owner decisions: 2026-11-19 tenancy brief (fixed, listed below). Worker:
 tenancy-spec. Status: approved design. PRs 1–3 are built. Amended 2026-11-21 with Delete everything and
-the `export_only` claim (K open question 4 (a)).
+the `export_only` claim (K open question 4 (a)), and with Mailbox address (multi-tenant), from the owner
+answer to KyPost open question 1.
 
 KyIdentity today is one organisation per install (`AGENTS.md:3`, `design.md:31` defers
 multi-tenancy). This spec adds a second mode to the same binary. **Single-tenant** is
@@ -501,7 +502,7 @@ holder's name and email on create.
 
 | Route | Scope | Effect |
 |---|---|---|
-| `POST /orgs` | `orgs:write` | `{name, kind: person\|household, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, billing_ref, revision}`. Creates the org and a pending account holder, and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere. |
+| `POST /orgs` | `orgs:write` | `{name, kind: person\|household, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, holder_mailbox_address?, billing_ref, revision}`. Creates the org and a pending account holder (with its mailbox address when given; see Mailbox address), and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere or the holder's mailbox address collides, `400 mailbox_domain` for a mailbox address off the suite domains. |
 | `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `over_limit`, `holder_activated`, `delete_after`, `revision`. No names or emails of users. |
 | `PATCH /orgs/{id}` | `orgs:write` | `{revision}` plus any of: plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). Lowering seats below the number used is accepted: the org is `over_limit`, new seats are refused, and nobody is disabled. |
 | `POST /orgs/{id}/suspend` | `orgs:write` | `{reason: payment\|abuse, revision}`. Semantics below. |
@@ -517,7 +518,7 @@ member is an everyday account (`role='user'`), and the endpoints reach no other 
 | Route | Scope | Effect |
 |---|---|---|
 | `GET /orgs/{id}/members` | `members:read` | `{user_id, email, status: pending\|active\|disabled, account_holder}` for each member. No names, sessions or factors. |
-| `POST /orgs/{id}/members` | `members:write` | `{email, name}`. Creates a pending member (username = email, D5) and mails an activation invite. Answers `{user_id, status}`. An existing member of this org with that email is `200` with the same. `409 email_in_use` if the email is elsewhere, `409 seat_limit`, `503 mail_not_configured`. |
+| `POST /orgs/{id}/members` | `members:write` | `{email, name, mailbox_address?}`. Creates a pending member (username = email, D5), with its mailbox address when given (see Mailbox address), and mails an activation invite. Answers `{user_id, status}`. An existing member of this org with that email is `200` with the same. `409 email_in_use` if the email is elsewhere or either address collides (Mailbox address), `400 mailbox_domain` for a mailbox address off the suite domains, `409 mailbox_address_set` when the existing member holds a different one, `409 seat_limit`, `503 mail_not_configured`. |
 | `POST /orgs/{id}/members/{user_id}/resend-invite` | `members:write` | Pending members only, otherwise `409`. Issues a new activation token, which ends the old one, and mails it. Rate limited per member. |
 | `POST /orgs/{id}/members/{user_id}/disable`, `…/enable` | `members:write` | Disable revokes every grant (`revokeSessionGrantsTx`). Enable adds a seat, so it is checked. |
 | `DELETE /orgs/{id}/members/{user_id}` | `members:write` | Deletes the account through the existing path (`DeleteUserWithSyncEvents`, `store.go:1073`), so apps get the usual deprovisioning event. |
@@ -641,8 +642,8 @@ cannot click.
   (`step_up_tokens.factor_method` is `totp`, `push` or `webauthn`; password-only and recovery
   grants are refused). The grant is spent in the erasure's own transaction, so a refused
   erasure spends nothing and a replayed grant erases nothing.
-- `address` must equal the account's mailbox address, or its sign-in email until the mailbox
-  address field lands, compared after trimming and case folding. A mismatch is
+- `address` must equal the account's mailbox address, or its sign-in email when it has none,
+  compared after trimming and case folding. A mismatch is
   `400 address_mismatch` and changes nothing.
 - The account page shows the dialog. It lists each app the account can open, with a link to
   that app's export, before the address field. Nothing can be got back afterwards.
@@ -745,6 +746,82 @@ a request, updating or deleting either new table, reusing an erased subject); re
 idempotency of both paths and of `user.erased`; cross-org refusals; a step-up without a second
 factor; the single-tenant golden files and `404`s; browser screenshots of the dialog.
 
+## Mailbox address (multi-tenant)
+
+Owner answer to KyPost's tenancy note, open question 1 (KyPost
+`docs/superpowers/specs/2026-11-20-tenancy-design.md`, "Mailbox addresses and domains in
+hosted mode"): KyIdentity holds each hosted member's **mailbox address**, and KyPost
+provisions the mailbox from it. A member's `email` is their sign-in address (D5). It is
+usually on someone else's domain, so it cannot be the mailbox.
+
+- **Field.** `users.mailbox_address` (schema version 12), one per user, NULL when unset. It is
+  separate from `email`: sign-in, activation, reset and every mail KyIdentity sends still go
+  to `email`, never to the mailbox address. A member reads their own (`User.mailboxAddress`)
+  and cannot change it.
+- **Form.** `<local>@<domain>`, stored lowercase, with the domain in punycode
+  (`store.NormalizeMailboxAddress`). The local part is ASCII letters, digits, `.`, `-` and
+  `_`, at most 64 bytes, not starting or ending with a `.` and with no `..`. `+` is refused,
+  because KyPost reads it as plus addressing. The whole address is at most 254 bytes.
+- **Domain.** It must be on the `suite_email_domains` list (KyIdentity #277). KyPost serves a
+  domain only when it is on the list *and* proved by its own TXT record (KyPost note).
+- **Uniqueness.** Global, on the stored form, so `Bob@Bücher.example` and
+  `bob@xn--bcher-kva.example` are the same address. The partial unique index
+  `users_mailbox_address` decides it. A mailbox address also may not equal another user's
+  sign-in `email` (case-insensitive), and a sign-in email may not equal another user's
+  mailbox address. Otherwise mail for one person's sign-in address, resets included, would
+  land in someone else's mailbox. Triggers `users_mailbox_insert` and `users_mailbox_update`
+  enforce this on every write path, and their refusal is a unique violation. So
+  `POST /orgs` and member adds answer it as `409 email_in_use`, and the admin route as
+  `409 mailbox_address_taken`. Writes are serialised (one SQLite writer, one Postgres writer
+  lock), so two racing writes cannot both pass. A sign-in email written with the Unicode
+  form of an IDN suite domain is not matched against the punycode mailbox address. Residual,
+  unverified risk.
+- **Reuse.** Deleting an account frees its mailbox address in KyIdentity. KyPost's ledger never
+  reuses an address (its tombstones), so it refuses the freed address for anyone else. That
+  shows up as KyPost's durable allocation failure, shown to staff (KyPost note).
+- **Customer accounts only.** The same triggers refuse a mailbox address for any account
+  outside a `person` or `household` org. That includes staff (KyPost gives staff no
+  mailbox) and the single-tenant `default` org, so a single-tenant install cannot hold one
+  on any path.
+- **Write-once.** It is set when the member is added: billing's `POST /orgs` sets it for the
+  account holder, and `POST /orgs/{id}/members` for the others (optional `mailbox_address`
+  in both bodies; see Platform provisioning API). Setting the same value again does nothing,
+  so a retry is safe. Setting a different value is `409 mailbox_address_set`. Only staff
+  change it afterwards (`PUT /api/admin/users/{id}/mailbox-address`, an org route,
+  `permAdmin` with step-up). Each staff change is audited as
+  `admin.user_mailbox_address_changed` in the org's log. The details hold the old and new
+  *domains* only. Local parts stay out of the audit log, as names do from logs. It cannot
+  be cleared, since a cleared field would orphan the KyPost mailbox. A staff change does not
+  touch sign-in or recovery: unlike a sign-in email change (refused for customer accounts,
+  see Staff), it moves no credential.
+- **Inbound SCIM and HR** never write it. No inbound path names the column, and inbound
+  SCIM is off in multi-tenant mode anyway (Per-org features). A connector's `emails` still
+  sets only the sign-in email, as today.
+- **Removing a domain.** `PUT /api/admin/suite-settings/email-domains` refuses to drop a
+  domain that any mailbox address uses: `409 domain_in_use`, naming the domain and the
+  count. Staff first move those addresses to another listed domain. The check runs in the
+  save's transaction, so a racing mailbox write cannot slip past it. The list cannot drop a
+  live mailbox's domain, so no address is ever orphaned silently. Adding domains, or
+  removing unused ones, is unchanged.
+- **Wire.** In the signed suite webhook body (multi-tenant only, beside `org_id`), the
+  mailbox address is a second `emails` entry `{"value": "…", "type": "mailbox", "primary": false}`, after the
+  sign-in entry (`type: "work"`, `primary: true`). It is never `primary`. A change goes out as
+  `user.updated`. Generic SCIM and Active Directory bodies never carry it. Contract:
+  `docs/SUITE-DIRECTORY.md`, "Mailbox address".
+- **Downstream (KyPost).** In multi-tenant mode KyPost allocates the mailbox from the
+  `mailbox` entry, never from the primary one, and treats an absent entry as "no mailbox
+  yet". What KyPost does when staff change an allocated address (add an alias, or move the
+  mailbox) is KyPost's to decide. Unverified here.
+
+Owner questions, each with the default this design applies:
+
+1. Is the mailbox address required on `POST /orgs` and member adds? *Default: optional.* A
+   plan without KyPost needs none, and staff can set it later.
+2. Should the staff-change audit row name the full old and new addresses? *Default: no,
+   only the domains.* The current address is visible on the user's admin page.
+3. Can staff clear an address? *Default: no.* Clearing would orphan the KyPost mailbox.
+   Deleting the member is the way to end it.
+
 ## Entitlements
 
 KyIdentity stores `max_seats` on `orgs`, and per-app enablement and opaque quotas in
@@ -795,7 +872,7 @@ Customer orgs are people and households. Business features stay in single-tenant
 | Forward-auth proxy apps | Disabled | Hosts and edge secrets are install-wide (`2026-11-15-forward-auth-design.md`) |
 | Custom launcher cards (`applications`) | Disabled for orgs | Platform cards only |
 | Branding (`branding_org_name`, `branding_logo`) | Platform only | The sign-in page comes before the org is known. The org name shows after sign-in (open question 5). |
-| Suite mail domains and default theme (`suite_email_domains`, `suite_default_theme`) | Platform only | Owner decision 2026-11-20: one list and one default for the install or hosted platform, set by staff there. |
+| Suite mail domains and default theme (`suite_email_domains`, `suite_default_theme`) | Platform only | Owner decision 2026-11-20: one list and one default for the install or hosted platform, set by staff there. In multi-tenant mode the list bounds mailbox addresses, and a domain in use cannot be removed (Mailbox address). |
 | Session limits, mail, alerts settings, attestation, rate-limit exemptions, push relays | Platform | `system_settings` keys (`session_limits.go:13`, `sealed.go:30`) |
 | Installer setup (`apply-setup`, `proxy-app`) | Refused | The installer channel is single-tenant |
 | Backups, restore, drill | Platform | Whole install |
@@ -841,7 +918,8 @@ tests.
    - Tests: single-tenant golden tokens are byte-identical apart from `jti`, `iat` and
      `exp`. Multi-org suite tests. A `ky-primitives/suitedir` `Orgs` method.
 4. **Platform provisioning API.** The listener, tokens and CLI, idempotency, revision,
-   create, update, suspend, resume and deletion, the member endpoints, the account holder
+   create, update, suspend, resume and deletion, the member endpoints (with the optional
+   mailbox address, set through `OrgStore.SetMailboxAddress` without overwrite), the account holder
    and its notices, the events outbox, and `active_principals`.
    - Tests:
      - Replay, conflict and stale-revision cases, including a retry of a successful
@@ -879,6 +957,12 @@ tests.
        a live member afterwards. A pending holder past its token's expiry stays, and
        `org.holder_invite_expired` is queued once.
      - Events are signed and retried.
+   - **Mailbox address** (landed before PR 4, see Mailbox address): the column, its index
+     and triggers, `OrgStore.SetMailboxAddress`, the `mailbox` webhook entry, the domain
+     removal refusal, and the staff route and edit field. Before PR 5 an org route binds the
+     caller's own org (staff), where a mailbox address is refused, so the staff path works
+     once PR 5 selects a customer org. Tests: uniqueness races, domain refusal, cross-org
+     refusals, the single-tenant golden files unchanged, and a multi-tenant webhook golden.
 5. **Staff admin UI.**
    - Adds the org selector and `X-Ky-Org`, staff read audit and the cross-org audit by
      actor, the pinned passkey policy, the customer-account guards (no password, no email
