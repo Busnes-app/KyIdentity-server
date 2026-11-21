@@ -37,6 +37,14 @@ describe('user row actions', () => {
   it('name the activation link for a pending account', () => {
     expect(actions(render({ ...member, pending: true }, false))).toContain('Activation link');
   });
+
+  it('offer the mailbox address only in a hosted customer org, to a full administrator', () => {
+    const withMailbox = (full: boolean) => actions(renderToStaticMarkup(<UserRowActions u={member} full={full} busy={false} act={act} mailbox={none} />));
+    expect(withMailbox(true)).toEqual(['Groups', 'Edit user', 'Mailbox address', 'Delegated administration', 'Reset MFA', 'Sessions and apps',
+      'Revoke sessions', 'Password reset link', 'Offboarding status', 'Delete user']);
+    expect(withMailbox(false)).not.toContain('Mailbox address');
+    expect(actions(render(member, true))).not.toContain('Mailbox address');
+  });
 });
 
 describe('user list filter', () => {

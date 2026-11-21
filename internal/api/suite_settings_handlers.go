@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -85,7 +86,11 @@ func (h *SuiteSettingsHandler) PutEmailDomains(w http.ResponseWriter, r *http.Re
 	// The store reads the old value and skips an unchanged save under its writer lock.
 	actor := GetUserFromContext(r.Context())
 	event := h.audit.Prepare("admin.suite_email_domains_changed", actor.ID, actor.Username, "suite_settings", "email_domains", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	if _, changed, err := h.store.SetSuiteEmailDomains(clean, event.Row); err != nil {
+	var inUse *store.DomainInUseError
+	if _, changed, err := h.store.SetSuiteEmailDomains(clean, event.Row); errors.As(err, &inUse) {
+		writeAPIError(w, http.StatusConflict, "domain_in_use", inUse.Error())
+		return
+	} else if err != nil {
 		writeInputError(w, "invalid_request", err)
 		return
 	} else if changed {

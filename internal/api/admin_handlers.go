@@ -28,6 +28,8 @@ type AdminHandler struct {
 	audit      *audit.Logger
 	middleware *MiddlewareManager
 	issuerURL  string
+	// multiTenant serves mailbox addresses (tenancy design).
+	multiTenant bool
 }
 
 func NewAdminHandler(s *store.Store, syncEngine *sync.Engine, audit *audit.Logger, mm *MiddlewareManager, issuerURL string) *AdminHandler {
@@ -51,8 +53,21 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		users = []store.User{}
 	}
 
+	body := map[string]any{"users": users}
+	// A customer org's list tells the UI the domains its mailbox addresses may use.
+	if h.multiTenant {
+		if ok, err := orgStore(r).MailboxEligible(); err != nil {
+			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+			return
+		} else if ok {
+			if body["mailboxDomains"], err = h.store.SuiteEmailDomains(); err != nil {
+				http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+				return
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"users": users})
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 type CreateUserRequest struct {

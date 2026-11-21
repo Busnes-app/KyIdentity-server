@@ -85,6 +85,9 @@ func scimUserPayloadWithRoles(u *User, active bool, roles []scim.MultiValue) ([]
 	if u.Email != "" {
 		res.Emails = []scim.MultiValue{{Value: u.Email, Type: "work", Primary: true}}
 	}
+	if u.MailboxAddress != "" {
+		res.Emails = append(res.Emails, scim.MultiValue{Value: u.MailboxAddress, Type: MailboxEmailType})
+	}
 	if roles == nil {
 		roles = []scim.MultiValue{}
 	}
@@ -105,16 +108,16 @@ func scimGroupPayload(groupID string) []byte {
 	return b
 }
 
-const userColumns = `id, username, display_name, email, password_hash, role, status, pending, password_change_required, email_verified_at, source_connector_id, external_id, source_active, locally_disabled, ends_at, created_at, updated_at, org_id`
+const userColumns = `id, username, display_name, email, password_hash, role, status, pending, password_change_required, email_verified_at, source_connector_id, external_id, source_active, locally_disabled, ends_at, created_at, updated_at, org_id, mailbox_address`
 
 // scanUser reads a user row. An account past its end date reads as disabled, so every
 // decision that checks status honours the end date without a worker.
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
 	var verified sql.NullTime
-	var source, external sql.NullString
+	var source, external, mailbox sql.NullString
 	var endsAt sql.NullInt64
-	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.Pending, &u.PasswordChangeRequired, &verified, &source, &external, &u.SourceActive, &u.LocallyDisabled, &endsAt, &u.CreatedAt, &u.UpdatedAt, &u.orgID)
+	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.Pending, &u.PasswordChangeRequired, &verified, &source, &external, &u.SourceActive, &u.LocallyDisabled, &endsAt, &u.CreatedAt, &u.UpdatedAt, &u.orgID, &mailbox)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -122,7 +125,7 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 		at := verified.Time
 		u.EmailVerifiedAt = &at
 	}
-	u.SourceConnectorID, u.ExternalID = source.String, external.String
+	u.SourceConnectorID, u.ExternalID, u.MailboxAddress = source.String, external.String, mailbox.String
 	if u.EndsAt = timeFromUnix(endsAt); u.EndsAt != nil && !u.EndsAt.After(time.Now()) {
 		u.Status = "disabled"
 	}

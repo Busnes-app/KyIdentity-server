@@ -636,6 +636,10 @@ func TestUpgradeKeepsOnePlatformAlert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Today's store code reads users.mailbox_address (version 12); the upgrade keeps it.
+	if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN mailbox_address TEXT`); err != nil {
+		t.Fatal(err)
+	}
 	admin := alertAdmin(t, s, "root")
 	if err := s.SetAlertSettings(AlertSettings{LoginFailureThreshold: 1, LoginFailureWindowSeconds: 600, Recipients: []string{admin.ID}}, nil); err != nil {
 		t.Fatal(err)

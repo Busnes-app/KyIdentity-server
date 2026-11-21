@@ -31,6 +31,7 @@ var migrations = []migration{
 	{version: 9, name: "staff_org", up: migrateStaffOrg, pgUp: migrateStaffOrgPostgres},
 	{version: 10, name: "org_id_required", up: migrateOrgIDRequired, pgUp: migrateOrgIDRequiredPostgres},
 	{version: 11, name: "workstation_password", up: migrateWorkstationPassword, pgUp: migrateWorkstationPasswordPostgres},
+	{version: 12, name: "mailbox_address", up: migrateMailboxAddress, pgUp: migrateMailboxAddressPostgres},
 }
 
 // migratePairingProofKey adds the sealed pairing proof key; tokens issued before it have
