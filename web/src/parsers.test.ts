@@ -22,6 +22,7 @@ import {
   parsePasskeys,
   parseSuccess,
   parseUsers,
+  parseUserDirectory,
 } from './parsers';
 
 const user = {
@@ -98,6 +99,15 @@ describe('parseUser', () => {
 
   it('treats an omitted users array as empty rather than failing', () => {
     expect(parseUsers({})).toEqual([]);
+  });
+
+  it('reads the mailbox domains only when a hosted customer org sends them', () => {
+    expect(parseUserDirectory({ users: [user] }).mailboxDomains).toBeUndefined();
+    const hosted = parseUserDirectory({ users: [{ ...user, mailboxAddress: 'a@example.com' }], mailboxDomains: ['example.com'] });
+    expect(hosted.mailboxDomains).toEqual(['example.com']);
+    expect(hosted.users[0]!.mailboxAddress).toBe('a@example.com');
+    expect(parseUserDirectory({ users: [], mailboxDomains: [] }).mailboxDomains).toEqual([]);
+    expect(parseUserDirectory({ users: [], mailboxDomains: null }).mailboxDomains).toEqual([]);
   });
 });
 

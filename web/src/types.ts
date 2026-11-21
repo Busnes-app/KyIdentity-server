@@ -34,6 +34,8 @@ export interface User {
   recoveryCodesNeedRegeneration?: boolean;
   /** The password was given, not chosen: every session is limited to replacing it. */
   passwordChangeRequired?: boolean;
+  /** A hosted member's mailbox, separate from the sign-in email (multi-tenant only). */
+  mailboxAddress?: string;
   /** Server release, sent only by /api/auth/me. */
   version?: string;
 }
