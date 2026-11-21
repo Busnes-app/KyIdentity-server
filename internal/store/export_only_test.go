@@ -120,3 +120,22 @@ func TestGrantsNeedAnActiveOrgOrExportOnly(t *testing.T) {
 		t.Fatalf("code from a full session of a non-active org: %v", err)
 	}
 }
+
+// A session that was export-only is whole again once billing resumes its org.
+func TestExportOnlyEndsWhenTheOrgResumes(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	erasureOrg(t, s, "billed", map[string]string{"kid": "active"})
+	tenancyExec(t, s, `UPDATE orgs SET status='deletion_scheduled', delete_after=4102444800 WHERE id='billed'`)
+	sess, err := newSessionFor(s, "billed-holder")
+	if err != nil || !exportOnly(t, s, sess) {
+		t.Fatalf("scheduled: %v", err)
+	}
+	tenancyExec(t, s, `UPDATE orgs SET status='active', delete_after=NULL WHERE id='billed'`)
+	if exportOnly(t, s, sess) {
+		t.Error("export_only outlived the resume")
+	}
+	if status, err := s.SessionEnrollmentStatus("billed-holder", sess.ID); err != nil || status.ExportOnly {
+		t.Errorf("status after the resume: %+v %v", status, err)
+	}
+}

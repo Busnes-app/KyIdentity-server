@@ -74,8 +74,8 @@ func enrollmentStatus(row interface{ Scan(...any) error }) (EnrollmentStatus, er
 	return s, err
 }
 
-const enrollmentStatusSQL = `SELECT r.required,r.allowed_mask,r.due_at,EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=r.user_id AND (f.bit&r.allowed_mask)<>0),NOT COALESCE((SELECT allowed FROM mfa_session_access WHERE id=? AND user_id=r.user_id),FALSE),
- COALESCE((SELECT export_only FROM sessions WHERE id=? AND user_id=r.user_id),FALSE) FROM enrollment_requirements r WHERE r.user_id=?`
+var enrollmentStatusSQL = `SELECT r.required,r.allowed_mask,r.due_at,EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=r.user_id AND (f.bit&r.allowed_mask)<>0),NOT COALESCE((SELECT allowed FROM mfa_session_access WHERE id=? AND user_id=r.user_id),FALSE),
+ COALESCE((SELECT ` + exportOnlyNowSQL("xs") + ` FROM sessions xs WHERE xs.id=? AND xs.user_id=r.user_id),FALSE) FROM enrollment_requirements r WHERE r.user_id=?`
 
 func (s *Store) SessionEnrollmentStatus(userID, sessionID string) (EnrollmentStatus, error) {
 	return enrollmentStatus(s.db.QueryRow(enrollmentStatusSQL, sessionID, sessionID, userID))
