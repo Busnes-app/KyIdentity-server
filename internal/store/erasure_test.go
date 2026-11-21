@@ -246,7 +246,14 @@ func TestEraseMember(t *testing.T) {
 		}
 	}
 	tenancyExec(t, s, `INSERT INTO audit_events(id,actor_id,actor_username,action,target_id,target_type,ip_address,user_agent,outcome,details_json,created_at,org_id)
- VALUES('ae-kid','home-kid','home-kid@test.invalid','user.password_changed','home-kid','user','','','success','{}',CURRENT_TIMESTAMP,'home')`)
+ VALUES('ae-kid','home-kid','home-kid@test.invalid','user.password_changed','home-kid','user','','','success','{}',CURRENT_TIMESTAMP,'home')`,
+		// A group change by the holder that names the member, and one that does not.
+		`INSERT INTO audit_events(id,actor_id,actor_username,action,target_id,target_type,ip_address,user_agent,outcome,details_json,created_at,org_id)
+ VALUES('ae-group','home-holder','','admin.group_member_added','g1','group','','','success','{"member":"home-kid"}',CURRENT_TIMESTAMP,'home')`,
+		`INSERT INTO audit_events(id,actor_id,actor_username,action,target_id,target_type,ip_address,user_agent,outcome,details_json,created_at,org_id)
+ VALUES('ae-other','home-holder','','admin.group_member_added','g1','group','','','success','{"member":"home-holder"}',CURRENT_TIMESTAMP,'home')`,
+		`INSERT INTO alerts(id,rule,key,severity,title,summary,status,first_seen,last_seen,org_id) VALUES('al-kid','login_failures','home-kid','warning','Failed sign-ins','home-kid failed 9 times','open',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'home')`,
+		`INSERT INTO alerts(id,rule,key,severity,title,summary,status,first_seen,last_seen,org_id) VALUES('al-other','login_failures','home-holder','warning','Failed sign-ins','home-holder failed 9 times','open',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'home')`)
 
 	// Another org's handle finds no such member, and changes nothing.
 	session, hash := erasureGrant(t, s, "home-kid", "totp")
@@ -275,6 +282,12 @@ func TestEraseMember(t *testing.T) {
 	}
 	if n := rowCount(t, s, `SELECT COUNT(*) FROM audit_events WHERE (actor_id='home-kid' OR target_id='home-kid') AND id<>'ae-erased'`); n != 0 {
 		t.Errorf("%d audit rows still name the member", n)
+	}
+	if n := rowCount(t, s, `SELECT COUNT(*) FROM audit_events WHERE id='ae-group'`) + rowCount(t, s, `SELECT COUNT(*) FROM alerts WHERE id='al-kid'`); n != 0 {
+		t.Errorf("%d audit rows or alerts still name the member in their text", n)
+	}
+	if n := rowCount(t, s, `SELECT COUNT(*) FROM audit_events WHERE id='ae-other'`) + rowCount(t, s, `SELECT COUNT(*) FROM alerts WHERE id='al-other'`); n != 2 {
+		t.Errorf("rows about someone else went with the member: %d of 2 left", n)
 	}
 	if n := rowCount(t, s, `SELECT COUNT(*) FROM audit_events WHERE id='ae-erased' AND org_id='home'`); n != 1 {
 		t.Error("the erasure row is not in the org's log")

@@ -29,8 +29,9 @@ than the configured cutoff are trimmed by the existing housekeeping, and any cha
 that period is a separate decision, not part of search or export. A multi-tenant install
 has two more deletion paths, both from Delete everything (tenancy design, amendment
 2026-11-21): deleting an org removes its whole log and leaves one platform row with the
-row counts, and a member who erases themselves takes their own rows (as actor or target)
-with them, leaving one `account.erased` row that names only their opaque ID. For external log
+row counts, and a member who erases themselves takes with them every row of their org's log and every
+alert that names them (as actor or target, or by ID, username or email in the details or the
+alert text; not by display name), leaving one `account.erased` row that names only their opaque ID. For external log
 collection use the structured process log; there is no second audit delivery path.
 
 ## Alerts
