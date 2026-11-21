@@ -197,6 +197,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/user/sessions", authM(http.HandlerFunc(sessH.ListOwn)))
 	mux.Handle("DELETE /api/user/sessions/{id}", authM(http.HandlerFunc(sessH.RevokeOwn)))
 	mux.Handle("POST /api/user/sessions/revoke-others", authM(http.HandlerFunc(sessH.RevokeOthers)))
+	eraseH := &EraseHandler{store: s.store, audit: s.audit, middleware: s.middleware, multiTenant: s.cfg.Tenancy == "multi"}
+	mux.Handle("GET /api/user/erase", authM(http.HandlerFunc(eraseH.Options)))
+	mux.Handle("POST /api/user/erase", authM(s.middleware.RateLimit("erase", 5, 0.05)(http.HandlerFunc(eraseH.Erase))))
 
 	mux.Handle("POST /api/user/passkeys/register/begin", authM(s.middleware.RateLimit("passkey_enrol", 10, 0.2)(http.HandlerFunc(webauthnH.BeginRegistration))))
 	mux.Handle("POST /api/user/passkeys/register/finish", authM(s.middleware.RateLimit("passkey_enrol", 10, 0.2)(http.HandlerFunc(webauthnH.FinishRegistration))))
@@ -224,6 +227,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/suite/people", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.People)))
 	mux.Handle("GET /api/suite/groups", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Groups)))
 	mux.Handle("GET /api/suite/orgs", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Orgs)))
+	mux.Handle("GET /api/suite/erased", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Erased)))
 
 	// Active Directory agent (docs/ACTIVE-DIRECTORY.md): Bearer agent token, one connector's queue.
 	adAgentH := &ADAgentHandler{store: s.store}

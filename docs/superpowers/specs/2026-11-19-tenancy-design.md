@@ -1,8 +1,9 @@
 # Tenancy: single-tenant and multi-tenant (SaaS), design
 
 Date: 2026-11-19. Owner decisions: 2026-11-19 tenancy brief (fixed, listed below). Worker:
-tenancy-spec. Status: approved design, nothing built. Amended 2026-11-21:
-Mailbox address (multi-tenant), from the owner answer to KyPost open question 1.
+tenancy-spec. Status: approved design. PRs 1–3 are built. Amended 2026-11-21 with Delete everything and
+the `export_only` claim (K open question 4 (a)), and with Mailbox address (multi-tenant), from the owner
+answer to KyPost open question 1.
 
 KyIdentity today is one organisation per install (`AGENTS.md:3`, `design.md:31` defers
 multi-tenancy). This spec adds a second mode to the same binary. **Single-tenant** is
@@ -65,6 +66,8 @@ check in code.
 | Customer of org A, adding members through the billing portal | Take over a person's identity by creating an account with their email (email squatting) | Emails are globally unique, so whoever creates an address first holds it. A pending account cannot sign in, and resets go only to a verified address (`onboarding_handlers.go:209`). A pending, never-activated account gives up its email when its activation token expires (open question 3). Nobody in another org can edit, reset or claim that account. |
 | Anyone at the sign-in page | Find out whether an email exists, or which org it is in | Unknown, inactive and locked accounts all answer like a wrong password, after the same Argon2 cost (`auth_handlers.go:100-104`, `loginRefusal` at `:296`). A suspended org's account gives the same answers until every factor has passed. Only then does it get `org_suspended` (owner answer 4, see Suspension), which only a holder of valid credentials can reach. Forgot-password always answers the same way (`onboarding_handlers.go:178-197`). No sign-in or recovery answer names an org. |
 | Customer of org A, adding members through the billing portal | Find out whether an email exists in another org, from a `409` on add | Unavoidable with global uniqueness (D5). The answer is `409 email_in_use`, never "in another org". Adds are rate limited per org. Residual risk. |
+| A thief holding a member's password and second factor | Delete the member's data, or a holder's whole org | Step-up with a second factor, the typed address, and an audit row. Step-up and the address stop a stray click, not a thief: residual risk (K). |
+| Billing, staff or the holder, after a Delete everything | Take the request back | `org_erasures` rows cannot change or be deleted, and `orgs_erasure_held` refuses `resume` and a new `delete_after` in the database. |
 | Operator restoring one org's backup | Load org A's data into org B, or roll every org back | v1 has no per-org restore or import. A capsule is the whole install (`internal/backup`, `store.go:2984`). The per-org export is read-only JSON. Any future import must assign the target org from the org staff selected and new IDs, never from the file. |
 
 Residual risks (accepted):
@@ -210,7 +213,10 @@ Views (`app_access.go:58-65`, `pg_schema.go:510-545`):
   - The session is marked restricted. It works like today's `enrollment_only` sessions
     (`pg_schema.go:56`, refused by `mfa_session_access` at `:539`).
   - It reaches only the export page, the export download and sign-out.
-  - It issues no codes or tokens and opens no suite or forward session.
+  - It opens no suite or forward session. It issues codes and tokens only to suite apps,
+    carrying the `export_only` claim (amendment, Delete everything). The same session is
+    given to the other members after a holder's Delete everything, and refused to that
+    holder.
   - A test calls every other route with such a session and expects a refusal.
 
 ### Migration of an existing install (the tenancy schema version)
@@ -612,6 +618,136 @@ After that:
 - Delivery is at least once and unordered. Billing de-duplicates by `event_id` and orders
   by `revision`.
 
+## Delete everything (amendment, 2026-11-21)
+
+The owner asked for a **Delete everything** button that cannot be undone, and approved K open
+question 4 option (a) (KyPost `docs/superpowers/specs/2026-11-20-tenancy-design.md`, "Delete
+everything", called K here). Multi-tenant only: in a single-tenant install every route below is
+`404`, no row is written, and the golden files do not change.
+
+**Who deletes what.** The clicker deletes their own data, and nobody else's without warning.
+
+| Clicker | Other live members (`liveHolder`) | Effect |
+|---|---|---|
+| Account holder | none | The org goes straight to `deleted` in one transaction. Every member is first offboarded as a member is below: access revoked with back-channel logouts queued, `user.erased` to suite apps, `user.deleted` to SCIM and AD, and a tombstone. Then the org's rows are deleted, and the `orgs` tombstone stays. The provisioning and logout rows (`account_sync_events` except delivered ones, `sync_delivery_attempts`, `sync_resource_state`, `scim_user_links`, `logout_deliveries`) stay too, as they do for any deleted user. They hold opaque IDs and bare payloads only, so the queued removals and logouts are delivered and held evidence is kept. |
+| Account holder | one or more | The org goes to `deletion_scheduled` with `delete_after` 7 days on. Every session and grant of the org ends at once (as suspension). The holder can never sign in again. Each activated member is owed a notice, queued in the same transaction (`erase_notices`) and mailed by the worker with retries until it is sent or the org is deleted, and may sign in to an export-only session until `delete_after`. The housekeeping sweep then deletes the org as above. |
+| Any other member | — | Only their own account: `user.erased` (below), then their rows are deleted. |
+
+Staff and `default` org accounts have no button. A pending account cannot sign in, so it
+cannot click.
+
+**Confirming.** `POST /api/user/erase` with `{"address"}`.
+
+- It spends an operation-bound step-up grant that proved the password **and** a second factor
+  (`step_up_tokens.factor_method` is `totp`, `push` or `webauthn`; password-only and recovery
+  grants are refused). The grant is spent in the erasure's own transaction, so a refused
+  erasure spends nothing and a replayed grant erases nothing.
+- `address` must equal the account's mailbox address, or its sign-in email when it has none,
+  compared after trimming and case folding. A mismatch is
+  `400 address_mismatch` and changes nothing.
+- The account page shows the dialog. It lists each app the account can open, with a link to
+  that app's export, before the address field. Nothing can be got back afterwards.
+- A replay changes nothing: the grant is single-use, and the clicker's sessions end with the
+  first call, so a second call from the same browser is a `401`. A second request for the
+  same org fails on the `org_erasures` primary key.
+
+**The record and the trigger path.** The holder's request is a row in a new platform table:
+
+```
+org_erasures (org_id TEXT PRIMARY KEY REFERENCES orgs(id), holder_user_id TEXT NOT NULL,
+  immediate BOOLEAN NOT NULL, requested_at)
+```
+
+- `org_erasures_holder` (`BEFORE INSERT`): the row names the org's current account holder,
+  the org is `active` and of kind `person` or `household`, and `immediate` is true exactly
+  when the org has no other live member.
+- `org_erasures_kept` (`BEFORE UPDATE`, `BEFORE DELETE`): refused always. A row never changes
+  and is never removed, so nobody can take a request back: not billing, staff or the holder.
+- `orgs_status` gains one named path, **`holder_erased`**: `deleted` may also be entered from
+  `active` when an `org_erasures` row for the org has `immediate` set and the org still has no
+  live member other than that holder. `status_bad_change` is otherwise unchanged.
+- `orgs_account_holder_update` gains the same path: clearing the pointer is allowed in the
+  update that enters `deleted` by `holder_erased`, as it is for `deletion_scheduled`.
+- New `orgs_erasure_held` (`BEFORE UPDATE`): while an `org_erasures` row exists and the org is
+  `deletion_scheduled`, the only status change allowed is to `deleted`, and `delete_after`
+  cannot change. So `resume` (from billing, staff or anyone) and a second
+  `schedule-deletion` are refused in the database. T's own grace and `resume` stay for
+  billing-driven deletion, which has no `org_erasures` row.
+- The store maps these refusals to `ErrOrgErased` (`409 org_erased`).
+
+**A member deletes only themselves.** In one transaction:
+
+1. Refuse the account holder (`409 account_holder`), a non-`active` org and a non-member.
+2. Revoke every session and grant (`revokeUserAccessTx`).
+3. Queue **`user.erased`** to every enabled suite webhook connector, whether or not it held
+   the account (as deletion's fan-out). The body is the bare inactive SCIM user (`id`,
+   `externalId`, `active: false`) with `org_id`, signed by `syncauth` with the event type.
+   It means "delete this person's data"; `user.deleted` keeps meaning "disable", as now.
+   Generic SCIM and AD connectors (off in multi-tenant v1) get `user.deleted`. It is a
+   removal: retried until delivered, never fenced, and a `404` acknowledges it.
+4. Add the subject to `erased_subjects`.
+5. Delete the org's audit rows and alerts that name the user, and their delivered sync events,
+   which hold their name and email. An audit row names them as actor or target, or by a
+   string equal to their ID, username or email under a key of its details that names a person
+   (`member`, `user`, `userId`, `username`, `email`, their plurals, `recipients`; a group change
+   records its members' usernames). An alert names them by its key. Only exact, case-sensitive
+   values under those keys match. Matching a display name, a part of a value or any other key's
+   value (`"role":"user"`) would take other people's rows. Write one `account.erased` row in the org's log naming only the
+   opaque user ID. This is a third named audit-deletion path, beside
+   `DeleteAuditEventsOlderThan` and org deletion.
+6. Delete the `users` row, which cascades to every derived row.
+
+**Tombstones.**
+
+```
+erased_subjects (subject TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id),
+  revision BIGINT NOT NULL UNIQUE, erased_at)
+```
+
+- Every erased member, and every user of an org deleted by `holder_erased` or by the sweep
+  after a holder's request, gets a row. `revision` is one past the table's highest.
+- `erased_subjects_kept` refuses every update and delete. `users_erased_subject` refuses a
+  `users` insert whose `id` is listed, so a subject is never reused.
+- Both new tables are platform class (`platformTables`): they hold opaque IDs only and must
+  outlive the org's rows.
+
+**`GET /api/suite/erased`.** Suite client authentication, rate limits and `no-store`, as
+`/api/suite/orgs`. `404` in single-tenant mode. Lists `{sub, org_id, revision}` for subjects
+whose org the caller is told about (`suiteOrgVisibleSQL`), ordered by `revision`, after
+`since=<revision>`, `limit` 1–500 (default 100); a full page carries `next` (a revision) to
+pass back as `since`. Apps re-read it from `since=0` after a restore, with `/api/suite/orgs`
+(K "A restore does not bring it back").
+
+**The `export_only` claim (K open question 4, option (a)).** While an org is
+`deletion_scheduled`, session creation makes the one exception to `active_principals`
+described under Views. This amendment widens it:
+
+- Who: the account holder, when the deletion came from billing (no `org_erasures` row), and
+  every other activated member, when it came from the holder's request. The holder who asked
+  is refused like a suspended org (`org_suspended`).
+- The session is restricted as before, and it may now complete an authorization-code flow
+  for a suite app that its org's plan enables. The tokens carry `"export_only": true` in the
+  ID token, the access token and UserInfo. They carry no refresh token, `scope` is cut to
+  `openid email profile`, and device sign-on, forward-auth, workstation login and the device
+  grant stay refused.
+- Apps admit only their export routes under the claim (K). `claims_supported` lists it in
+  multi-tenant mode only.
+- A golden test pins the multi-tenant claim, and the single-tenant golden files stay identical.
+
+**Billing.** `org.deletion_scheduled` and `org.deleted` are queued in `platform_events` in
+the same transactions, as for billing's own calls. A billing `DELETE /orgs/{id}` after a
+holder's request finds the org already `deleted`, or still inside its grace (`409`).
+
+**Restore.** A KyIdentity capsule taken before the click brings the org back, because a
+restore rolls every org back (Residual risks). The apps' own restores are covered by the
+`deleted` tombstone and `erased_subjects` (K).
+
+**Tests.** Every new trigger path and its refusals (immediate with another live member,
+scheduled with none, a non-holder, a non-`active` org, `resume` and a new `delete_after` under
+a request, updating or deleting either new table, reusing an erased subject); replay and
+idempotency of both paths and of `user.erased`; cross-org refusals; a step-up without a second
+factor; the single-tenant golden files and `404`s; browser screenshots of the dialog.
+
 ## Mailbox address (multi-tenant)
 
 Owner answer to KyPost's tenancy note, open question 1 (KyPost
@@ -843,6 +979,15 @@ tests.
    - Tests: the seat limit on each path, two parallel adds on Postgres with one seat free
      (one succeeds), and app disablement removing access and suite listing.
 7. (Optional) **Postgres row-level security** as extra protection.
+8. **Delete everything** (amendment). Stacked PRs, each multi-tenant only:
+   - (a) This amendment, `org_erasures`, `erased_subjects` and their triggers, the holder's
+     two paths and the sweep, `user.erased`, `POST /api/user/erase` and
+     `GET /api/suite/erased`. Session creation does not yet read `active_principals`, so until
+     (b) nothing stops a member of a `deletion_scheduled` org from signing in. Multi-tenant
+     mode is refused at startup until PR 6, so that is reachable only in tests.
+   - (b) Session creation through `active_principals`, the export-only session for the cases
+     above, and the `export_only` claim.
+   - (c) The account page button and dialog.
 
 ## Owner answers
 
@@ -1002,6 +1147,8 @@ Tables this spec adds (the tenancy migration, both backends):
 | `platform_tokens` | P | Credentials of the billing service and portal, which span every org |
 | `platform_requests` | P | Idempotency records, keyed by token and kept 30 days. Stored responses hold IDs and states only (member writes answer `{user_id, status}`), so no user data outlives a deleted org here. |
 | `platform_events` | P | Outbox to billing. `org_id` is a plain reference with no FK, because `org.deleted` must still be delivered after the org's rows are gone. Bodies carry no personal data (see Events back to billing). Delivered rows are removed after 30 days. |
+| `org_erasures` | P | A holder's Delete everything request (amendment). Opaque IDs only, never changed or deleted, and it must outlive the org's rows, which its trigger path deletes. |
+| `erased_subjects` | P | Tombstones of erased subjects, listed by `GET /api/suite/erased`. Opaque IDs only, never changed or deleted. |
 
 `account_sync_events_new` (`store.go:872`) is a temporary name inside the legacy rebuild,
 not a live table.

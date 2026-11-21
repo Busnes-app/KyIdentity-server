@@ -26,7 +26,12 @@ return are prefixed with a quote so no spreadsheet treats them as formulas, and 
 recorded rows carry the filter and row count. Administrators
 and auditors may search and export; nobody else. Retention is unchanged: rows older
 than the configured cutoff are trimmed by the existing housekeeping, and any change to
-that period is a separate decision, not part of search or export. For external log
+that period is a separate decision, not part of search or export. A multi-tenant install
+has two more deletion paths, both from Delete everything (tenancy design, amendment
+2026-11-21): deleting an org removes its whole log and leaves one platform row with the
+row counts, and a member who erases themselves takes with them every row of their org's log and every
+alert that names them (as actor or target, as a whole ID, username or email value in the details,
+or as the key of an alert raised about them; never by display name or a part of a value), leaving one `account.erased` row that names only their opaque ID. For external log
 collection use the structured process log; there is no second audit delivery path.
 
 ## Alerts

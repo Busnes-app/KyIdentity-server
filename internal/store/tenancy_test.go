@@ -16,7 +16,7 @@ import (
 var (
 	orgOwnedTables = []string{"users", "directory_groups", "group_memberships", "account_sync_events", "audit_events",
 		"scim_user_links", "sync_delivery_attempts", "scim_connectors", "logout_deliveries", "sync_resource_state", "alerts",
-		"suite_groups", "org_apps"}
+		"suite_groups", "org_apps", "erase_notices"}
 	derivedTables = map[string]string{
 		"sessions": "users", "login_failures": "users", "native_devices": "users", "device_pairing_tokens": "users",
 		"mfa_methods": "users", "mfa_challenges": "users", "mfa_tokens": "users", "recovery_codes": "users",
@@ -38,7 +38,8 @@ var (
 	platformTables = []string{"schema_migrations", "leases", "installer_setup_resources", "paired_systems",
 		"device_signon_jtis", "oauth_clients", "launcher_icons", "applications", "system_settings", "app_registry",
 		"authorization_interactions", "app_roles", "enrollment_policies", "sync_reconcile_jobs", "rate_limits",
-		"push_relay_keys", "proxy_apps", "workstation_apps", "ad_connectors", "orgs", "platform_tokens", "platform_requests", "platform_events"}
+		"push_relay_keys", "proxy_apps", "workstation_apps", "ad_connectors", "orgs", "platform_tokens", "platform_requests", "platform_events",
+		"org_erasures", "erased_subjects"}
 )
 
 // testCatalogs is the SQLite catalog of a fresh database, and the Postgres one when the
@@ -463,6 +464,27 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 	} {
 		if _, err := s.db.Exec(q.sql, q.args...); err != nil {
 			t.Fatalf("%s: %v", strings.Fields(q.sql)[2], err)
+		}
+	}
+	var n int
+	if s.db.QueryRow(`SELECT COUNT(*) FROM org_erasures`).Scan(&n) != nil {
+		return // a schema from before Delete everything
+	}
+	// A household whose holder asked for Delete everything, an owed notice, and one erased subject.
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO orgs(id,name,kind,status,created_at,updated_at) VALUES('org-erasing','Erasing','household','active',?,?)`, []any{now, now}},
+		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-holder','erasing-holder','H','erasing-holder@test.invalid','','user','active','org-erasing')`, nil},
+		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-kid','erasing-kid','K','erasing-kid@test.invalid','','user','active','org-erasing')`, nil},
+		{`UPDATE orgs SET account_holder_user_id='erasing-holder' WHERE id='org-erasing'`, nil},
+		{`INSERT INTO org_erasures(org_id,holder_user_id,immediate,requested_at) VALUES('org-erasing','erasing-holder',FALSE,?)`, []any{now}},
+		{`INSERT INTO erased_subjects(subject,org_id,revision,erased_at) VALUES('erased-1','org-erasing',1,?)`, []any{now}},
+		{`INSERT INTO erase_notices(org_id,user_id,attempts,next_attempt_at) VALUES('org-erasing','erasing-kid',1,?)`, []any{now}},
+	} {
+		if _, err := s.db.Exec(q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
 		}
 	}
 }
