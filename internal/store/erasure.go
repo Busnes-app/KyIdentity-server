@@ -420,11 +420,13 @@ func (p *PlatformStore) FinishDueErasures() (int, error) {
 			return deleteOrgTx(tx, org, &AuditEvent{ID: uuid.NewString(), ActorID: holder, Action: "org.erased", TargetID: org, TargetType: "org",
 				Outcome: "success", DetailsJSON: string(details), CreatedAt: time.Now().UTC()}, time.Now().UTC())
 		})
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		switch {
+		case errors.Is(err, sql.ErrNoRows): // another pass finished it first
+		case err != nil:
 			errs = append(errs, fmt.Errorf("org %s: %w", org, err))
-			continue
+		default:
+			done++
 		}
-		done++
 	}
 	return done, errors.Join(errs...)
 }
