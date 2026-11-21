@@ -38,7 +38,8 @@ var (
 	platformTables = []string{"schema_migrations", "leases", "installer_setup_resources", "paired_systems",
 		"device_signon_jtis", "oauth_clients", "launcher_icons", "applications", "system_settings", "app_registry",
 		"authorization_interactions", "app_roles", "enrollment_policies", "sync_reconcile_jobs", "rate_limits",
-		"push_relay_keys", "proxy_apps", "workstation_apps", "ad_connectors", "orgs", "platform_tokens", "platform_requests", "platform_events"}
+		"push_relay_keys", "proxy_apps", "workstation_apps", "ad_connectors", "orgs", "platform_tokens", "platform_requests", "platform_events",
+		"org_erasures", "erased_subjects"}
 )
 
 // testCatalogs is the SQLite catalog of a fresh database, and the Postgres one when the
@@ -461,6 +462,26 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 	} {
 		if _, err := s.db.Exec(q.sql, q.args...); err != nil {
 			t.Fatalf("%s: %v", strings.Fields(q.sql)[2], err)
+		}
+	}
+	var n int
+	if s.db.QueryRow(`SELECT COUNT(*) FROM org_erasures`).Scan(&n) != nil {
+		return // a schema from before Delete everything
+	}
+	// A household whose holder asked for Delete everything, and one erased subject.
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO orgs(id,name,kind,status,created_at,updated_at) VALUES('org-erasing','Erasing','household','active',?,?)`, []any{now, now}},
+		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-holder','erasing-holder','H','erasing-holder@test.invalid','','user','active','org-erasing')`, nil},
+		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-kid','erasing-kid','K','erasing-kid@test.invalid','','user','active','org-erasing')`, nil},
+		{`UPDATE orgs SET account_holder_user_id='erasing-holder' WHERE id='org-erasing'`, nil},
+		{`INSERT INTO org_erasures(org_id,holder_user_id,immediate,requested_at) VALUES('org-erasing','erasing-holder',FALSE,?)`, []any{now}},
+		{`INSERT INTO erased_subjects(subject,org_id,revision,erased_at) VALUES('erased-1','org-erasing',1,?)`, []any{now}},
+	} {
+		if _, err := s.db.Exec(q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
 		}
 	}
 }

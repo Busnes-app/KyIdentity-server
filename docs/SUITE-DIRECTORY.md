@@ -165,6 +165,33 @@ The organisations the calling app serves. Same authentication, rate limit and `n
 60 s. Remember the highest `revision` seen once a pass ends without `next`, and start the
 next poll from it. An error changes nothing.
 
+### `GET /api/suite/erased`
+
+The people who used Delete everything (tenancy design, amendment 2026-11-21), and every
+person of an organisation deleted after its account holder asked. Same authentication, rate
+limit and `no-store`. `404 {"error":"not_found"}` in a single-tenant install.
+
+- Listed: erased subjects of the organisations `/api/suite/orgs` tells the caller about.
+  A subject is never reused, and the list never shrinks.
+- `since=<revision>` lists what was erased after it, in `revision` order. `limit` 1 to 500,
+  default 100. A full page carries `next`, the last revision, to pass back as `since`.
+
+```json
+{"subjects": [{"sub": "…", "org_id": "…", "revision": 7}], "next": "7"}
+```
+
+Delete the data of each listed subject. Re-read the list from `since=0`, with
+`/api/suite/orgs`, after restoring a backup, before serving again.
+
+### `user.erased`
+
+A signed suite webhook, sent to every enabled suite app when a member deletes their own
+account. The body is the bare inactive SCIM user (`id`, `externalId`, `active: false`) with
+`org_id`, covered by the `ky-primitives/syncauth` signature with the event type. It means
+"delete this person's data"; `user.deleted` keeps meaning "disable". Apply it idempotently
+and answer `2xx` (or `404` for a person you never held); it is retried until then. Generic
+SCIM and Active Directory targets get `user.deleted` instead.
+
 Downstream contract, for every app run as a shared multi-tenant install: refuse a token
 without `org_id`; key every row by `org_id`; bind a local account to `(sub, org_id)` and
 refuse a known `sub` arriving with another `org_id`; take the org only from a verified token,

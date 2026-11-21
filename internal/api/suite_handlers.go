@@ -265,3 +265,38 @@ func (h *SuiteHandler) Orgs(w http.ResponseWriter, r *http.Request, caller *stor
 	}
 	suiteJSON(w, http.StatusOK, body)
 }
+
+// Erased lists the erased subjects of the orgs the caller is told about, after
+// since=<revision>. GET /api/suite/erased (tenancy design, amendment: Delete everything).
+func (h *SuiteHandler) Erased(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
+	if !h.multiTenant {
+		suiteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	q := r.URL.Query()
+	var since int64
+	limit, ok := 100, true
+	var err error
+	if q.Has("since") {
+		since, err = strconv.ParseInt(q.Get("since"), 10, 64)
+		ok = err == nil && since >= 0
+	}
+	if q.Has("limit") {
+		limit, err = strconv.Atoi(q.Get("limit"))
+		ok = ok && err == nil && limit >= 1 && limit <= suiteOrgsLimit
+	}
+	if !ok {
+		suiteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+		return
+	}
+	subjects, err := h.store.Platform().SuiteErased(caller.ID, since, limit)
+	if err != nil {
+		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	body := map[string]any{"subjects": subjects}
+	if len(subjects) == limit {
+		body["next"] = strconv.FormatInt(subjects[len(subjects)-1].Revision, 10)
+	}
+	suiteJSON(w, http.StatusOK, body)
+}

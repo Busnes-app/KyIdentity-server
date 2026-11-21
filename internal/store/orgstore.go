@@ -91,6 +91,16 @@ func EnableOrgAppForTest(s *Store, org OrgID, appID, quotas string) error {
 	return err
 }
 
+// SetAccountHolderForTest names the org's account holder. Test binaries only: billing
+// names it through the platform API (build plan PR 4).
+func SetAccountHolderForTest(s *Store, org OrgID, userID string) error {
+	if !testing.Testing() {
+		panic("store: SetAccountHolderForTest outside a test binary")
+	}
+	_, err := s.db.Exec(`UPDATE orgs SET account_holder_user_id=?,revision=`+nextOrgRevisionSQL+` WHERE id=?`, userID, org.id)
+	return err
+}
+
 // connectorOrgTx is the org of an inbound SCIM connector: its token decided it, so every
 // account it writes is in that org. A missing connector is ErrNotFound.
 func connectorOrgTx(q interface {

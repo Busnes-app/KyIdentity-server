@@ -609,7 +609,7 @@ func (e *Engine) deliver(ctx context.Context, sys *store.PairedSystem, secret, e
 	_ = json.Unmarshal(payload, &body)
 	inactive := body.Active != nil && !*body.Active
 	if (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusNoContent) ||
-		((eventType == "user.deleted" || (eventType == "user.updated" && inactive)) && resp.StatusCode == http.StatusNotFound) ||
+		((eventType == "user.deleted" || eventType == "user.erased" || (eventType == "user.updated" && inactive)) && resp.StatusCode == http.StatusNotFound) ||
 		(eventType == "user.created" && resp.StatusCode == http.StatusConflict) {
 		return nil
 	}
@@ -687,6 +687,11 @@ func (e *Engine) StartWorker(ctx context.Context) {
 		case <-reconcile.C:
 			if _, err := e.store.Platform().RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
 				log.Printf("expiry follow-up failed: %v", err)
+			}
+			if e.multiTenant {
+				if _, err := e.store.Platform().FinishDueErasures(); err != nil && ctx.Err() == nil {
+					log.Printf("erasure follow-up failed: %v", err)
+				}
 			}
 			if err := e.store.ReconcileProvisioning(); err != nil && ctx.Err() == nil {
 				log.Printf("provisioning reconcile failed: %v", err)

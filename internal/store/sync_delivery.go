@@ -49,10 +49,10 @@ func (s *Store) reconcileSyncEvents() error {
 // an update whose payload says "active": false (or 0).
 func (s *Store) removalSQL() string {
 	if s.postgres {
-		return `(event_type IN ('user.deleted','group.deleted') OR (event_type='user.updated'
+		return `(event_type IN ('user.deleted','user.erased','group.deleted') OR (event_type='user.updated'
  AND CASE WHEN payload_json IS JSON THEN payload_json::jsonb->'active' END IN ('false'::jsonb,'0'::jsonb)))`
 	}
-	return `(event_type IN ('user.deleted','group.deleted') OR (event_type='user.updated'
+	return `(event_type IN ('user.deleted','user.erased','group.deleted') OR (event_type='user.updated'
  AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.active') END IS 0))`
 }
 
@@ -79,7 +79,7 @@ const SyncAttemptBudget = 5
 // idempotently, so one is retried until delivered and never held as uncertain.
 func (ev AccountSyncEvent) Removal() bool {
 	switch ev.EventType {
-	case "user.deleted", "group.deleted":
+	case "user.deleted", "user.erased", "group.deleted":
 		return true
 	case "user.updated":
 		var body struct {
