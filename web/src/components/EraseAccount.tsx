@@ -14,6 +14,11 @@ export function parseEraseScope(value: unknown): EraseScope {
   return { holder: value.holder, otherMembers: value.otherMembers };
 }
 
+/** The typed address confirms only a non-empty address, ignoring case and outer spaces. */
+export function confirmsAddress(typed: string, address: string): boolean {
+  return address !== '' && typed.trim().toLowerCase() === address.toLowerCase();
+}
+
 /** What the button deletes, in the clicker's words. */
 export function eraseSummary(scope: EraseScope): string {
   if (!scope.holder) return 'Deletes your account and everything you keep in every app. The rest of your household keeps theirs.';
@@ -75,7 +80,7 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
 
   if (!scope) return null;
   const address = user.email;
-  const matches = typed.trim().toLowerCase() === address.toLowerCase();
+  const matches = confirmsAddress(typed, address);
 
   const close = () => { if (!busy) { setOpen(false); setTyped(''); setError(null); } };
   const erase = async (e: React.FormEvent) => {
