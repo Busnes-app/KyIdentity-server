@@ -16,7 +16,7 @@ import (
 var (
 	orgOwnedTables = []string{"users", "directory_groups", "group_memberships", "account_sync_events", "audit_events",
 		"scim_user_links", "sync_delivery_attempts", "scim_connectors", "logout_deliveries", "sync_resource_state", "alerts",
-		"suite_groups", "org_apps"}
+		"suite_groups", "org_apps", "erase_notices"}
 	derivedTables = map[string]string{
 		"sessions": "users", "login_failures": "users", "native_devices": "users", "device_pairing_tokens": "users",
 		"mfa_methods": "users", "mfa_challenges": "users", "mfa_tokens": "users", "recovery_codes": "users",
@@ -470,7 +470,7 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 	if s.db.QueryRow(`SELECT COUNT(*) FROM org_erasures`).Scan(&n) != nil {
 		return // a schema from before Delete everything
 	}
-	// A household whose holder asked for Delete everything, and one erased subject.
+	// A household whose holder asked for Delete everything, an owed notice, and one erased subject.
 	for _, q := range []struct {
 		sql  string
 		args []any
@@ -481,6 +481,7 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 		{`UPDATE orgs SET account_holder_user_id='erasing-holder' WHERE id='org-erasing'`, nil},
 		{`INSERT INTO org_erasures(org_id,holder_user_id,immediate,requested_at) VALUES('org-erasing','erasing-holder',FALSE,?)`, []any{now}},
 		{`INSERT INTO erased_subjects(subject,org_id,revision,erased_at) VALUES('erased-1','org-erasing',1,?)`, []any{now}},
+		{`INSERT INTO erase_notices(org_id,user_id,attempts,next_attempt_at) VALUES('org-erasing','erasing-kid',1,?)`, []any{now}},
 	} {
 		if _, err := s.db.Exec(q.sql, q.args...); err != nil {
 			t.Fatalf("%s: %v", q.sql, err)

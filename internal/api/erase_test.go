@@ -217,3 +217,21 @@ func TestEraseConfirmsTheMailboxAddress(t *testing.T) {
 		t.Fatalf("mailbox address: %d %v", code, out)
 	}
 }
+
+// A refusal from the store commits nothing, and is audited with its reason.
+func TestEraseRefusalIsAudited(t *testing.T) {
+	srv, db, _, _, cleanup := multiSuite(t)
+	defer cleanup()
+	staff, err := store.CreateOrgForTest(db, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, cookie := eraseMember(t, srv, db, staff, "staffer")
+	if code, out := erasePost(t, srv, cookie, u.Email, eraseGrant(t, srv, cookie, "totp")); code != http.StatusNotFound || out["error"] != "not_found" {
+		t.Fatalf("staff erase: %d %v", code, out)
+	}
+	rows, _, err := db.Org(staff).SearchAuditEvents(store.AuditFilter{Action: "account.erased", Limit: 10})
+	if err != nil || len(rows) != 1 || rows[0].Outcome != "denied" || !strings.Contains(rows[0].DetailsJSON, `"reason":"not_found"`) {
+		t.Fatalf("audit = %+v, %v", rows, err)
+	}
+}
