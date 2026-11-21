@@ -132,7 +132,7 @@ func TestEraseHolderAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := s.Org(OrgID{"solo"}).Erase("solo-holder", session, hash, testEraseOp, &AuditEvent{ID: uuid.NewString(), ActorID: "solo-holder", Action: "account.erased", TargetID: "solo-holder", TargetType: "user", Outcome: "success"})
-	if err != nil || !out.Holder || !out.Deleted || len(out.Notify) != 0 {
+	if err != nil || !out.Holder || !out.Deleted || out.Notices != 0 {
 		t.Fatalf("erase = %+v, %v", out, err)
 	}
 	if n := rowCount(t, s, `SELECT COUNT(*) FROM logout_deliveries WHERE user_id='solo-holder' AND client_id='app' AND status='queued'`); n != 1 {
@@ -180,7 +180,7 @@ func TestEraseHolderWithMembers(t *testing.T) {
 	erasureOrg(t, s, "home", map[string]string{"kid": "active", "invited": "pending"})
 	kidSession, _ := erasureGrant(t, s, "home-kid", "totp")
 	out, err := erase(t, s, "home", "home-holder", "webauthn")
-	if err != nil || !out.Holder || out.Deleted || len(out.Notify) != 1 || out.Notify[0].Email != "home-kid@test.invalid" {
+	if err != nil || !out.Holder || out.Deleted || out.Notices != 1 {
 		t.Fatalf("erase = %+v, %v", out, err)
 	}
 	if d := time.Until(out.DeleteAfter); d < 6*24*time.Hour || d > 7*24*time.Hour {
@@ -345,5 +345,49 @@ func TestErasureRefusals(t *testing.T) {
 func TestDeleteOrgEmptiesEveryOrgTable(t *testing.T) {
 	if got, want := slices.Sorted(slices.Values(append(append([]string{}, orgRowTables...), orgKeptTables...))), slices.Sorted(slices.Values(orgOwnedTables)); !slices.Equal(got, want) {
 		t.Fatalf("orgRowTables and orgKeptTables %v, want the org-owned tables %v", got, want)
+	}
+}
+
+// The notices are owed in the request's transaction and retried until one is sent.
+func TestEraseNoticesAreRetriedUntilSent(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	erasureOrg(t, s, "home", map[string]string{"kid": "active", "invited": "pending"})
+	out, err := erase(t, s, "home", "home-holder", "totp")
+	if err != nil || out.Notices != 1 {
+		t.Fatalf("erase = %+v, %v", out, err)
+	}
+	now := time.Now().UTC()
+	var got []EraseNotice
+	send := func(fail bool) func(EraseNotice) error {
+		return func(n EraseNotice) error {
+			got = append(got, n)
+			if fail {
+				return errors.New("relay down")
+			}
+			return nil
+		}
+	}
+	// A failed send stays owed, backs off, and is audited once.
+	if n, err := s.Platform().SendEraseNotices(now, send(true)); err != nil || n != 0 {
+		t.Fatalf("failing pass = %d, %v", n, err)
+	}
+	if n, err := s.Platform().SendEraseNotices(now, send(false)); err != nil || n != 0 || len(got) != 1 {
+		t.Fatalf("backed-off pass = %d, %v, %d sends", n, err, len(got))
+	}
+	if _, err := s.Platform().SendEraseNotices(now.Add(5*time.Minute), send(true)); err != nil {
+		t.Fatal(err)
+	}
+	if n := rowCount(t, s, `SELECT COUNT(*) FROM audit_events WHERE org_id='home' AND action='account.erase_notice' AND outcome='failure'`); n != 1 {
+		t.Errorf("%d failure rows, want 1", n)
+	}
+	if n, err := s.Platform().SendEraseNotices(now.Add(time.Hour), send(false)); err != nil || n != 1 {
+		t.Fatalf("retry = %d, %v", n, err)
+	}
+	if len(got) != 3 || got[2].Email != "home-kid@test.invalid" || !got[2].DeleteAfter.Equal(out.DeleteAfter) {
+		t.Fatalf("sends = %+v", got)
+	}
+	if n := rowCount(t, s, `SELECT COUNT(*) FROM erase_notices`); n != 0 {
+		t.Errorf("%d notices still owed after a send", n)
 	}
 }

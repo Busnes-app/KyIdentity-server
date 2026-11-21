@@ -197,7 +197,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/user/sessions", authM(http.HandlerFunc(sessH.ListOwn)))
 	mux.Handle("DELETE /api/user/sessions/{id}", authM(http.HandlerFunc(sessH.RevokeOwn)))
 	mux.Handle("POST /api/user/sessions/revoke-others", authM(http.HandlerFunc(sessH.RevokeOthers)))
-	eraseH := &EraseHandler{store: s.store, audit: s.audit, middleware: s.middleware, issuerURL: s.cfg.IssuerURL, encryptionKey: s.cfg.EncryptionKey, multiTenant: s.cfg.Tenancy == "multi"}
+	eraseH := &EraseHandler{store: s.store, audit: s.audit, middleware: s.middleware, multiTenant: s.cfg.Tenancy == "multi"}
 	mux.Handle("GET /api/user/erase", authM(http.HandlerFunc(eraseH.Options)))
 	mux.Handle("POST /api/user/erase", authM(s.middleware.RateLimit("erase", 5, 0.05)(http.HandlerFunc(eraseH.Erase))))
 

@@ -64,6 +64,8 @@ func erasureTriggers(now string) []tenancyTrigger {
 		{"erased_subjects_kept_update", "BEFORE UPDATE", "erased_subjects", "TRUE", msgErasureKept},
 		{"erased_subjects_kept_delete", "BEFORE DELETE", "erased_subjects", "TRUE", msgErasureKept},
 		{"users_erased_subject", "BEFORE INSERT", "users", `EXISTS(SELECT 1 FROM erased_subjects WHERE subject=NEW.id)`, msgErasedReused},
+		{"erase_notices_org_exists", "BEFORE INSERT", "erase_notices", tenancyRefusals(now)["org_missing"], msgOrgMissing},
+		{"erase_notices_org_immutable", "BEFORE UPDATE OF org_id", "erase_notices", tenancyRefusals(now)["org_changed"], msgOrgChanged},
 	}
 }
 
@@ -72,6 +74,8 @@ func erasureTablesSQL(ts, num string) string {
  immediate BOOLEAN NOT NULL, requested_at ` + ts + ` NOT NULL);
 CREATE TABLE IF NOT EXISTS erased_subjects (subject TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs(id),
  revision ` + num + ` NOT NULL UNIQUE, erased_at ` + ts + ` NOT NULL);
+CREATE TABLE IF NOT EXISTS erase_notices (org_id TEXT NOT NULL REFERENCES orgs(id), user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ attempts ` + num + ` NOT NULL DEFAULT 0, next_attempt_at ` + ts + ` NOT NULL, PRIMARY KEY (org_id, user_id));
 `
 }
 
@@ -116,12 +120,10 @@ type Erasure struct {
 	Holder      bool // the account holder's request, for the whole org
 	Deleted     bool // the org is deleted now (a holder alone), or the member is
 	DeleteAfter time.Time
-	// Notify: the other activated members, to be mailed that the org will be deleted.
-	Notify []ErasureNotice
+	// Notices: the other activated members owed a mail that the org will be deleted,
+	// queued in erase_notices for SendEraseNotices.
+	Notices int
 }
-
-// ErasureNotice is one member to mail. Never logged.
-type ErasureNotice struct{ Email, Name string }
 
 // Erase is the Delete everything button for the signed-in user. It spends their step-up
 // grant (hash, for this session and operation) only if it proved a second factor, all in
@@ -187,21 +189,17 @@ func (o *OrgStore) Erase(userID, sessionID, grantHash, operation string, audit *
 		out.Deleted = true
 		return out, tx.Commit()
 	}
-	rows, err := tx.Query(`SELECT email,display_name FROM users WHERE org_id=? AND id<>? AND status='active' AND NOT pending AND ends_at IS NULL AND email<>''`, o.org, userID)
+	// The notices are owed in this transaction, so a restart or a mail outage cannot lose them.
+	res, err = tx.Exec(`INSERT INTO erase_notices(org_id,user_id,next_attempt_at) SELECT org_id,id,? FROM users
+ WHERE org_id=? AND id<>? AND status='active' AND NOT pending AND ends_at IS NULL AND email<>''`, now, o.org, userID)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var n ErasureNotice
-		if err := rows.Scan(&n.Email, &n.Name); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		out.Notify = append(out.Notify, n)
-	}
-	if err := rows.Close(); err != nil {
+	n, err := res.RowsAffected()
+	if err != nil {
 		return nil, err
 	}
+	out.Notices = int(n)
 	// The org stops as a suspension does: every grant of every member ends now.
 	ids, err := scanStrings(tx.Query(`SELECT id FROM users WHERE org_id=?`, o.org))
 	if err != nil {
@@ -353,7 +351,7 @@ func tombstoneTx(tx *sql.Tx, org, subject string, now time.Time) error {
 // opaque IDs and bare payloads only. TestDeleteOrgEmptiesEveryOrgTable holds both lists to
 // the classification.
 var (
-	orgRowTables = []string{"group_memberships", "suite_groups", "directory_groups", "scim_connectors",
+	orgRowTables = []string{"erase_notices", "group_memberships", "suite_groups", "directory_groups", "scim_connectors",
 		"alerts", "audit_events", "org_apps", "users"}
 	orgKeptTables = []string{"sync_delivery_attempts", "account_sync_events", "sync_resource_state", "scim_user_links", "logout_deliveries"}
 )
@@ -462,6 +460,83 @@ func (p *PlatformStore) FinishDueErasures() (int, error) {
 		}
 	}
 	return done, errors.Join(errs...)
+}
+
+// EraseNotice is one member to mail that their org will be deleted. Never logged.
+type EraseNotice struct {
+	Email, Name string
+	DeleteAfter time.Time
+}
+
+// eraseNoticeLease is how long a claimed notice waits before another pass may retry it.
+const eraseNoticeLease = 10 * time.Minute
+
+// SendEraseNotices mails the owed notices of orgs still in their export window, at least
+// once each. A notice is claimed before send is called and deleted after it succeeds; a
+// failure backs off (1 minute doubling, at most an hour) until the org is deleted. The
+// first failure of each notice is audited in the org's log, with no address.
+func (p *PlatformStore) SendEraseNotices(now time.Time, send func(EraseNotice) error) (int, error) {
+	type due struct {
+		org, user, holder string
+		attempts          int
+		n                 EraseNotice
+	}
+	rows, err := p.s.db.Query(`SELECT n.org_id,n.user_id,COALESCE(o.account_holder_user_id,''),n.attempts,u.email,u.display_name,o.delete_after
+ FROM erase_notices n JOIN users u ON u.id=n.user_id JOIN orgs o ON o.id=n.org_id
+ WHERE o.status='deletion_scheduled' AND o.delete_after>? AND n.next_attempt_at<=? ORDER BY n.org_id,n.user_id LIMIT 50`, now.Unix(), now)
+	if err != nil {
+		return 0, err
+	}
+	var batch []due
+	for rows.Next() {
+		var d due
+		var at int64
+		if err := rows.Scan(&d.org, &d.user, &d.holder, &d.attempts, &d.n.Email, &d.n.Name, &at); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		d.n.DeleteAfter = time.Unix(at, 0).UTC()
+		batch = append(batch, d)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	sent := 0
+	var errs []error
+	for _, d := range batch {
+		res, err := p.s.db.Exec(`UPDATE erase_notices SET next_attempt_at=? WHERE org_id=? AND user_id=? AND attempts=? AND next_attempt_at<=?`,
+			now.Add(eraseNoticeLease), d.org, d.user, d.attempts, now)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			continue // another pass claimed it
+		}
+		if send(d.n) == nil {
+			if _, err := p.s.db.Exec(`DELETE FROM erase_notices WHERE org_id=? AND user_id=?`, d.org, d.user); err != nil {
+				errs = append(errs, err)
+			}
+			sent++
+			continue
+		}
+		backoff := min(time.Minute<<min(d.attempts, 6), time.Hour)
+		err = p.s.auditedTx(nil, func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`UPDATE erase_notices SET attempts=attempts+1,next_attempt_at=? WHERE org_id=? AND user_id=?`, now.Add(backoff), d.org, d.user); err != nil {
+				return err
+			}
+			if d.attempts > 0 || d.holder == "" {
+				return nil
+			}
+			details, _ := json.Marshal(map[string]any{"member": d.user})
+			return recordAuditTx(tx, &AuditEvent{ID: uuid.NewString(), ActorID: d.holder, Action: "account.erase_notice", TargetID: d.org, TargetType: "org",
+				Outcome: "failure", DetailsJSON: string(details), CreatedAt: now})
+		})
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return sent, errors.Join(errs...)
 }
 
 // ErasedSubject is one erased account, as GET /api/suite/erased lists it.
