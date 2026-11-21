@@ -350,6 +350,12 @@ func (h *AuthHandler) createSessionAndRespond(w http.ResponseWriter, r *http.Req
 		err = h.store.CreateSession(sess)
 		restartAuthorization = true
 	}
+	if errors.Is(err, store.ErrOrgSuspended) {
+		// Every factor passed, so only a holder of the credentials learns this (owner answer 4).
+		h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "denied", map[string]any{"reason": "org_suspended"})
+		writeAPIError(w, http.StatusForbidden, "org_suspended", "Your organisation is suspended")
+		return
+	}
 	if errors.Is(err, store.ErrAppAccessDenied) {
 		h.audit.Observe("auth.login", user.ID, user.Username, user.ID, "user", ip, ua, "failure", map[string]any{"reason": "credentials_changed"})
 		http.Error(w, invalidCredentials, http.StatusUnauthorized)

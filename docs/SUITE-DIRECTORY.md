@@ -153,6 +153,10 @@ always comes from KyIdentity's data, never from the calling app:
 - `/api/suite/groups` requires `org_id` (above).
 - Tokens and UserInfo carry `org_id`, and so does the body of every signed suite webhook,
   inside the `ky-primitives/syncauth` signature.
+- While an organisation is `deletion_scheduled`, the people allowed to export sign in with
+  tokens and UserInfo that carry `"export_only": true` (scope `openid email profile`, no
+  refresh token). Admit only your export routes for such a sign-in, and refuse everything
+  else. A token without the claim from an organisation that is not `active` is never issued.
 
 ### Mailbox address
 

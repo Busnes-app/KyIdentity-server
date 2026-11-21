@@ -392,6 +392,14 @@ func (m *MiddlewareManager) RequireAuth(next http.Handler) http.Handler {
 			writePasswordChangeRequired(w)
 			return
 		}
+		// A password the account must replace, or a factor it must enroll, comes first, or no
+		// code is ever issued; the gates below still hold those sessions to their own routes.
+		if status.ExportOnly && !exportRouteAllowed(r.Method, r.URL.Path) &&
+			!(user.PasswordChangeRequired && passwordChangeRouteAllowed(r.Method, r.URL.Path)) &&
+			!(status.Restricted && enrollmentRouteAllowed(r.Method, r.URL.Path)) {
+			writeAPIError(w, http.StatusForbidden, "export_only", "This organisation is being deleted. You can only export your data and sign out.")
+			return
+		}
 		if status.Restricted && !enrollmentRouteAllowed(r.Method, r.URL.Path) {
 			http.Error(w, `{"error":"enrollment_required","error_description":"Complete MFA enrollment and sign in again to continue."}`, 403)
 			return

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,6 +33,28 @@ type Engine struct {
 	userCodeKey []byte
 	// multiTenant adds org_id to every token (tenancy design D4); see SetMultiTenant.
 	multiTenant bool
+}
+
+// exportOnly reports a multi-tenant export-only session (tenancy design, Views): its
+// tokens carry export_only, its scope is cut to exportScopes, and it gets no refresh token
+// or workstation login.
+func (e *Engine) exportOnly(sessionID string) (bool, error) {
+	if !e.multiTenant || sessionID == "" {
+		return false, nil
+	}
+	return e.store.SessionExportOnly(sessionID)
+}
+
+var exportScopes = []string{"openid", "email", "profile"}
+
+func exportScope(scope string) string {
+	var out []string
+	for _, s := range strings.Fields(scope) {
+		if slices.Contains(exportScopes, s) {
+			out = append(out, s)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 // SetMultiTenant turns on the org_id claim. Call it before serving.
@@ -103,7 +126,7 @@ func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 			"preferred_username", "name", "email", "email_verified", "roles", "groups", "role"},
 	}
 	if e.multiTenant {
-		cfg.ClaimsSupported = append(cfg.ClaimsSupported, "org_id")
+		cfg.ClaimsSupported = append(cfg.ClaimsSupported, "org_id", "export_only")
 	}
 	if e.SupportsRevocation() {
 		cfg.RevocationEndpoint = e.issuerURL + "/oauth/revoke"
@@ -247,6 +270,13 @@ func (e *Engine) CreateAuthorizationCodeForInteraction(clientID, sessionID, redi
 	}
 	if !requirements.Satisfied(session.AuthenticationEvidence, time.Now().UTC()) {
 		return "", store.ErrAppAuthentication
+	}
+	exportOnly, err := e.exportOnly(session.ID)
+	if err != nil {
+		return "", err
+	}
+	if exportOnly {
+		scope = exportScope(scope)
 	}
 	rawCode, err := crypto.GenerateRandomHex(32)
 	if err != nil {
@@ -395,11 +425,18 @@ func (e *Engine) ExchangeAuthorizationCode(codeStr, clientID, clientSecret, redi
 	if err != nil {
 		return nil, err
 	}
+	exportOnly, err := e.exportOnly(authCode.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if exportOnly && ws != nil {
+		return nil, store.ErrAppAccessDenied
+	}
 	if ws != nil && ws.OfflineWindow > 0 {
 		return e.workstationCodeTokens(authCode, user, ws, now)
 	}
 	var family *store.RefreshFamily
-	if policy.RefreshEnabled() && client.ClientType == "confidential" {
+	if policy.RefreshEnabled() && client.ClientType == "confidential" && !exportOnly {
 		if family, err = e.newRefreshFamily(authCode, policy, now); err != nil {
 			return nil, err
 		}
@@ -643,6 +680,13 @@ func (e *Engine) tokenResponse(user *store.User, clientID, sessionID, scope stri
 		"token_use": "access_token",
 	}
 	e.addOrg(access, user.Org().String())
+	exportOnly, err := e.exportOnly(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if exportOnly {
+		access["export_only"] = true
+	}
 	accessToken, err := e.keyManager.SignJWT(access)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign access token: %w", err)
@@ -665,6 +709,9 @@ func (e *Engine) tokenResponse(user *store.User, clientID, sessionID, scope stri
 		claims["iat"] = now.Unix()
 		claims["jti"] = uuid.New().String()
 		claims["token_use"] = "id_token"
+		if exportOnly {
+			claims["export_only"] = true
+		}
 		addAuthenticationClaims(claims, evidence)
 		if nonce != "" {
 			claims["nonce"] = nonce
@@ -739,7 +786,11 @@ func (e *Engine) GetUserinfo(tokenString string) (map[string]any, error) {
 
 	aud, _ := claims["aud"].(string)
 	scope, _ := claims["scope"].(string)
-	return e.identityClaims(user, aud, scope)
+	info, err := e.identityClaims(user, aud, scope)
+	if err == nil && e.multiTenant && claims["export_only"] == true {
+		info["export_only"] = true
+	}
+	return info, err
 }
 
 // ErrClaimsTooLarge means the roles and groups mapped for this user and app do not fit

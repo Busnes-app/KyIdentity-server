@@ -668,3 +668,37 @@ func TestLeaseFollowsTheDatabaseClockNotTheCallers(t *testing.T) {
 		t.Fatal("a lease the database holds live was taken by the caller's clock:", ok, err)
 	}
 }
+
+// A server starting while another process holds the write lock past the busy timeout (a
+// long migration) waits for it rather than failing to start.
+func TestStartWaitsOutALongWriteLock(t *testing.T) {
+	SkipOnPostgres(t, "holds a SQLite write lock")
+	path := filepath.Join(t.TempDir(), "held.db")
+	first, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	conn, err := raw.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(6 * time.Second) // past the 5s busy timeout
+		_, _ = conn.ExecContext(context.Background(), `COMMIT`)
+	}()
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("start under a held write lock: %v", err)
+	}
+	s.Close()
+}
