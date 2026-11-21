@@ -99,6 +99,18 @@ func TestExportOnlySessionOverHTTP(t *testing.T) {
 	if rr := adminRequestNoStepUp(t, srv, "GET", "/api/user/sessions", cookie, ""); rr.Code != http.StatusForbidden {
 		t.Fatalf("sessions: %d", rr.Code)
 	}
+	// An enrollment-restricted export-only session reaches the enrollment routes too.
+	for _, q := range []string{`UPDATE users SET password_change_required=FALSE WHERE id='a-kid'`, `UPDATE sessions SET enrollment_only=TRUE WHERE user_id='a-kid'`} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rr := adminRequestNoStepUp(t, srv, "GET", "/api/user/devices", cookie, ""); rr.Code != http.StatusOK {
+		t.Fatalf("enrollment route under export-only and restricted: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := adminRequestNoStepUp(t, srv, "GET", "/api/user/sessions", cookie, ""); rr.Code != http.StatusForbidden {
+		t.Fatalf("sessions under export-only and restricted: %d", rr.Code)
+	}
 	if rr := adminRequestNoStepUp(t, srv, "POST", "/api/auth/logout", cookie, ""); rr.Code != 200 {
 		t.Fatalf("logout: %d", rr.Code)
 	}
