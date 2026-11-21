@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"modernc.org/sqlite"
 )
 
 // State every replica must agree on lives here, in the database, never in process memory:
@@ -175,25 +176,34 @@ func (s *Store) withMigrationLease(fn func() error) error {
 	if s.postgres {
 		return s.withPostgresMigrationLock(fn)
 	}
-	if _, err := s.db.Exec(leasesSchema); err != nil {
-		return err
-	}
+	// SQLITE_BUSY here means another process holds the write lock, most likely while it
+	// migrates: a migration can outlast the busy timeout, so that is waited out too.
 	waited := false
-	for {
-		release, ok, err := s.AcquireLease("migrate", migrationLease)
-		if err != nil {
-			return err
+	for deadline := time.Now().Add(migrationLease); ; time.Sleep(50 * time.Millisecond) {
+		_, err := s.db.Exec(leasesSchema)
+		var release func()
+		ok := false
+		if err == nil {
+			release, ok, err = s.AcquireLease("migrate", migrationLease)
 		}
 		if ok {
 			defer release()
 			return fn()
 		}
+		if err != nil && (!sqliteBusy(err) || time.Now().After(deadline)) {
+			return err
+		}
 		if !waited {
 			waited = true
 			log.Printf("database: another process is migrating; waiting for it (at most %s if it died)", migrationLease)
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// sqliteBusy reports a SQLite SQLITE_BUSY error, whatever its extended code.
+func sqliteBusy(err error) bool {
+	var busy *sqlite.Error
+	return errors.As(err, &busy) && busy.Code()&0xff == 5
 }
 
 const migrationLease = 2 * time.Minute
