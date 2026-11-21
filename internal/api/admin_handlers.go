@@ -56,14 +56,14 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	body := map[string]any{"users": users}
 	// A customer org's list tells the UI the domains its mailbox addresses may use.
 	if h.multiTenant {
-		if ok, err := orgStore(r).MailboxEligible(); err != nil {
-			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		ok, err := orgStore(r).MailboxEligible()
+		if err == nil && ok {
+			body["mailboxDomains"], err = h.store.SuiteEmailDomains()
+		}
+		if err != nil {
+			log.Printf("user list mailbox domains: %v", err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
 			return
-		} else if ok {
-			if body["mailboxDomains"], err = h.store.SuiteEmailDomains(); err != nil {
-				http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-				return
-			}
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
