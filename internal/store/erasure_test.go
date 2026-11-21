@@ -118,22 +118,31 @@ func TestEraseHolderAlone(t *testing.T) {
 	// A pending member is live, so the org would be scheduled; end the invite first.
 	tenancyExec(t, s, `DELETE FROM users WHERE id='solo-invited'`)
 	erasureOrg(t, s, "next", nil)
+	if err := s.CreatePairedSystem(&PairedSystem{ID: "post", Name: "Post", SystemType: "kypost", CallbackURL: "https://post.example/api/sync/events", Status: "active"}, nil); err != nil {
+		t.Fatal(err)
+	}
 	g := &Group{ID: "solo-g", Name: "solo group"}
 	if err := s.Org(OrgID{"solo"}).CreateGroup(g, nil); err != nil {
 		t.Fatal(err)
 	}
-	out, err := erase(t, s, "solo", "solo-holder", "totp")
+	// The holder is signed in to an app that takes back-channel logout.
+	session, hash := erasureGrant(t, s, "solo-holder", "totp")
+	seedLogoutClient(t, s, "app", "https://app.example/bc")
+	if _, err := s.EnsureClientSession("app", session, "solo-holder"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.Org(OrgID{"solo"}).Erase("solo-holder", session, hash, testEraseOp, &AuditEvent{ID: uuid.NewString(), ActorID: "solo-holder", Action: "account.erased", TargetID: "solo-holder", TargetType: "user", Outcome: "success"})
 	if err != nil || !out.Holder || !out.Deleted || len(out.Notify) != 0 {
 		t.Fatalf("erase = %+v, %v", out, err)
+	}
+	if n := rowCount(t, s, `SELECT COUNT(*) FROM logout_deliveries WHERE user_id='solo-holder' AND client_id='app' AND status='queued'`); n != 1 {
+		t.Errorf("%d back-channel logouts queued for the holder's app, want 1", n)
 	}
 	var status, name string
 	if err := s.db.QueryRow(`SELECT status,name FROM orgs WHERE id='solo'`).Scan(&status, &name); err != nil || status != "deleted" || name != "" {
 		t.Fatalf("org is %q %q (%v)", status, name, err)
 	}
-	for _, table := range orgOwnedTables {
-		if table == "audit_events" {
-			continue
-		}
+	for _, table := range orgRowTables {
 		if n := rowCount(t, s, `SELECT COUNT(*) FROM `+table+` WHERE org_id='solo'`); n != 0 {
 			t.Errorf("%s keeps %d rows of the deleted org", table, n)
 		}
@@ -143,6 +152,13 @@ func TestEraseHolderAlone(t *testing.T) {
 	}
 	if n := rowCount(t, s, `SELECT COUNT(*) FROM audit_events WHERE org_id IS NULL AND action='account.erased' AND target_id='solo' AND target_type='org'`); n != 1 {
 		t.Errorf("%d platform erasure rows, want 1", n)
+	}
+	// Every member is offboarded first: the suite app is told to erase each, with bare bodies.
+	for _, id := range []string{"solo-holder", "solo-old"} {
+		var payload string
+		if err := s.db.QueryRow(`SELECT payload_json FROM account_sync_events WHERE system_id='post' AND user_id=? AND event_type='user.erased' AND status='pending'`, id).Scan(&payload); err != nil || payload != string(scimInactivePayload(id)) {
+			t.Errorf("%s: user.erased %q (%v)", id, payload, err)
+		}
 	}
 	if n := rowCount(t, s, `SELECT COUNT(*) FROM erased_subjects WHERE org_id='solo'`); n != 2 {
 		t.Errorf("%d tombstones, want the holder and the disabled member", n)
@@ -311,7 +327,7 @@ func TestErasureRefusals(t *testing.T) {
 
 // deleteOrgTx empties every org-owned table.
 func TestDeleteOrgEmptiesEveryOrgTable(t *testing.T) {
-	if got, want := slices.Sorted(slices.Values(orgRowTables)), slices.Sorted(slices.Values(orgOwnedTables)); !slices.Equal(got, want) {
-		t.Fatalf("orgRowTables %v, want the org-owned tables %v", got, want)
+	if got, want := slices.Sorted(slices.Values(append(append([]string{}, orgRowTables...), orgKeptTables...))), slices.Sorted(slices.Values(orgOwnedTables)); !slices.Equal(got, want) {
+		t.Fatalf("orgRowTables and orgKeptTables %v, want the org-owned tables %v", got, want)
 	}
 }

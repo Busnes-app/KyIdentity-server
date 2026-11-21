@@ -264,7 +264,31 @@ func (o *OrgStore) ErasureScope(userID string) (*ErasureScope, error) {
 // to every enabled suite webhook, held or not (as deletion's fan-out), and user.deleted to
 // generic SCIM and AD, which only disable. Every payload is the bare inactive user.
 func eraseUserTx(tx *sql.Tx, org string, u *User, audit *AuditEvent, now time.Time) error {
-	if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
+	if err := offboardErasedTx(tx, org, u.ID, now); err != nil {
+		return err
+	}
+	// Their audit rows hold their name and email.
+	if _, err := tx.Exec(`DELETE FROM audit_events WHERE org_id=? AND (actor_id=? OR target_id=?)`, org, u.ID, u.ID); err != nil {
+		return err
+	}
+	// The audit row is written while the user still names the org.
+	if err := recordAuditTx(tx, audit); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM users WHERE org_id=? AND id=?`, org, u.ID); err != nil {
+		return erasureError(err)
+	}
+	if err := queuePlatformEventTx(tx, org, "org.member_changed", u.ID, now); err != nil {
+		return err
+	}
+	return reconcileProvisioningTx(tx, now)
+}
+
+// offboardErasedTx ends a user's access, queuing the back-channel logouts owed, and tells
+// every connector, then tombstones the subject. The provisioning and logout rows stay, as
+// for any deleted user, so delivery and its evidence outlive the account.
+func offboardErasedTx(tx *sql.Tx, org, userID string, now time.Time) error {
+	if err := revokeUserAccessTx(tx, userID, now); err != nil {
 		return err
 	}
 	rows, err := tx.Query(`SELECT id,system_type FROM paired_systems WHERE status<>'disabled' ORDER BY id`)
@@ -285,34 +309,19 @@ func eraseUserTx(tx *sql.Tx, org string, u *User, audit *AuditEvent, now time.Ti
 		return err
 	}
 	for _, s := range systems {
-		d := desiredState{systemID: s.id, resourceID: u.ID, kind: "user", payload: scimInactivePayload(u.ID), deleted: true,
+		d := desiredState{systemID: s.id, resourceID: userID, kind: "user", payload: scimInactivePayload(userID), deleted: true,
 			erased: s.kind != "scim" && s.kind != "active_directory"}
 		if err := queueDesiredStateTx(tx, d, now); err != nil {
 			return err
 		}
 	}
-	if err := tombstoneTx(tx, org, u.ID, now); err != nil {
+	if err := tombstoneTx(tx, org, userID, now); err != nil {
 		return err
 	}
-	// Their audit rows and delivered profiles hold their name and email. An attempt in
-	// flight keeps its payload: held evidence is never rewritten.
-	if _, err := tx.Exec(`DELETE FROM audit_events WHERE org_id=? AND (actor_id=? OR target_id=?)`, org, u.ID, u.ID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM account_sync_events WHERE org_id=? AND user_id=? AND status='delivered'`, org, u.ID); err != nil {
-		return err
-	}
-	// The audit row is written while the user still names the org.
-	if err := recordAuditTx(tx, audit); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM users WHERE org_id=? AND id=?`, org, u.ID); err != nil {
-		return erasureError(err)
-	}
-	if err := queuePlatformEventTx(tx, org, "org.member_changed", u.ID, now); err != nil {
-		return err
-	}
-	return reconcileProvisioningTx(tx, now)
+	// Delivered profiles hold the name and email. An attempt in flight keeps its payload:
+	// held evidence is never rewritten.
+	_, err = tx.Exec(`DELETE FROM account_sync_events WHERE org_id=? AND user_id=? AND status='delivered'`, org, userID)
+	return err
 }
 
 // tombstoneTx lists a subject as erased, once.
@@ -323,10 +332,15 @@ func tombstoneTx(tx *sql.Tx, org, subject string, now time.Time) error {
 }
 
 // orgRowTables are the org-owned tables in the order deleteOrgTx empties them; derived
-// rows cascade. TestDeleteOrgEmptiesEveryOrgTable holds it to the classification.
-var orgRowTables = []string{"group_memberships", "suite_groups", "directory_groups", "scim_connectors",
-	"sync_delivery_attempts", "account_sync_events", "sync_resource_state", "scim_user_links", "logout_deliveries",
-	"alerts", "audit_events", "org_apps", "users"}
+// rows cascade. orgKeptTables outlive the users, as they do any deleted user: queued
+// removals and back-channel logouts, held delivery evidence and remote mappings, with
+// opaque IDs and bare payloads only. TestDeleteOrgEmptiesEveryOrgTable holds both lists to
+// the classification.
+var (
+	orgRowTables = []string{"group_memberships", "suite_groups", "directory_groups", "scim_connectors",
+		"alerts", "audit_events", "org_apps", "users"}
+	orgKeptTables = []string{"sync_delivery_attempts", "account_sync_events", "sync_resource_state", "scim_user_links", "logout_deliveries"}
+)
 
 // deleteOrgTx deletes every org row, leaving the orgs tombstone, and records it as a
 // platform audit row (the org's own log goes with it). The org must be deletable: the
@@ -337,7 +351,7 @@ func deleteOrgTx(tx *sql.Tx, org string, audit *AuditEvent, now time.Time) error
 		return err
 	}
 	for _, id := range ids {
-		if err := tombstoneTx(tx, org, id, now); err != nil {
+		if err := offboardErasedTx(tx, org, id, now); err != nil {
 			return err
 		}
 	}
@@ -353,6 +367,9 @@ func deleteOrgTx(tx *sql.Tx, org string, audit *AuditEvent, now time.Time) error
 		if counts[t], err = res.RowsAffected(); err != nil {
 			return err
 		}
+	}
+	if err := reconcileProvisioningTx(tx, now); err != nil {
+		return err
 	}
 	if err := queuePlatformEventTx(tx, org, "org.deleted", "", now); err != nil {
 		return err

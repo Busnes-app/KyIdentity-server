@@ -628,7 +628,7 @@ everything", called K here). Multi-tenant only: in a single-tenant install every
 
 | Clicker | Other live members (`liveHolder`) | Effect |
 |---|---|---|
-| Account holder | none | The org goes straight to `deleted`: every org row is deleted in one transaction and the `orgs` tombstone stays (as `DELETE /orgs/{id}`). |
+| Account holder | none | The org goes straight to `deleted` in one transaction. Every member is first offboarded as a member is below: access revoked with back-channel logouts queued, `user.erased` to suite apps, `user.deleted` to SCIM and AD, and a tombstone. Then the org's rows are deleted, and the `orgs` tombstone stays. The provisioning and logout rows (`account_sync_events` except delivered ones, `sync_delivery_attempts`, `sync_resource_state`, `scim_user_links`, `logout_deliveries`) stay too, as they do for any deleted user. They hold opaque IDs and bare payloads only, so the queued removals and logouts are delivered and held evidence is kept. |
 | Account holder | one or more | The org goes to `deletion_scheduled` with `delete_after` 7 days on. Every session and grant of the org ends at once (as suspension). The holder can never sign in again. Each activated member is mailed a notice and may sign in to an export-only session until `delete_after`. The housekeeping sweep then deletes the org as above. |
 | Any other member | — | Only their own account: `user.erased` (below), then their rows are deleted. |
 
