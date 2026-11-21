@@ -27,8 +27,13 @@ type EraseHandler struct {
 // eraseOperation is the step-up operation the grant must name.
 const eraseOperation = "POST /api/user/erase"
 
-// eraseAddress is what the clicker types. ponytail: the mailbox address once that field lands.
-func eraseAddress(u *store.User) string { return u.Email }
+// eraseAddress is what the clicker types: the mailbox address, else the sign-in email.
+func eraseAddress(u *store.User) string {
+	if u.MailboxAddress != "" {
+		return u.MailboxAddress
+	}
+	return u.Email
+}
 
 // Options answers whether the button applies, and what it deletes. GET /api/user/erase.
 func (h *EraseHandler) Options(w http.ResponseWriter, r *http.Request) {
