@@ -122,8 +122,6 @@ export const App: React.FC = () => {
     return <LoginView onLoginSuccess={(u) => { setLogoutFailed(false); updateSession({ kind: 'signedIn', user: u }); checkSession(); }} />;
   }
 
-  if (currentUser.enrollment?.exportOnly) return <main className="ky-content">{logoutAlert}<ExportOnly onLogout={handleLogout} /></main>;
-
   if (currentUser.enrollment?.restricted) return <main className="ky-content">
     {logoutAlert}
     <div role="status" className="alert-box"><div><h1>Complete MFA enrollment</h1><p>This session can only set up account security. Permitted methods: {currentUser.enrollment.allowedMethods.map(m=>m==='webauthn'?'passkey':m.toUpperCase()).join(', ')}.</p><p>After enrolling, sign out and sign in with a permitted factor to continue.</p><button className="secondary-btn" onClick={handleLogout}>Sign out and sign in again</button></div></div>
@@ -133,6 +131,10 @@ export const App: React.FC = () => {
   if (currentUser.passwordChangeRequired) {
     return <>{logoutAlert}<PasswordChangeRequired user={currentUser} onLogout={handleLogout} onChanged={() => { setActiveTab('dashboard'); checkSession(); }} /></>;
   }
+
+  // After enrollment and a required password change, which an export-only session may
+  // also need before it can get a code.
+  if (currentUser.enrollment?.exportOnly) return <main className="ky-content">{logoutAlert}<ExportOnly onLogout={handleLogout} /></main>;
 
   // Workstation sign-in (RFC 8628): approve a code a computer shows.
   if (window.location.pathname === '/device') return <DeviceApproval user={currentUser} />;
