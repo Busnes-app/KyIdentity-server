@@ -63,6 +63,12 @@ func TestExportOnlySessions(t *testing.T) {
 			t.Errorf("%s: status %+v %v", user, status, err)
 		}
 	}
+	// An admitted user refused for another reason (the password changed after the sign-in
+	// read it) gets that reason, not org_suspended.
+	stale := &Session{ID: uuid.NewString(), UserID: "billed-holder", SessionTokenHash: uuid.NewString(), ExpiresAt: time.Now().UTC().Add(time.Hour), ProvenPasswordHash: "an-older-hash"}
+	if err := s.CreateSession(stale); !errors.Is(err, ErrAppAccessDenied) {
+		t.Errorf("export-eligible user with a changed password: %v, want ErrAppAccessDenied", err)
+	}
 	// The single-tenant default org is always active.
 	u := createTestUserNamed(t, s, "alice")
 	if sess, err := newSessionFor(s, u.ID); err != nil || exportOnly(t, s, sess) {

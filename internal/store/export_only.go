@@ -45,10 +45,12 @@ func migrateExportOnlyPostgres(tx *sql.Tx) error {
 	return err
 }
 
-// orgRefusedTx tells a session refused for its org from one refused for its user.
+// orgRefusedTx tells a session refused for its org from one refused for its user. A user
+// the export-only exception admits was refused for another reason (a changed password).
 func orgRefusedTx(tx *sql.Tx, userID string) (bool, error) {
 	var refused bool
-	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users u JOIN orgs o ON o.id=u.org_id WHERE u.id=? AND u.status='active' AND o.status<>'active')`, userID).Scan(&refused)
+	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users u JOIN orgs o ON o.id=u.org_id WHERE u.id=? AND u.status='active' AND o.status<>'active'
+ AND NOT `+exportOnlySQL("u", "o")+`)`, userID).Scan(&refused)
 	return refused, err
 }
 

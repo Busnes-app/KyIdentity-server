@@ -80,6 +80,25 @@ func TestExportOnlySessionOverHTTP(t *testing.T) {
 			t.Errorf("%s %s: %d %s", c.method, c.path, rr.Code, rr.Body.String())
 		}
 	}
+	// A password the account must replace stays replaceable, or it could never export.
+	raw, err := store.OpenRawForTest(srv.cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	q := `UPDATE users SET password_change_required=TRUE WHERE id='a-kid'`
+	if _, err := raw.Exec(q); err != nil {
+		t.Fatal(err)
+	}
+	rr = adminRequestNoStepUp(t, srv, "POST", "/api/user/password", cookie, `{"newPassword":"another-long-password"}`)
+	var out map[string]string
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if rr.Code != http.StatusForbidden || out["error"] != "step_up_required" {
+		t.Fatalf("password change under export-only: %d %s, want the step-up gate, not export_only", rr.Code, rr.Body.String())
+	}
+	if rr := adminRequestNoStepUp(t, srv, "GET", "/api/user/sessions", cookie, ""); rr.Code != http.StatusForbidden {
+		t.Fatalf("sessions: %d", rr.Code)
+	}
 	if rr := adminRequestNoStepUp(t, srv, "POST", "/api/auth/logout", cookie, ""); rr.Code != 200 {
 		t.Fatalf("logout: %d", rr.Code)
 	}

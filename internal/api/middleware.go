@@ -392,7 +392,8 @@ func (m *MiddlewareManager) RequireAuth(next http.Handler) http.Handler {
 			writePasswordChangeRequired(w)
 			return
 		}
-		if status.ExportOnly && !exportRouteAllowed(r.Method, r.URL.Path) {
+		// A password the account must replace is replaced first, or no code is ever issued.
+		if status.ExportOnly && !exportRouteAllowed(r.Method, r.URL.Path) && !(user.PasswordChangeRequired && passwordChangeRouteAllowed(r.Method, r.URL.Path)) {
 			writeAPIError(w, http.StatusForbidden, "export_only", "This organisation is being deleted. You can only export your data and sign out.")
 			return
 		}
