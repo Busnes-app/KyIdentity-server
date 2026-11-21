@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -534,8 +535,9 @@ const eraseNoticeLease = 10 * time.Minute
 // SendEraseNotices mails the owed notices of orgs still in their export window, at least
 // once each. A notice is claimed before send is called and deleted after it succeeds; a
 // failure backs off (1 minute doubling, at most an hour) until the org is deleted. The
-// first failure of each notice is audited in the org's log, with no address.
-func (p *PlatformStore) SendEraseNotices(now time.Time, send func(EraseNotice) error) (int, error) {
+// first failure of each notice is audited in the org's log, with no address. It stops
+// claiming once ctx is done; the rest wait for the next pass.
+func (p *PlatformStore) SendEraseNotices(ctx context.Context, now time.Time, send func(EraseNotice) error) (int, error) {
 	type due struct {
 		org, user, holder string
 		attempts          int
@@ -564,6 +566,9 @@ func (p *PlatformStore) SendEraseNotices(now time.Time, send func(EraseNotice) e
 	sent := 0
 	var errs []error
 	for _, d := range batch {
+		if ctx.Err() != nil {
+			break
+		}
 		res, err := p.s.db.Exec(`UPDATE erase_notices SET next_attempt_at=? WHERE org_id=? AND user_id=? AND attempts=? AND next_attempt_at<=?`,
 			now.Add(eraseNoticeLease), d.org, d.user, d.attempts, now)
 		if err != nil {

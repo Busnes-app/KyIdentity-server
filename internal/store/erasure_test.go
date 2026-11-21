@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"slices"
@@ -369,20 +370,26 @@ func TestEraseNoticesAreRetriedUntilSent(t *testing.T) {
 			return nil
 		}
 	}
+	// A pass whose budget is spent claims and sends nothing.
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if n, err := s.Platform().SendEraseNotices(done, now, send(false)); err != nil || n != 0 || len(got) != 0 {
+		t.Fatalf("cancelled pass = %d, %v, %d sends", n, err, len(got))
+	}
 	// A failed send stays owed, backs off, and is audited once.
-	if n, err := s.Platform().SendEraseNotices(now, send(true)); err != nil || n != 0 {
+	if n, err := s.Platform().SendEraseNotices(context.Background(), now, send(true)); err != nil || n != 0 {
 		t.Fatalf("failing pass = %d, %v", n, err)
 	}
-	if n, err := s.Platform().SendEraseNotices(now, send(false)); err != nil || n != 0 || len(got) != 1 {
+	if n, err := s.Platform().SendEraseNotices(context.Background(), now, send(false)); err != nil || n != 0 || len(got) != 1 {
 		t.Fatalf("backed-off pass = %d, %v, %d sends", n, err, len(got))
 	}
-	if _, err := s.Platform().SendEraseNotices(now.Add(5*time.Minute), send(true)); err != nil {
+	if _, err := s.Platform().SendEraseNotices(context.Background(), now.Add(5*time.Minute), send(true)); err != nil {
 		t.Fatal(err)
 	}
 	if n := rowCount(t, s, `SELECT COUNT(*) FROM audit_events WHERE org_id='home' AND action='account.erase_notice' AND outcome='failure'`); n != 1 {
 		t.Errorf("%d failure rows, want 1", n)
 	}
-	if n, err := s.Platform().SendEraseNotices(now.Add(time.Hour), send(false)); err != nil || n != 1 {
+	if n, err := s.Platform().SendEraseNotices(context.Background(), now.Add(time.Hour), send(false)); err != nil || n != 1 {
 		t.Fatalf("retry = %d, %v", n, err)
 	}
 	if len(got) != 3 || got[2].Email != "home-kid@test.invalid" || !got[2].DeleteAfter.Equal(out.DeleteAfter) {
