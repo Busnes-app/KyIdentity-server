@@ -127,6 +127,20 @@ group with a resource, archive it (read-only, no members, kept for administrator
 delete, and never archive because a group is absent from a response. Client:
 `ky-primitives/suitedir` `Groups`.
 
+## `GET /api/suite/email-domains`
+
+The suite's mail domains, set by the administrator (staff on the hosted platform) under
+Administration › Suite settings. Same authentication, rate limits (per IP and per client) and
+`no-store`.
+
+```json
+{"domains": ["example.com", "xn--bcher-kva.example"]}
+```
+
+Lowercase punycode DNS names, at most 50, in the administrator's order; `[]` when none is set.
+In a single-tenant install the list is informational. In a multi-tenant install it also
+bounds mailbox addresses (below), and a domain a mailbox address uses cannot be removed.
+
 ## Multi-tenant installs
 
 A multi-tenant install (design `docs/superpowers/specs/2026-11-19-tenancy-design.md`) holds
@@ -139,6 +153,30 @@ always comes from KyIdentity's data, never from the calling app:
 - `/api/suite/groups` requires `org_id` (above).
 - Tokens and UserInfo carry `org_id`, and so does the body of every signed suite webhook,
   inside the `ky-primitives/syncauth` signature.
+
+### Mailbox address
+
+A member of a hosted org may have a **mailbox address**, separate from their sign-in email:
+the address KyPost provisions their mailbox from (tenancy design, "Mailbox address"). It is
+sent only in the body of a signed suite webhook, in a multi-tenant install, as a second
+`emails` entry:
+
+```json
+{"emails": [{"value": "alice@gmail.example", "type": "work", "primary": true},
+            {"value": "alice@xn--bcher-kva.example", "type": "mailbox", "primary": false}],
+ "org_id": "…"}
+```
+
+- `type: "mailbox"` names it. It is always `"primary": false`; the primary entry stays the sign-in
+  email. Golden: `internal/sync/testdata/tenancy-golden/webhook_mailbox.txt`.
+- Lowercase, with the domain in punycode, always on a listed suite mail domain, and unique
+  across the install, including against every other account's sign-in email.
+- Absent means the member has none yet. A change arrives as `user.updated` with the new value.
+  It is never cleared while the account exists.
+- Never in single-tenant webhooks, generic SCIM or Active Directory bodies, tokens, UserInfo
+  or `/api/suite/people`.
+
+KyPost allocates a hosted mailbox only from this entry, never from the primary email.
 
 ### `GET /api/suite/orgs`
 

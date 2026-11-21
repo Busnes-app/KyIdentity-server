@@ -5,12 +5,12 @@ import { apiJson, apiRequest, errorMessage } from '../api';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 import { Modal } from './Modal';
 import { describeInstant, instantFromLocal, localInputValue, localZone } from '../instant';
-import { parseAccountLink, parseMailSettings, parseSessionInventory, parseUsers } from '../parsers';
+import { parseAccountLink, parseMailSettings, parseSessionInventory, parseUserDirectory, parseUsers } from '../parsers';
 import type { AccountLink } from '../types';
 import { SessionList } from './SessionList';
 import { OffboardingView } from './OffboardingView';
 import { PageHead } from './PageHead';
-import { Users, Search, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, Monitor, UserX, Link, Clock, UserCog, MoreHorizontal } from 'lucide-react';
+import { Users, Search, Plus, RefreshCw, KeyRound, LogOut, Trash2, Edit, CheckCircle, Monitor, UserX, Link, Clock, UserCog, MoreHorizontal, Mail } from 'lucide-react';
 
 export interface UserFilter { query: string; role: 'all' | 'admin' | 'user'; status: 'all' | 'active' | 'pending' | 'disabled' }
 const NO_FILTER: UserFilter = { query: '', role: 'all', status: 'all' };
@@ -45,6 +45,10 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
   const [issued, setIssued] = useState<{ user: User; link: AccountLink } | null>(null);
   const [mailConfigured, setMailConfigured] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  // Set only for a hosted customer org: the suite domains its mailbox addresses may use.
+  const [mailboxDomains, setMailboxDomains] = useState<string[] | undefined>(undefined);
+  const [mailboxUser, setMailboxUser] = useState<User | null>(null);
+  const [mailboxValue, setMailboxValue] = useState('');
   const [filter, setFilter] = useState<UserFilter>(NO_FILTER);
   const shown = users ? filterUsers(users, filter) : [];
 
@@ -61,7 +65,9 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
 
   const fetchUsers = async () => {
     try {
-      setUsers(await apiJson('/api/admin/users', parseUsers));
+      const directory = await apiJson('/api/admin/users', parseUserDirectory);
+      setUsers(directory.users);
+      setMailboxDomains(directory.mailboxDomains);
       setListError(null);
     } catch (err) {
       setListError(errorMessage(err, 'Could not load users'));
@@ -178,6 +184,31 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
     setStatus(u.status || 'active');
     setEndsAt(localInputValue(u.endsAt));
     setShowEditModal(true);
+  };
+
+  const openMailbox = (u: User) => {
+    setFormError(null);
+    setMailboxValue(u.mailboxAddress ?? '');
+    setMailboxUser(u);
+  };
+
+  const handleMailbox = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mailboxUser) return;
+    setFormError(null);
+    setSubmitting(true);
+    const path = `/api/admin/users/${mailboxUser.id}/mailbox-address`;
+    try {
+      const grant = await requestGrant(`Setting the mailbox address of '${mailboxUser.username}' decides where their hosted mail goes.`, `PUT ${path}`);
+      await apiRequest(path, { method: 'PUT', body: JSON.stringify({ mailboxAddress: mailboxValue }), stepUpToken: grant });
+      setMailboxUser(null);
+      fetchUsers();
+    } catch (err) {
+      if (isCancelled(err)) return;
+      setFormError(errorMessage(err, 'Failed to set the mailbox address'));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleResetMFA = async (u: User) => {
@@ -314,7 +345,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                     <span className="cell-title"><AccountName u={u} busy={busy} onEdit={full ? openEditModal : undefined} />{u.sourceConnectorId && <span className="badge-type" title={`Managed by an inbound SCIM connector (external id ${u.externalId ?? ''})`}> SCIM</span>}</span>
                     {u.displayName && u.displayName !== u.username && <span className="cell-meta font-mono">{u.username}</span>}
                   </td>
-                  <td data-label="Email" className="text-muted">{u.email}</td>
+                  <td data-label="Email" className="text-muted">{u.email}{u.mailboxAddress && <span className="cell-meta">Mailbox {u.mailboxAddress}</span>}</td>
                   <td data-label="Role">
                     {u.role === 'admin' ? 'Administrator' : 'User'}
                   </td>
@@ -339,7 +370,7 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
                       groups: onManageGroups, edit: openEditModal, delegate: setDelegating, resetMFA: handleResetMFA,
                       sessions: openSessions, revoke: handleRevokeSessions, link: (x) => issueLink(x, false),
                       offboarding: (x) => setOffboarding({ id: x.id, username: x.username }), remove: handleDeleteUser,
-                    }} />
+                    }} mailbox={mailboxDomains && openMailbox} />
                   </td>
                 </tr>
               );
@@ -494,6 +525,29 @@ export const AdminUsers: React.FC<{ access?: Access; onManageGroups: (user: User
         </Modal>
       )}
 
+      {mailboxUser && mailboxDomains && (
+        <Modal title={`Mailbox address for ${mailboxUser.username}`} onClose={() => setMailboxUser(null)}>
+          <form onSubmit={handleMailbox} className="modal-body">
+            {formError && <div className="alert-box error sm" role="alert">{formError}</div>}
+            <p className="text-muted">Where this person's hosted mail is delivered. It is separate from their sign-in email, which stays {mailboxUser.email}.</p>
+            <div className="form-group">
+              <label className="form-label" htmlFor="user-mailbox-address">Mailbox address</label>
+              <input id="user-mailbox-address" type="text" className="form-input" autoComplete="off" spellCheck={false} value={mailboxValue} onChange={(e) => setMailboxValue(e.target.value)} required aria-describedby="user-mailbox-domains" />
+              <p id="user-mailbox-domains" className="text-muted text-sm">
+                {mailboxDomains.length ? `On one of the suite mail domains: ${mailboxDomains.join(', ')}.` : 'No suite mail domains are set yet (Administration › Suite settings).'}
+                {mailboxUser.mailboxAddress && ' A change is recorded in the audit log. The address cannot be cleared.'}
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="secondary-btn" onClick={() => setMailboxUser(null)}>Cancel</button>
+              <button type="submit" className="primary-btn" disabled={submitting || !mailboxDomains.length}>
+                {submitting ? <RefreshCw className="spin" size={14} /> : <span>Save address</span>}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       {/* Edit User Modal */}
       {showEditModal && selectedUser && (
         <Modal title={`Edit ${selectedUser.username}`} onClose={() => setShowEditModal(false)}>
@@ -597,7 +651,9 @@ export const AccountName: React.FC<{ u: User; busy: boolean; onEdit?: RowAction 
 export const UserRowActions: React.FC<{
   u: User; full: boolean; busy: boolean;
   act: Record<'groups' | 'edit' | 'delegate' | 'resetMFA' | 'sessions' | 'revoke' | 'link' | 'offboarding' | 'remove', RowAction>;
-}> = ({ u, full, busy, act }) => {
+  /** Present only in a hosted customer org. */
+  mailbox?: RowAction;
+}> = ({ u, full, busy, act, mailbox }) => {
   const menuId = useId();
   if (!full && u.role === 'admin') return null;
   return (
@@ -613,6 +669,9 @@ export const UserRowActions: React.FC<{
         </button>}
         {full && <button className="row-action" disabled={busy} onClick={() => act.edit(u)}>
           <Edit size={15} />Edit user
+        </button>}
+        {full && mailbox && <button className="row-action" disabled={busy} onClick={() => mailbox(u)} aria-label={`Mailbox address for ${u.username}`}>
+          <Mail size={15} />Mailbox address
         </button>}
         {full && <button className="row-action" onClick={() => act.delegate(u)} aria-label={`Delegated administration for ${u.username}`}>
           <UserCog size={15} />Delegated administration
