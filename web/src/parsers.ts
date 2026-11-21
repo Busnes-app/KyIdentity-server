@@ -774,7 +774,7 @@ function enrollmentMethods(value: unknown): string[] {
  return methods;
 }
 export function parseEnrollmentStatus(value: unknown): EnrollmentStatus {
- const o=obj(value,'enrollment status');return {required:requiredBool(o,'required'),allowedMethods:enrollmentMethods(o.allowedMethods),deadline:directoryCount(o,'deadline'),enrolled:requiredBool(o,'enrolled'),restricted:requiredBool(o,'restricted')};
+ const o=obj(value,'enrollment status');return {required:requiredBool(o,'required'),allowedMethods:enrollmentMethods(o.allowedMethods),deadline:directoryCount(o,'deadline'),enrolled:requiredBool(o,'enrolled'),restricted:requiredBool(o,'restricted'),...(o.exportOnly===true?{exportOnly:true}:{})};
 }
 function enrollmentScope(o: Record<string, unknown>): EnrollmentPolicy['scope'] {
  const scope = str(o, 'scope');

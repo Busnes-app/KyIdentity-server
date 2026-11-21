@@ -8,6 +8,7 @@ import { LoginView } from './components/LoginView';
 import { UserDashboard } from './components/UserDashboard';
 import { DeviceSettings } from './components/DeviceSettings';
 import { Settings } from './components/Settings';
+import { ExportOnly } from './components/EraseAccount';
 import { SettingsSection, hashFor, tabFromHash } from './route';
 import { AdminAppRegistry } from './components/AdminAppRegistry';
 import { AdminEnrollmentPolicies } from './components/AdminEnrollmentPolicies';
@@ -120,6 +121,8 @@ export const App: React.FC = () => {
   if (!currentUser || (window.location.pathname === '/login' && new URLSearchParams(window.location.search).has('interaction'))) {
     return <LoginView onLoginSuccess={(u) => { setLogoutFailed(false); updateSession({ kind: 'signedIn', user: u }); checkSession(); }} />;
   }
+
+  if (currentUser.enrollment?.exportOnly) return <main className="ky-content">{logoutAlert}<ExportOnly onLogout={handleLogout} /></main>;
 
   if (currentUser.enrollment?.restricted) return <main className="ky-content">
     {logoutAlert}
