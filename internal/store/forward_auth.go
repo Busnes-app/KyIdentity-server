@@ -444,6 +444,15 @@ func (s *Store) ForwardSessionFor(hash, host string) (*ForwardSession, error) {
 	return fs, rows.Err()
 }
 
+// ForwardSessionLive reports whether the session for a cookie hash on host still exists
+// and has not expired. Every logout and revocation deletes or shortens the row, so replicas
+// check it on each cached answer: one primary-key read.
+func (s *Store) ForwardSessionLive(hash, host string) (bool, error) {
+	var live bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM forward_sessions WHERE hash=? AND host=? AND expires_at>?)`, hash, host, time.Now().UTC().Unix()).Scan(&live)
+	return live, err
+}
+
 // EndForwardSession deletes the session for a cookie hash on host. It reports the user
 // and app, empty when there was none.
 func (s *Store) EndForwardSession(hash, host string, audit *AuditEvent) (bool, error) {

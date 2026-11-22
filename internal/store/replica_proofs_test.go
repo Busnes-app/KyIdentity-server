@@ -463,14 +463,44 @@ func TestProofConcurrentWorkerPassesDoNotDuplicate(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		var expired atomic.Int32
+		// Accounts past their end date, and memberships past their instant.
+		if err := s.DefaultOrg().CreateGroup(&Group{ID: "expiring-group", Name: "Expiring group"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		for range 4 {
+			u := createTestUser(t, s)
+			if _, err := s.db.Exec(`UPDATE users SET ends_at=? WHERE id=?`, past.Unix(), u.ID); err != nil {
+				t.Fatal(err)
+			}
+			m := createTestUser(t, s)
+			if err := s.DefaultOrg().SetGroupMembership("expiring-group", m.ID, true, nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.db.Exec(`UPDATE group_memberships SET expires_at=? WHERE group_id='expiring-group' AND user_id=?`, past.Unix(), m.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var expired, ended, left atomic.Int32
 		noErrors(t, "RunDueExpiries", race(stores, 2, func(_ int, s *Store) error {
 			run, err := s.Platform().RunDueExpiries(time.Now().UTC())
 			expired.Add(int32(run.Assignments))
+			ended.Add(int32(run.Accounts))
+			left.Add(int32(run.Memberships))
 			return err
 		}))
 		if expired.Load() != 8 || count(t, s, `SELECT COUNT(*) FROM app_user_assignments WHERE app_id=?`, app) != 0 {
 			t.Fatalf("%d assignment expiries reported for 8 due", expired.Load())
+		}
+		if ended.Load() != 4 || left.Load() != 4 {
+			t.Fatalf("%d accounts ended and %d memberships expired, want 4 each", ended.Load(), left.Load())
+		}
+		for action, want := range map[string]int{"account.ended": 4, "group.membership_expired": 4, "app.assignment_expired": 8} {
+			if n := count(t, s, `SELECT COUNT(*) FROM audit_events WHERE action=?`, action); n != want {
+				t.Fatalf("%d %s audit rows, want %d", n, action, want)
+			}
+		}
+		if n := count(t, s, `SELECT COUNT(*) FROM audit_events WHERE actor_username='expiry' AND outcome<>'success'`); n != 0 {
+			t.Fatalf("%d expiry failures audited", n)
 		}
 	})
 
@@ -484,6 +514,46 @@ func TestProofConcurrentWorkerPassesDoNotDuplicate(t *testing.T) {
 		noErrors(t, "ReconcileProvisioning", race(stores, 2, func(_ int, s *Store) error { return s.ReconcileProvisioning() }))
 		if n := count(t, s, `SELECT COUNT(*) FROM (SELECT user_id FROM account_sync_events WHERE system_id='reconciled' AND status='pending' GROUP BY user_id HAVING COUNT(*)>1) d`); n != 0 {
 			t.Fatalf("%d accounts queued twice", n)
+		}
+	})
+
+	t.Run("ExpireADPasswords", func(t *testing.T) {
+		_, app := adStoreFixture(t, s, "ad-race")
+		for range 4 {
+			u := createTestUser(t, s)
+			if err := s.DefaultOrg().SetAppAssignment(app, "users", u.ID, true, nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.QueueDirectoryPassword(testKeys, u.ID, u.PasswordHash, []byte("Expiring-pass-1"), queuedAudit); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var cleared atomic.Int32
+		noErrors(t, "ExpireADPasswords", race(stores, 2, func(_ int, s *Store) error {
+			n, err := s.ExpireADPasswords(now.Add(25 * time.Hour))
+			cleared.Add(int32(n))
+			return err
+		}))
+		if cleared.Load() != 4 || count(t, s, `SELECT COUNT(*) FROM audit_events WHERE action='directory.password_expired'`) != 4 {
+			t.Fatalf("%d directory passwords expired for 4 due", cleared.Load())
+		}
+	})
+
+	t.Run("FinishDueErasures", func(t *testing.T) {
+		erasureGrace = -time.Minute
+		defer func() { erasureGrace = 7 * 24 * time.Hour }()
+		erasureOrg(t, s, "racing", map[string]string{"kid": "active"})
+		if _, err := erase(t, s, "racing", "racing-holder", "push"); err != nil {
+			t.Fatal(err)
+		}
+		var done atomic.Int32
+		noErrors(t, "FinishDueErasures", race(stores, 2, func(_ int, s *Store) error {
+			n, err := s.Platform().FinishDueErasures()
+			done.Add(int32(n))
+			return err
+		}))
+		if done.Load() != 1 || count(t, s, `SELECT COUNT(*) FROM audit_events WHERE action='org.erased' AND target_id='racing'`) != 1 {
+			t.Fatalf("org erased %d times, want 1", done.Load())
 		}
 	})
 

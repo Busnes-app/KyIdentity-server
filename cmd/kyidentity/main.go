@@ -256,7 +256,7 @@ func main() {
 	// Background housekeeping.
 	go func() {
 		housekeep := func() {
-			purgeExpired(dbStore, time.Now().UTC())
+			_ = purgeExpired(dbStore, time.Now().UTC()) // each failure is logged
 			if err := clearFirstRunPasswordFile(dbStore, cfg.DataDir); err != nil {
 				log.Printf("Housekeeping: %v", err)
 			}
@@ -1183,7 +1183,10 @@ func restoreServiceHelp() string {
 
 // purgeExpired deletes rows past their use. Every table here is written by unauthenticated
 // or per-request paths, so none may grow without bound; a failed purge is retried next tick.
-func purgeExpired(s *store.Store, now time.Time) {
+// Every replica runs it each tick with no lease: each purge is one idempotent DELETE of
+// expired rows, so passes that overlap delete each row once
+// (TestHousekeepingPurgesOnEveryReplicaAtOnce).
+func purgeExpired(s *store.Store, now time.Time) error {
 	purges := []struct {
 		name string
 		run  func() error
@@ -1206,11 +1209,14 @@ func purgeExpired(s *store.Store, now time.Time) {
 		{"alerts", func() error { return s.DeleteAlertsOlderThan(now.Add(-auditRetention)) }},
 		{"orphaned launcher icons", func() error { _, err := s.DeleteOrphanedLauncherIcons(time.Hour); return err }},
 	}
+	var errs []error
 	for _, p := range purges {
 		if err := p.run(); err != nil {
 			log.Printf("Housekeeping: purge %s: %v", p.name, err)
+			errs = append(errs, err)
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // runAttestationHousekeeping refreshes the attestation caches whenever the status list is

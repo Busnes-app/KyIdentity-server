@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
@@ -30,9 +31,9 @@ type fwdApp struct {
 	id, appID, secret string
 }
 
-func newFwdFixture(t *testing.T) *fwdFixture {
+func newFwdFixture(t *testing.T, opts ...func(*config.Config)) *fwdFixture {
 	t.Helper()
-	srv, db, _, _, _, cleanup := setupTestServer(t)
+	srv, db, _, _, _, cleanup := setupTestServerWith(t, opts...)
 	t.Cleanup(cleanup)
 	f := &fwdFixture{t: t, srv: srv, db: db, apps: map[string]fwdApp{}}
 	srv.forward.now = func() time.Time { return time.Now().Add(f.skew) }
@@ -436,6 +437,63 @@ func TestForwardRevocationWithin30Seconds(t *testing.T) {
 		if rr := f.check(appHost, secret, "/", cookie); rr.Code != c.want || rr.Header().Get("X-Ky-User") != "" {
 			t.Fatalf("%s: after 31 s: %d, want %d", c.name, rr.Code, c.want)
 		}
+	}
+}
+
+// With KYIDENTITY_REPLICATED, a forward logout or a revocation on one replica ends the
+// session on another at once, though that replica cached the answer a moment before.
+func TestForwardLogoutReachesEveryReplica(t *testing.T) {
+	f := newFwdFixture(t, func(c *config.Config) { c.Replicated = true })
+	other, _ := serverOn(t, f.srv.cfg.DBPath, f.srv.cfg)
+	b := *f
+	b.srv = other
+	secret := f.apps[appHost].secret
+	cases := []struct {
+		name string
+		end  func(cookie string, u *store.User)
+	}{
+		{"forward logout", func(cookie string, _ *store.User) {
+			if rr := f.edge("/forward/logout", appHost, secret, &http.Cookie{Name: forwardCookie, Value: cookie}); rr.Code != http.StatusFound {
+				t.Fatalf("logout: %d", rr.Code)
+			}
+		}},
+		{"signed out everywhere", func(_ string, u *store.User) {
+			if err := f.db.DefaultOrg().RevokeUserAccess(u.ID, nil); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"disabled", func(_ string, u *store.User) {
+			if _, err := f.db.DefaultOrg().EditUser(u.ID, nil, func(row *store.User) (bool, error) { row.Status = "disabled"; return false, nil }); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, c := range cases {
+		u := newUser(t, f.db, "user")
+		if err := f.db.DefaultOrg().SetAppAssignment(f.apps[appHost].appID, "users", u.ID, true, nil); err != nil {
+			t.Fatal(err)
+		}
+		cookie := f.signIn(appHost, f.loginSession(u, "push", time.Now().UTC()))
+		for _, r := range []*fwdFixture{f, &b} {
+			if rr := r.check(appHost, secret, "/", cookie); rr.Code != http.StatusOK {
+				t.Fatalf("%s: before: %d", c.name, rr.Code)
+			}
+		}
+		c.end(cookie, u)
+		for i, r := range []*fwdFixture{f, &b} {
+			if rr := r.check(appHost, secret, "/", cookie); rr.Code != http.StatusUnauthorized || rr.Header().Get("X-Ky-User") != "" {
+				t.Fatalf("%s: replica %d after: %d", c.name, i, rr.Code)
+			}
+		}
+	}
+	// A cached answer whose check cannot reach the database fails closed.
+	cookie := f.signIn(appHost, f.userSS)
+	if rr := b.check(appHost, secret, "/", cookie); rr.Code != http.StatusOK {
+		t.Fatalf("before close: %d", rr.Code)
+	}
+	_ = other.store.Close()
+	if rr := b.check(appHost, secret, "/", cookie); rr.Code != http.StatusInternalServerError || rr.Header().Get("X-Ky-User") != "" {
+		t.Fatalf("closed store: %d", rr.Code)
 	}
 }
 

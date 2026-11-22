@@ -100,6 +100,11 @@ An answer for a session is cached in KyIdentity for at most 30 seconds. Disablin
 removing their assignment, signing them out everywhere, changing the app's policy, or an MFA
 enrollment policy the sign-in no longer meets (including a passed grace deadline) therefore
 takes effect within 30 seconds. Changing the host ends every session for the app at once.
+With `KYIDENTITY_REPLICATED=true`, each cached answer that lets the request through is checked
+against its session row first (one database read). So a logout at `/.ky/logout`, signing out
+everywhere, disabling the user, or anything else that ends the session takes effect on every
+replica at the next request, not only on the one that handled it. Removing an assignment or
+changing a policy still takes up to 30 seconds.
 
 A bypass applies only when the raw path is the prefix or starts with the prefix followed by
 `/`. A path that contains `%`, `;`, `..`, `//` or a backslash is never bypassed; it gets the
