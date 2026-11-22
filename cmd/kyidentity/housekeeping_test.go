@@ -29,7 +29,9 @@ func TestHousekeepingPurgesExpiredStepUpGrants(t *testing.T) {
 		}
 	}
 
-	purgeExpired(s, now)
+	if err := purgeExpired(s, now); err != nil {
+		t.Fatal(err)
+	}
 
 	raw, err := store.OpenRawForTest(path)
 	if err != nil {

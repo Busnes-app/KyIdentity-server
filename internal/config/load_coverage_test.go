@@ -41,7 +41,7 @@ func TestLoadFailsClosedOnMalformedValues(t *testing.T) {
 		{"port with sign", map[string]string{"KYIDENTITY_PORT": "+5867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
 		{"port with leading zero", map[string]string{"KYIDENTITY_PORT": "05867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
 		{"port with space", map[string]string{"KYIDENTITY_PORT": " 5867"}, "KYIDENTITY_PORT must be a port number from 1 to 65535"},
-		{"tenancy multi", map[string]string{"KYIDENTITY_TENANCY": "multi"}, "KYIDENTITY_TENANCY=multi is not available"},
+		{"tenancy multi", map[string]string{"KYIDENTITY_TENANCY": "multi"}, "KYIDENTITY_TENANCY=multi requires KYIDENTITY_REPLICATED=true"},
 		{"tenancy unknown", map[string]string{"KYIDENTITY_TENANCY": "Single"}, "KYIDENTITY_TENANCY must be single or multi"},
 	}
 	for _, c := range cases {

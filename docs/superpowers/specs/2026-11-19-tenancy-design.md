@@ -245,6 +245,20 @@ The fixed default org ID leaves room to add it later.
   sessions anyway.
 - Org status is read in the same query as user status, so a suspension takes effect on
   every replica at the next request.
+- **Multi-server (amendment, 2026-11-22).** The owner decided that multi-tenant needs
+  multi-server. `config.Load` refuses `KYIDENTITY_TENANCY=multi` unless
+  `KYIDENTITY_REPLICATED=true`. That flag already requires a PostgreSQL URL (D2) and the four
+  keys from outside the data directory, so a multi-tenant install can gain a replica without
+  moving its keys. A single server may still run with the flag. The check comes before the
+  release gate, so `multi` stays refused until PR 6.
+  - With the flag, a cached forward-auth answer that admits the request is first checked
+    against its `forward_sessions` row (`Store.ForwardSessionLive`). A logout or revocation
+    on one replica then holds on every replica at the next request.
+  - The housekeeping that runs on every replica with no lease (`purgeExpired`,
+    `RunDueExpiries`, `ReconcileProvisioning`, `ScheduleReconcileJobs`, `ExpireADPasswords`,
+    `FinishDueErasures`) re-checks its rows inside serialised write transactions. Passes that
+    overlap apply each change once: `TestProofConcurrentWorkerPassesDoNotDuplicate` and
+    `TestHousekeepingPurgesOnEveryReplicaAtOnce`.
 - Backups stay whole-install capsules, unchanged. Per-org backup is not offered. Per-org
   **export** (JSON: org, users without credentials, groups, memberships, assignments, the
   org's audit) is available to the account holder while a deletion is scheduled, and on

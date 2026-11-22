@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
@@ -210,5 +213,55 @@ func TestScheduledBackupOnAReplicaWithoutTheKeyFile(t *testing.T) {
 	scheduledBackup(context.Background(), &bare, s, nil, audit.NewLogger(s))
 	if failures() != 2 {
 		t.Fatal("a pinned key this replica cannot load was skipped without an audit row")
+	}
+}
+
+// Every replica purges each tick with no lease. Passes that overlap must neither fail nor
+// remove a live row.
+func TestHousekeepingPurgesOnEveryReplicaAtOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "identity.db")
+	stores := handles(t, path, 4)
+	s := stores[0]
+	now := time.Now().UTC()
+	u := &store.User{ID: "u", Username: "ada", Email: "ada@example.test", PasswordHash: "x", Role: "user", Status: "active"}
+	if err := s.DefaultOrg().CreateUserWithSyncEvents(u, nil); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 20 {
+		expires := now.Add(-time.Minute)
+		if i%2 == 0 {
+			expires = now.Add(time.Hour)
+		}
+		id := fmt.Sprintf("sess-%d", i)
+		if err := s.CreateSession(&store.Session{ID: id, UserID: u.ID, SessionTokenHash: id, ExpiresAt: expires}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, err := range allAtOnce(stores, func(_ int, s *store.Store) error { return purgeExpired(s, now) }) {
+		if err != nil {
+			t.Fatalf("replica %d: %v", i, err)
+		}
+	}
+	raw, err := store.OpenRawForTest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	rows, err := raw.Query(`SELECT id FROM sessions ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var left []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		left = append(left, id)
+	}
+	want := []string{"sess-0", "sess-10", "sess-12", "sess-14", "sess-16", "sess-18", "sess-2", "sess-4", "sess-6", "sess-8"}
+	if !slices.Equal(left, want) {
+		t.Fatalf("sessions after overlapping purges: %v, want the live ones %v", left, want)
 	}
 }

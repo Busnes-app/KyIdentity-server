@@ -27,6 +27,9 @@ func TestDatabaseURL(t *testing.T) {
 		{"unparsable", map[string]string{"KYIDENTITY_DATABASE_URL": "postgres://ky:hunter2@:port/ky"}, "postgres:// URL", ""},
 		{"missing file", map[string]string{"KYIDENTITY_DATABASE_URL_FILE": file + ".none"}, "KYIDENTITY_DATABASE_URL_FILE", ""},
 		{"replicated SQLite", map[string]string{"KYIDENTITY_REPLICATED": "true", "KYIDENTITY_SECRET_KEY": strings.Repeat("ab", KeyLength), "KYIDENTITY_ENCRYPTION_KEY": strings.Repeat("ab", KeyLength), "KYIDENTITY_RSA_KEY_PATH": file, "KYIDENTITY_VAPID_KEY_PATH": file}, "replicas must share one database", ""},
+		{"multi-tenant on one server", map[string]string{"KYIDENTITY_TENANCY": "multi", "KYIDENTITY_DATABASE_URL": secret}, "requires KYIDENTITY_REPLICATED=true", ""},
+		// Replicated configuration passes this check; the release gate still refuses multi.
+		{"multi-tenant replicated", map[string]string{"KYIDENTITY_TENANCY": "multi", "KYIDENTITY_DATABASE_URL": secret, "KYIDENTITY_REPLICATED": "true", "KYIDENTITY_SECRET_KEY": strings.Repeat("ab", KeyLength), "KYIDENTITY_ENCRYPTION_KEY": strings.Repeat("ab", KeyLength), "KYIDENTITY_RSA_KEY_PATH": file, "KYIDENTITY_VAPID_KEY_PATH": file}, "is not available in this release", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())

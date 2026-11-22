@@ -427,6 +427,8 @@ at startup, naming the variable, when one is missing. Supply the keys from a mou
 
 With the flag set the server also:
 
+- checks each cached forward-auth answer against its session row, so a forward-auth logout
+  or revocation on one replica holds on all of them at once (`docs/FORWARD-AUTH.md`);
 - keeps rate-limit buckets in the database as well as in memory, so a limit of five an hour
   is five an hour across all replicas, not five per replica. A limiter that cannot reach
   the database refuses the request;
@@ -449,6 +451,11 @@ These hold with or without the flag, because they cost a single instance nothing
 - The push relay keys live in the database, sealed under the encryption key, so every
   replica presents the same key and one of them renews it.
 - Session limits changed on one replica reach the others within five seconds.
+- The other housekeeping runs on every replica with no lease: the 15-minute purge of
+  expired rows and the minute's expiry, provisioning reconcile, reconcile scheduling,
+  directory-password expiry and erasure passes. Each re-checks its rows inside a write
+  transaction, and writes are serialised across replicas, so passes that overlap apply
+  each change once.
 - Two servers starting at once on one database migrate it one after the other, and the
   first administrator is created once.
 - The pinned backup key is kept in the database as well as in `recovery.pub`, sealed under

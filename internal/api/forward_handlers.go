@@ -40,6 +40,8 @@ type ForwardHandler struct {
 	middleware *MiddlewareManager
 	issuer     string
 	now        func() time.Time
+	// shared (config.Replicated): another replica may have ended a cached session.
+	shared bool
 
 	mu    sync.Mutex
 	apps  map[string]forwardApp
@@ -146,7 +148,20 @@ func (h *ForwardHandler) decide(app *store.ProxyApp, cookieHash string) (forward
 	d, ok := h.cache[key]
 	h.mu.Unlock()
 	if ok && now.Before(d.until) {
-		return d, nil
+		if d.status != http.StatusOK || !h.shared {
+			return d, nil
+		}
+		// A logout or revocation on another replica cleared only its own cache.
+		live, err := h.store.ForwardSessionLive(cookieHash, app.Host)
+		if err != nil {
+			return forwardDecision{status: http.StatusUnauthorized}, err
+		}
+		if live {
+			return d, nil
+		}
+		h.mu.Lock()
+		delete(h.cache, key)
+		h.mu.Unlock()
 	}
 	fs, err := h.store.ForwardSessionFor(cookieHash, app.Host)
 	if err != nil || fs == nil {

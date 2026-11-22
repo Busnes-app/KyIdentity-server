@@ -687,6 +687,9 @@ func (e *Engine) StartWorker(ctx context.Context) {
 		go e.eraseNoticeWorker(ctx)
 	}
 	go e.hrWorker(ctx)
+	// The reconcile tick's passes run on every replica with no lease. Each re-checks its rows
+	// inside a write transaction, and writes are serialised across replicas, so passes that
+	// overlap apply each change once (TestProofConcurrentWorkerPassesDoNotDuplicate).
 	// Overdue expiries are applied at start, so a restart drains them before anything else.
 	if _, err := e.store.Platform().RunDueExpiries(time.Now().UTC()); err != nil && ctx.Err() == nil {
 		log.Printf("expiry follow-up failed: %v", err)

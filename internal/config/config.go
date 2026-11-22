@@ -324,6 +324,11 @@ func Load() (*Config, error) {
 	switch tenancy {
 	case "single":
 	case "multi":
+		// Multi-tenant runs as replicas: one PostgreSQL database and keys from outside the
+		// data directory, so another replica can be added without moving either.
+		if !replicated {
+			return nil, errors.New("KYIDENTITY_TENANCY=multi requires KYIDENTITY_REPLICATED=true, with its PostgreSQL database and key files")
+		}
 		return nil, errors.New("KYIDENTITY_TENANCY=multi is not available in this release; unset it or set single")
 	default:
 		return nil, fmt.Errorf("KYIDENTITY_TENANCY must be single or multi, not %q", tenancy)

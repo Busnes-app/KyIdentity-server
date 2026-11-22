@@ -237,6 +237,7 @@ func (s *Server) routes() *http.ServeMux {
 	// Organisation branding: public, because the sign-in page shows it (issue #145).
 	// Forward-auth (docs/FORWARD-AUTH.md): edge routes authenticate the per-app secret.
 	forwardH := NewForwardHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL)
+	forwardH.shared = s.cfg.Replicated
 	s.forward = forwardH
 	mux.HandleFunc("GET /api/forward/check", forwardH.Check)
 	mux.Handle("GET /forward/begin", s.middleware.RateLimit("forward_begin", 30, 1)(http.HandlerFunc(forwardH.Begin)))
