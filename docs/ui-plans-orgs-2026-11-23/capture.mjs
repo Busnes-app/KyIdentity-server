@@ -52,8 +52,10 @@ try {
   await waitReady(`${baseURL}/`);
   await mkdir(OUT, { recursive: true });
   const browser = await chromium.launch();
+  // One sign-in for every shot, so each Account view lists the same single session.
+  let state;
   for (const { scheme, vp, dev } of PLAN) {
-    const ctx = await browser.newContext({ baseURL, viewport: vp, colorScheme: scheme, timezoneId: 'America/Chicago', locale: 'en-US' });
+    const ctx = await browser.newContext({ baseURL, viewport: vp, colorScheme: scheme, timezoneId: 'America/Chicago', locale: 'en-US', storageState: state });
     const page = await ctx.newPage();
     await page.clock.setFixedTime(NOW);
     // The forced password change confirms the given password in the step-up prompt.
@@ -66,7 +68,8 @@ try {
     await page.goto('/');
     await page.evaluate((id) => localStorage.setItem('kyidentity-theme', id), busnes(scheme));
     await page.reload();
-    await signIn(page);
+    if (state) await signedInOrSignIn(page); else await signIn(page);
+    state ??= await ctx.storageState();
     await account(page);
     await shot(page, `account-${dev}-${scheme}`);
     {
@@ -84,7 +87,7 @@ try {
       await shot(page, `dialog-${dev}-${scheme}`, { fixture: true, full: false });
       // The real step-up (password); the erase POST itself is the fixture's, so nothing is deleted.
       await dialog.getByRole('button', { name: 'Delete everything', exact: true }).click();
-      await dialog.getByRole('status').waitFor({ timeout: 60000 });
+      await page.getByRole('dialog').getByRole('status').waitFor({ timeout: 60000 });
       await shot(page, `done-${dev}-${scheme}`, { fixture: true, full: false });
       await page.goto('/');
       await signedInOrSignIn(page);

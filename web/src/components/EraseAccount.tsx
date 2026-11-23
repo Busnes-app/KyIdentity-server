@@ -29,7 +29,7 @@ export function eraseSummary(scope: EraseScope): string {
   if (!scope.holder) return 'Deletes your account and everything you keep in every app. Everyone else in your organisation keeps their data.';
   if (scope.otherMembers === 0) return 'Deletes your account and everything in it, in every app, right away.';
   const others = scope.otherMembers === 1 ? 'The other member has' : `The other ${scope.otherMembers} members have`;
-  return `Deletes your organisation. You lose access now. ${others} 7 days to export their own data, then everything is deleted.`;
+  return `Deletes your organisation. You lose access straight away. ${others} 7 days to export their own data before everything is deleted.`;
 }
 
 type AppList = Application[] | 'loading' | 'failed';
@@ -86,6 +86,7 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
   if (!scope) return null;
   const address = eraseAddress(user);
   const matches = confirmsAddress(typed, address);
+  const scheduled = scope.holder && scope.otherMembers > 0;
 
   const close = () => { if (!busy) { setOpen(false); setTyped(''); setError(null); } };
   const erase = async (e: React.FormEvent) => {
@@ -118,13 +119,14 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
           <Trash2 size={15} /><span>Delete everything…</span>
         </button>
       </div>
-      <p className="text-muted text-sm">{eraseSummary(scope)} No one can undo this, not even staff.</p>
+      <p className="text-muted text-sm">{eraseSummary(scope)} This cannot be undone.</p>
       {open && (
-        <Modal title="Delete everything" onClose={done ? () => window.location.assign('/') : close}>
+        <Modal title={done ? (scheduled ? 'Deletion scheduled' : 'Everything deleted') : 'Delete everything'}
+          onClose={done ? () => window.location.assign('/') : close}>
           {done ? (
             <div className="modal-body">
-              <p className="modal-desc" role="status">{scope.holder && scope.otherMembers > 0
-                ? 'Your organisation is scheduled for deletion. The other members have been told, and you have been signed out.'
+              <p className="modal-desc" role="status">{scheduled
+                ? 'You have been signed out. The other members have 7 days to export their own data.'
                 : 'Everything has been deleted, and you have been signed out.'}</p>
             </div>
           ) : (
@@ -163,7 +165,7 @@ export const ExportOnly: React.FC<{ onLogout: () => void }> = ({ onLogout }) => 
   const [apps, retry] = useExportApps(true);
   return (
     <>
-      <PageHead title="Your organisation is being deleted" lede="Your organisation and all its data will be permanently deleted within 7 days. Until then, export your own data from each app below." />
+      <PageHead title="Your organisation is being deleted" lede="Export your own data from each app below before your organisation and its data are permanently deleted." />
       <div className="settings-page security-page"><div className="settings-section">
         <div className="section-header">
           <div className="section-title-wrap"><h2>Export your data</h2></div>
