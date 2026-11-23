@@ -239,7 +239,7 @@ client, never a body field.
              {"org_id": "…", "result": "unknown_org"}]}
 ```
 
-- 1 to 500 reports, body at most 64 KiB, no other fields. `org_id` is a lowercase UUID, at
+- 1 to 500 reports, body at most 64 KiB, every field required (`null` refused), no other fields. `org_id` is a lowercase UUID, at
   most once per request; `used_bytes` and `want_bytes` 0 to 2^53; `seq` 1 to 2^63−1.
   Anything else is `400 {"error":"invalid_request"}` and nothing is applied.
 - `unknown_org`: an organisation `/api/suite/orgs` does not list for the app, a deleted

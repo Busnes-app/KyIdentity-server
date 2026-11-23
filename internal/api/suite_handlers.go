@@ -341,8 +341,14 @@ func (h *SuiteHandler) Storage(w http.ResponseWriter, r *http.Request, caller *s
 		suiteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}
+	// Pointers: a missing or null figure is refused, never read as 0.
 	var body struct {
-		Reports []store.StorageReport `json:"reports"`
+		Reports []struct {
+			OrgID     string `json:"org_id"`
+			UsedBytes *int64 `json:"used_bytes"`
+			Seq       *int64 `json:"seq"`
+			WantBytes *int64 `json:"want_bytes"`
+		} `json:"reports"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, suiteStorageMaxBody))
 	dec.DisallowUnknownFields()
@@ -350,18 +356,25 @@ func (h *SuiteHandler) Storage(w http.ResponseWriter, r *http.Request, caller *s
 	ok := dec.Decode(&body) == nil && errors.Is(dec.Decode(&json.RawMessage{}), io.EOF) &&
 		len(body.Reports) >= 1 && len(body.Reports) <= suiteStorageMaxReports
 	seen := map[string]bool{}
+	reports := make([]store.StorageReport, 0, len(body.Reports))
 	for _, rep := range body.Reports {
 		id, err := uuid.Parse(rep.OrgID)
 		ok = ok && err == nil && id.String() == rep.OrgID && !seen[rep.OrgID] &&
-			rep.UsedBytes >= 0 && rep.UsedBytes <= store.MaxReportBytes &&
-			rep.WantBytes >= 0 && rep.WantBytes <= store.MaxReportBytes && rep.Seq >= 1
+			rep.UsedBytes != nil && rep.Seq != nil && rep.WantBytes != nil
+		if !ok {
+			break
+		}
+		r := store.StorageReport{OrgID: rep.OrgID, UsedBytes: *rep.UsedBytes, Seq: *rep.Seq, WantBytes: *rep.WantBytes}
+		ok = r.UsedBytes >= 0 && r.UsedBytes <= store.MaxReportBytes &&
+			r.WantBytes >= 0 && r.WantBytes <= store.MaxReportBytes && r.Seq >= 1
 		seen[rep.OrgID] = true
+		reports = append(reports, r)
 	}
 	if !ok {
 		suiteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 		return
 	}
-	results, err := h.store.Platform().ReportStorage(caller.ID, body.Reports, time.Now().UTC())
+	results, err := h.store.Platform().ReportStorage(caller.ID, reports, time.Now().UTC())
 	if err != nil {
 		log.Printf("suite storage: internal error: %v", err)
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})

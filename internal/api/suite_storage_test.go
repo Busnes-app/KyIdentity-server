@@ -68,6 +68,11 @@ func TestSuiteStorage(t *testing.T) {
 		"fractional":    `{"reports":[{"org_id":"` + org + `","used_bytes":1.5,"seq":2,"want_bytes":0}]}`,
 		"app in body":   `{"reports":[{"org_id":"` + org + `","app_id":"kydrive","used_bytes":0,"seq":2,"want_bytes":0}]}`,
 		"trailing":      `{"reports":[` + entry(org) + `]} {}`,
+		"used missing":  `{"reports":[{"org_id":"` + org + `","seq":2,"want_bytes":0}]}`,
+		"used null":     `{"reports":[{"org_id":"` + org + `","used_bytes":null,"seq":2,"want_bytes":0}]}`,
+		"seq missing":   `{"reports":[{"org_id":"` + org + `","used_bytes":0,"want_bytes":0}]}`,
+		"want null":     `{"reports":[{"org_id":"` + org + `","used_bytes":0,"seq":2,"want_bytes":null}]}`,
+		"org missing":   `{"reports":[{"used_bytes":0,"seq":2,"want_bytes":0}]}`,
 		"trailing junk": `{"reports":[` + entry(org) + `]}x`,
 		"trailing ]":    `{"reports":[` + entry(org) + `]}]`,
 		"trailing pad":  `{"reports":[` + entry(org) + `]}` + strings.Repeat(" ", 64<<10),
@@ -78,6 +83,9 @@ func TestSuiteStorage(t *testing.T) {
 		}
 	}
 	// Nothing in a refused request was applied: seq 2 is still new.
+	if code, body := suiteStoragePost(t, srv, "kypost", "post-secret", fmt.Sprintf(`{"reports":[{"org_id":%q,"used_bytes":%d,"seq":1,"want_bytes":%d}]}`, org, gib, gib)); code != http.StatusOK || !strings.Contains(body, fmt.Sprintf(`"result":"ok","seq":1,"ceiling_bytes":%d,`, 2*gib)) {
+		t.Fatalf("stored usage changed by a refused request: %d %s", code, body)
+	}
 	if code, body := suiteStoragePost(t, srv, "kypost", "post-secret", fmt.Sprintf(`{"reports":[{"org_id":%q,"used_bytes":0,"seq":2,"want_bytes":0}]}`, org)); code != http.StatusOK || !strings.Contains(body, `"result":"ok","seq":2,`) {
 		t.Fatalf("after refusals: %d %s", code, body)
 	}
