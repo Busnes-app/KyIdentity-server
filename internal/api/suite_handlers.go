@@ -4,10 +4,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
@@ -320,4 +325,60 @@ func (h *SuiteHandler) Erased(w http.ResponseWriter, r *http.Request, caller *st
 		body["next"] = strconv.FormatInt(subjects[len(subjects)-1].Revision, 10)
 	}
 	suiteJSON(w, http.StatusOK, body)
+}
+
+// Usage report bounds (docs/SUITE-DIRECTORY.md, "Storage pool").
+const (
+	suiteStorageMaxBody    = 64 << 10
+	suiteStorageMaxReports = 500
+)
+
+// Storage takes the calling app's usage per org and answers each with its headroom grant
+// against the org's pool. POST /api/suite/storage, multi-tenant only. The app is the
+// authenticated client, never a body field. One bad entry refuses the whole request.
+func (h *SuiteHandler) Storage(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
+	if !h.multiTenant {
+		suiteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	// Pointers: a missing or null figure is refused, never read as 0.
+	var body struct {
+		Reports []struct {
+			OrgID     string `json:"org_id"`
+			UsedBytes *int64 `json:"used_bytes"`
+			Seq       *int64 `json:"seq"`
+			WantBytes *int64 `json:"want_bytes"`
+		} `json:"reports"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, suiteStorageMaxBody))
+	dec.DisallowUnknownFields()
+	// Exactly one JSON value: anything after it, or past the limit, is refused.
+	ok := dec.Decode(&body) == nil && errors.Is(dec.Decode(&json.RawMessage{}), io.EOF) &&
+		len(body.Reports) >= 1 && len(body.Reports) <= suiteStorageMaxReports
+	seen := map[string]bool{}
+	reports := make([]store.StorageReport, 0, len(body.Reports))
+	for _, rep := range body.Reports {
+		id, err := uuid.Parse(rep.OrgID)
+		ok = ok && err == nil && id.String() == rep.OrgID && !seen[rep.OrgID] &&
+			rep.UsedBytes != nil && rep.Seq != nil && rep.WantBytes != nil
+		if !ok {
+			break
+		}
+		r := store.StorageReport{OrgID: rep.OrgID, UsedBytes: *rep.UsedBytes, Seq: *rep.Seq, WantBytes: *rep.WantBytes}
+		ok = r.UsedBytes >= 0 && r.UsedBytes <= store.MaxReportBytes &&
+			r.WantBytes >= 0 && r.WantBytes <= store.MaxReportBytes && r.Seq >= 1
+		seen[rep.OrgID] = true
+		reports = append(reports, r)
+	}
+	if !ok {
+		suiteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+		return
+	}
+	results, err := h.store.Platform().ReportStorage(caller.ID, reports, time.Now().UTC())
+	if err != nil {
+		log.Printf("suite storage: internal error: %v", err)
+		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	suiteJSON(w, http.StatusOK, map[string]any{"results": results})
 }

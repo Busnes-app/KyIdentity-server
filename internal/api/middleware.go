@@ -436,6 +436,7 @@ func (m *MiddlewareManager) CSRFValidate(next http.Handler) http.Handler {
 		path := r.URL.Path
 		if strings.HasPrefix(path, "/scim/v2/") || strings.HasPrefix(path, "/hr/v1/") || strings.HasPrefix(path, "/api/ad-agent/v1/") || // Bearer-only machine boundaries; cookies are never read there.
 			path == "/api/systems/register" ||
+			path == "/api/suite/storage" || // HTTP Basic client credentials only; cookies are never read there.
 			path == "/api/notifications/native/register" ||
 			(strings.HasPrefix(path, "/api/notifications/native/devices/") && strings.HasSuffix(path, "/push-token")) ||
 			path == "/api/mfa/push/respond" ||

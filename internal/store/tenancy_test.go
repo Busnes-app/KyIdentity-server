@@ -16,7 +16,7 @@ import (
 var (
 	orgOwnedTables = []string{"users", "directory_groups", "group_memberships", "account_sync_events", "audit_events",
 		"scim_user_links", "sync_delivery_attempts", "scim_connectors", "logout_deliveries", "sync_resource_state", "alerts",
-		"suite_groups", "org_apps", "erase_notices"}
+		"suite_groups", "org_apps", "erase_notices", "org_storage"}
 	derivedTables = map[string]string{
 		"sessions": "users", "login_failures": "users", "native_devices": "users", "device_pairing_tokens": "users",
 		"mfa_methods": "users", "mfa_challenges": "users", "mfa_tokens": "users", "recovery_codes": "users",
@@ -168,7 +168,7 @@ func refused(t *testing.T, s *Store, want, q string) {
 
 func newTestOrg(t *testing.T, s *Store, id, status string) {
 	t.Helper()
-	if _, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES(?,?,'customer',?,'local',?,?)`, id, id, status, time.Now().UTC(), time.Now().UTC()); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,home_region,max_seats,created_at,updated_at) VALUES(?,?,'customer',?,'local',1000,?,?)`, id, id, status, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -475,7 +475,7 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 		sql  string
 		args []any
 	}{
-		{`INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES('org-erasing','Erasing','customer','active','local',?,?)`, []any{now, now}},
+		{`INSERT INTO orgs(id,name,kind,status,home_region,max_seats,created_at,updated_at) VALUES('org-erasing','Erasing','customer','active','local',6,?,?)`, []any{now, now}},
 		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-holder','erasing-holder','H','erasing-holder@test.invalid','','user','active','org-erasing')`, nil},
 		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-kid','erasing-kid','K','erasing-kid@test.invalid','','user','active','org-erasing')`, nil},
 		{`UPDATE orgs SET account_holder_user_id='erasing-holder' WHERE id='org-erasing'`, nil},
@@ -486,6 +486,12 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 		if _, err := s.db.Exec(q.sql, q.args...); err != nil {
 			t.Fatalf("%s: %v", q.sql, err)
 		}
+	}
+	if s.db.QueryRow(`SELECT COUNT(*) FROM org_storage`).Scan(&n) != nil {
+		return // a schema from before the storage pool
+	}
+	if _, err := s.db.Exec(`INSERT INTO org_storage(org_id,app_id,used_bytes,seq,ceiling_bytes,reported_at) VALUES('org-erasing',?,5,1,7,?)`, appID, now.Unix()); err != nil {
+		t.Fatal(err)
 	}
 }
 

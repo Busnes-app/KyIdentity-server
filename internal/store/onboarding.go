@@ -113,6 +113,9 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
  status=CASE WHEN ?='activation' THEN CASE WHEN source_connector_id IS NULL OR (source_active AND NOT locally_disabled) THEN 'active' ELSE 'disabled' END ELSE status END,
  email_verified_at=CASE WHEN email_verified_at IS NOT NULL THEN email_verified_at WHEN ?='email' THEN ? END, updated_at=?
  WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending))`, passwordHash, kind, delivery, now, now, userID, kind, kind)
+		if errors.Is(staffOrgError(err), ErrSeatLimit) {
+			return ErrNotFound // the seat-cap backstop at activation reads as an expired link
+		}
 		if err != nil {
 			return err
 		}

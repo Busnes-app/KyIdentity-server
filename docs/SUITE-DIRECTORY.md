@@ -3,8 +3,8 @@
 KyIdentity tells suite apps about each other, so cross-app features work without an
 operator copying URLs or secrets between servers. Four read-only service endpoints, called
 server to server by a registered app with its own OAuth client credentials. A multi-tenant
-install adds a fifth, `/api/suite/orgs`, and scopes people and groups by organisation (see
-Multi-tenant installs). The people route
+install adds `/api/suite/orgs`, `/api/suite/erased` and `POST /api/suite/storage`, and
+scopes people and groups by organisation (see Multi-tenant installs). The people route
 is contract A2 of the wave-1 suite integrations (`ky-redesign/integrations/suite-integrations-contracts.md`);
 this file is the durable copy.
 
@@ -215,9 +215,55 @@ The organisations the calling app serves. Same authentication, rate limit and `n
 `home_region` is the region every multi-region app keeps the organisation in (see Home
 regions). It never changes, so a cached value is exact.
 
+A customer organisation also carries `storage: {"pool_bytes", "over_since"}`: its storage
+pool across every app, and the unix second its usage passed the pool (`null` while within
+it). Either change takes a new `revision`. The staff organisation has no `storage`. See
+Storage pool.
+
 `status` is `active`, `suspended`, `deletion_scheduled` or `deleted`. Apps poll about every
 60 s. Remember the highest `revision` seen once a pass ends without `next`, and start the
 next poll from it. An error changes nothing.
+
+### Storage pool: `POST /api/suite/storage`
+
+Each customer organisation has one storage pool shared by every app (tenancy design, "Org
+storage pool"). Each app reports the bytes it stores per organisation and gets a headroom
+grant: a ceiling it may fill until the grant expires. Same authentication, rate limit and
+`no-store`; `404 {"error":"not_found"}` in a single-tenant install. The app is the calling
+client, never a body field.
+
+```json
+{"reports": [{"org_id": "…", "used_bytes": 1073741824, "seq": 17, "want_bytes": 268435456}]}
+{"results": [{"org_id": "…", "result": "ok", "seq": 17, "ceiling_bytes": 1342177280, "ttl_seconds": 900,
+              "pool_bytes": 21474836480, "org_used_bytes": 5368709120, "over_since": null},
+             {"org_id": "…", "result": "unknown_org"}]}
+```
+
+- 1 to 500 reports, body at most 64 KiB, every field required (`null` refused), no other fields. `org_id` is a lowercase UUID, at
+  most once per request; `used_bytes` and `want_bytes` 0 to 2^53; `seq` 1 to 2^63−1.
+  Anything else is `400 {"error":"invalid_request"}` and nothing is applied.
+- `unknown_org`: an organisation `/api/suite/orgs` does not list for the app, a deleted
+  one, the staff organisation, or none at all. All answer the same.
+- `seq` rises per organisation and per app, from the app's shared database (a PostgreSQL
+  sequence), never one replica's clock. A report applies only above the stored `seq`. The
+  same `seq` with the same `used_bytes` is a replay: `ok` with the stored grant. A lower
+  `seq`, or the same one with other bytes, is `stale` with the stored `seq` and grant, and
+  changes nothing.
+- `ceiling_bytes` is `used_bytes` plus the grant. The grant is at most `want_bytes`, what
+  the pool leaves after every app's usage and every other app's grant, and the organisation's
+  cap on all grants at once (`min(pool / 8, 64 GiB)`). It is `0` while the organisation is
+  not `active`, the app is turned off for it (its bytes still count), or its usage is over
+  the pool. A grant stays reserved until the app's next report replaces it, expired or not.
+- The grant expires `ttl_seconds` after the app **sent** the request, by the app's clock.
+  Allow a write that adds `n` bytes only when committed usage plus `n` is at most
+  `ceiling_bytes` and the grant has not expired, checked inside the write's own transaction.
+  Writes that add nothing are always allowed. Report about every 60 s for each organisation
+  whose usage changed, at once when half the grant is used, and at least once per
+  `ttl_seconds` for every grant held (`want_bytes: 0` releases it).
+- When usage passes the pool, `over_since` is set (and `/api/suite/orgs` shows it); when it
+  is back within, it is cleared. Each flip is audited in the organisation's log with the
+  two byte figures. Reports themselves are not audited. Nothing is ever deleted: over the
+  pool, refuse new stored content and keep reads, deletes and exports working.
 
 ### Home regions
 
