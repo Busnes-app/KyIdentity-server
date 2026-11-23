@@ -270,6 +270,13 @@ account. The body is the bare inactive SCIM user (`id`, `externalId`, `active: f
 and answer `2xx` (or `404` for a person you never held); it is retried until then. Generic
 SCIM and Active Directory targets get `user.deleted` instead.
 
+"This person's data" is only what they own alone. Other members keep what they share: a
+shared item the person owns passes to its longest-standing admin, else editor, else other
+member, and is deleted only when it has no other member. Their messages in shared rooms
+become tombstones (text and attachments deleted, the author a deleted account). Nothing
+other members wrote is deleted. Treat a subject listed by `GET /api/suite/erased` the same
+way; when its whole organisation is deleted, the organisation's data goes with it.
+
 Downstream contract, for every app run as a shared multi-tenant install: refuse a token
 without `org_id`; key every row by `org_id`; bind a local account to `(sub, org_id)` and
 refuse a known `sub` arriving with another `org_id`; take the org only from a verified token,
