@@ -3,7 +3,7 @@
 Date: 2026-11-19. Owner decisions: 2026-11-19 tenancy brief (fixed, listed below). Worker:
 tenancy-spec. Status: approved design. PRs 1–3 are built. Amended 2026-11-21 with Delete everything and
 the `export_only` claim (K open question 4 (a)), and with Mailbox address (multi-tenant), from the owner
-answer to KyPost open question 1.
+answer to KyPost open question 1. Amended 2026-11-22 with Home region (owner decision on multi-region apps).
 
 KyIdentity today is one organisation per install (`AGENTS.md:3`, `design.md:31` defers
 multi-tenancy). This spec adds a second mode to the same binary. **Single-tenant** is
@@ -516,7 +516,7 @@ holder's name and email on create.
 
 | Route | Scope | Effect |
 |---|---|---|
-| `POST /orgs` | `orgs:write` | `{name, kind: person\|household, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, holder_mailbox_address?, billing_ref, revision}`. Creates the org and a pending account holder (with its mailbox address when given; see Mailbox address), and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere or the holder's mailbox address collides, `400 mailbox_domain` for a mailbox address off the suite domains. |
+| `POST /orgs` | `orgs:write` | `{name, kind: person\|household, home_region, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, holder_mailbox_address?, billing_ref, revision}`. Creates the org and a pending account holder (with its mailbox address when given; see Mailbox address), and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere or the holder's mailbox address collides, `400 mailbox_domain` for a mailbox address off the suite domains, `400 invalid_home_region` (see Home region). |
 | `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `over_limit`, `holder_activated`, `delete_after`, `revision`. No names or emails of users. |
 | `PATCH /orgs/{id}` | `orgs:write` | `{revision}` plus any of: plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). Lowering seats below the number used is accepted: the org is `over_limit`, new seats are refused, and nobody is disabled. |
 | `POST /orgs/{id}/suspend` | `orgs:write` | `{reason: payment\|abuse, revision}`. Semantics below. |
@@ -627,8 +627,8 @@ After that:
   stored, and it is not an `orgs.status` value. A transaction that changes either side
   computes it before and after, and queues `org.over_limit` or `org.within_limit` in the
   same transaction when it flips.
-- Body: `{event_id, type, org_id, billing_ref, revision, status, seats_used, user_id?,
-  change?, at}`. `user_id` is the opaque KyIdentity ID. No personal data.
+- Body: `{event_id, type, org_id, home_region, billing_ref, revision, status, seats_used,
+  user_id?, change?, at}`. `user_id` is the opaque KyIdentity ID. No personal data.
 - Delivery is at least once and unordered. Billing de-duplicates by `event_id` and orders
   by `revision`.
 
@@ -837,6 +837,67 @@ Owner questions, each with the default this design applies:
    only the domains.* The current address is visible on the user's admin page.
 3. Can staff clear an address? *Default: no.* Clearing would orphan the KyPost mailbox.
    Deleting the member is the way to end it.
+
+## Home region (amendment, 2026-11-22)
+
+Owner decision, 2026-11-22: KyIdentity is the source of truth for each org's **home region**.
+The suite's multi-tenant apps run in several regions, KyMessages-Native first
+(KyMessages-Native `docs/superpowers/specs/2026-11-22-tenancy-design.md` §6.2). Each org lives
+in exactly one region: its app data, media server and attachment store are there, and
+nothing is written across regions. Each region is its own app URL (for example
+`us.chat.<domain>` and `eu.chat.<domain>`), not one hostname behind an edge router, and each
+region runs its own LiveKit SFU. So an app learns where an org lives from KyIdentity, and a
+caller learns which URL serves it.
+
+| # | Decision | Why |
+|---|---|---|
+| H1 | `orgs.home_region` (schema version 15), a slug matching `^[a-z][a-z0-9-]{1,31}$`, `NOT NULL`. Existing orgs, the single-tenant `default` org and the `staff` org are `local`. | One field, set once. `local` is what a single-region app already assumes (KyMessages-Native §6.2 item 5). |
+| H2 | **Immutable.** Trigger `orgs_home_region_immutable` refuses every change, on both backends and on every path, staff included. A deleted org's tombstone keeps it. | A move copies every app's data to another region. No app can do that yet, so a changed field would only point apps at a region that holds none of the org's data. A later move must be its own audited flow, designed with the apps, that lifts the trigger on one named path (as `holder_erased` does for the account holder). |
+| H3 | Set at provisioning. `POST /orgs` takes a required `home_region`; missing or malformed is `400 invalid_home_region` (`store.ValidHomeRegion`). A single-region service sends `local`. | Billing chooses the region at checkout. On Postgres the column has no default (dropped after the backfill, like `org_id` in version 10), so an insert that forgets it fails. SQLite keeps `DEFAULT 'local'` (a column default cannot be dropped there), and SQLite is single-tenant only (D2). The `CHECK` refuses a malformed value on both. |
+| H4 | Published in `/api/suite/orgs` (`home_region` on each entry; ky-primitives `suitedir.Org.HomeRegion`) and in every platform event body (`home_region`). **Not a token claim.** | An app must already read `/api/suite/orgs` before serving an org (status, `enabled`, quotas), and the value never changes, so a cached entry is exact. A claim would add an `orgs` read to every issuance and change every multi-tenant token for no new fact. |
+| H5 | Per-region app URLs: `client_region_origins (client_id, region, origin)`, a platform table. Each origin is the HTTPS origin of one of that client's redirect URIs. | One OAuth client per app, as today: every region is a redirect origin of the same client, so a region URL adds no new place KyIdentity sends a user or a signed request to. |
+
+**Setting region URLs.** `GET` and `PUT /api/admin/clients/{id}/regions`,
+`{"regions": {"us": "https://us.chat.example"}}`. Platform routes, multi-tenant only (`404` in
+single-tenant), `PUT` with step-up. `PUT` replaces the whole map (at most 32 entries; `{}`
+clears it) and commits `admin.client_regions_changed` with the map in the same transaction.
+`400 invalid_regions` for a malformed region, an origin that is not exactly
+`https://host[:port]`, or one that is not among the client's redirect origins. Reads re-check
+that last rule, so an origin whose redirect URI was later removed is ignored rather than
+used. Deleting the client deletes its rows.
+
+**Resolving an app's URL for an org.** A client with no rows is one URL, as today. A client
+with rows serves an org only through the row for that org's home region; with none it does not
+serve the org at all, and the URL is never guessed.
+
+- The launcher and `/api/suite/apps?sub=` (the `sub` user's org) replace the launch URL's
+  origin with the region's origin, keeping its path, and leave out a regioned app that has no
+  origin for the viewer's region. `/api/suite/apps` without `sub` stays global.
+- `/api/suite/peer` adds `regions` (`{region: origin}`) when the peer has rows. `url` stays
+  the redirect origin. A caller sends an org's requests to `regions[home_region]`, with the
+  home region from `/api/suite/orgs`; an org whose region has no entry gets no peer feature.
+  ky-primitives `suitedir.Peer.URLFor(region)` applies this rule. KyPost and KyCalendar
+  reach the KyMessages region that owns an org this way.
+
+**Single-tenant.** The column exists and holds `local`, but nothing publishes it: no token,
+UserInfo, webhook, launcher or suite answer changes, and the region routes are `404`, so
+`client_region_origins` stays empty. The golden files are unchanged.
+
+**Not covered.**
+
+- Signed suite webhooks (`user.*`) still go to the connector's one endpoint. A multi-region
+  app forwards one for an org homed elsewhere, as KyMessages-Native §6.2 item 3 already does
+  for peer calls. Delivering to the home region's endpoint directly is a later change.
+- KyIdentity sends no org lifecycle webhooks to apps. `org.*` platform events go to billing
+  only, and apps learn an org's status from `/api/suite/orgs`. KyMessages-Native §5 and §6.2
+  item 4 assume signed `org.suspended`, `org.resumed` and `org.deleted` webhooks from
+  KyIdentity; until that is designed, they poll.
+
+Tests: `TestHomeRegion` (format on both backends, `ValidHomeRegion` and the `CHECK` agree,
+immutability, `local` for the default org, the Postgres insert without a region refused),
+`TestSuiteOrgsCarryTheHomeRegion`, the platform event body, `TestClientRegions` (the admin
+routes, refusals and the single-tenant `404`), `TestRegionalLaunchURLs` (launcher, apps and
+peer), and the single-tenant golden files unchanged.
 
 ## Entitlements
 

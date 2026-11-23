@@ -42,6 +42,9 @@ func copyFixture(t *testing.T, s *Store) {
 			t.Fatal(err)
 		}
 	}
+	if err := s.SetClientRegionOrigins("client-1", map[string]string{"us": "https://app.test"}, &AuditEvent{ID: uuid.NewString(), Action: "admin.client_regions_changed", Outcome: "success", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	app := provisioningFixture(t, s, "hr")
 	g := &Group{ID: uuid.NewString(), Name: "Staff Ünits"}
 	if err := s.DefaultOrg().CreateGroup(g, nil); err != nil {

@@ -27,6 +27,8 @@ type DeviceHandler struct {
 	audit      *audit.Logger
 	middleware *MiddlewareManager
 	issuerURL  string
+	// multiTenant sends each user to their org's home region of a regioned app.
+	multiTenant bool
 }
 
 func NewDeviceHandler(s *store.Store, mfaEngine *mfa.Engine, audit *audit.Logger, mm *MiddlewareManager, issuerURL string) *DeviceHandler {
@@ -503,8 +505,9 @@ func clientLaunchURL(client store.OAuthClient) string {
 // launcherApps lists the enabled custom cards and OAuth clients whose key allow admits, in
 // launcher order, under each client's launcher name. A card for admins only shows when
 // admin holds its client ID (nil for no viewer). The launcher and the suite directory both
-// read it; neither audience nor name changes access.
-func launcherApps(st *store.Store, allow func(key string) bool, admin map[string]bool) ([]store.Application, error) {
+// read it; neither audience nor name changes access. regions (orgRegionOrigins, nil for none)
+// moves a regioned client to the viewer's home-region origin, and drops it without one.
+func launcherApps(st *store.Store, allow func(key string) bool, admin map[string]bool, regions map[string]string) ([]store.Application, error) {
 	customApps, err := st.ListApplications()
 	if err != nil {
 		return nil, err
@@ -533,6 +536,9 @@ func launcherApps(st *store.Store, allow func(key string) bool, admin map[string
 			continue
 		}
 		launchURL := clientLaunchURL(client)
+		if origin, ok := regions[client.ID]; ok && launchURL != "" {
+			launchURL = regionLaunchURL(client, launchURL, origin)
+		}
 		if launchURL == "" {
 			continue
 		}
@@ -560,7 +566,8 @@ func launcherApps(st *store.Store, allow func(key string) bool, admin map[string
 
 // ListApplications returns dashboard application links, aggregating custom applications and registered OAuth clients.
 func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request) {
-	userID := GetUserFromContext(r.Context()).ID
+	user := GetUserFromContext(r.Context())
+	userID := user.ID
 	allowed, err := h.store.LauncherAppAccess(userID)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -571,7 +578,12 @@ func (h *DeviceHandler) ListApplications(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	result, err := launcherApps(h.store, func(key string) bool { return allowed[key] }, admin)
+	regions, err := orgRegionOrigins(h.store, h.multiTenant, user.Org())
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return
+	}
+	result, err := launcherApps(h.store, func(key string) bool { return allowed[key] }, admin, regions)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return

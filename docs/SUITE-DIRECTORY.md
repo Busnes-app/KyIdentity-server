@@ -89,6 +89,15 @@ Connection details for a paired suite integration.
   secret gives it no power it lacks. Each app's own explicit configuration (its `*_URL` and
   `*_SECRET_FILE` variables) still wins when set.
 - Each issue is audited (`suite.peer.issue`, caller and peer, never the secret).
+- In a multi-tenant install, a peer served from one URL per region (see Home regions) adds
+  `regions`, `{region: origin}`. Send an organisation's requests to
+  `regions[home_region]`, never to `url`; an organisation whose region has no entry gets no
+  peer feature. Client: `ky-primitives/suitedir` `Peer.URLFor`.
+
+```json
+{"client": "kymessage", "url": "https://us.chat.example.com", "secret": "…",
+ "regions": {"us": "https://us.chat.example.com", "eu": "https://eu.chat.example.com"}}
+```
 
 ## `GET /api/suite/groups`
 
@@ -199,13 +208,38 @@ The organisations the calling app serves. Same authentication, rate limit and `n
   PR 6; until then a multi-tenant install is refused at startup, so nothing serves this.
 
 ```json
-{"orgs": [{"id": "…", "status": "active", "revision": 42, "enabled": true, "quotas": {"storage_gb": 5}}],
+{"orgs": [{"id": "…", "status": "active", "revision": 42, "home_region": "eu", "enabled": true, "quotas": {"storage_gb": 5}}],
  "next": "42.…"}
 ```
+
+`home_region` is the region every multi-region app keeps the organisation in (see Home
+regions). It never changes, so a cached value is exact.
 
 `status` is `active`, `suspended`, `deletion_scheduled` or `deleted`. Apps poll about every
 60 s. Remember the highest `revision` seen once a pass ends without `next`, and start the
 next poll from it. An error changes nothing.
+
+### Home regions
+
+Each organisation lives in one region of every multi-region app (tenancy design, "Home
+region"): `home_region`, a slug matching `^[a-z][a-z0-9-]{1,31}$`, set when the organisation
+is created and never changed. `local` is the region of every organisation created without
+one, for single-region apps. It is published in `/api/suite/orgs` and in platform event
+bodies only, never in tokens: take it from `/api/suite/orgs` by the token's `org_id`.
+
+A multi-region app is one OAuth client whose redirect URIs include each region's origin
+(`https://us.chat.example.com/cb`, `https://eu.chat.example.com/cb`). Staff map regions to
+those origins (`PUT /api/admin/clients/{id}/regions`). Then:
+
+- `/api/suite/apps?sub=` and the launcher open the app at the `sub`'s home-region origin,
+  with the launch URL's path, and leave the app out when it has no origin for that region.
+  `/api/suite/apps` without `sub` is unchanged.
+- `/api/suite/peer` carries `regions` (above).
+- Signed suite webhooks still go to the connector's one endpoint; forward one for an
+  organisation homed elsewhere. KyIdentity sends apps no `org.*` webhooks: poll
+  `/api/suite/orgs` for status.
+
+An app with no region map is one URL, exactly as before.
 
 ### `GET /api/suite/erased`
 
