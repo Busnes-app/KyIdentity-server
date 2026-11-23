@@ -35,7 +35,7 @@ func TestNormalizeMailboxAddress(t *testing.T) {
 	}
 }
 
-// mailboxFixture: a store with suite domains, a household org and a member in it.
+// mailboxFixture: a store with suite domains, a customer org and a member in it.
 func mailboxFixture(t *testing.T, domains ...string) (*Store, *OrgStore, *User) {
 	t.Helper()
 	s, cleanup := setupTestStore(t)
@@ -45,7 +45,7 @@ func mailboxFixture(t *testing.T, domains ...string) (*Store, *OrgStore, *User) 
 			t.Fatal(err)
 		}
 	}
-	org := testOrg(t, s, "household")
+	org := testOrg(t, s, "customer")
 	return s, org, testOrgUser(t, org, "user")
 }
 
@@ -124,7 +124,7 @@ func TestMailboxAddressMustBeOnASuiteDomain(t *testing.T) {
 
 func TestMailboxAddressIsUniqueAcrossTheInstall(t *testing.T) {
 	s, a, alice := mailboxFixture(t, "bücher.example", "example.com")
-	b := testOrg(t, s, "person")
+	b := testOrg(t, s, "customer")
 	bob := testOrgUser(t, b, "user")
 	if _, _, err := a.SetMailboxAddress(alice.ID, "post@Bücher.example", false, nil); err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestMailboxAddressRace(t *testing.T) {
 
 func TestMailboxAddressRefusesAnotherOrgsUser(t *testing.T) {
 	s, a, _ := mailboxFixture(t, "example.com")
-	b := testOrg(t, s, "household")
+	b := testOrg(t, s, "customer")
 	victim := testOrgUser(t, b, "user")
 	_, _, cross := a.SetMailboxAddress(victim.ID, "x@example.com", true, nil)
 	_, _, missing := a.SetMailboxAddress(uuid.NewString(), "x@example.com", true, nil)
@@ -217,7 +217,7 @@ func TestMailboxAddressRefusesAnotherOrgsUser(t *testing.T) {
 	}
 }
 
-// Only person and household accounts hold one, on every write path: a single-tenant
+// Only customer accounts hold one, on every write path: a single-tenant
 // install (the default org) and staff never can.
 func TestMailboxAddressIsForCustomerAccountsOnly(t *testing.T) {
 	s, member, u := mailboxFixture(t, "example.com")
@@ -234,7 +234,7 @@ func TestMailboxAddressIsForCustomerAccountsOnly(t *testing.T) {
 		}
 	}
 	if ok, err := member.MailboxEligible(); err != nil || !ok {
-		t.Errorf("household eligible: %v %v", ok, err)
+		t.Errorf("customer eligible: %v %v", ok, err)
 	}
 	if _, err := s.db.Exec(`INSERT INTO users(org_id,id,username,display_name,email,password_hash,role,status,mailbox_address) VALUES(?,'raw','raw','raw','raw@test.invalid','','user','active','raw@example.com')`, DefaultOrgID); err == nil {
 		t.Error("raw insert of a default-org account with a mailbox address")

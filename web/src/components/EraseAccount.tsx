@@ -26,10 +26,10 @@ export function confirmsAddress(typed: string, address: string): boolean {
 
 /** What the button deletes, in the clicker's words. */
 export function eraseSummary(scope: EraseScope): string {
-  if (!scope.holder) return 'Deletes your account and everything you keep in every app. The rest of your household keeps theirs.';
-  if (scope.otherMembers === 0) return 'Deletes your account and everything in it, in every app, straight away.';
-  const people = scope.otherMembers === 1 ? '1 other person' : `${scope.otherMembers} other people`;
-  return `Deletes your household: you lose access now, and ${people} can export their own data for 7 days before everything is deleted.`;
+  if (!scope.holder) return 'Deletes your account and everything you keep in every app. Everyone else in your organisation keeps their data.';
+  if (scope.otherMembers === 0) return 'Deletes your account and everything in it, in every app, right away.';
+  const others = scope.otherMembers === 1 ? 'The other member has' : `The other ${scope.otherMembers} members have`;
+  return `Deletes your organisation. You lose access straight away. ${others} 7 days to export their own data before everything is deleted.`;
 }
 
 type AppList = Application[] | 'loading' | 'failed';
@@ -86,6 +86,7 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
   if (!scope) return null;
   const address = eraseAddress(user);
   const matches = confirmsAddress(typed, address);
+  const scheduled = scope.holder && scope.otherMembers > 0;
 
   const close = () => { if (!busy) { setOpen(false); setTyped(''); setError(null); } };
   const erase = async (e: React.FormEvent) => {
@@ -118,20 +119,20 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
           <Trash2 size={15} /><span>Delete everything…</span>
         </button>
       </div>
-      <p className="text-muted text-sm">{eraseSummary(scope)} Nobody can undo it, staff included.</p>
+      <p className="text-muted text-sm">{eraseSummary(scope)} This cannot be undone.</p>
       {open && (
-        <Modal title="Delete everything" onClose={done ? () => window.location.assign('/') : close}>
+        <Modal title={done ? (scheduled ? 'Deletion scheduled' : 'Everything deleted') : 'Delete everything'}
+          onClose={done ? () => window.location.assign('/') : close}>
           {done ? (
             <div className="modal-body">
-              <div className="alert-box" role="status">{scope.holder && scope.otherMembers > 0
-                ? 'Your household will be deleted. Everyone else has been told, and you are signed out.'
-                : 'Everything is deleted, and you are signed out.'}</div>
-              <div className="modal-footer"><button type="button" className="primary-btn" onClick={() => window.location.assign('/')}>Close</button></div>
+              <p className="modal-desc" role="status">{scheduled
+                ? 'You have been signed out. The other members have 7 days to export their own data.'
+                : 'Everything has been deleted, and you have been signed out.'}</p>
             </div>
           ) : (
             <form onSubmit={erase}>
               <div className="modal-body">
-                <p className="modal-desc">{eraseSummary(scope)} It cannot be got back.</p>
+                <p className="modal-desc">{eraseSummary(scope)} This cannot be undone.</p>
                 <h4 className="erase-step">1. Export first</h4>
                 <ExportLinks apps={apps} retry={retryApps} />
                 <h4 className="erase-step">2. Confirm</h4>
@@ -142,7 +143,6 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
                 </div>
                 {error && <div className="alert-box error" role="alert">{error}</div>}
                 <div className="modal-footer">
-                  <button type="button" className="secondary-btn" onClick={close} disabled={busy}>Cancel</button>
                   <button type="submit" className="primary-btn danger" disabled={!matches || busy}>
                     <Trash2 size={16} /><span>{busy ? 'Deleting…' : 'Delete everything'}</span>
                   </button>
@@ -165,7 +165,7 @@ export const ExportOnly: React.FC<{ onLogout: () => void }> = ({ onLogout }) => 
   const [apps, retry] = useExportApps(true);
   return (
     <>
-      <PageHead title="Your household is being deleted" lede="Everything will be deleted soon, and it cannot be undone. Until then you can export your own data from each app." />
+      <PageHead title="Your organisation is being deleted" lede="Export your own data from each app below before your organisation and its data are permanently deleted." />
       <div className="settings-page security-page"><div className="settings-section">
         <div className="section-header">
           <div className="section-title-wrap"><h2>Export your data</h2></div>

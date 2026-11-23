@@ -58,16 +58,20 @@ var ErrStaffOnly = errors.New("administrators and delegations belong to the staf
 
 const msgStaffOnly = "administrators and delegations belong to the staff org only"
 
-// staffOrgError maps the D8 trigger to ErrStaffOnly.
+// staffOrgError maps the users triggers: D8 to ErrStaffOnly, the seat cap to ErrSeatLimit.
 func staffOrgError(err error) error {
-	if err != nil && strings.Contains(err.Error(), msgStaffOnly) {
+	switch {
+	case err == nil:
+	case strings.Contains(err.Error(), msgStaffOnly):
 		return ErrStaffOnly
+	case strings.Contains(err.Error(), msgSeatLimit):
+		return ErrSeatLimit
 	}
 	return err
 }
 
-// CreateOrgForTest adds an active org of the kind given and returns it. Test binaries
-// only: orgs are created by the platform API (build plan PR 4).
+// CreateOrgForTest adds an active org of the kind given and returns it, a customer org with
+// MaxSeats seats. Test binaries only: orgs are created by the platform API (build plan PR 4).
 func CreateOrgForTest(s *Store, kind string) (OrgID, error) {
 	return CreateOrgInRegionForTest(s, kind, HomeRegionLocal)
 }
@@ -79,7 +83,11 @@ func CreateOrgInRegionForTest(s *Store, kind, region string) (OrgID, error) {
 	}
 	id := uuid.NewString()
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,home_region,revision,created_at,updated_at) VALUES(?,?,?,'active',?,`+nextOrgRevisionSQL+`,?,?)`, id, kind+" "+id[:8], kind, region, now, now)
+	seats := 0
+	if kind == customerKind {
+		seats = MaxSeats
+	}
+	_, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,home_region,max_seats,revision,created_at,updated_at) VALUES(?,?,?,'active',?,?,`+nextOrgRevisionSQL+`,?,?)`, id, kind+" "+id[:8], kind, region, seats, now, now)
 	return OrgID{id}, err
 }
 

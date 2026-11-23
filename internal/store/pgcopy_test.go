@@ -471,6 +471,8 @@ func TestExportedFileIsAWorkingSQLiteInstall(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
 	u := createTestUserNamed(t, s, "Mixed.Case")
+	// A customer org restores through SQLite's CHECK (tenancy design, "Plans and orgs").
+	org := testOrg(t, s, customerKind)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "export.db")
 	if err := s.SnapshotTo(path); err != nil {
@@ -490,6 +492,10 @@ func TestExportedFileIsAWorkingSQLiteInstall(t *testing.T) {
 	defer lite.Close()
 	if legacyRuns.Load() != runs {
 		t.Fatal("opening the exported file ran the legacy migration")
+	}
+	var kind string
+	if err := lite.db.QueryRow(`SELECT kind FROM orgs WHERE id=?`, org.org).Scan(&kind); err != nil || kind != customerKind {
+		t.Fatalf("customer org in the snapshot: %q %v", kind, err)
 	}
 	got, err := lite.GetUserByUsername("mIXED.cASE")
 	if err != nil || got == nil || got.ID != u.ID {

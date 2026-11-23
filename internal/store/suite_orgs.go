@@ -29,6 +29,15 @@ type SuiteOrg struct {
 	HomeRegion string          `json:"home_region"`
 	Enabled    bool            `json:"enabled"`
 	Quotas     json.RawMessage `json:"quotas"`
+	// Storage is a customer org's pool (Org storage pool); absent for the staff org.
+	Storage *SuiteStorage `json:"storage,omitempty"`
+}
+
+// SuiteStorage is the org's pool and when its usage passed it (unix seconds, null while
+// within it).
+type SuiteStorage struct {
+	PoolBytes int64  `json:"pool_bytes"`
+	OverSince *int64 `json:"over_since"`
 }
 
 // suiteAppID is the app_registry row of an OAuth client, "" when it has none.
@@ -49,7 +58,8 @@ func (p *PlatformStore) SuiteOrgs(clientID string, afterRevision int64, afterID 
 		return []SuiteOrg{}, err
 	}
 	rows, err := p.s.rdb.Query(`SELECT o.id,o.status,o.revision,o.home_region,
- (o.status<>'deleted' AND (o.all_apps OR COALESCE(oa.enabled,FALSE))),COALESCE(oa.quotas_json,'{}')
+ (o.status<>'deleted' AND (o.all_apps OR COALESCE(oa.enabled,FALSE))),COALESCE(oa.quotas_json,'{}'),
+ o.kind,o.storage_bytes,o.storage_per_seat_bytes,o.max_seats,o.storage_over_since
  FROM orgs o LEFT JOIN org_apps oa ON oa.org_id=o.id AND oa.app_id=?
  WHERE `+suiteOrgVisibleSQL+` AND (o.revision>? OR ?<>'' AND o.revision=? AND o.id>?)
  ORDER BY o.revision,o.id LIMIT ?`, app, app, afterRevision, afterID, afterRevision, afterID, limit)
@@ -60,11 +70,19 @@ func (p *PlatformStore) SuiteOrgs(clientID string, afterRevision int64, afterID 
 	out := []SuiteOrg{}
 	for rows.Next() {
 		var o SuiteOrg
-		var quotas string
-		if err := rows.Scan(&o.ID, &o.Status, &o.Revision, &o.HomeRegion, &o.Enabled, &quotas); err != nil {
+		var quotas, kind string
+		var storage, perSeat, seats int64
+		var over sql.NullInt64
+		if err := rows.Scan(&o.ID, &o.Status, &o.Revision, &o.HomeRegion, &o.Enabled, &quotas, &kind, &storage, &perSeat, &seats, &over); err != nil {
 			return nil, err
 		}
 		o.Quotas = json.RawMessage(quotas)
+		if kind == customerKind {
+			o.Storage = &SuiteStorage{PoolBytes: PoolBytes(storage, perSeat, seats)}
+			if over.Valid {
+				o.Storage.OverSince = &over.Int64
+			}
+		}
 		out = append(out, o)
 	}
 	return out, rows.Err()

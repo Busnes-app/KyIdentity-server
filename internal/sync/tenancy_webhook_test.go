@@ -99,7 +99,7 @@ func TestMultiTenantWebhookCarriesTheOrg(t *testing.T) {
 	e, s, _, cleanup := setupTestSyncEngine(t)
 	defer cleanup()
 	e.SetMultiTenant(true)
-	org, err := store.CreateOrgForTest(s, "household")
+	org, err := store.CreateOrgForTest(s, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func mailboxBodies(t *testing.T, e *Engine, s *store.Store) []string {
 	if _, _, err := s.SetSuiteEmailDomains([]string{"bücher.example"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	id, err := store.CreateOrgForTest(s, "household")
+	id, err := store.CreateOrgForTest(s, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}

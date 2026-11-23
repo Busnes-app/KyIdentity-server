@@ -240,6 +240,8 @@ var orgSQLAllowlist = map[string]string{
 	"migrateOrgIDRequiredPostgres":                  "migration: lifts and restores the alerts org_id trigger around the platform-alert move",
 	"migrateMailboxAddress":                         "migration: the users column, its global unique index and the triggers that compare it across the install",
 	"migrateMailboxAddressPostgres":                 "migration: the users column, its global unique index and the triggers that compare it across the install",
+	"migrateCustomerKind":                           "migration: recreates the mailbox triggers, which compare addresses across the install",
+	"migrateCustomerKindPostgres":                   "migration: replaces the mailbox trigger function, which compares addresses across the install",
 	"refuseRemovingUsedDomainsTx":                   "platform: a suite mail domain is install-wide, so its use is counted over every org",
 	"Store.migrateAlerts":                           "migration: written before org_id existed",
 	"Store.migrateAppAccess":                        "migration: written before org_id existed",

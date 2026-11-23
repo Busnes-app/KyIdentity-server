@@ -167,7 +167,7 @@ func TestMultiTenantTokensCarryTheOrg(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	e.SetMultiTenant(true)
-	org, err := store.CreateOrgForTest(db, "household")
+	org, err := store.CreateOrgForTest(db, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestExportOnlyTokensCarryTheClaim(t *testing.T) {
 	e, db, cleanup := setupTestOAuthEngine(t)
 	defer cleanup()
 	e.SetMultiTenant(true)
-	orgID, err := store.CreateOrgForTest(db, "household")
+	orgID, err := store.CreateOrgForTest(db, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 // Mailbox address (tenancy design, "Mailbox address"): a hosted member's mailbox, separate
 // from the sign-in email, on a suite mail domain, unique across the install and against
 // every other account's sign-in email. Multi-tenant only: the triggers refuse it outside a
-// person or household org, so a single-tenant install never holds one.
+// customer org, so a single-tenant install never holds one.
 
 // MailboxEmailType is the SCIM emails[].type that carries it in signed suite webhooks.
 const MailboxEmailType = "mailbox"
@@ -180,10 +180,10 @@ func refuseRemovingUsedDomainsTx(tx *sql.Tx, old, next []string) error {
 	return nil
 }
 
-// MailboxEligible reports whether the org's accounts may hold a mailbox address: a person
-// or household org. Staff and the single-tenant default org may not.
+// MailboxEligible reports whether the org's accounts may hold a mailbox address: a
+// customer org. Staff and the single-tenant default org may not.
 func (o *OrgStore) MailboxEligible() (bool, error) {
 	var ok bool
-	err := o.s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM orgs WHERE id=? AND kind IN ('person','household'))`, o.org).Scan(&ok)
+	err := o.s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM orgs WHERE id=? AND kind=?)`, o.org, customerKind).Scan(&ok)
 	return ok, err
 }

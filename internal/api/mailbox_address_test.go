@@ -61,7 +61,7 @@ func multiMailboxServer(t *testing.T) (*Server, *store.Store, store.OrgID, *stor
 func TestMailboxAddressRouteRefusals(t *testing.T) {
 	srv, db, staffOrg, _, cookie, cleanup := multiMailboxServer(t)
 	defer cleanup()
-	orgB, err := store.CreateOrgForTest(db, "household")
+	orgB, err := store.CreateOrgForTest(db, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestMailboxAddressRouteInACustomerOrg(t *testing.T) {
 	srv, db, _, staff, cookie, cleanup := multiMailboxServer(t)
 	defer cleanup()
 	h := &AdminHandler{store: db, audit: srv.audit, middleware: srv.middleware, multiTenant: true}
-	orgA, err := store.CreateOrgForTest(db, "household")
+	orgA, err := store.CreateOrgForTest(db, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestInboundSCIMCannotSetTheMailboxAddress(t *testing.T) {
 	if _, _, err := db.SetSuiteEmailDomains([]string{"example.com"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	orgA, err := store.CreateOrgForTest(db, "household")
+	orgA, err := store.CreateOrgForTest(db, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestMailboxDomainsAreAnEmptyListWhenUnset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	org, err := store.CreateOrgForTest(db, "person")
+	org, err := store.CreateOrgForTest(db, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}

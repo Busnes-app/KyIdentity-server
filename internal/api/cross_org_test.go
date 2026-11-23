@@ -44,7 +44,7 @@ func TestCrossOrgMatrix(t *testing.T) {
 		}
 		return id
 	}
-	orgA, orgB, staffOrg := org("household"), org("household"), org("staff")
+	orgA, orgB, staffOrg := org("customer"), org("customer"), org("staff")
 
 	holderA, memberA := newOrgUser(t, db, orgA, "user"), newOrgUser(t, db, orgA, "user")
 	raw, err := store.OpenRawForTest(srv.cfg.DBPath)

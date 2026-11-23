@@ -229,6 +229,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("GET /api/suite/groups", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Groups)))
 	mux.Handle("GET /api/suite/orgs", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Orgs)))
 	mux.Handle("GET /api/suite/erased", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Erased)))
+	mux.Handle("POST /api/suite/storage", s.middleware.RateLimit("suite", 120, 2)(suiteH.Authenticate(suiteH.Storage)))
 
 	// Active Directory agent (docs/ACTIVE-DIRECTORY.md): Bearer agent token, one connector's queue.
 	adAgentH := &ADAgentHandler{store: s.store}
