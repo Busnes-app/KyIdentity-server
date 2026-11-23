@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
@@ -320,4 +323,45 @@ func (h *SuiteHandler) Erased(w http.ResponseWriter, r *http.Request, caller *st
 		body["next"] = strconv.FormatInt(subjects[len(subjects)-1].Revision, 10)
 	}
 	suiteJSON(w, http.StatusOK, body)
+}
+
+// Usage report bounds (docs/SUITE-DIRECTORY.md, "Storage pool").
+const (
+	suiteStorageMaxBody    = 64 << 10
+	suiteStorageMaxReports = 500
+)
+
+// Storage takes the calling app's usage per org and answers each with its headroom grant
+// against the org's pool. POST /api/suite/storage, multi-tenant only. The app is the
+// authenticated client, never a body field. One bad entry refuses the whole request.
+func (h *SuiteHandler) Storage(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
+	if !h.multiTenant {
+		suiteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	var body struct {
+		Reports []store.StorageReport `json:"reports"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, suiteStorageMaxBody))
+	dec.DisallowUnknownFields()
+	ok := dec.Decode(&body) == nil && dec.Decode(&struct{}{}) != nil &&
+		len(body.Reports) >= 1 && len(body.Reports) <= suiteStorageMaxReports
+	seen := map[string]bool{}
+	for _, rep := range body.Reports {
+		id, err := uuid.Parse(rep.OrgID)
+		ok = ok && err == nil && id.String() == rep.OrgID && !seen[rep.OrgID] &&
+			rep.UsedBytes >= 0 && rep.UsedBytes <= store.MaxReportBytes &&
+			rep.WantBytes >= 0 && rep.WantBytes <= store.MaxReportBytes && rep.Seq >= 1
+		seen[rep.OrgID] = true
+	}
+	if !ok {
+		suiteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+		return
+	}
+	results, err := h.store.Platform().ReportStorage(caller.ID, body.Reports, time.Now().UTC())
+	if err != nil {
+		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	suiteJSON(w, http.StatusOK, map[string]any{"results": results})
 }
