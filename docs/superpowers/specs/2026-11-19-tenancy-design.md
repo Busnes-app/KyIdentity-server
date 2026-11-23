@@ -669,7 +669,7 @@ cannot click.
   compared after trimming and case folding. A mismatch is
   `400 address_mismatch` and changes nothing.
 - The account page shows the dialog. It lists each app the account can open, with a link to
-  that app's export, before the address field. Nothing can be got back afterwards.
+  that app's export, before the address field. Nothing can be recovered afterwards.
 - A replay changes nothing: the grant is single-use, and the clicker's sessions end with the
   first call, so a second call from the same browser is a `401`. A second request for the
   same org fails on the `org_erasures` primary key.

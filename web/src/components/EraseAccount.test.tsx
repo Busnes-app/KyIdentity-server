@@ -13,10 +13,10 @@ describe('Delete everything', () => {
   });
 
   it('says what each click deletes', () => {
-    expect(eraseSummary({ holder: false, otherMembers: 0 })).toMatch(/^Deletes your account .*organisation keeps theirs/);
-    expect(eraseSummary({ holder: true, otherMembers: 0 })).toMatch(/straight away/);
-    expect(eraseSummary({ holder: true, otherMembers: 1 })).toMatch(/1 other person can export .* 7 days/);
-    expect(eraseSummary({ holder: true, otherMembers: 3 })).toMatch(/3 other people/);
+    expect(eraseSummary({ holder: false, otherMembers: 0 })).toMatch(/^Deletes your account .*organisation keeps their data/);
+    expect(eraseSummary({ holder: true, otherMembers: 0 })).toMatch(/right away/);
+    expect(eraseSummary({ holder: true, otherMembers: 1 })).toMatch(/The other member has 7 days to export/);
+    expect(eraseSummary({ holder: true, otherMembers: 3 })).toMatch(/The other 3 members have 7 days/);
   });
 
   it('reads exportOnly only when the server says true', () => {

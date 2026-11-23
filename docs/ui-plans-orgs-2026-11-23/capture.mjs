@@ -115,8 +115,16 @@ async function account(page) {
 async function shot(page, view, { fixture = false, full = true } = {}) {
   await settle(page, 600);
   const path = join(OUT, `kyidentity-orgs-${TAG}-${view}.png`);
-  await page.screenshot({ path, fullPage: full });
+  // A full-page shot paints fixed elements (the sidebar) once at viewport height, so grow the
+  // viewport to the page height instead and restore it after.
+  const vp = page.viewportSize();
+  if (full) {
+    const height = await page.evaluate(() => document.documentElement.scrollHeight);
+    if (height > vp.height) { await page.setViewportSize({ width: vp.width, height }); await settle(page, 300); }
+  }
+  await page.screenshot({ path });
   const over = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  await page.setViewportSize(vp);
   shots.push(`${path} overflow=${over}${fixture ? ' fixture' : ''}`);
 }
 async function signedInOrSignIn(page) {

@@ -26,10 +26,10 @@ export function confirmsAddress(typed: string, address: string): boolean {
 
 /** What the button deletes, in the clicker's words. */
 export function eraseSummary(scope: EraseScope): string {
-  if (!scope.holder) return 'Deletes your account and everything you keep in every app. The rest of your organisation keeps theirs.';
-  if (scope.otherMembers === 0) return 'Deletes your account and everything in it, in every app, straight away.';
-  const people = scope.otherMembers === 1 ? '1 other person' : `${scope.otherMembers} other people`;
-  return `Deletes your organisation: you lose access now, and ${people} can export their own data for 7 days before everything is deleted.`;
+  if (!scope.holder) return 'Deletes your account and everything you keep in every app. Everyone else in your organisation keeps their data.';
+  if (scope.otherMembers === 0) return 'Deletes your account and everything in it, in every app, right away.';
+  const others = scope.otherMembers === 1 ? 'The other member has' : `The other ${scope.otherMembers} members have`;
+  return `Deletes your organisation. You lose access now. ${others} 7 days to export their own data, then everything is deleted.`;
 }
 
 type AppList = Application[] | 'loading' | 'failed';
@@ -118,20 +118,19 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
           <Trash2 size={15} /><span>Delete everything…</span>
         </button>
       </div>
-      <p className="text-muted text-sm">{eraseSummary(scope)} Nobody can undo it, staff included.</p>
+      <p className="text-muted text-sm">{eraseSummary(scope)} No one can undo this, not even staff.</p>
       {open && (
         <Modal title="Delete everything" onClose={done ? () => window.location.assign('/') : close}>
           {done ? (
             <div className="modal-body">
-              <div className="alert-box" role="status">{scope.holder && scope.otherMembers > 0
-                ? 'Your organisation will be deleted. Everyone else has been told, and you are signed out.'
-                : 'Everything is deleted, and you are signed out.'}</div>
-              <div className="modal-footer"><button type="button" className="primary-btn" onClick={() => window.location.assign('/')}>Close</button></div>
+              <p className="modal-desc" role="status">{scope.holder && scope.otherMembers > 0
+                ? 'Your organisation is scheduled for deletion. The other members have been told, and you have been signed out.'
+                : 'Everything has been deleted, and you have been signed out.'}</p>
             </div>
           ) : (
             <form onSubmit={erase}>
               <div className="modal-body">
-                <p className="modal-desc">{eraseSummary(scope)} It cannot be got back.</p>
+                <p className="modal-desc">{eraseSummary(scope)} This cannot be undone.</p>
                 <h4 className="erase-step">1. Export first</h4>
                 <ExportLinks apps={apps} retry={retryApps} />
                 <h4 className="erase-step">2. Confirm</h4>
@@ -142,7 +141,6 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
                 </div>
                 {error && <div className="alert-box error" role="alert">{error}</div>}
                 <div className="modal-footer">
-                  <button type="button" className="secondary-btn" onClick={close} disabled={busy}>Cancel</button>
                   <button type="submit" className="primary-btn danger" disabled={!matches || busy}>
                     <Trash2 size={16} /><span>{busy ? 'Deleting…' : 'Delete everything'}</span>
                   </button>
@@ -165,7 +163,7 @@ export const ExportOnly: React.FC<{ onLogout: () => void }> = ({ onLogout }) => 
   const [apps, retry] = useExportApps(true);
   return (
     <>
-      <PageHead title="Your organisation is being deleted" lede="Everything will be deleted soon, and it cannot be undone. Until then you can export your own data from each app." />
+      <PageHead title="Your organisation is being deleted" lede="Your organisation and all its data will be permanently deleted within 7 days. Until then, export your own data from each app below." />
       <div className="settings-page security-page"><div className="settings-section">
         <div className="section-header">
           <div className="section-title-wrap"><h2>Export your data</h2></div>
