@@ -7,33 +7,29 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/Busnes-app/ky-primitives/recoverykey"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
-// pairDepositor records every URL and token a deposit was sent with.
-type pairDepositor struct {
-	fakeStore
-	mu    sync.Mutex
-	pairs [][2]string
+// switchingReader commits a change on a second handle immediately after the
+// reader takes its pairing snapshot, while the public operation is still running.
+type switchingReader struct {
+	*store.Store
+	afterRead func()
 }
 
-func (d *pairDepositor) Deposit(ctx context.Context, url, token string, raw []byte) (backup.Receipt, error) {
-	d.mu.Lock()
-	d.pairs = append(d.pairs, [2]string{url, token})
-	d.mu.Unlock()
-	return d.fakeStore.Deposit(ctx, url, token, raw)
+func (r switchingReader) GetSettings(keys ...string) (map[string]string, error) {
+	rows, err := r.Store.GetSettings(keys...)
+	if err == nil {
+		r.afterRead()
+	}
+	return rows, err
 }
 
-// One handle unpairs and re-pairs between two pairings while another handle reads the
-// pairing and runs backups. A reader must never pair one pairing's URL with the other's
-// token: that would send a credential to a server it was not issued for.
 func TestPairingReadsAreCoherentUnderConcurrentRepairing(t *testing.T) {
 	cfg, writer := instance(t)
 	pair(t, cfg, writer)
@@ -42,74 +38,63 @@ func TestPairingReadsAreCoherentUnderConcurrentRepairing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reader.Close()
-	match := map[string]string{"https://a.recovery.example": "token-a", "https://b.recovery.example": "token-b", "https://recovery.example.test": "kyrec_live_t"}
-	pause := time.Millisecond
-	if store.OnPostgresTest() {
-		pause = 10 * time.Millisecond
-	}
-	var stop atomic.Bool
-	var writes atomic.Int64
-	writerDone := make(chan error, 1)
-	go func() {
-		var err error
-		for i := 0; !stop.Load() && err == nil; i++ {
-			url := "https://a.recovery.example"
-			if i%2 == 1 {
-				url = "https://b.recovery.example"
-			}
-			if err = writer.EditSettings(nil, func(st store.Settings) error {
-				if err := backup.ClearPairing(st); err != nil && !errors.Is(err, backup.ErrNotPaired) {
-					return err
-				}
-				return nil
-			}); err != nil {
-				break
-			}
-			err = writer.EditSettings(nil, func(st store.Settings) error {
-				return backup.StorePairing(st, cfg.EncryptionKey, url, match[url])
-			})
-			writes.Add(1)
-			// Leave this test's readers room on its schema's single writer.
-			// Other test schemas have separate writer-lock keys.
-			time.Sleep(pause)
-		}
-		writerDone <- err
-	}()
-	check := func(url, token string) {
+	const firstURL, firstToken = "https://recovery.example.test", "kyrec_live_t"
+	const nextURL, nextToken = "https://b.recovery.example", "token-b"
+	// Exercise the real multi-row SELECT across commits, including a driver
+	// regression that splits one GetSettings call into separate queries.
+	setPair := func(url, token string) {
 		t.Helper()
-		if want, ok := match[url]; !ok || want != token {
-			t.Fatalf("read URL %q with token %q", url, token)
-		}
-	}
-	loads := 0
-	for loads < 400 {
-		p, err := backup.LoadPairing(cfg, reader)
-		if errors.Is(err, backup.ErrNotPaired) {
-			continue
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		check(p.URL, p.Token)
-		loads++
-	}
-	dep := &pairDepositor{}
-	for runs := 0; runs < 200; runs++ {
-		if _, err := backup.RunBackup(context.Background(), cfg, reader, reader, dep, "1.0.0"); err != nil && !errors.Is(err, backup.ErrNoDestination) {
+		if err := writer.EditSettings(nil, func(st store.Settings) error {
+			return backup.StorePairing(st, cfg.EncryptionKey, url, token)
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	stop.Store(true)
-	if err := <-writerDone; err != nil {
+	var reads sync.WaitGroup
+	reads.Go(func() {
+		for range 400 {
+			p, err := backup.LoadPairing(cfg, reader)
+			if err != nil || !(p.URL == firstURL && p.Token == firstToken || p.URL == nextURL && p.Token == nextToken) {
+				t.Errorf("concurrent load: (%q, %q), %v", p.URL, p.Token, err)
+				return
+			}
+		}
+	})
+	defer reads.Wait()
+	for range 20 {
+		setPair(nextURL, nextToken)
+		setPair(firstURL, firstToken)
+	}
+	reads.Wait()
+	unpair := func() {
+		t.Helper()
+		if err := writer.EditSettings(nil, func(st store.Settings) error { return backup.ClearPairing(st) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Load starts paired to A. Unpair and re-pair to B after the read: the
+	// in-flight operation must retain A's URL and token.
+	load := switchingReader{reader, func() {
+		unpair()
+		setPair(nextURL, nextToken)
+	}}
+	p, err := backup.LoadPairing(cfg, load)
+	if err != nil || p.URL != firstURL || p.Token != firstToken {
+		t.Fatalf("load during re-pair: (%q, %q), %v", p.URL, p.Token, err)
+	}
+	// The next operation must see B even though the writer now unpairs while
+	// the backup is in flight. Its attempt and receipt can write normally.
+	run := switchingReader{reader, unpair}
+	dep := &fakeStore{}
+	if _, err := backup.RunBackup(t.Context(), cfg, run, reader, dep, "1.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	if len(dep.pairs) == 0 || writes.Load() < 10 {
-		t.Fatalf("the race barely ran: %d deposits, %d re-pairs", len(dep.pairs), writes.Load())
+	if dep.url != nextURL || dep.token != nextToken {
+		t.Fatalf("deposit during unpair used (%q, %q)", dep.url, dep.token)
 	}
-	for _, p := range dep.pairs {
-		check(p[0], p[1])
+	if _, err := backup.LoadPairing(cfg, reader); !errors.Is(err, backup.ErrNotPaired) {
+		t.Fatalf("load after unpair: %v", err)
 	}
-	t.Logf("%d pairing loads, %d deposits, %d re-pairs", loads, len(dep.pairs), writes.Load())
 }
 
 // failingSettings fails every read, as a database that has gone away does.

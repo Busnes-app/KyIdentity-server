@@ -416,23 +416,38 @@ func TestLeaseUsesTheDatabaseClock(t *testing.T) {
 	}
 }
 
-// A live holder keeps its lease through work far longer than the ttl.
+// Age the database lease by an interval at a time. Even after more than one
+// TTL in total, renewals keep the row live and exclude another replica.
 func TestHeldLeaseOutlivesItsTTL(t *testing.T) {
 	stores := replicas(t, 2)
-	ttl := 400 * time.Millisecond
+	ticks := make(chan time.Time)
+	LeaseTicksForTest(t, ticks)
+	const ttl = 2 * time.Minute
 	ctx, release, ok, err := stores[0].HoldLease(context.Background(), "backup", ttl)
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
-	deadline := time.Now().Add(4 * ttl)
-	for time.Now().Before(deadline) {
-		if _, ok, _ := stores[1].AcquireLease("backup", ttl); ok {
-			t.Fatal("another replica took a lease its holder was renewing")
+	defer release()
+	tick := func() {
+		t.Helper()
+		select {
+		case ticks <- time.Now():
+		case <-ctx.Done():
+			t.Fatal(context.Cause(ctx))
+		case <-time.After(30 * time.Second):
+			t.Fatal("holder stopped receiving renewal ticks")
 		}
-		if ctx.Err() != nil {
-			t.Fatal("the holder lost a lease nobody took:", context.Cause(ctx))
+	}
+	for range 5 {
+		if _, err := stores[1].db.Exec(`UPDATE leases SET until_ms=until_ms-? WHERE name='backup'`, (ttl / 4).Milliseconds()); err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(ttl / 8)
+		tick()
+		// Receiving the next tick means the previous renewal has committed.
+		tick()
+		if _, ok, err := stores[1].AcquireLease("backup", ttl); err != nil || ok {
+			t.Fatal("a renewed lease must exclude the second replica:", ok, err)
+		}
 	}
 	release()
 	if ctx.Err() == nil {
