@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -344,7 +345,8 @@ func (h *SuiteHandler) Storage(w http.ResponseWriter, r *http.Request, caller *s
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, suiteStorageMaxBody))
 	dec.DisallowUnknownFields()
-	ok := dec.Decode(&body) == nil && dec.Decode(&struct{}{}) != nil &&
+	// Exactly one JSON value: anything after it, or past the limit, is refused.
+	ok := dec.Decode(&body) == nil && errors.Is(dec.Decode(&json.RawMessage{}), io.EOF) &&
 		len(body.Reports) >= 1 && len(body.Reports) <= suiteStorageMaxReports
 	seen := map[string]bool{}
 	for _, rep := range body.Reports {

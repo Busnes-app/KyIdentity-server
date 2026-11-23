@@ -68,6 +68,9 @@ func TestSuiteStorage(t *testing.T) {
 		"fractional":    `{"reports":[{"org_id":"` + org + `","used_bytes":1.5,"seq":2,"want_bytes":0}]}`,
 		"app in body":   `{"reports":[{"org_id":"` + org + `","app_id":"kydrive","used_bytes":0,"seq":2,"want_bytes":0}]}`,
 		"trailing":      `{"reports":[` + entry(org) + `]} {}`,
+		"trailing junk": `{"reports":[` + entry(org) + `]}x`,
+		"trailing ]":    `{"reports":[` + entry(org) + `]}]`,
+		"trailing pad":  `{"reports":[` + entry(org) + `]}` + strings.Repeat(" ", 64<<10),
 		"oversize":      `{"reports":[` + entry(org) + `],"pad":"` + strings.Repeat("x", 64<<10) + `"}`,
 	} {
 		if code, body := suiteStoragePost(t, srv, "kypost", "post-secret", b); code != http.StatusBadRequest || body != `{"error":"invalid_request"}` {

@@ -487,6 +487,12 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 			t.Fatalf("%s: %v", q.sql, err)
 		}
 	}
+	if s.db.QueryRow(`SELECT COUNT(*) FROM org_storage`).Scan(&n) != nil {
+		return // a schema from before the storage pool
+	}
+	if _, err := s.db.Exec(`INSERT INTO org_storage(org_id,app_id,used_bytes,seq,ceiling_bytes,reported_at) VALUES('org-erasing',?,5,1,7,?)`, appID, now.Unix()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // An app reaches a user only through the user's org: every app for the default org, and
