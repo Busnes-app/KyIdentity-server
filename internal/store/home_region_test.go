@@ -27,7 +27,7 @@ func TestHomeRegion(t *testing.T) {
 		if ValidHomeRegion(c.region) != c.ok {
 			t.Errorf("ValidHomeRegion(%q) = %v", c.region, !c.ok)
 		}
-		org, err := CreateOrgInRegionForTest(s, "household", c.region)
+		org, err := CreateOrgInRegionForTest(s, "customer", c.region)
 		if (err == nil) != c.ok {
 			t.Errorf("insert %q: %v, want ok=%v", c.region, err, c.ok)
 		}
@@ -37,7 +37,7 @@ func TestHomeRegion(t *testing.T) {
 			}
 		}
 	}
-	org, err := CreateOrgInRegionForTest(s, "person", "eu")
+	org, err := CreateOrgInRegionForTest(s, "customer", "eu")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestHomeRegion(t *testing.T) {
 	// Other org writes leave it alone.
 	tenancyExec(t, s, `UPDATE orgs SET name='renamed', home_region='eu' WHERE id='`+org.id+`'`)
 	// Postgres (the multi-tenant backend) has no default: provisioning must name the region.
-	missing := `INSERT INTO orgs(id,name,kind,status,created_at,updated_at) VALUES('org-nr','n','person','active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`
+	missing := `INSERT INTO orgs(id,name,kind,status,created_at,updated_at) VALUES('org-nr','n','customer','active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`
 	if OnPostgresTest() {
 		refused(t, s, "home_region", missing)
 	} else {
@@ -61,7 +61,7 @@ func TestHomeRegion(t *testing.T) {
 func TestHomeRegionIsPublished(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	org, err := CreateOrgInRegionForTest(s, "household", "eu")
+	org, err := CreateOrgInRegionForTest(s, "customer", "eu")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,8 +124,8 @@ func TestClientRegionOrigins(t *testing.T) {
 	if got, _ := s.ClientRegionOrigins("kychat"); len(got) != 1 || got["eu"] != "https://eu.chat.test" {
 		t.Fatalf("replaced map %v", got)
 	}
-	eu, _ := CreateOrgInRegionForTest(s, "household", "eu")
-	us, _ := CreateOrgInRegionForTest(s, "household", "us")
+	eu, _ := CreateOrgInRegionForTest(s, "customer", "eu")
+	us, _ := CreateOrgInRegionForTest(s, "customer", "us")
 	if got, _ := s.OrgRegionOrigins(eu); got["kychat"] != "https://eu.chat.test" {
 		t.Fatalf("eu %v", got)
 	}

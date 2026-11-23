@@ -16,7 +16,7 @@ import (
 // Delete everything (tenancy design, amendment 2026-11-21). Multi-tenant only: the API
 // refuses it in a single-tenant install, and the triggers refuse it for the default org.
 
-// erasureGrace is the export window the other members of a holder's household get. A
+// erasureGrace is the export window the other members of a holder's org get. A
 // variable only so a test can make it pass.
 var erasureGrace = 7 * 24 * time.Hour
 
@@ -34,7 +34,7 @@ var (
 
 const (
 	msgErased       = "the account holder deleted this org; it cannot be undone"
-	msgErasureAsk   = "only the holder of an active person or household org asks, immediate exactly when no other member is live"
+	msgErasureAsk   = "only the holder of an active customer org asks, immediate exactly when no other member is live"
 	msgErasureKept  = "erasure records are never changed or deleted"
 	msgErasedReused = "an erased subject is never reused"
 )
@@ -58,7 +58,7 @@ func erasureTriggers(now string) []tenancyTrigger {
  AND NOT (OLD.status='active' AND ` + holderErasedSQL + `))`, msgDeleted},
 		{"orgs_erasure_held", "BEFORE UPDATE", "orgs", `OLD.status='deletion_scheduled' AND EXISTS(SELECT 1 FROM org_erasures e WHERE e.org_id=OLD.id)
  AND ((NEW.status IS DISTINCT FROM OLD.status AND NEW.status<>'deleted') OR NEW.delete_after IS DISTINCT FROM OLD.delete_after)`, msgErased},
-		{"org_erasures_holder", "BEFORE INSERT", "org_erasures", `NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.account_holder_user_id=NEW.holder_user_id AND o.status='active' AND o.kind IN ('person','household'))
+		{"org_erasures_holder", "BEFORE INSERT", "org_erasures", `NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.account_holder_user_id=NEW.holder_user_id AND o.status='active' AND o.kind='` + customerKind + `')
  OR (NEW.immediate) <> (NOT ` + otherLiveSQL("NEW.org_id", "NEW.holder_user_id") + `)`, msgErasureAsk},
 		{"org_erasures_kept_update", "BEFORE UPDATE", "org_erasures", "TRUE", msgErasureKept},
 		{"org_erasures_kept_delete", "BEFORE DELETE", "org_erasures", "TRUE", msgErasureKept},
@@ -160,7 +160,7 @@ func (o *OrgStore) Erase(userID, sessionID, grantHash, operation string, audit *
 	if err != nil {
 		return nil, err
 	}
-	if u == nil || u.Role != "user" || u.Pending || u.Status != "active" || status != "active" || (kind != "person" && kind != "household") {
+	if u == nil || u.Role != "user" || u.Pending || u.Status != "active" || status != "active" || kind != customerKind {
 		return nil, ErrErasureRefused
 	}
 	out := &Erasure{Holder: holder == userID}
@@ -251,7 +251,7 @@ func (o *OrgStore) ErasureScope(userID string) (*ErasureScope, error) {
 	if err != nil {
 		return nil, err
 	}
-	if u == nil || u.Role != "user" || u.Pending || u.Status != "active" || status != "active" || (kind != "person" && kind != "household") {
+	if u == nil || u.Role != "user" || u.Pending || u.Status != "active" || status != "active" || kind != customerKind {
 		return nil, ErrErasureRefused
 	}
 	if holder != userID {

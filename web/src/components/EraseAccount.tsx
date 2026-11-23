@@ -26,10 +26,10 @@ export function confirmsAddress(typed: string, address: string): boolean {
 
 /** What the button deletes, in the clicker's words. */
 export function eraseSummary(scope: EraseScope): string {
-  if (!scope.holder) return 'Deletes your account and everything you keep in every app. The rest of your household keeps theirs.';
+  if (!scope.holder) return 'Deletes your account and everything you keep in every app. The rest of your organisation keeps theirs.';
   if (scope.otherMembers === 0) return 'Deletes your account and everything in it, in every app, straight away.';
   const people = scope.otherMembers === 1 ? '1 other person' : `${scope.otherMembers} other people`;
-  return `Deletes your household: you lose access now, and ${people} can export their own data for 7 days before everything is deleted.`;
+  return `Deletes your organisation: you lose access now, and ${people} can export their own data for 7 days before everything is deleted.`;
 }
 
 type AppList = Application[] | 'loading' | 'failed';
@@ -124,7 +124,7 @@ export const EraseAccount: React.FC<{ user: User }> = ({ user }) => {
           {done ? (
             <div className="modal-body">
               <div className="alert-box" role="status">{scope.holder && scope.otherMembers > 0
-                ? 'Your household will be deleted. Everyone else has been told, and you are signed out.'
+                ? 'Your organisation will be deleted. Everyone else has been told, and you are signed out.'
                 : 'Everything is deleted, and you are signed out.'}</div>
               <div className="modal-footer"><button type="button" className="primary-btn" onClick={() => window.location.assign('/')}>Close</button></div>
             </div>
@@ -165,7 +165,7 @@ export const ExportOnly: React.FC<{ onLogout: () => void }> = ({ onLogout }) => 
   const [apps, retry] = useExportApps(true);
   return (
     <>
-      <PageHead title="Your household is being deleted" lede="Everything will be deleted soon, and it cannot be undone. Until then you can export your own data from each app." />
+      <PageHead title="Your organisation is being deleted" lede="Everything will be deleted soon, and it cannot be undone. Until then you can export your own data from each app." />
       <div className="settings-page security-page"><div className="settings-section">
         <div className="section-header">
           <div className="section-title-wrap"><h2>Export your data</h2></div>

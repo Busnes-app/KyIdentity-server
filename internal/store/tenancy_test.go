@@ -168,7 +168,7 @@ func refused(t *testing.T, s *Store, want, q string) {
 
 func newTestOrg(t *testing.T, s *Store, id, status string) {
 	t.Helper()
-	if _, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES(?,?,'household',?,'local',?,?)`, id, id, status, time.Now().UTC(), time.Now().UTC()); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES(?,?,'customer',?,'local',?,?)`, id, id, status, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -215,7 +215,7 @@ func TestAccountHolderGuard(t *testing.T) {
 	newOrgUser(t, s, "gone", "org-b", "disabled", false)
 	newOrgUser(t, s, "other", "org-c", "active", false)
 
-	refused(t, s, msgHolderOnInsert, `INSERT INTO orgs(id,name,kind,status,account_holder_user_id,created_at,updated_at) VALUES('org-d','d','person','active','member',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+	refused(t, s, msgHolderOnInsert, `INSERT INTO orgs(id,name,kind,status,account_holder_user_id,created_at,updated_at) VALUES('org-d','d','customer','active','member',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
 	refused(t, s, msgHolderNotLive, `UPDATE orgs SET account_holder_user_id='other' WHERE id='org-b'`)
 	refused(t, s, msgHolderNotLive, `UPDATE orgs SET account_holder_user_id='gone' WHERE id='org-b'`)
 	refused(t, s, msgHolderNotLive, `UPDATE orgs SET account_holder_user_id='nobody' WHERE id='org-b'`)
@@ -475,7 +475,7 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 		sql  string
 		args []any
 	}{
-		{`INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES('org-erasing','Erasing','household','active','local',?,?)`, []any{now, now}},
+		{`INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES('org-erasing','Erasing','customer','active','local',?,?)`, []any{now, now}},
 		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-holder','erasing-holder','H','erasing-holder@test.invalid','','user','active','org-erasing')`, nil},
 		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-kid','erasing-kid','K','erasing-kid@test.invalid','','user','active','org-erasing')`, nil},
 		{`UPDATE orgs SET account_holder_user_id='erasing-holder' WHERE id='org-erasing'`, nil},

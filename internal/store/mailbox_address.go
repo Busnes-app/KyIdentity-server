@@ -12,7 +12,7 @@ import (
 // Mailbox address (tenancy design, "Mailbox address"): a hosted member's mailbox, separate
 // from the sign-in email, on a suite mail domain, unique across the install and against
 // every other account's sign-in email. Multi-tenant only: the triggers refuse it outside a
-// person or household org, so a single-tenant install never holds one.
+// customer org, so a single-tenant install never holds one.
 
 // MailboxEmailType is the SCIM emails[].type that carries it in signed suite webhooks.
 const MailboxEmailType = "mailbox"
@@ -39,11 +39,25 @@ func (e *DomainInUseError) Error() string {
 // The mailbox check: lowercase, a customer org, and no clash with another account's
 // sign-in email either way. The clash is a unique violation, so every user-creating
 // path already answers it as a conflict.
-const mailboxCustomerSQL = `NEW.mailbox_address IS NOT NULL AND (NEW.mailbox_address<>lower(NEW.mailbox_address) OR NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.kind IN ('person','household')))`
+const mailboxCustomerSQL = `NEW.mailbox_address IS NOT NULL AND (NEW.mailbox_address<>lower(NEW.mailbox_address) OR NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.kind='` + customerKind + `'))`
 
-func migrateMailboxAddress(tx *sql.Tx) error {
+// mailboxTriggersSQLite is the SQLite trigger pair; customer_kind recreates it.
+func mailboxTriggersSQLite() string {
 	clash := `EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email) OR u.email=NEW.mailbox_address))`
 	body := fmt.Sprintf(`BEGIN SELECT RAISE(ABORT,'%s') WHERE %s; SELECT RAISE(ABORT,'UNIQUE constraint failed: users.mailbox_address') WHERE %s; END;`, msgMailboxCustomerOnly, mailboxCustomerSQL, clash)
+	return `CREATE TRIGGER IF NOT EXISTS users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW ` + body + `
+CREATE TRIGGER IF NOT EXISTS users_mailbox_update BEFORE UPDATE OF email, mailbox_address ON users FOR EACH ROW ` + body
+}
+
+// mailboxCheckPostgres is the Postgres triggers' function; customer_kind replaces it.
+const mailboxCheckPostgres = `CREATE OR REPLACE FUNCTION users_mailbox_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF (` + mailboxCustomerSQL + `) THEN RAISE EXCEPTION '` + msgMailboxCustomerOnly + `'; END IF;
+ IF EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email::text) OR u.email=NEW.mailbox_address::citext)) THEN
+  RAISE EXCEPTION 'UNIQUE constraint failed: users.mailbox_address' USING ERRCODE = 'unique_violation'; END IF;
+ RETURN NEW; END $$;
+`
+
+func migrateMailboxAddress(tx *sql.Tx) error {
 	var n int
 	if err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info('users') WHERE name='mailbox_address'`).Scan(&n); err != nil {
 		return err
@@ -54,20 +68,14 @@ func migrateMailboxAddress(tx *sql.Tx) error {
 		}
 	}
 	_, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_mailbox_address ON users(mailbox_address) WHERE mailbox_address IS NOT NULL;
-CREATE TRIGGER IF NOT EXISTS users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW ` + body + `
-CREATE TRIGGER IF NOT EXISTS users_mailbox_update BEFORE UPDATE OF email, mailbox_address ON users FOR EACH ROW ` + body)
+` + mailboxTriggersSQLite())
 	return err
 }
 
 func migrateMailboxAddressPostgres(tx *sql.Tx) error {
 	_, err := tx.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS mailbox_address TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS users_mailbox_address ON users(mailbox_address) WHERE mailbox_address IS NOT NULL;
-CREATE FUNCTION users_mailbox_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
- IF (` + mailboxCustomerSQL + `) THEN RAISE EXCEPTION '` + msgMailboxCustomerOnly + `'; END IF;
- IF EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email::text) OR u.email=NEW.mailbox_address::citext)) THEN
-  RAISE EXCEPTION 'UNIQUE constraint failed: users.mailbox_address' USING ERRCODE = 'unique_violation'; END IF;
- RETURN NEW; END $$;
-CREATE TRIGGER users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION users_mailbox_check();
+` + mailboxCheckPostgres + `CREATE TRIGGER users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION users_mailbox_check();
 CREATE TRIGGER users_mailbox_update BEFORE UPDATE OF email, mailbox_address ON users FOR EACH ROW EXECUTE FUNCTION users_mailbox_check();`)
 	return err
 }
@@ -180,10 +188,10 @@ func refuseRemovingUsedDomainsTx(tx *sql.Tx, old, next []string) error {
 	return nil
 }
 
-// MailboxEligible reports whether the org's accounts may hold a mailbox address: a person
-// or household org. Staff and the single-tenant default org may not.
+// MailboxEligible reports whether the org's accounts may hold a mailbox address: a
+// customer org. Staff and the single-tenant default org may not.
 func (o *OrgStore) MailboxEligible() (bool, error) {
 	var ok bool
-	err := o.s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM orgs WHERE id=? AND kind IN ('person','household'))`, o.org).Scan(&ok)
+	err := o.s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM orgs WHERE id=? AND kind=?)`, o.org, customerKind).Scan(&ok)
 	return ok, err
 }
