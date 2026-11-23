@@ -4,11 +4,13 @@ Date: 2026-11-19. Owner decisions: 2026-11-19 tenancy brief (fixed, listed below
 tenancy-spec. Status: approved design. PRs 1–3 are built. Amended 2026-11-21 with Delete everything and
 the `export_only` claim (K open question 4 (a)), and with Mailbox address (multi-tenant), from the owner
 answer to KyPost open question 1. Amended 2026-11-22 with Home region (owner decision on multi-region apps).
+Amended 2026-11-23 with Plans and orgs (owner decisions: every paid plan, Business included, is an org on
+the shared install; only Enterprise gets a dedicated one).
 
 KyIdentity today is one organisation per install (`AGENTS.md:3`, `design.md:31` defers
 multi-tenancy). This spec adds a second mode to the same binary. **Single-tenant** is
 today's behaviour, unchanged for existing installs. **Multi-tenant** is a hosted service
-where every customer (a person or a household) is an *organisation* (org), all under one
+where every paid account (Personal, Couple, Family or Business) is an *organisation* (org), all under one
 issuer, one sign-in page and one WebAuthn relying party. Our own staff administer it.
 
 Owner decisions (not reopened here):
@@ -28,10 +30,11 @@ Owner decisions (not reopened here):
    delegations inside customer orgs. Every customer account is a member. Single-tenant is
    not affected: self-hosted installs keep today's administrators and delegations
    unchanged.
-7. Businesses run on isolated platforms. A business customer gets its own KyIdentity
-   install in single-tenant mode, with its own administrators and delegations. The shared
-   multi-tenant service holds only individuals and households. Staff-only administration
-   (decision 6) applies to the shared service only.
+7. *Superseded 2026-11-23* (see Plans and orgs). Every paid plan is an org on the shared
+   multi-tenant service: Personal (1 member), Couple (2), Family (up to 6) and Business (N
+   seats, small teams). Only **Enterprise** gets a dedicated install (cloud or on-prem), in
+   single-tenant mode with its own administrators and delegations. Staff-only administration
+   (decision 6) applies to the shared service, Business orgs included.
 
 Line references are to `master` at `09caf1c`. "Unverified" marks a claim this spec did not
 check in code.
@@ -49,7 +52,7 @@ check in code.
 | D7 | OAuth clients, the app registry, app roles and launcher cards stay global. Each org's access to an app is a new per-org row (`org_apps`). | Owner decision 2 (shared apps). |
 | D8 | Staff are accounts in one internal staff org (`orgs.kind='staff'`): `role='admin'`, or everyday accounts with today's delegations. In multi-tenant mode the store refuses `role='admin'` and any `admin_delegations` row for an account outside the staff org. | Owner decision 6. No new role or delegation kind, so `accessFor` (`permissions.go:66`) and the permission matrix stay as they are. |
 | D9 | One member of each customer org may be the **account holder** (`orgs.account_holder_user_id`), named by billing. It is a pointer, not a role: it maps to no `Access` field. | Export, the deletion banner and member-change notices need a person to go to. Billing already knows who pays. |
-| D10 | In multi-tenant mode, MFA enrollment policies are platform-wide, set by staff. `group:` scopes are refused. | A household has nobody to ask for a different policy. Per-org policies would need a per-org primary key (D2) with no one to request it. |
+| D10 | In multi-tenant mode, MFA enrollment policies are platform-wide, set by staff. `group:` scopes are refused. *Amended 2026-11-23:* staff may also require MFA for one customer org's members (scope `org:<org_id>`, Plans and orgs P5). It only adds a requirement, never removes one. | A household has nobody to ask for a different policy. A business may ask staff to require MFA for its members; the `org:` scope key is globally unique (the org ID), so it needs no per-org primary key (D2). Staff stay the only administrators. |
 
 ## Threat model
 
@@ -95,8 +98,9 @@ Residual risks (accepted):
 orgs (
   id TEXT PRIMARY KEY,                 -- UUID; never reused
   name TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('default','person','household','staff')),
-                                       -- 'default': the single-tenant org; one 'staff' org in multi
+  kind TEXT NOT NULL CHECK (kind IN ('default','customer','staff')),
+                                       -- 'default': the single-tenant org; one 'staff' org in multi;
+                                       -- 'customer': every paid plan (Plans and orgs P1)
   status TEXT NOT NULL CHECK (status IN ('active','suspended','deletion_scheduled','deleted')),
   status_reason TEXT NOT NULL DEFAULT '' CHECK (status_reason IN ('','payment','abuse','operator')),
   all_apps BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE only for the single-tenant default org
@@ -342,7 +346,7 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
 
 | Mode | Principal | Can | Cannot |
 |---|---|---|---|
-| Single | Administrator (`role='admin'`) and delegations (`permissions.go:17-41`) | Unchanged. This includes business platforms (decision 7). | Unchanged |
+| Single | Administrator (`role='admin'`) and delegations (`permissions.go:17-41`) | Unchanged. This includes Enterprise installs (decision 7). | Unchanged |
 | Multi | **Staff**: accounts in the staff org (D8), admins and staff with today's delegations | The admin UI in any customer org, one selected org at a time, with today's permissions. Staff admins also use `platform` routes. | Sign in as a user, set a customer's password, change a customer's email, see an activation or reset link, read app content |
 | Multi | **Member**: every customer account | Its own account pages, and the apps its org's plan enables | Any admin route (refused as today, `writeForbidden` at `permissions.go:84`), any platform-listener route |
 | Multi | **Account holder**: one member (D9) | What a member can, plus the export-only session while a deletion is scheduled, the deletion banner, and member-change notices by mail | Anything a member cannot. It maps to no `Access` field and passes no permission check. |
@@ -516,16 +520,16 @@ holder's name and email on create.
 
 | Route | Scope | Effect |
 |---|---|---|
-| `POST /orgs` | `orgs:write` | `{name, kind: person\|household, home_region, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, holder_mailbox_address?, billing_ref, revision}`. Creates the org and a pending account holder (with its mailbox address when given; see Mailbox address), and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere or the holder's mailbox address collides, `400 mailbox_domain` for a mailbox address off the suite domains, `400 invalid_home_region` (see Home region). |
-| `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `over_limit`, `holder_activated`, `delete_after`, `revision`. No names or emails of users. |
-| `PATCH /orgs/{id}` | `orgs:write` | `{revision}` plus any of: plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). Lowering seats below the number used is accepted: the org is `over_limit`, new seats are refused, and nobody is disabled. |
+| `POST /orgs` | `orgs:write` | `{name, home_region, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, holder_mailbox_address?, billing_ref, revision}`. Creates the org and a pending account holder (with its mailbox address when given; see Mailbox address), and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere or the holder's mailbox address collides, `400 mailbox_domain` for a mailbox address off the suite domains, `400 invalid_home_region` (see Home region), `400 invalid_max_seats` outside 1–`MaxSeats` (Plans and orgs P2). The org is `kind='customer'`; the body has no `kind`. |
+| `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `holder_activated`, `delete_after`, `revision`. No names or emails of users. |
+| `PATCH /orgs/{id}` | `orgs:write` | `{revision}` plus any of: plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). `max_seats` below the seats in use is `409 seats_in_use` with `seats_used`, and nothing changes: billing removes members first (Plans and orgs P3). `400 invalid_max_seats` as for `POST`. |
 | `POST /orgs/{id}/suspend` | `orgs:write` | `{reason: payment\|abuse, revision}`. Semantics below. |
 | `POST /orgs/{id}/resume` | `orgs:write` | `{revision}`. From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
 | `POST /orgs/{id}/schedule-deletion` | `orgs:write` | `{grace_days 7–90, revision}`. Suspends the org and sets `delete_after`. The account holder can still sign in to a restricted, export-only session (the `active_principals` exception under Views). |
 | `DELETE /orgs/{id}` | `orgs:delete` | No `revision`: the state gate replaces it. Only for `deletion_scheduled` once `delete_after` has passed, otherwise `409`, so a late `DELETE` after a resume does nothing. Deletes every org-owned and derived row in one transaction and leaves the tombstone. That includes the org's `audit_events`. This is a second, named audit-deletion path beside `DeleteAuditEventsOlderThan`, and the audit retention contract in `AGENTS.md` must be amended to say so. The org's audit is in the account holder's export. In the same transaction, a platform audit row (`org_id` NULL), `platform.org_deleted`, records the org ID, the token and row counts per table, with no content. If it cannot be written, nothing is deleted (fail closed). A test proves both. |
 
-**Member endpoints.** A household still invites and removes its people, and resends
-invites. With no org admin (decision 6), the billing service's customer portal does it for
+**Member endpoints.** A customer org (a household or a business) still invites and removes
+its people, and resends invites. With no org admin (decision 6), the billing service's customer portal does it for
 the account holder through these endpoints. Staff do the same in the admin UI. Every
 member is an everyday account (`role='user'`), and the endpoints reach no other kind.
 
@@ -620,13 +624,14 @@ After that:
   with `ky-primitives/syncauth`, using a secret sealed at rest and set by
   `kyidentity platform-events set-secret`.
 - Types: `org.created`, `org.member_changed` (`change`: `added`, `activated`, `disabled`,
-  `enabled` or `removed`, for any member including the account holder), `org.over_limit`
-  and `org.within_limit`, `org.suspended`, `org.resumed`, `org.deletion_scheduled`,
-  `org.deleted`, `org.holder_invite_expired`.
-- `over_limit` is **derived**: `seats_used > max_seats`, with `max_seats > 0`. It is not
-  stored, and it is not an `orgs.status` value. A transaction that changes either side
-  computes it before and after, and queues `org.over_limit` or `org.within_limit` in the
-  same transaction when it flips.
+  `enabled` or `removed`, for any member including the account holder), `org.suspended`,
+  `org.resumed`, `org.deletion_scheduled`, `org.deleted`, `org.holder_invite_expired`.
+- **`org.resumed` is the canonical name** for an org leaving `suspended` or
+  `deletion_scheduled` for `active` (the `resume` route). There is no `org.unsuspended`: a
+  resume from `deletion_scheduled` is not an unsuspension. Any later org lifecycle webhook to
+  apps (Home region, "Not covered") uses the same names.
+- *Amended 2026-11-23:* there is no `org.over_limit` or `org.within_limit`. Seats can no
+  longer pass `max_seats` (Plans and orgs P3), so there is nothing to derive.
 - Body: `{event_id, type, org_id, home_region, billing_ref, revision, status, seats_used,
   user_id?, change?, at}`. `user_id` is the opaque KyIdentity ID. No personal data.
 - Delivery is at least once and unordered. Billing de-duplicates by `event_id` and orders
@@ -673,7 +678,7 @@ org_erasures (org_id TEXT PRIMARY KEY REFERENCES orgs(id), holder_user_id TEXT N
 ```
 
 - `org_erasures_holder` (`BEFORE INSERT`): the row names the org's current account holder,
-  the org is `active` and of kind `person` or `household`, and `immediate` is true exactly
+  the org is `active` and of kind `customer` (Plans and orgs), and `immediate` is true exactly
   when the org has no other live member.
 - `org_erasures_kept` (`BEFORE UPDATE`, `BEFORE DELETE`): refused always. A row never changes
   and is never removed, so nobody can take a request back: not billing, staff or the holder.
@@ -796,7 +801,7 @@ usually on someone else's domain, so it cannot be the mailbox.
   reuses an address (its tombstones), so it refuses the freed address for anyone else. That
   shows up as KyPost's durable allocation failure, shown to staff (KyPost note).
 - **Customer accounts only.** The same triggers refuse a mailbox address for any account
-  outside a `person` or `household` org. That includes staff (KyPost gives staff no
+  outside a `customer` org. That includes staff (KyPost gives staff no
   mailbox) and the single-tenant `default` org, so a single-tenant install cannot hold one
   on any path.
 - **Write-once.** It is set when the member is added: billing's `POST /orgs` sets it for the
@@ -900,6 +905,74 @@ immutability, `local` for the default org, the Postgres insert without a region 
 routes, refusals and the single-tenant `404`), `TestRegionalLaunchURLs` (launcher, apps and
 peer), and the single-tenant golden files unchanged.
 
+## Plans and orgs (amendment, 2026-11-23)
+
+Owner decisions, 2026-11-23 (fixed): every paid account is an org. Personal is an org of 1
+member, Couple 2, Family up to 6, and Business N seats (small teams). All four run on the
+shared multi-tenant install, which runs as several replicas across hosts (Replicas,
+Postgres and backups). Only Enterprise gets a dedicated install (Enterprise installs). This
+supersedes owner decision 7 as first written, and every line that kept businesses off the
+shared service. Every plan sells all seven apps (email, contacts, calendar, tasks, notes,
+drive, messages); which apps an org has is still `org_apps`, set by billing.
+
+| # | Decision | Why |
+|---|---|---|
+| P1 | **One `customer` kind** replaces `person` and `household`: `orgs.kind IN ('default','customer','staff')`. The plan is `orgs.plan` (billing's opaque name) and its size is `max_seats`. KyIdentity never branches on `plan`. | The smallest safe change. No shipped code tells `person` from `household`: every check names both (`internal/store/erasure.go:61,163,254`, `internal/store/mailbox_address.go:42,187`). Plans do not map onto kinds (Couple has none), so a `business` kind would be one more name with no behaviour, and each new plan would change the `CHECK` again. SQLite cannot change a `CHECK` without rebuilding `orgs` (D2), and every Postgres backup is a fresh SQLite file built by the migrations (`internal/store/pgcopy.go:367`), so it must accept every kind Postgres holds. With one customer kind, a new plan needs no migration. |
+| P2 | `max_seats` of a customer org is 1 to `MaxSeats` (1000). `0` (unlimited) stays for the `default` and `staff` orgs only. Set by billing (`POST /orgs`, `PATCH`) or by staff (the org page, PR 5, step-up, audited in the org's log); never by the holder. Out of range is `400 invalid_max_seats`. | Validate at the boundary. A customer org always has a cap, so a missing field cannot mean unlimited. Above the ceiling is Enterprise. |
+| P3 | Seats (Entitlements): a seat is an active or pending everyday account (owner answer 7). Checked at every add (member add, admin create, enable), and again at activation. **A downgrade below the seats in use is refused** (`409 seats_in_use`, nothing changes); billing removes members, pending invites included, first. | The safe rule. An org never holds more seats than it pays for, nobody is disabled by surprise, and there is no `over_limit` state to derive, signal or reconcile. |
+| P4 | The account holder (D9) is the same for every plan: a pointer, not a role, with no admin route. A business's holder is its billing contact. Member invites and removals go through the billing portal (`members:*`) or staff, for every plan. | Owner decision 6: staff stay the only administrators. A business that needs its own administrators or delegations buys Enterprise. |
+| P5 | **Per-org MFA requirement.** Staff may add one required enrollment policy for a customer org, scope `org:<org_id>`, on an org route (`permAdmin`, step-up, audited in the org's log). It joins today's intersection: factors intersect with the platform policies and the earliest per-user deadline wins (`AGENTS.md`, MFA enrollment), so it adds a requirement and removes none. The holder and billing cannot set or clear it. | A business may need MFA for its members, and staff are its only administrators. A billing token that could clear it would strip a second factor from a whole org. The scope key is the org's ID, globally unique, so D2's per-org key problem does not arise. Build note: the `enrollment_policies` `CHECK` (`internal/store/group_enrollment.go:54`) admits only `organization`, `administrators` and `group:`, so widening it has P1's SQLite constraint and uses P1's method. |
+| P6 | **Quotas are per org and per app** (`org_apps.quotas_json`, opaque, ≤ 4 KiB, set by billing), so they are already settable per org. A pooled storage quota for a Family (one figure for the whole org in one app) is one key; a per-member quota is another; apps enforce either from `/api/suite/orgs`. No schema change. | Owner input 5: pooled or not is undecided, so both must fit. Not covered: one pool shared *across* apps (mail, drive and notes drawing on one figure), which needs a usage total the apps share; KyIdentity holds no usage. |
+| P7 | Delete everything (amendment, 2026-11-21) applies to every customer org: the holder alone deletes at once, a holder with members schedules deletion with the 7-day export window (`erasureGrace`), and a member deletes only themselves. The notice mail says "organisation", not "household". | One rule for every plan. Apps export a member's own data, so the window does not hand a member the business's other data. |
+| P8 | The business features under Per-org features (inbound SCIM, HR, upstream federation, outbound SCIM, forward-auth) stay off for every customer org. | Each needs per-org connectors or secrets the shared install does not have. Enterprise has them all. |
+
+**Migration (schema version 16, `customer_kind`).** No customer org exists in any database
+yet: `KYIDENTITY_TENANCY=multi` is refused at startup until PR 6, and `person`/`household`
+rows come only from tests. So:
+
+- Fresh installs get the new `CHECK` from schema version 7's DDL (`tenancyTablesSQL`).
+- Postgres: version 16 swaps the constraint (`orgs_kind_check`) after moving any
+  `person`/`household` row to `customer`.
+- SQLite: version 16 cannot change the `CHECK`, so an upgraded single-tenant file keeps the
+  old list. That is harmless: SQLite is single-tenant only (D2) and holds only the `default`
+  org, and a backup of a multi-tenant install is always a fresh file.
+- Both backends recreate the triggers that named the old kinds: `org_erasures_holder` and
+  `users_mailbox_insert`/`users_mailbox_update` (on Postgres, the function
+  `users_mailbox_check`).
+- Single-tenant behaviour and the golden files do not change.
+
+**Events.** The canonical name for a resume is `org.resumed` (Events back to billing).
+KyMessages-Native still names `org.unsuspended` in `docs/PRODUCT.md:75` and
+`docs/INSTALLER_SETUP.md:71`; its tenancy design already plans to accept `org.resumed`
+(`docs/superpowers/specs/2026-11-22-tenancy-design.md:89`). KyIdentity sends no `org.*`
+event to anyone yet: the outbox is PR 4.
+
+**Storage cost (open question; not decided).** Owner input: object storage costs about
+$0.007/GB/month (Backblaze B2) against about EUR 0.057 (Hetzner volumes) or $0.10
+(DigitalOcean) for block storage, and storage is the main cost per account. KyIdentity
+stores no files: its database stays on Postgres block storage and is small. *Recommendation:*
+the apps keep bulk content (drive files, mail bodies and attachments, message media, note
+attachments) in S3-compatible object storage, one bucket per home region,
+and keep their databases and search indexes on block storage. That is each app's spec to
+decide; the cost figures are the owner's, unverified here.
+
+Owner questions, each with the default this design applies:
+
+1. The seat ceiling `MaxSeats`. *Default: 1000*; above it is Enterprise.
+2. A downgrade below the seats in use. *Default: refused* (P3). The alternative is to accept
+   it, refuse new seats, disable nobody, and signal `org.over_limit`, as first written.
+3. Who sets the per-org MFA requirement. *Default: staff only* (P5). Billing never.
+4. The export window when a business's holder deletes everything. *Default: 7 days, as for
+   every plan* (P7).
+5. One storage pool across apps. *Default: not in v1* (P6); each app enforces its own.
+6. Object or block storage for app content. *Recommendation: object storage* (above).
+
+Tests (code PR): the `CHECK` and the renamed kind on both backends (a customer org is
+accepted, `person` and `household` are refused, an upgraded Postgres database lands on the
+same constraint as a fresh one), Delete everything and the mailbox address for a `customer`
+org on both backends, a Postgres snapshot of a customer org restoring through SQLite, and
+`testdata/tenancy-golden` unchanged.
+
 ## Entitlements
 
 KyIdentity stores `max_seats` on `orgs`, and per-app enablement and opaque quotas in
@@ -908,18 +981,24 @@ KyIdentity stores `max_seats` on `orgs`, and per-app enablement and opaque quota
 - **KyIdentity enforces seats and app enablement.**
   - A seat is an everyday account (`role='user'`) that is active or pending (open
     question 7).
-  - Only a transition that adds a seat is checked: a member add (platform API or admin UI)
+  - A transition that adds a seat is checked: a member add (platform API or admin UI)
     or re-enabling a disabled account. SCIM and HR creates are off in multi-tenant v1.
     One that would pass `max_seats` is refused with `seat_limit`.
-  - Activation never is, because the pending account already holds its seat. An invited
-    member can activate even while the org is `over_limit`.
+  - *Amended 2026-11-23:* activation (first sign-in) is checked again, in the redemption's
+    transaction: it is refused like an expired link when the org's activated seats already
+    reach `max_seats`. The pending account holds its seat, so this never fires while the
+    seat invariant holds. It is the backstop for a path that skipped the add check.
+  - A `PATCH` that lowers `max_seats` below the seats in use is refused (Plans and orgs P3),
+    so a customer org never holds more seats than its plan.
   - One store function counts and inserts inside the write transaction. Postgres write
     transactions are already serialised on one advisory lock across every replica
     (`AGENTS.md:191`), so count-then-insert cannot race. No per-org lock or seat counter
     column is needed.
   - A disabled app gives no access: the `app_access_facts` join above means no token and no
     suite listing.
-- **Apps enforce their own quotas** (storage, mailboxes) from `GET /api/suite/orgs`.
+- **Apps enforce their own quotas** (storage, mailboxes) from `GET /api/suite/orgs`. A
+  quota is per org and per app (`org_apps.quotas_json`), so a pooled quota for the whole
+  org in one app is one key there (Plans and orgs P6).
 
 Why a suite API pull:
 
@@ -933,16 +1012,17 @@ Why a suite API pull:
 
 ## Per-org features
 
-Customer orgs are people and households. Business features stay in single-tenant installs
-(see Business platforms).
+Customer orgs are every paid plan, Business included (Plans and orgs). The business features
+marked below stay off for every customer org, and an Enterprise install has them all (see
+Enterprise installs).
 
 | Feature | Multi-tenant v1 | Notes |
 |---|---|---|
 | Users, groups, access requests, expiry, offboarding | Per org, run by staff | `OrgStore` |
 | Delegations | Staff org only | D8 |
 | App assignment, app roles assignment | Per org, run by staff | Roles themselves are global (appendix) |
-| MFA enrollment policies (`enrollment_policies`) | Platform-wide, set by staff | D10. Staff are pinned to passkeys (Roles). |
-| Inbound SCIM connectors | Disabled | Syncs a business directory. A household has none. |
+| MFA enrollment policies (`enrollment_policies`) | Platform-wide, set by staff, plus an optional per-org requirement set by staff (`org:` scope) | D10, Plans and orgs P5. Staff are pinned to passkeys (Roles). |
+| Inbound SCIM connectors | Disabled | Syncs a business directory. A small team has none; Enterprise does. |
 | HR provisioning | Disabled | Feeds a business HR system, and reserves a KyPost address per `domain` (`hr.go:46`). |
 | Upstream SSO / federation per org | Absent | Does not exist today (`docs/access-lifecycle-plan.md:73`, `design.md:32`). It serves a business's own IdP. |
 | Generic outbound SCIM to customer targets | Disabled | Provisions a business's own apps, and would need per-org `paired_systems`. |
@@ -959,12 +1039,14 @@ Customer orgs are people and households. Business features stay in single-tenant
 The disabled features answer `404` in multi-tenant mode, and their admin routes refuse to
 create a connector, as the cross-org matrix test checks.
 
-## Business platforms
+## Enterprise installs
 
-A business customer gets its own dedicated KyIdentity install in single-tenant mode, with
-its own administrators and delegations. That is today's self-hosted behaviour, with every
-business feature above. For now staff set these installs up by hand. The billing service
-only bills them and does not deploy them. They are outside this spec.
+*Amended 2026-11-23.* Business plans are customer orgs on the shared service (Plans and
+orgs). Only an **Enterprise** customer gets its own dedicated KyIdentity install, in the
+cloud or on-prem, in single-tenant mode (SQLite is fine there), with its own administrators
+and delegations. That is today's self-hosted behaviour, with every business feature above.
+For now staff set these installs up by hand. The billing service only bills them and does
+not deploy them. They are outside this spec.
 
 ## Phased build plan
 
@@ -1065,6 +1147,13 @@ tests.
      check) rather than a read of the `active_principals` view: the same rows, and the
      `credential_principals` naming stays PR 4's.
    - (c) The account page button and dialog.
+9. **Plans and orgs** (amendment, 2026-11-23). Stacked PRs:
+   - (a) This amendment.
+   - (b) Schema version 16 `customer_kind` and the kind checks it renames (P1, P7), on both
+     backends. Nothing else is shipped yet that the amendment changes.
+   - Folded into later PRs: PR 4 drops `kind` from `POST /orgs`, validates `max_seats`
+     (P2) and refuses a downgrade (P3); PR 5 adds the staff seat field and the `org:` MFA
+     scope (P5); PR 6 adds the activation backstop (P3).
 
 ## Owner answers
 
@@ -1159,7 +1248,7 @@ given. Migrations 2–4 use one SQL text on both backends, with only the column 
 | `group_memberships` | `store.go:143` | `:41` | O | Joins two org-owned rows. A composite FK keeps both in one org. |
 | `sessions` | `store.go:150` | `:47` | D | `user_id` FK. Found by token hash, a pre-org lookup. |
 | `login_failures` | `store.go:163` | `:58` | D | `user_id` FK |
-| `paired_systems` | `store.go:171` | `:66` | P | Suite app targets are shared. Customer-owned generic SCIM targets are business features, single-tenant only. |
+| `paired_systems` | `store.go:171` | `:66` | P | Suite app targets are shared. Customer-owned generic SCIM targets are business features, single-tenant (Enterprise) only. |
 | `account_sync_events` | `store.go:184` | `:79` | O | `user_id` has no FK, and events outlive the user. The payload needs the org after deletion. |
 | `native_devices` | `store.go:724` | `:95` | D | `user_id` FK |
 | `device_pairing_tokens` | `store.go:202` | `:118` | D | `user_id` FK |
