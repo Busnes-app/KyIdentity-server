@@ -469,8 +469,9 @@ func TestTwoServerProcessesAreOneIdentity(t *testing.T) {
 	c.loadBalancer(func() []*process { liveMu.Lock(); defer liveMu.Unlock(); return live })
 
 	// Both start at once on an empty database: one schema, one administrator.
-	a := c.spawn("a", "KYIDENTITY_RECOVERY_KEY_ID="+keyID, "KYIDENTITY_BACKUP_DEPOSIT_INTERVAL=0")
-	b := c.spawn("b", "KYIDENTITY_RECOVERY_KEY_ID="+keyID, "KYIDENTITY_BACKUP_DEPOSIT_INTERVAL=0")
+	const scheduleOff = "KYIDENTITY_BACKUP_DEPOSIT_INTERVAL=0"
+	a := c.spawn("a", "KYIDENTITY_RECOVERY_KEY_ID="+keyID, scheduleOff)
+	b := c.spawn("b", "KYIDENTITY_RECOVERY_KEY_ID="+keyID, scheduleOff)
 	c.waitReady(a)
 	c.waitReady(b)
 	setLive(a, b)
@@ -667,7 +668,7 @@ func TestTwoServerProcessesAreOneIdentity(t *testing.T) {
 
 	// A third server whose configuration names no key reads the same database and seals
 	// nothing: the database alone does not choose who can open a backup.
-	unnamed := c.spawn("unnamed")
+	unnamed := c.spawn("unnamed", scheduleOff)
 	c.waitReady(unnamed)
 	if st := admin.get(unnamed.url, "/api/admin/backup/status"); st.body["key_pinned"] == true || !strings.Contains(fmt.Sprint(st.body["recovery_key_error"]), "KYIDENTITY_RECOVERY_KEY_ID") {
 		t.Fatalf("a server with no key named reports: %v", st)
