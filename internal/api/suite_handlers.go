@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -362,6 +363,7 @@ func (h *SuiteHandler) Storage(w http.ResponseWriter, r *http.Request, caller *s
 	}
 	results, err := h.store.Platform().ReportStorage(caller.ID, body.Reports, time.Now().UTC())
 	if err != nil {
+		log.Printf("suite storage: internal error: %v", err)
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
