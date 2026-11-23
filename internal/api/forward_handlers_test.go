@@ -570,7 +570,7 @@ func TestProxyAppAdminValidation(t *testing.T) {
 		t.Fatalf("list leaks the secret or failed: %d", rr.Code)
 	}
 	// The card is a launcher app for assigned users only.
-	apps, err := launcherApps(f.db, func(string) bool { return true }, nil)
+	apps, err := launcherApps(f.db, func(string) bool { return true }, nil, nil)
 	if err != nil || !hasLauncherURL(apps, "https://app.example.test/") {
 		t.Fatalf("launcher card missing: %v", err)
 	}

@@ -39,7 +39,7 @@ var (
 		"device_signon_jtis", "oauth_clients", "launcher_icons", "applications", "system_settings", "app_registry",
 		"authorization_interactions", "app_roles", "enrollment_policies", "sync_reconcile_jobs", "rate_limits",
 		"push_relay_keys", "proxy_apps", "workstation_apps", "ad_connectors", "orgs", "platform_tokens", "platform_requests", "platform_events",
-		"org_erasures", "erased_subjects"}
+		"org_erasures", "erased_subjects", "client_region_origins"}
 )
 
 // testCatalogs is the SQLite catalog of a fresh database, and the Postgres one when the
@@ -168,7 +168,7 @@ func refused(t *testing.T, s *Store, want, q string) {
 
 func newTestOrg(t *testing.T, s *Store, id, status string) {
 	t.Helper()
-	if _, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,created_at,updated_at) VALUES(?,?,'household',?,?,?)`, id, id, status, time.Now().UTC(), time.Now().UTC()); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES(?,?,'household',?,'local',?,?)`, id, id, status, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -368,9 +368,9 @@ func TestTenancyUpgradeKeepsEveryView(t *testing.T) {
 	for _, table := range orgColumnTables {
 		tenancyExec(t, s, `ALTER TABLE `+table+` ADD COLUMN org_id TEXT DEFAULT '`+DefaultOrgID+`'`)
 	}
-	tenancyExec(t, s, `ALTER TABLE users ADD COLUMN mailbox_address TEXT`)
+	tenancyExec(t, s, `ALTER TABLE users ADD COLUMN mailbox_address TEXT`, clientRegionOriginsSQL)
 	copyFixture(t, s)
-	tenancyExec(t, s, `ALTER TABLE users DROP COLUMN mailbox_address`)
+	tenancyExec(t, s, `ALTER TABLE users DROP COLUMN mailbox_address`, `DROP TABLE client_region_origins`)
 	for _, table := range orgColumnTables {
 		tenancyExec(t, s, `ALTER TABLE `+table+` DROP COLUMN org_id`)
 	}
@@ -475,7 +475,7 @@ func tenancyFixture(t *testing.T, s *Store, appID string) {
 		sql  string
 		args []any
 	}{
-		{`INSERT INTO orgs(id,name,kind,status,created_at,updated_at) VALUES('org-erasing','Erasing','household','active',?,?)`, []any{now, now}},
+		{`INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES('org-erasing','Erasing','household','active','local',?,?)`, []any{now, now}},
 		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-holder','erasing-holder','H','erasing-holder@test.invalid','','user','active','org-erasing')`, nil},
 		{`INSERT INTO users(id,username,display_name,email,password_hash,role,status,org_id) VALUES('erasing-kid','erasing-kid','K','erasing-kid@test.invalid','','user','active','org-erasing')`, nil},
 		{`UPDATE orgs SET account_holder_user_id='erasing-holder' WHERE id='org-erasing'`, nil},

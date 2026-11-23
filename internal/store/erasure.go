@@ -471,15 +471,15 @@ func deleteOrgTx(tx *sql.Tx, org string, audit *AuditEvent, now time.Time) error
 // queuePlatformEventTx queues an event to billing (tenancy design, "Events back to
 // billing"). The body holds IDs and counts only.
 func queuePlatformEventTx(tx *sql.Tx, org, typ, userID string, now time.Time) error {
-	var billingRef, status string
+	var billingRef, status, region string
 	var revision, seats int64
-	if err := tx.QueryRow(`SELECT COALESCE(billing_ref,''),status,revision,
+	if err := tx.QueryRow(`SELECT COALESCE(billing_ref,''),status,home_region,revision,
  (SELECT COUNT(*) FROM users u WHERE u.org_id=orgs.id AND u.role='user' AND (u.status='active' OR u.pending))
- FROM orgs WHERE id=?`, org).Scan(&billingRef, &status, &revision, &seats); err != nil {
+ FROM orgs WHERE id=?`, org).Scan(&billingRef, &status, &region, &revision, &seats); err != nil {
 		return err
 	}
 	id := uuid.NewString()
-	body := map[string]any{"event_id": id, "type": typ, "org_id": org, "billing_ref": billingRef, "revision": revision,
+	body := map[string]any{"event_id": id, "type": typ, "org_id": org, "home_region": region, "billing_ref": billingRef, "revision": revision,
 		"status": status, "seats_used": seats, "at": now.Unix()}
 	if userID != "" {
 		body["user_id"], body["change"] = userID, "removed"

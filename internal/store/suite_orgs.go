@@ -22,11 +22,13 @@ const suiteOrgVisibleSQL = `(o.kind<>'default' AND (o.all_apps OR o.status='dele
 // SuiteOrg is one org as GET /api/suite/orgs lists it to an app. Enabled and Quotas are
 // that app's only.
 type SuiteOrg struct {
-	ID       string          `json:"id"`
-	Status   string          `json:"status"`
-	Revision int64           `json:"revision"`
-	Enabled  bool            `json:"enabled"`
-	Quotas   json.RawMessage `json:"quotas"`
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	Revision int64  `json:"revision"`
+	// HomeRegion is where every multi-region app keeps the org (tenancy design, "Home region").
+	HomeRegion string          `json:"home_region"`
+	Enabled    bool            `json:"enabled"`
+	Quotas     json.RawMessage `json:"quotas"`
 }
 
 // suiteAppID is the app_registry row of an OAuth client, "" when it has none.
@@ -46,7 +48,7 @@ func (p *PlatformStore) SuiteOrgs(clientID string, afterRevision int64, afterID 
 	if err != nil || app == "" {
 		return []SuiteOrg{}, err
 	}
-	rows, err := p.s.rdb.Query(`SELECT o.id,o.status,o.revision,
+	rows, err := p.s.rdb.Query(`SELECT o.id,o.status,o.revision,o.home_region,
  (o.status<>'deleted' AND (o.all_apps OR COALESCE(oa.enabled,FALSE))),COALESCE(oa.quotas_json,'{}')
  FROM orgs o LEFT JOIN org_apps oa ON oa.org_id=o.id AND oa.app_id=?
  WHERE `+suiteOrgVisibleSQL+` AND (o.revision>? OR ?<>'' AND o.revision=? AND o.id>?)
@@ -59,7 +61,7 @@ func (p *PlatformStore) SuiteOrgs(clientID string, afterRevision int64, afterID 
 	for rows.Next() {
 		var o SuiteOrg
 		var quotas string
-		if err := rows.Scan(&o.ID, &o.Status, &o.Revision, &o.Enabled, &quotas); err != nil {
+		if err := rows.Scan(&o.ID, &o.Status, &o.Revision, &o.HomeRegion, &o.Enabled, &quotas); err != nil {
 			return nil, err
 		}
 		o.Quotas = json.RawMessage(quotas)

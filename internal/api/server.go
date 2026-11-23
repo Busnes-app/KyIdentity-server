@@ -109,6 +109,7 @@ func (s *Server) routes() *http.ServeMux {
 
 	authH := NewAuthHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.SecureCookies)
 	devH := NewDeviceHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.IssuerURL)
+	devH.multiTenant = s.cfg.Tenancy == "multi"
 	adminH := NewAdminHandler(s.store, s.syncEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	adminH.multiTenant = s.cfg.Tenancy == "multi"
 	onboardH := NewOnboardingHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL, s.cfg.EncryptionKey)
@@ -333,6 +334,8 @@ func (s *Server) routes() *http.ServeMux {
 		{"PUT", "/api/admin/clients/{id}", permAdmin, platformRoute, true, http.HandlerFunc(adminH.UpdateOAuthClient)},
 		{"DELETE", "/api/admin/clients/{id}", permAdmin, platformRoute, true, http.HandlerFunc(adminH.DeleteOAuthClient)},
 		{"PUT", "/api/admin/clients/{id}/launcher", permAdmin, platformRoute, false, http.HandlerFunc(adminH.UpdateClientLauncher)},
+		{"GET", "/api/admin/clients/{id}/regions", permRead, platformRoute, false, http.HandlerFunc(adminH.GetClientRegions)},
+		{"PUT", "/api/admin/clients/{id}/regions", permAdmin, platformRoute, true, http.HandlerFunc(adminH.PutClientRegions)},
 		{"GET", "/api/admin/app-registry/{id}/access-users", permAppRead, orgRoute, false, http.HandlerFunc(adminH.ListAppAccessUsers)},
 		{"GET", "/api/admin/app-registry/{id}/access-groups", permAppRead, orgRoute, false, http.HandlerFunc(adminH.ListAppAccessGroups)},
 		{"PUT", "/api/admin/app-registry/{id}/access-policy", permAdmin, platformRoute, true, http.HandlerFunc(adminH.SetAppPolicy)},

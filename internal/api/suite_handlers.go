@@ -76,11 +76,20 @@ type suiteApp struct {
 // Apps lists launchable suite apps, for one user when sub is given.
 func (h *SuiteHandler) Apps(w http.ResponseWriter, r *http.Request, caller *store.OAuthClient) {
 	var keys, admin map[string]bool
+	var regions map[string]string
 	var err error
 	if q := r.URL.Query(); q.Has("sub") {
 		keys, err = h.store.LauncherAppAccess(q.Get("sub"))
 		if err == nil {
 			admin, err = h.store.LauncherAdminClients(q.Get("sub"))
+		}
+		var user *store.User
+		if err == nil && h.multiTenant {
+			user, err = h.store.PrincipalByID(q.Get("sub"))
+		}
+		if err == nil && user != nil {
+			// The sub's own org, from the user row.
+			regions, err = orgRegionOrigins(h.store, h.multiTenant, user.Org())
 		}
 		if !keys["client:"+caller.ID] {
 			keys = nil
@@ -92,7 +101,7 @@ func (h *SuiteHandler) Apps(w http.ResponseWriter, r *http.Request, caller *stor
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
-	apps, err := launcherApps(h.store, func(key string) bool { return keys[key] }, admin)
+	apps, err := launcherApps(h.store, func(key string) bool { return keys[key] }, admin, regions)
 	if err != nil {
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
@@ -187,8 +196,20 @@ func (h *SuiteHandler) Peer(w http.ResponseWriter, r *http.Request, caller *stor
 		suiteJSON(w, http.StatusNotFound, map[string]string{"error": "no_peer"})
 		return
 	}
+	body := map[string]any{"client": peer.ID, "url": origin, "secret": suitePeerSecret(h.encryptionKey, a, b)}
+	if h.multiTenant {
+		regions, err := h.store.ClientRegionOrigins(peer.ID)
+		if err != nil {
+			suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+		if regions, _ = splitRegions(*peer, regions); len(regions) > 0 {
+			// A caller uses regions[home_region] for an org, never url (suitedir Peer.URLFor).
+			body["regions"] = regions
+		}
+	}
 	h.audit.Observe("suite.peer.issue", "", "", caller.ID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"client": caller.ID, "peer": peer.ID})
-	suiteJSON(w, http.StatusOK, map[string]string{"client": peer.ID, "url": origin, "secret": suitePeerSecret(h.encryptionKey, a, b)})
+	suiteJSON(w, http.StatusOK, body)
 }
 
 // Groups lists the suite groups for the calling app (docs/SUITE-DIRECTORY.md): the

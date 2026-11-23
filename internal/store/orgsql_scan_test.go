@@ -307,6 +307,7 @@ var preOrgCallers = map[string]string{
 	"internal/api/auth_handlers.go:AuthHandler.resolveMFAToken":                  "the user an MFA token names",
 	"internal/api/onboarding_handlers.go:OnboardingHandler.Forgot":               "forgot-password",
 	"internal/api/middleware.go:MiddlewareManager.authenticate":                  "the user a session names",
+	"internal/api/suite_handlers.go:SuiteHandler.Apps":                           "a suite call's sub; its org picks a regioned app's home-region URL",
 	"internal/api/suite_handlers.go:SuiteHandler.People":                         "a suite call's sub; the people listed are in that user's org",
 	"internal/api/suite_handlers.go:SuiteHandler.Groups":                         "single-tenant: the install's one org; multi-tenant binds the org_id org instead",
 	"internal/mfa/mfa.go:Engine.dispatchPushChallenge":                           "the user a push challenge names (display only)",

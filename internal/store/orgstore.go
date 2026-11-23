@@ -69,12 +69,17 @@ func staffOrgError(err error) error {
 // CreateOrgForTest adds an active org of the kind given and returns it. Test binaries
 // only: orgs are created by the platform API (build plan PR 4).
 func CreateOrgForTest(s *Store, kind string) (OrgID, error) {
+	return CreateOrgInRegionForTest(s, kind, HomeRegionLocal)
+}
+
+// CreateOrgInRegionForTest is CreateOrgForTest with a home region.
+func CreateOrgInRegionForTest(s *Store, kind, region string) (OrgID, error) {
 	if !testing.Testing() {
 		panic("store: CreateOrgForTest outside a test binary")
 	}
 	id := uuid.NewString()
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,revision,created_at,updated_at) VALUES(?,?,?,'active',`+nextOrgRevisionSQL+`,?,?)`, id, kind+" "+id[:8], kind, now, now)
+	_, err := s.db.Exec(`INSERT INTO orgs(id,name,kind,status,home_region,revision,created_at,updated_at) VALUES(?,?,?,'active',?,`+nextOrgRevisionSQL+`,?,?)`, id, kind+" "+id[:8], kind, region, now, now)
 	return OrgID{id}, err
 }
 
