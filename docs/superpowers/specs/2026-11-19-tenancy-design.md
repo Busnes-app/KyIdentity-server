@@ -934,12 +934,16 @@ drive, messages); which apps an org has is still `org_apps`, set by billing.
 yet: `KYIDENTITY_TENANCY=multi` is refused at startup until PR 6, and `person`/`household`
 rows come only from tests. So:
 
-- Fresh installs get the new `CHECK` from schema version 7's DDL (`tenancyTablesSQL`).
+- Schema version 7's DDL is shipped and does not change (`AGENTS.md`, Schema versions): every
+  install, fresh or upgraded, creates the old `CHECK` there and version 16 replaces it.
 - Postgres: version 16 swaps the constraint (`orgs_kind_check`) after moving any
   `person`/`household` row to `customer`.
-- SQLite: version 16 cannot change the `CHECK`, so an upgraded single-tenant file keeps the
-  old list. That is harmless: SQLite is single-tenant only (D2) and holds only the `default`
-  org, and a backup of a multi-tenant install is always a fresh file.
+- SQLite: a `CHECK` cannot be altered, and rebuilding `orgs` would trip the three foreign keys
+  to it (`org_erasures`, `erased_subjects`, `erase_notices`). So version 16 edits the `CHECK`
+  text in `sqlite_schema` under `writable_schema`, SQLite's documented procedure for changing
+  a constraint, bumps `schema_version`, moves any old row, and runs
+  `PRAGMA integrity_check(orgs)`. A fresh file and an upgraded one end with the same `orgs`
+  definition, so a Postgres snapshot of customer orgs restores into either.
 - Both backends recreate the triggers that named the old kinds: `org_erasures_holder` and
   `users_mailbox_insert`/`users_mailbox_update` (on Postgres, the function
   `users_mailbox_check`).
@@ -969,7 +973,7 @@ Owner questions, each with the default this design applies:
 7. What "seats" means for the Business pool. *Default: paid seats, `max_seats`* (S2). The
    alternative is the members in use (`seats_used`).
 8. Incoming mail while over the pool. *Recommendation: 7 days' grace with up to 10% of the
-   pool (at least 2 GB) over, then `452 4.2.2` for 3 days, then `552 5.2.2`* (Org storage
+   pool over, then `452 4.2.2` for 3 days, then `552 5.2.2`* (Org storage
    pool). KyPost's spec applies it.
 
 Tests (code PR): the `CHECK` and the renamed kind on both backends (a customer org is
@@ -1098,8 +1102,9 @@ only.
   and at least once per `ttl_seconds` for every org it holds a grant for, renewing it or
   releasing it with `want_bytes: 0`, in batches. An app that stops reporting keeps its last
   grant reserved (at most the org's cap) until it reports again. A write larger than the grant cap is written in parts, each checked, or
-  refused by the app's own per-write limit. Every org's cap is at least 2.5 GB (a Personal
-  pool's eighth).
+  refused by the app's own per-write limit. The cap is 2.5 GB for Personal, the smallest
+  plan, and larger for every other plan; a smaller custom pool (S3 allows 1 GiB) has a
+  proportionally smaller cap, down to 128 MiB, and its apps write in smaller parts.
 - **KyIdentity unreachable:** once the grant expires (at most 15 minutes), writes that add
   bytes are refused until a report succeeds. Reads, deletes and mail already accepted are not
   affected. That fails closed; the staleness bound is the 15-minute grant.
@@ -1153,7 +1158,7 @@ it to outside senders, who did nothing wrong. *Recommendation:* a grace period w
 overage, then a temporary failure, then a permanent one.
 
 - **Grace:** for **7 days** after `over_since`, KyPost keeps accepting mail for the org's
-  mailboxes beyond its grant, up to an overage of **10% of the pool** (at least 2 GB), and
+  mailboxes beyond its grant, up to an overage of **10% of the pool** (2 GB for Personal), and
   reports it as usage like any other mail. Members and the holder see a banner in KyPost:
   "Your organisation is over its storage. Mail is still arriving until <date>."
 - **Then a temporary failure:** `452 4.2.2` ("mailbox full", retry later) to senders for
