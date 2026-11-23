@@ -137,7 +137,9 @@ jobs:
           POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
         ports:
           - 5432:5432
+        # Concurrent schema creation can exhaust Docker's default 64 MiB /dev/shm.
         options: >-
+          --shm-size=256m
           --health-cmd "pg_isready -U postgres"
           --health-interval 2s
           --health-timeout 5s
