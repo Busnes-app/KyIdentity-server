@@ -62,12 +62,34 @@ func regionLaunchURL(client store.OAuthClient, launchURL, origin string) string 
 	return u.String()
 }
 
-// orgRegionOrigins is launcherApps' regions for a user of org: nil in single-tenant mode.
+// orgRegionOrigins is launcherApps' regions for a user of org: nil in single-tenant mode. A
+// client whose entries are all stale is unregioned here too, as for peer and the admin view.
 func orgRegionOrigins(st *store.Store, multiTenant bool, org store.OrgID) (map[string]string, error) {
 	if !multiTenant {
 		return nil, nil
 	}
-	return st.OrgRegionOrigins(org)
+	out, err := st.OrgRegionOrigins(org)
+	if err != nil {
+		return nil, err
+	}
+	for id := range out {
+		client, err := st.GetOAuthClientByID(id)
+		if err != nil {
+			return nil, err
+		}
+		if client == nil {
+			delete(out, id)
+			continue
+		}
+		regions, err := st.ClientRegionOrigins(id)
+		if err != nil {
+			return nil, err
+		}
+		if served, _ := splitRegions(*client, regions); len(served) == 0 {
+			delete(out, id)
+		}
+	}
+	return out, nil
 }
 
 // regionsBody is the admin route's body and answer. Stale (answers only) lists stored

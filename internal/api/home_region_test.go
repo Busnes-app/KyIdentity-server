@@ -129,6 +129,30 @@ func TestRegionalLaunchURLs(t *testing.T) {
 	if rr := suiteGet(t, srv, "/api/suite/peer?client=kycalendar", "kymessage", "msg-secret"); rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "regions") {
 		t.Fatalf("unregioned peer: %d %s", rr.Code, rr.Body.String())
 	}
+
+	// Consolidated back to one host, every entry is stale: the app is an ordinary one-URL app
+	// for everyone, as peer says, not hidden.
+	c, err := db.GetOAuthClientByID("kymessage")
+	if err != nil || c == nil {
+		t.Fatal(c, err)
+	}
+	c.RedirectURIsJSON = `["https://chat.example.test/cb"]`
+	if err := db.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	const one = "https://chat.example.test/api/sso/kyidentity/login"
+	for _, u := range []*store.User{euMember, localMember} {
+		if _, body := suiteBody(t, srv, "/api/suite/apps?sub="+u.ID, ""); appURL(t, body, "kymessage") != one {
+			t.Errorf("suite apps for %s after consolidation: %s", u.ID, body)
+		}
+		launcher := adminRequest(t, srv, "GET", "/api/user/applications", newSession(t, db, u, time.Now().UTC().Add(time.Hour)), "")
+		if appURL(t, launcher.Body.String(), "kymessage") != one {
+			t.Errorf("launcher for %s after consolidation: %s", u.ID, launcher.Body.String())
+		}
+	}
+	if rr := suiteGet(t, srv, "/api/suite/peer?client=kymessage", "kymessage", "msg-secret"); strings.Contains(rr.Body.String(), "regions") {
+		t.Errorf("peer after consolidation: %s", rr.Body.String())
+	}
 }
 
 // Staff set a client's region map with step-up and an audit row; origins must be the
