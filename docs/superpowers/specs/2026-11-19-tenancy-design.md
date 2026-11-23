@@ -926,7 +926,7 @@ drive, messages); which apps an org has is still `org_apps`, set by billing.
 | P3 | Seats (Entitlements): a seat is an active or pending everyday account (owner answer 7). Checked at every add (member add, admin create, enable), and again at activation. **A downgrade below the seats in use is refused** (`409 seats_in_use`, nothing changes); billing removes members, pending invites included, first. | The safe rule. An org never holds more seats than it pays for, nobody is disabled by surprise, and there is no `over_limit` state to derive, signal or reconcile. |
 | P4 | The account holder (D9) is the same for every plan: a pointer, not a role, with no admin route. A business's holder is its billing contact. Member invites and removals go through the billing portal (`members:*`) or staff, for every plan. | Owner decision 6: staff stay the only administrators. A business that needs its own administrators or delegations buys Enterprise. |
 | P5 | **Per-org MFA requirement.** Staff may add one required enrollment policy for a customer org, scope `org:<org_id>`, on an org route (`permAdmin`, step-up, audited in the org's log). It joins today's intersection: factors intersect with the platform policies and the earliest per-user deadline wins (`AGENTS.md`, MFA enrollment), so it adds a requirement and removes none. The holder and billing cannot set or clear it. | A business may need MFA for its members, and staff are its only administrators. A billing token that could clear it would strip a second factor from a whole org. The scope key is the org's ID, globally unique, so D2's per-org key problem does not arise. Build note: the `enrollment_policies` `CHECK` (`internal/store/group_enrollment.go:54`) admits only `organization`, `administrators` and `group:`, so widening it has P1's SQLite constraint and uses P1's method. |
-| P6 | **The storage a customer buys is one pool per org, across all apps, held by KyIdentity** (Org storage pool). Per-app quotas (`org_apps.quotas_json`, opaque, ≤ 4 KiB, set by billing) stay for each app's safety limits (per upload, per mailbox, sending), already settable per org. | Owner decision 6, 2026-11-23. A per-app key cannot hold one figure all apps share, so the pool is an org field with usage reports (S1, S4). |
+| P6 | **The storage a customer buys is one pool per org, across all apps, held by KyIdentity** (Org storage pool). Per-app quotas (`org_apps.quotas_json`, opaque, ≤ 4 KiB, set by billing) stay for each app's safety limits (per upload, per mailbox, sending), already settable per org. | Plans and orgs owner question 5, decided 2026-11-23. A per-app key cannot hold one figure all apps share, so the pool is an org field with usage reports (S1, S4). |
 | P7 | Delete everything (amendment, 2026-11-21) applies to every customer org: the holder alone deletes at once, a holder with members schedules deletion with the 7-day export window (`erasureGrace`), and a member deletes only themselves. The notice mail says "organisation", not "household". | One rule for every plan. Apps export a member's own data, so the window does not hand a member the business's other data. |
 | P8 | The business features under Per-org features (inbound SCIM, HR, upstream federation, outbound SCIM, forward-auth) stay off for every customer org. | Each needs per-org connectors or secrets the shared install does not have. Enterprise has them all. |
 
@@ -955,7 +955,7 @@ KyMessages-Native still names `org.unsuspended` in `docs/PRODUCT.md:75` and
 (`docs/superpowers/specs/2026-11-22-tenancy-design.md:89`). KyIdentity sends no `org.*`
 event to anyone yet: the outbox is PR 4.
 
-**Storage backend.** Decided 2026-11-23 (owner decision 5): primary app content on the hosted
+**Storage backend.** Decided 2026-11-23 (Plans and orgs owner question 6): primary app content on the hosted
 install goes in S3-compatible object storage, with the volume backend kept behind the same
 interface; each app's spec owns it. KyIdentity stores no content: its database stays in
 PostgreSQL and is small, so it has no object-storage backend, and no bucket key reaches it.
@@ -994,7 +994,7 @@ buys is the pool. **When a seat change leaves a Business org over its pool** (ap
 (1) new uploads and new stored content are blocked until the org is back under the pool,
 (2) no data is ever deleted, (3) the org's admin is warned before the seat change takes
 effect. Primary content on the hosted install goes in S3-compatible object storage, with the
-volume backend kept behind the same interface (owner decision 5); that is each app's spec.
+volume backend kept behind the same interface (Plans and orgs owner question 6); that is each app's spec.
 KyIdentity stores no content, so it has no object-storage backend and is not counted in the
 pool. Line references in this section are to `master` at `5604cd9`.
 
@@ -1009,7 +1009,7 @@ is those install limits.
 | S3 | Billing sets both fields on `POST /orgs` (required for a customer org) and `PATCH`; staff set them on the org page (PR 5, step-up, audited in the org's log); never the holder. Each is a whole number of bytes, `storage_bytes` 0 to 2^50 and `storage_per_seat_bytes` 0 to 2^44; a customer org's pool must be at least 1 GiB. Otherwise `400 invalid_storage`. The default and staff orgs keep `0, 0`: no pool. | Validate at the boundary. A missing field must not mean unlimited. The bounds keep `per_seat × MaxSeats` far inside a signed 64-bit integer. |
 | S4 | **Usage is reported per org and per app** to `POST /api/suite/storage`, with a sequence number, and the answer is that app's **headroom grant**: a ceiling it may fill until the grant expires. The pool and the reports live in PostgreSQL (`org_storage`); no replica holds any of it. | A grant reserves bytes for one app, so two apps cannot both fill the last bytes, and an app checks every write against its ceiling locally, with no round trip per write. |
 | S5 | **A write over the pool is refused, never deleted.** An org whose usage passes its pool (after a pool reduction, or by the mail overage of owner question 8) gets grants of zero. Every app then refuses writes that add bytes and allows every write that removes or keeps bytes. | The approved rule, and the safe default for every plan, not only Business. |
-| S6 | **"The admin" is the account holder** (D9). Staff stay the only administrators (decision 6): the holder is warned, not made an administrator. | The holder is the billing contact who asks for the seat change. |
+| S6 | **"The admin" is the account holder** (D9). Staff stay the only administrators (owner decision 6 at the top of this spec): the holder is warned, not made an administrator. | The holder is the billing contact who asks for the seat change. |
 
 ### Schema
 
