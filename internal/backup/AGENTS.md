@@ -21,6 +21,7 @@ KyIdentity's adapter over `github.com/Busnes-app/ky-primitives/recoveryclient`, 
 
 ## Verification
 - `go test ./internal/backup/...`
+- The pairing coherence test commits a change through a second handle immediately after the reader selects its pairing rows. Keep this interleaving for both `LoadPairing` and `RunBackup`.
 - `kyidentity backup-drill` against a throwaway data dir: every check but "Recovery Key" passes on an unpaired instance.
 
 ## Child DOX Index
