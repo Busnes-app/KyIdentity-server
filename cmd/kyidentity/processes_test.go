@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -45,7 +46,6 @@ type process struct {
 	name, url, dataDir, backupDir, logPath string
 	env                                    []string
 	cmd                                    *exec.Cmd
-	spawned, ready                         time.Time
 	exited                                 chan struct{}
 }
 
@@ -112,7 +112,6 @@ func (c *cluster) start(p *process) {
 	}
 	p.cmd = exec.Command(c.bin)
 	p.cmd.Env, p.cmd.Stdout, p.cmd.Stderr = p.env, logFile, logFile
-	p.spawned = time.Now()
 	if err := p.cmd.Start(); err != nil {
 		c.t.Fatal(err)
 	}
@@ -143,7 +142,6 @@ func (c *cluster) waitReady(p *process) {
 		if res, err := http.Get(p.url + "/readyz"); err == nil {
 			_ = res.Body.Close()
 			if res.StatusCode == 200 {
-				p.ready = time.Now()
 				return
 			}
 		}
@@ -346,6 +344,18 @@ func countStatus(replies []reply, status int) (n int) {
 	return n
 }
 
+func waitFor(t *testing.T, what string, limit time.Duration, ok func() bool) time.Duration {
+	t.Helper()
+	start := time.Now()
+	for !ok() {
+		if time.Since(start) > limit {
+			t.Fatalf("%s: not within %v", what, limit)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return time.Since(start)
+}
+
 func capsules(t *testing.T, procs ...*process) (n int) {
 	t.Helper()
 	for _, p := range procs {
@@ -459,8 +469,8 @@ func TestTwoServerProcessesAreOneIdentity(t *testing.T) {
 	c.loadBalancer(func() []*process { liveMu.Lock(); defer liveMu.Unlock(); return live })
 
 	// Both start at once on an empty database: one schema, one administrator.
-	a := c.spawn("a", "KYIDENTITY_RECOVERY_KEY_ID="+keyID)
-	b := c.spawn("b", "KYIDENTITY_RECOVERY_KEY_ID="+keyID)
+	a := c.spawn("a", "KYIDENTITY_RECOVERY_KEY_ID="+keyID, "KYIDENTITY_BACKUP_DEPOSIT_INTERVAL=0")
+	b := c.spawn("b", "KYIDENTITY_RECOVERY_KEY_ID="+keyID, "KYIDENTITY_BACKUP_DEPOSIT_INTERVAL=0")
 	c.waitReady(a)
 	c.waitReady(b)
 	setLive(a, b)
@@ -596,7 +606,6 @@ func TestTwoServerProcessesAreOneIdentity(t *testing.T) {
 	if res := admin.do(a.url, "POST", "/api/admin/backup/pin-key", pinBody, admin.stepUp(b.url, "POST", "/api/admin/backup/pin-key"), ""); res.status != 200 {
 		t.Fatalf("pin: %v", res)
 	}
-	pinnedAt := time.Now()
 	for _, p := range []*process{a, b} {
 		if st := admin.get(p.url, "/api/admin/backup/status"); st.body["key_pinned"] != true || st.body["recovery_key_id"] != keyID {
 			t.Fatalf("%s does not hold the pinned key: %v", p.name, st)
@@ -606,19 +615,31 @@ func TestTwoServerProcessesAreOneIdentity(t *testing.T) {
 		}
 	}
 
-	// The schedule comes due in both processes. Wait until each has ticked since the pin
-	// (a tick is a minute after its start, give or take the start itself): one backup ran.
-	var bothTicked time.Time
-	for _, p := range []*process{a, b} {
-		tick := p.ready.Add(time.Minute)
-		for p.spawned.Add(tick.Sub(p.ready)).Before(pinnedAt) {
-			tick = tick.Add(time.Minute)
-		}
-		if tick.After(bothTicked) {
-			bothTicked = tick
-		}
+	// Enable the schedule only once both replicas have the key. An earlier,
+	// unpaired attempt would consume the first interval.
+	const schedule = "/api/admin/backup/schedule"
+	if r := admin.do(a.url, "PUT", schedule, map[string]any{"interval_sec": 3600}, admin.stepUp(b.url, "PUT", schedule), ""); r.status != 200 {
+		t.Fatalf("enable schedule: %v", r)
 	}
-	time.Sleep(time.Until(bothTicked.Add(5 * time.Second)))
+	// Give both schedulers a tick. A tick starts work; even after a capsule
+	// appears the audit and lease release may still be outstanding.
+	db, err := sql.Open("pgx", c.databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	eligible := time.Now().Add(time.Minute)
+	waitFor(t, "scheduled backup to finish", 3*time.Minute, func() bool {
+		if time.Now().Before(eligible) {
+			return false
+		}
+		var finished bool
+		if err := db.QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM audit_events WHERE action='admin.backup_run')
+			AND NOT EXISTS(SELECT 1 FROM leases WHERE name='backup')`).Scan(&finished); err != nil {
+			t.Fatal(err)
+		}
+		return finished
+	})
 	if n := capsules(t, a, b); n != 1 {
 		t.Fatalf("%d capsules after the schedule came due once in two processes, want 1", n)
 	}
@@ -1027,17 +1048,7 @@ func TestServerProcessesFollowAPostgresFailover(t *testing.T) {
 		t.Helper()
 		return docker("exec", "-u", "postgres", server, "psql", "-qAtX", "-v", "ON_ERROR_STOP=1", "-c", statement)
 	}
-	until := func(what string, limit time.Duration, ok func() bool) time.Duration {
-		t.Helper()
-		start := time.Now()
-		for !ok() {
-			if time.Since(start) > limit {
-				t.Fatalf("%s: not within %v", what, limit)
-			}
-			time.Sleep(250 * time.Millisecond)
-		}
-		return time.Since(start)
-	}
+
 	accepts := func(server string) func() bool {
 		return func() bool {
 			return exec.Command("docker", "exec", "-u", "postgres", server, "psql", "-qAtX", "-c", "SELECT 1").Run() == nil
@@ -1054,7 +1065,7 @@ func TestServerProcessesFollowAPostgresFailover(t *testing.T) {
 
 	docker("run", "-d", "--name", primary, "--network", network, "-p", "127.0.0.1::5432", "-e", "POSTGRES_PASSWORD="+password, image)
 	// The image starts a temporary server to initialise, then the real one: wait for TCP.
-	until("the primary starts", time.Minute, func() bool {
+	waitFor(t, "the primary starts", time.Minute, func() bool {
 		return exec.Command("docker", "exec", primary, "pg_isready", "-h", "127.0.0.1", "-U", "postgres").Run() == nil
 	})
 	docker("exec", "-u", "postgres", primary, "sh", "-c", `echo "host replication all all scram-sha-256" >> "$PGDATA/pg_hba.conf"`)
@@ -1062,7 +1073,7 @@ func TestServerProcessesFollowAPostgresFailover(t *testing.T) {
 	sql(primary, "CREATE DATABASE kyidentity ENCODING 'UTF8' LOCALE 'C' TEMPLATE template0")
 	docker("run", "-d", "--name", standby, "--network", network, "-p", "127.0.0.1::5432", "--user", "postgres", "-e", "PGPASSWORD="+password,
 		"--entrypoint", "sh", image, "-c", `pg_basebackup -h `+primary+` -U postgres -D "$PGDATA" -R -X stream -c fast && chmod 700 "$PGDATA" && exec postgres`)
-	until("the standby streams", time.Minute, func() bool {
+	waitFor(t, "the standby streams", time.Minute, func() bool {
 		out, err := exec.Command("docker", "exec", "-u", "postgres", primary, "psql", "-qAtX", "-c", "SELECT count(*) FROM pg_stat_replication WHERE state='streaming'").Output()
 		return err == nil && strings.TrimSpace(string(out)) == "1"
 	})
@@ -1070,7 +1081,7 @@ func TestServerProcessesFollowAPostgresFailover(t *testing.T) {
 	// loses nothing. An asynchronous standby may be missing the last sign-out.
 	sql(primary, "ALTER SYSTEM SET synchronous_standby_names = '*'")
 	sql(primary, "SELECT pg_reload_conf()")
-	until("the standby is synchronous", time.Minute, func() bool {
+	waitFor(t, "the standby is synchronous", time.Minute, func() bool {
 		return sql(primary, "SELECT count(*) FROM pg_stat_replication WHERE sync_state='sync'") == "1"
 	})
 
@@ -1106,7 +1117,7 @@ func TestServerProcessesFollowAPostgresFailover(t *testing.T) {
 	// The primary dies. Neither server may say it is ready, and neither may exit.
 	docker("kill", primary)
 	for _, p := range both {
-		t.Logf("%s not ready %v after the primary died", p.name, until(p.name+" stops being ready", 30*time.Second, func() bool { return !ready(p) }))
+		t.Logf("%s not ready %v after the primary died", p.name, waitFor(t, p.name+" stops being ready", 30*time.Second, func() bool { return !ready(p) }))
 	}
 	if res := newBrowser(t, "198.51.100.12").do(a.url, "POST", "/api/auth/login", map[string]string{"username": "admin", "password": processPassword}, nil, ""); res.status/100 == 2 {
 		t.Fatalf("a sign-in succeeded with no database: %v", res)
@@ -1114,9 +1125,9 @@ func TestServerProcessesFollowAPostgresFailover(t *testing.T) {
 
 	// The standby is promoted. Both servers find it without a restart.
 	docker("exec", "-u", "postgres", standby, "sh", "-c", `pg_ctl promote -w -D "$PGDATA"`)
-	until("the standby accepts connections", time.Minute, accepts(standby))
+	waitFor(t, "the standby accepts connections", time.Minute, accepts(standby))
 	for _, p := range both {
-		t.Logf("%s ready %v after the promotion", p.name, until(p.name+" is ready again", 60*time.Second, func() bool { return ready(p) }))
+		t.Logf("%s ready %v after the promotion", p.name, waitFor(t, p.name+" is ready again", 60*time.Second, func() bool { return ready(p) }))
 		select {
 		case <-p.exited:
 			t.Fatalf("%s exited during the failover:\n%s", p.name, p.log(t))
