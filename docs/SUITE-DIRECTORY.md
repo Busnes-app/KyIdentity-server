@@ -229,7 +229,9 @@ bodies only, never in tokens: take it from `/api/suite/orgs` by the token's `org
 
 A multi-region app is one OAuth client whose redirect URIs include each region's origin
 (`https://us.chat.example.com/cb`, `https://eu.chat.example.com/cb`). Staff map regions to
-those origins (`PUT /api/admin/clients/{id}/regions`). Then:
+those origins (`PUT /api/admin/clients/{id}/regions`). An entry whose origin is no longer a
+redirect origin is ignored everywhere below, and `GET` on that route lists it under `stale`.
+Then:
 
 - `/api/suite/apps?sub=` and the launcher open the app at the `sub`'s home-region origin,
   with the launch URL's path, and leave the app out when it has no origin for that region.

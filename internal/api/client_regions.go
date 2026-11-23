@@ -36,6 +36,20 @@ func isRedirectOrigin(client store.OAuthClient, origin string) bool {
 	return false
 }
 
+// splitRegions parts a stored region map into the entries served (origin still a redirect
+// origin of the client) and the stale rest, which every reader ignores.
+func splitRegions(client store.OAuthClient, regions map[string]string) (served, stale map[string]string) {
+	served, stale = map[string]string{}, map[string]string{}
+	for region, origin := range regions {
+		if isRedirectOrigin(client, origin) {
+			served[region] = origin
+		} else {
+			stale[region] = origin
+		}
+	}
+	return served, stale
+}
+
 // regionLaunchURL moves launchURL to origin, keeping its path and query; "" when origin is
 // not one of the client's redirect origins.
 func regionLaunchURL(client store.OAuthClient, launchURL, origin string) string {
@@ -56,12 +70,15 @@ func orgRegionOrigins(st *store.Store, multiTenant bool, org store.OrgID) (map[s
 	return st.OrgRegionOrigins(org)
 }
 
-// regionsBody is the admin route's body and answer.
+// regionsBody is the admin route's body and answer. Stale (answers only) lists stored
+// entries whose origin is no longer a redirect origin: kept, never served.
 type regionsBody struct {
 	Regions map[string]string `json:"regions"`
+	Stale   map[string]string `json:"stale,omitempty"`
 }
 
-// GetClientRegions answers the client's region map. Multi-tenant only.
+// GetClientRegions answers the client's region map as served, and its stale entries.
+// Multi-tenant only.
 func (h *AdminHandler) GetClientRegions(w http.ResponseWriter, r *http.Request) {
 	if !h.multiTenant {
 		writeAPIError(w, http.StatusNotFound, "not_found", "")
@@ -83,7 +100,8 @@ func (h *AdminHandler) GetClientRegions(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "")
 		return
 	}
-	writeJSON(w, http.StatusOK, regionsBody{regions})
+	served, stale := splitRegions(*client, regions)
+	writeJSON(w, http.StatusOK, regionsBody{served, stale})
 }
 
 // PutClientRegions replaces the client's region map; {} clears it. Multi-tenant only.
@@ -128,5 +146,5 @@ func (h *AdminHandler) PutClientRegions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	event.Committed()
-	writeJSON(w, http.StatusOK, regionsBody{clean})
+	writeJSON(w, http.StatusOK, regionsBody{Regions: clean})
 }

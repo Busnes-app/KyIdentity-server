@@ -864,7 +864,8 @@ clears it) and commits `admin.client_regions_changed` with the map in the same t
 `400 invalid_regions` for a malformed region, an origin that is not exactly
 `https://host[:port]`, or one that is not among the client's redirect origins. Reads re-check
 that last rule, so an origin whose redirect URI was later removed is ignored rather than
-used. Deleting the client deletes its rows.
+used; `GET` answers `regions` as served and lists such entries apart under `stale`, so the
+admin view matches what apps get. Deleting the client deletes its rows.
 
 **Resolving an app's URL for an org.** A client with no rows is one URL, as today. A client
 with rows serves an org only through the row for that org's home region; with none it does not

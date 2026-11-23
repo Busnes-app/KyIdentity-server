@@ -203,12 +203,7 @@ func (h *SuiteHandler) Peer(w http.ResponseWriter, r *http.Request, caller *stor
 			suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 			return
 		}
-		for region, o := range regions {
-			if !isRedirectOrigin(*peer, o) {
-				delete(regions, region)
-			}
-		}
-		if len(regions) > 0 {
+		if regions, _ = splitRegions(*peer, regions); len(regions) > 0 {
 			// A caller uses regions[home_region] for an org, never url (suitedir Peer.URLFor).
 			body["regions"] = regions
 		}

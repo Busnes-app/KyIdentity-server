@@ -168,6 +168,20 @@ func TestClientRegions(t *testing.T) {
 	if err != nil || len(rows) != 1 || !strings.Contains(rows[0].DetailsJSON, `"eu-central":"https://eu.chat.example.test"`) {
 		t.Fatalf("audit %+v %v", rows, err)
 	}
+	// A redirect URI removed later leaves its region stale: the admin view shows it apart
+	// from what is served, as the launcher and peer ignore it.
+	c, err := db.GetOAuthClientByID("kymessage")
+	if err != nil || c == nil {
+		t.Fatal(c, err)
+	}
+	c.RedirectURIsJSON = `["https://us.chat.example.test/cb"]`
+	if err := db.UpdateOAuthClient(c); err != nil {
+		t.Fatal(err)
+	}
+	stale := `{"regions":{"us":"https://us.chat.example.test"},"stale":{"eu-central":"https://eu.chat.example.test"}}`
+	if rr := adminRequest(t, srv, "GET", path, cookie, ""); strings.TrimSpace(rr.Body.String()) != stale {
+		t.Fatalf("get after redirect removal: %s", rr.Body.String())
+	}
 	if rr := adminRequest(t, srv, "PUT", path, cookie, `{"regions":{}}`); rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != `{"regions":{}}` {
 		t.Fatalf("clear: %d %s", rr.Code, rr.Body.String())
 	}
