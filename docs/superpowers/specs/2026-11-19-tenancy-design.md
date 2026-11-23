@@ -5,7 +5,8 @@ tenancy-spec. Status: approved design. PRs 1–3 are built. Amended 2026-11-21 w
 the `export_only` claim (K open question 4 (a)), and with Mailbox address (multi-tenant), from the owner
 answer to KyPost open question 1. Amended 2026-11-22 with Home region (owner decision on multi-region apps).
 Amended 2026-11-23 with Plans and orgs (owner decisions: every paid plan, Business included, is an org on
-the shared install; only Enterprise gets a dedicated one).
+the shared install; only Enterprise gets a dedicated one), and with Org storage pool (owner decisions:
+one storage quota per org across all apps, held by KyIdentity; the over-quota rule for a seat change).
 
 KyIdentity today is one organisation per install (`AGENTS.md:3`, `design.md:31` defers
 multi-tenancy). This spec adds a second mode to the same binary. **Single-tenant** is
@@ -76,7 +77,7 @@ check in code.
 Residual risks (accepted):
 
 - **One writer for every org.** Every Postgres write transaction takes one advisory lock
-  (`AGENTS.md:191`, `docs/RUNNING.md:343`). A burst of writes in one org delays sign-ins
+  (`AGENTS.md:198`, `docs/RUNNING.md:343`). A burst of writes in one org delays sign-ins
   (which write `sessions`) in every other org. Per-org rate limits soften this but do not
   remove it. Capacity is unmeasured (open question 8).
 - **A restore rolls back every org.** Restoring a capsule to fix one customer's problem
@@ -113,6 +114,7 @@ orgs (
   billing_revision BIGINT NOT NULL DEFAULT 0,
   revision BIGINT NOT NULL DEFAULT 1,       -- KyIdentity's own version, carried in events
   delete_after BIGINT,                      -- unix seconds, set by schedule-deletion
+  storage_bytes, storage_per_seat_bytes, storage_over_since,  -- Org storage pool (2026-11-23)
   created_at, updated_at)
 org_apps (org_id, app_id REFERENCES app_registry ON DELETE CASCADE,
   enabled BOOLEAN, access_mode TEXT NULL,   -- NULL = app_registry.access_mode
@@ -308,7 +310,7 @@ unscoped `*Store` for org-owned tables.
 
 **Postgres row-level security** would add a second layer: a non-owner role, policies of
 `org_id = current_setting('ky.org')`, and `SET LOCAL` per transaction. The work is real and
-unverified. `pgdialect` wraps statements in its own transactions (`AGENTS.md:191`), and the
+unverified. `pgdialect` wraps statements in its own transactions (`AGENTS.md:198`), and the
 read pool and every worker would need a bypass role. Deferred (open question 6).
 
 **Tests:**
@@ -466,6 +468,8 @@ targets are off in multi-tenant v1 (see Per-org features).
 5. Stop serving an org whose `/api/suite/orgs` status is not `active`. Keep its data unless
    the status is `deleted`.
 6. Enforce its own quotas from `/api/suite/orgs`.
+7. *Amended 2026-11-23:* report its stored bytes per org to `POST /api/suite/storage`, and
+   refuse any write that adds bytes beyond the grant it holds (Org storage pool).
 
 Each app's PR documents its half against this list.
 
@@ -520,9 +524,9 @@ holder's name and email on create.
 
 | Route | Scope | Effect |
 |---|---|---|
-| `POST /orgs` | `orgs:write` | `{name, home_region, plan, max_seats, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, holder_mailbox_address?, billing_ref, revision}`. Creates the org and a pending account holder (with its mailbox address when given; see Mailbox address), and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere or the holder's mailbox address collides, `400 mailbox_domain` for a mailbox address off the suite domains, `400 invalid_home_region` (see Home region), `400 invalid_max_seats` outside 1–`MaxSeats` (Plans and orgs P2). The org is `kind='customer'`; the body has no `kind`. |
-| `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `holder_activated`, `delete_after`, `revision`. No names or emails of users. |
-| `PATCH /orgs/{id}` | `orgs:write` | `{revision}` plus any of: plan, `max_seats`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). `max_seats` below the seats in use is `409 seats_in_use` with `seats_used`, and nothing changes: billing removes members first (Plans and orgs P3). `400 invalid_max_seats` as for `POST`. |
+| `POST /orgs` | `orgs:write` | `{name, home_region, plan, max_seats, storage_bytes, storage_per_seat_bytes, apps:{client_id:{enabled, quotas}}, holder_email, holder_name, holder_mailbox_address?, billing_ref, revision}`. Creates the org and a pending account holder (with its mailbox address when given; see Mailbox address), and sends an activation invite by mail (`account_tokens`, delivery `email`). `503 mail_not_configured`, creating nothing, until platform mail is set (see Roles). `409 email_in_use` if the email exists anywhere or the holder's mailbox address collides, `400 mailbox_domain` for a mailbox address off the suite domains, `400 invalid_home_region` (see Home region), `400 invalid_max_seats` outside 1–`MaxSeats` (Plans and orgs P2), `400 invalid_storage` (Org storage pool S3). The org is `kind='customer'`; the body has no `kind`. |
+| `GET /orgs/{id}`, `GET /orgs?status=&billing_ref=&cursor=` | `orgs:read` | Status, reason, plan, limits, `seats_used`, `pending_invites`, `holder_activated`, `delete_after`, `revision`, and the storage figures (Org storage pool). No names or emails of users. |
+| `PATCH /orgs/{id}` | `orgs:write` | `{revision}` plus any of: plan, `max_seats`, `storage_bytes`, `storage_per_seat_bytes`, apps and quotas, name, `account_holder_user_id` (a live member of the org, pending or activated: see Account holder guard). `max_seats` below the seats in use is `409 seats_in_use` with `seats_used`, and nothing changes: billing removes members first (Plans and orgs P3). A change that lowers the pool to below the org's usage is `409 storage_over_pool` without `storage_over_pool_ack` (Org storage pool). `400 invalid_max_seats` and `400 invalid_storage` as for `POST`. |
 | `POST /orgs/{id}/suspend` | `orgs:write` | `{reason: payment\|abuse, revision}`. Semantics below. |
 | `POST /orgs/{id}/resume` | `orgs:write` | `{revision}`. From `suspended`, or from `deletion_scheduled` before `delete_after`. Sign-in works again. Sessions do not come back. |
 | `POST /orgs/{id}/schedule-deletion` | `orgs:write` | `{grace_days 7–90, revision}`. Suspends the org and sets `delete_after`. The account holder can still sign in to a restricted, export-only session (the `active_principals` exception under Views). |
@@ -922,7 +926,7 @@ drive, messages); which apps an org has is still `org_apps`, set by billing.
 | P3 | Seats (Entitlements): a seat is an active or pending everyday account (owner answer 7). Checked at every add (member add, admin create, enable), and again at activation. **A downgrade below the seats in use is refused** (`409 seats_in_use`, nothing changes); billing removes members, pending invites included, first. | The safe rule. An org never holds more seats than it pays for, nobody is disabled by surprise, and there is no `over_limit` state to derive, signal or reconcile. |
 | P4 | The account holder (D9) is the same for every plan: a pointer, not a role, with no admin route. A business's holder is its billing contact. Member invites and removals go through the billing portal (`members:*`) or staff, for every plan. | Owner decision 6: staff stay the only administrators. A business that needs its own administrators or delegations buys Enterprise. |
 | P5 | **Per-org MFA requirement.** Staff may add one required enrollment policy for a customer org, scope `org:<org_id>`, on an org route (`permAdmin`, step-up, audited in the org's log). It joins today's intersection: factors intersect with the platform policies and the earliest per-user deadline wins (`AGENTS.md`, MFA enrollment), so it adds a requirement and removes none. The holder and billing cannot set or clear it. | A business may need MFA for its members, and staff are its only administrators. A billing token that could clear it would strip a second factor from a whole org. The scope key is the org's ID, globally unique, so D2's per-org key problem does not arise. Build note: the `enrollment_policies` `CHECK` (`internal/store/group_enrollment.go:54`) admits only `organization`, `administrators` and `group:`, so widening it has P1's SQLite constraint and uses P1's method. |
-| P6 | **Quotas are per org and per app** (`org_apps.quotas_json`, opaque, ≤ 4 KiB, set by billing), so they are already settable per org. A pooled storage quota for a Family (one figure for the whole org in one app) is one key; a per-member quota is another; apps enforce either from `/api/suite/orgs`. No schema change. | Owner input 5: pooled or not is undecided, so both must fit. Not covered: one pool shared *across* apps (mail, drive and notes drawing on one figure), which needs a usage total the apps share; KyIdentity holds no usage. |
+| P6 | **The storage a customer buys is one pool per org, across all apps, held by KyIdentity** (Org storage pool). Per-app quotas (`org_apps.quotas_json`, opaque, ≤ 4 KiB, set by billing) stay for each app's safety limits (per upload, per mailbox, sending), already settable per org. | Owner decision 6, 2026-11-23. A per-app key cannot hold one figure all apps share, so the pool is an org field with usage reports (S1, S4). |
 | P7 | Delete everything (amendment, 2026-11-21) applies to every customer org: the holder alone deletes at once, a holder with members schedules deletion with the 7-day export window (`erasureGrace`), and a member deletes only themselves. The notice mail says "organisation", not "household". | One rule for every plan. Apps export a member's own data, so the window does not hand a member the business's other data. |
 | P8 | The business features under Per-org features (inbound SCIM, HR, upstream federation, outbound SCIM, forward-auth) stay off for every customer org. | Each needs per-org connectors or secrets the shared install does not have. Enterprise has them all. |
 
@@ -947,14 +951,10 @@ KyMessages-Native still names `org.unsuspended` in `docs/PRODUCT.md:75` and
 (`docs/superpowers/specs/2026-11-22-tenancy-design.md:89`). KyIdentity sends no `org.*`
 event to anyone yet: the outbox is PR 4.
 
-**Storage cost (open question; not decided).** Owner input: object storage costs about
-$0.007/GB/month (Backblaze B2) against about EUR 0.057 (Hetzner volumes) or $0.10
-(DigitalOcean) for block storage, and storage is the main cost per account. KyIdentity
-stores no files: its database stays on Postgres block storage and is small. *Recommendation:*
-the apps keep bulk content (drive files, mail bodies and attachments, message media, note
-attachments) in S3-compatible object storage, one bucket per home region,
-and keep their databases and search indexes on block storage. That is each app's spec to
-decide; the cost figures are the owner's, unverified here.
+**Storage backend.** Decided 2026-11-23 (owner decision 5): primary app content on the hosted
+install goes in S3-compatible object storage, with the volume backend kept behind the same
+interface; each app's spec owns it. KyIdentity stores no content: its database stays in
+PostgreSQL and is small, so it has no object-storage backend, and no bucket key reaches it.
 
 Owner questions, each with the default this design applies:
 
@@ -964,14 +964,217 @@ Owner questions, each with the default this design applies:
 3. Who sets the per-org MFA requirement. *Default: staff only* (P5). Billing never.
 4. The export window when a business's holder deletes everything. *Default: 7 days, as for
    every plan* (P7).
-5. One storage pool across apps. *Default: not in v1* (P6); each app enforces its own.
-6. Object or block storage for app content. *Recommendation: object storage* (above).
+5. *Decided 2026-11-23:* one storage pool per org across apps (Org storage pool).
+6. *Decided 2026-11-23:* object storage for app content, volumes behind the same interface.
+7. What "seats" means for the Business pool. *Default: paid seats, `max_seats`* (S2). The
+   alternative is the members in use (`seats_used`).
+8. Incoming mail while over the pool. *Recommendation: 7 days' grace with up to 10% of the
+   pool (at least 2 GB) over, then `452 4.2.2` for 3 days, then `552 5.2.2`* (Org storage
+   pool). KyPost's spec applies it.
 
 Tests (code PR): the `CHECK` and the renamed kind on both backends (a customer org is
 accepted, `person` and `household` are refused, an upgraded Postgres database lands on the
 same constraint as a fresh one), Delete everything and the mailbox address for a `customer`
 org on both backends, a Postgres snapshot of a customer org restoring through SQLite, and
 `testdata/tenancy-golden` unchanged.
+
+## Org storage pool (amendment, 2026-11-23)
+
+Owner decisions, 2026-11-23 (fixed). **One storage quota per org, across all seven apps,
+required for launch.** It is one number per org, shared by every member: Personal 20 GB,
+Couple 40 GB, Family 100 GB, Business 30 GB × its seats (pooled across the team, recalculated
+whenever seats are added or removed), Enterprise custom. **KyIdentity holds the pool.** Each
+app checks it before a write that adds bytes, and reports its usage. Per-app limits that exist
+today (per upload, per user, per mailbox) stay as safety limits, but the figure a customer
+buys is the pool. **When a seat change leaves a Business org over its pool** (approved rule):
+(1) new uploads and new stored content are blocked until the org is back under the pool,
+(2) no data is ever deleted, (3) the org's admin is warned before the seat change takes
+effect. Primary content on the hosted install goes in S3-compatible object storage, with the
+volume backend kept behind the same interface (owner decision 5); that is each app's spec.
+KyIdentity stores no content, so it has no object-storage backend and is not counted in the
+pool. Line references in this section are to `master` at `5604cd9`.
+
+Single-tenant installs (Enterprise included) have no pool: every route below answers `404`,
+the columns stay at their defaults, and apps keep their install limits. Enterprise "custom"
+is those install limits.
+
+| # | Decision | Why |
+|---|---|---|
+| S1 | **The pool is an org field**, not a `quotas_json` key: `orgs.storage_bytes` (a fixed part) and `orgs.storage_per_seat_bytes`. The pool is `storage_bytes + storage_per_seat_bytes × max_seats`, computed by KyIdentity in the transaction that changes any of the three. Personal is `20 GB + 0`, Business `0 + 30 GB`. KyIdentity never branches on `plan`. | `quotas_json` is per app and opaque, so it cannot hold one figure that all apps share, and KyIdentity cannot compute with it. Deriving the Business pool from `max_seats` means a seat change and the pool change are one write: billing cannot change one and forget the other, and two writes cannot race. |
+| S2 | **"Seats" means paid seats, `max_seats`**, not the members in use. | A Business customer buys seats; the pool follows what is paid. Using members in use would shrink the pool when a member leaves without any change to the bill. Owner question 7. |
+| S3 | Billing sets both fields on `POST /orgs` (required for a customer org) and `PATCH`; staff set them on the org page (PR 5, step-up, audited in the org's log); never the holder. Each is a whole number of bytes, `storage_bytes` 0 to 2^50 and `storage_per_seat_bytes` 0 to 2^44; a customer org's pool must be at least 1 GiB. Otherwise `400 invalid_storage`. The default and staff orgs keep `0, 0`: no pool. | Validate at the boundary. A missing field must not mean unlimited. The bounds keep `per_seat × MaxSeats` far inside a signed 64-bit integer. |
+| S4 | **Usage is reported per org and per app** to `POST /api/suite/storage`, with a sequence number, and the answer is that app's **headroom grant**: a ceiling it may fill until the grant expires. The pool and the reports live in PostgreSQL (`org_storage`); no replica holds any of it. | A grant reserves bytes for one app, so two apps cannot both fill the last bytes, and an app checks every write against its ceiling locally, with no round trip per write. |
+| S5 | **A write over the pool is refused, never deleted.** An org whose usage passes its pool (after a pool reduction, or by the mail overage of owner question 8) gets grants of zero. Every app then refuses writes that add bytes and allows every write that removes or keeps bytes. | The approved rule, and the safe default for every plan, not only Business. |
+| S6 | **"The admin" is the account holder** (D9). Staff stay the only administrators (decision 6): the holder is warned, not made an administrator. | The holder is the billing contact who asks for the seat change. |
+
+### Schema
+
+```
+orgs (…,
+  storage_bytes BIGINT NOT NULL DEFAULT 0,          -- S1; 0 for the default and staff orgs
+  storage_per_seat_bytes BIGINT NOT NULL DEFAULT 0, -- S1
+  storage_over_since BIGINT)                        -- unix seconds; NULL while within the pool
+org_storage (org_id REFERENCES orgs, app_id REFERENCES app_registry ON DELETE CASCADE,
+  used_bytes BIGINT NOT NULL,      -- the app's last accepted report
+  seq BIGINT NOT NULL,             -- that report's sequence number
+  ceiling_bytes BIGINT NOT NULL,   -- used_bytes + the grant; reserved until the next report
+  reported_at BIGINT NOT NULL,
+  PRIMARY KEY(org_id, app_id))
+```
+
+`org_storage` is org class (O): `org_id` is in its key, `DELETE /orgs/{id}` and Delete
+everything remove it with the org's other rows (`orgRowTables`). It holds byte counts only,
+no names, paths or content. Both backends get the schema in one version (with the `CHECK`s
+for S3's bounds); on SQLite it stays empty, since SQLite holds no customer org (D2).
+
+### `POST /api/suite/storage` (suite contract)
+
+Suite client authentication (HTTP Basic, a confidential client, `Authenticate`), rate limit
+and `no-store`, as `/api/suite/orgs`. The app is the caller's `app_registry` row
+(`suiteAppID`), never a body field. `404` in single-tenant mode.
+
+```
+{"reports": [{"org_id", "used_bytes", "seq", "want_bytes"}]}          -- 1 to 500 entries
+{"results": [{"org_id", "result": "ok"|"stale"|"unknown_org",
+              "seq", "ceiling_bytes", "ttl_seconds",                   -- this app's grant
+              "pool_bytes", "org_used_bytes", "over_since"}]}          -- the org, all apps
+```
+
+- **Validation.** Body ≤ 64 KiB; `org_id` a UUID, at most once per request; `used_bytes`
+  and `want_bytes` 0 to 2^53; `seq` 1 to 2^63−1. Anything else is `400 invalid_request` for
+  the whole request, and nothing is applied.
+- **Which orgs.** An org the app is not told about (`suiteOrgVisibleSQL`), or `deleted`,
+  answers `unknown_org`, the same for both, so the route reveals no other org. An app whose
+  access was turned off still reports (its bytes still count) but gets no grant.
+- **Sequence.** `seq` is strictly increasing per org and per app, and comes from the app's
+  shared database (for example a PostgreSQL sequence), never from one replica's clock. A
+  report is applied only when its `seq` is above the stored one, in one
+  `UPDATE … WHERE seq < ?` (or the first insert), so a stale report cannot overwrite a newer
+  one in any order. The same `seq` with the same `used_bytes` is a replay: `ok`, with the
+  stored grant unchanged (idempotent). A lower `seq`, or the same one with other bytes, is
+  `stale` with the stored `seq` and changes nothing; the app keeps its current grant until it
+  expires. A renewal therefore needs a new `seq`.
+- **Grant.** In the same write transaction (serialised on every replica: one Postgres
+  advisory lock, `AGENTS.md:198`), for an accepted report:
+  - `used` is the sum of every app's `used_bytes` for the org, this report included;
+    `held` is the sum of every *other* app's grant, `ceiling_bytes − used_bytes`. A grant
+    stays held after it expires, until that app's next report replaces it: an app may have
+    filled it before expiry without reporting yet, so releasing it on a clock would
+    under-count. No clock comparison happens in KyIdentity, so skew cannot matter;
+  - `grant = max(0, min(want_bytes, pool − used − held, cap − held))`, where
+    `cap = min(pool / 8, 64 GiB)` bounds every grant an org holds at once;
+  - the grant is `0` when the org is not `active`, the app is not enabled for it, or the org
+    is over its pool (S5);
+  - the row stores `ceiling_bytes = used_bytes + grant`. The answer carries
+    `ttl_seconds: 900`, the app's own limit on using it.
+- **Over the pool.** The same transaction sets `orgs.storage_over_since` to now when `used`
+  first passes the pool, and clears it when `used` is back within it. Either change takes a
+  new org revision (`nextOrgRevisionSQL`), so it reaches apps through `/api/suite/orgs`.
+  A `PATCH` that changes the pool does the same.
+- **Audit.** Reports are not audited one by one (they are metering, not changes). A flip of
+  `storage_over_since` writes `org.storage_over` or `org.storage_within` in the org's log,
+  with the two byte figures only.
+
+**`/api/suite/orgs` gains** `storage: {pool_bytes, over_since}` on each customer org, so
+KyPost and the others read the over-quota state on the poll they already make. Usage itself
+changes too often to take an org revision; it is in the storage answer only.
+
+**Platform API.** `GET /orgs/{id}` adds `storage_bytes`, `storage_per_seat_bytes`,
+`pool_bytes`, `used_bytes`, `used_by_app` (`{app_id: bytes}`) and `over_since`. Byte counts
+only.
+
+### The check an app makes
+
+- An app keeps its grant (`ceiling_bytes` and an expiry) in its own shared database, so every
+  replica checks the same figure. The expiry is the time the app **sent** the request plus
+  `ttl_seconds`, by the app's clock, so a slow answer or a skewed KyIdentity clock can only
+  shorten it.
+- A write that adds `n` bytes is allowed only when the app's committed usage plus `n` is at
+  most `ceiling_bytes`, the grant has not expired, and the check runs inside the write's own
+  transaction (so the app's own replicas cannot both take the last bytes). A write that adds
+  nothing (a delete, a move, a shrink, a metadata edit) is always allowed.
+- The app reports about every 60 s for each org whose usage changed, at once when it has
+  used half its grant or wants more than it holds (`want_bytes` sized to its recent rate),
+  and at least once per `ttl_seconds` for every org it holds a grant for, renewing it or
+  releasing it with `want_bytes: 0`, in batches. An app that stops reporting keeps its last
+  grant reserved (at most the org's cap) until it reports again. A write larger than the grant cap is written in parts, each checked, or
+  refused by the app's own per-write limit. Every org's cap is at least 2.5 GB (a Personal
+  pool's eighth).
+- **KyIdentity unreachable:** once the grant expires (at most 15 minutes), writes that add
+  bytes are refused until a report succeeds. Reads, deletes and mail already accepted are not
+  affected. That fails closed; the staleness bound is the 15-minute grant.
+- **What "used" counts** is each app's spec: every stored byte it keeps for the org (bodies,
+  attachments, previews and indexes if the app counts them), the same figure it reports.
+  An app with no stored content (if any) reports `0` and asks for nothing.
+- **After a restore** of an app's database, its `seq` source may restart below KyIdentity's.
+  Its reports are then `stale` with the stored `seq`; the operator's restore step advances
+  the app's sequence past that value, and the next report wins. An app never advances it on
+  its own, so a stale replica cannot overwrite a newer figure. After a restore of
+  KyIdentity, the stored rows are older, and the apps' next reports (higher `seq`) replace
+  them.
+
+**Worst-case overshoot.**
+
+- With the pool unchanged: **none**. Every byte an app may add is reserved for it alone
+  (`used + held + grant ≤ pool`), and each app checks inside its write transaction.
+- After a pool reduction (a seat removed, a downgrade): the grants already handed out, at
+  most `min(old pool / 8, 64 GiB)` for the whole org, for at most 15 minutes. After that every
+  grant is zero until the org is back within the pool.
+- Plus incoming mail, if the owner chooses an overage (owner question 8): at most that
+  overage, which KyPost bounds.
+- Not bounded by this design: an app that reports less than it stores. Apps are
+  platform-run and trusted for their own figure (threat model, "The operator is trusted").
+
+### The seat change that leaves an org over its pool (approved rule)
+
+- `PATCH /orgs/{id}` that lowers the pool to below the org's current `used` (a lower
+  `max_seats` for Business, or new storage fields on any plan) is refused with
+  `409 storage_over_pool {pool_bytes, used_bytes}` unless the body carries
+  `"storage_over_pool_ack": true`. Billing sets it only after the holder has confirmed the
+  warning in the customer portal, which shows both figures and says that new uploads and new
+  content stop until the org is back under the pool and that nothing is deleted. The staff
+  org page shows the same warning in its confirm dialog. The flag is not stored; the audit
+  row of the change records that it was given.
+- So the warning comes **before** the change takes effect, on every path: the change cannot
+  be made without the acknowledgement.
+- Once applied, the org is over its pool (`storage_over_since` set), every grant is zero, and
+  each app blocks new stored content through the same check. For example (each app's spec
+  states its exact list and what members see, a banner with the two figures): KyDrive
+  refuses uploads and new versions, KyNotes and KyCalendar refuse writes that grow the org,
+  KyMessages refuses new attachments, and KyPost refuses new stored mail, with receiving
+  under owner question 8. Nothing
+  is deleted, nothing is locked, reads and exports work, and deleting content brings the
+  org back.
+- The org is back within its pool when the apps' reports sum to the pool or less; KyIdentity
+  then clears `storage_over_since` and grants resume. Billing can also add seats.
+
+**Incoming mail while over the pool (open question 8, for the owner).** Rejecting mail bounces
+it to outside senders, who did nothing wrong. *Recommendation:* a grace period with a bounded
+overage, then a temporary failure, then a permanent one.
+
+- **Grace:** for **7 days** after `over_since`, KyPost keeps accepting mail for the org's
+  mailboxes beyond its grant, up to an overage of **10% of the pool** (at least 2 GB), and
+  reports it as usage like any other mail. Members and the holder see a banner in KyPost:
+  "Your organisation is over its storage. Mail is still arriving until <date>."
+- **Then a temporary failure:** `452 4.2.2` ("mailbox full", retry later) to senders for
+  **3 more days**, which most senders retry for about 4 to 5 days before they give up, so
+  freeing space in that time still gets the mail.
+- **Then a permanent failure:** `552 5.2.2`, mail bounces, the sender is told the mailbox is
+  full. Nothing already stored is touched.
+- **Org status wins.** A suspended or `deletion_scheduled` org gets K's answers (`550` during
+  scheduled deletion, owner decision), whatever its storage. The receiving tier (K's hosted
+  receiving spec) checks the org row KyPost already caches from `/api/suite/orgs`, which now
+  carries `over_since`; it needs no new call to KyIdentity.
+- KyIdentity carries only what KyPost needs: `pool_bytes`, `org_used_bytes` and `over_since`.
+  The days, the percentage and the SMTP codes are KyPost's rule (K), not KyIdentity's.
+
+Tests (build, after the owner approves): the pool formula and S3's bounds on both backends;
+a stale `seq` in either order, a replay, the same `seq` with other bytes; two apps asking for
+the last bytes at once (one gets them); a grant of zero for a suspended org, a disabled app
+and an over-pool org; `unknown_org` for another app's org and a deleted one, identical; an
+oversize body, 501 entries, a repeated `org_id`; the `PATCH` refusal and the acknowledged
+change; `storage_over_since` set and cleared with a new revision; four handles on one
+Postgres database reporting at once; single-tenant `404` and the golden files unchanged.
 
 ## Entitlements
 
@@ -992,13 +1195,15 @@ KyIdentity stores `max_seats` on `orgs`, and per-app enablement and opaque quota
     so a customer org never holds more seats than its plan.
   - One store function counts and inserts inside the write transaction. Postgres write
     transactions are already serialised on one advisory lock across every replica
-    (`AGENTS.md:191`), so count-then-insert cannot race. No per-org lock or seat counter
+    (`AGENTS.md:198`), so count-then-insert cannot race. No per-org lock or seat counter
     column is needed.
   - A disabled app gives no access: the `app_access_facts` join above means no token and no
     suite listing.
-- **Apps enforce their own quotas** (storage, mailboxes) from `GET /api/suite/orgs`. A
-  quota is per org and per app (`org_apps.quotas_json`), so a pooled quota for the whole
-  org in one app is one key there (Plans and orgs P6).
+- **Apps enforce their own quotas** (per-app safety limits, mailboxes) from
+  `GET /api/suite/orgs` (`org_apps.quotas_json`, per org and per app).
+- *Amended 2026-11-23:* **KyIdentity holds the org's storage pool** and grants each app
+  headroom against it; each app refuses a write that adds bytes beyond its grant (Org
+  storage pool).
 
 Why a suite API pull:
 
@@ -1154,6 +1359,10 @@ tests.
    - Folded into later PRs: PR 4 drops `kind` from `POST /orgs`, validates `max_seats`
      (P2) and refuses a downgrade (P3); PR 5 adds the staff seat field and the `org:` MFA
      scope (P5); PR 6 adds the activation backstop (P3).
+   - (c) Org storage pool, after the owner approves it: the schema version, the `orgs`
+     fields with `POST /orgs`/`PATCH`/`GET` (or with PR 4 if it has not merged),
+     `POST /api/suite/storage`, `storage` in `/api/suite/orgs`, and `docs/SUITE-DIRECTORY.md`.
+     It is required for launch, so `KYIDENTITY_TENANCY=multi` stays refused until it merges.
 
 ## Owner answers
 
@@ -1315,6 +1524,7 @@ Tables this spec adds (the tenancy migration, both backends):
 | `platform_events` | P | Outbox to billing. `org_id` is a plain reference with no FK, because `org.deleted` must still be delivered after the org's rows are gone. Bodies carry no personal data (see Events back to billing). Delivered rows are removed after 30 days. |
 | `org_erasures` | P | A holder's Delete everything request (amendment). Opaque IDs only, never changed or deleted, and it must outlive the org's rows, which its trigger path deletes. |
 | `erased_subjects` | P | Tombstones of erased subjects, listed by `GET /api/suite/erased`. Opaque IDs only, never changed or deleted. |
+| `org_storage` | O | Each app's reported bytes and grant for one org (Org storage pool). `org_id` is in its key; removed with the org. Byte counts only. |
 
 `account_sync_events_new` (`store.go:872`) is a temporary name inside the legacy rebuild,
 not a live table.
