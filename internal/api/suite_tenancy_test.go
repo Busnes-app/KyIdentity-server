@@ -95,10 +95,10 @@ func multiSuite(t *testing.T) (srv *Server, db *store.Store, orgA, orgB store.Or
 	createClient(t, db, "kycalendar", "confidential", crypto.HashSHA256("cal-secret"), "", "https://cal.example.test/cb")
 	createClient(t, db, "kypost", "confidential", crypto.HashSHA256("post-secret"), "", "https://mail.example.test/cb")
 	var err error
-	if orgA, err = store.CreateOrgForTest(db, "household"); err != nil {
+	if orgA, err = store.CreateOrgForTest(db, "customer"); err != nil {
 		t.Fatal(err)
 	}
-	if orgB, err = store.CreateOrgForTest(db, "household"); err != nil {
+	if orgB, err = store.CreateOrgForTest(db, "customer"); err != nil {
 		t.Fatal(err)
 	}
 	for _, grant := range []struct {
@@ -162,7 +162,7 @@ func TestMultiTenantSuiteIsScopedByOrg(t *testing.T) {
 		t.Fatalf("groups without org_id: %d", code)
 	}
 	// An org without the app is not the app's to read.
-	orgC, err := store.CreateOrgForTest(db, "household")
+	orgC, err := store.CreateOrgForTest(db, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestMultiTenantSuiteOrgs(t *testing.T) {
 	if _, err := store.CreateOrgForTest(db, "staff"); err != nil {
 		t.Fatal(err)
 	}
-	orgOff, err := store.CreateOrgForTest(db, "person")
+	orgOff, err := store.CreateOrgForTest(db, "customer")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ import (
 // Delete everything (tenancy design, amendment 2026-11-21). Multi-tenant only: the API
 // refuses it in a single-tenant install, and the triggers refuse it for the default org.
 
-// erasureGrace is the export window the other members of a holder's household get. A
+// erasureGrace is the export window the other members of a holder's org get. A
 // variable only so a test can make it pass.
 var erasureGrace = 7 * 24 * time.Hour
 
@@ -108,7 +108,7 @@ func erasureError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case strings.Contains(err.Error(), msgErased), strings.Contains(err.Error(), msgErasureAsk):
+	case strings.Contains(err.Error(), msgErased), strings.Contains(err.Error(), msgErasureAskCustomer):
 		return ErrOrgErased
 	case strings.Contains(err.Error(), msgHolder):
 		return ErrAccountHolder
@@ -160,7 +160,7 @@ func (o *OrgStore) Erase(userID, sessionID, grantHash, operation string, audit *
 	if err != nil {
 		return nil, err
 	}
-	if u == nil || u.Role != "user" || u.Pending || u.Status != "active" || status != "active" || (kind != "person" && kind != "household") {
+	if u == nil || u.Role != "user" || u.Pending || u.Status != "active" || status != "active" || kind != customerKind {
 		return nil, ErrErasureRefused
 	}
 	out := &Erasure{Holder: holder == userID}
@@ -251,7 +251,7 @@ func (o *OrgStore) ErasureScope(userID string) (*ErasureScope, error) {
 	if err != nil {
 		return nil, err
 	}
-	if u == nil || u.Role != "user" || u.Pending || u.Status != "active" || status != "active" || (kind != "person" && kind != "household") {
+	if u == nil || u.Role != "user" || u.Pending || u.Status != "active" || status != "active" || kind != customerKind {
 		return nil, ErrErasureRefused
 	}
 	if holder != userID {

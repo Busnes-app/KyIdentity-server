@@ -37,7 +37,7 @@ func (h *AdminHandler) PutMailboxAddress(w http.ResponseWriter, r *http.Request)
 	case errors.Is(err, store.ErrMailboxAddressTaken):
 		writeAPIError(w, http.StatusConflict, "mailbox_address_taken", "Another account already uses this address")
 	case errors.Is(err, store.ErrMailboxCustomerOnly):
-		writeAPIError(w, http.StatusBadRequest, "mailbox_customer_only", "Only accounts of a person or household org have a mailbox address")
+		writeAPIError(w, http.StatusBadRequest, "mailbox_customer_only", "Only customer accounts have a mailbox address")
 	case err != nil:
 		writeInputError(w, "invalid_request", err)
 	default:

@@ -758,13 +758,13 @@ func (e *Engine) SendEraseNotices(ctx context.Context, now time.Time) error {
 		if settings == nil {
 			return errors.New("mail not configured")
 		}
-		return settings.Send(n.Email, "Your household is being deleted", eraseNoticeBody(n.Name, e.issuerURL, n.DeleteAfter))
+		return settings.Send(n.Email, "Your organisation is being deleted", eraseNoticeBody(n.Name, e.issuerURL, n.DeleteAfter))
 	})
 	return err
 }
 
 func eraseNoticeBody(name, issuer string, at time.Time) string {
-	return "Hello " + name + ",\r\n\r\nThe account holder of your household asked for everything in it to be deleted. " +
+	return "Hello " + name + ",\r\n\r\nThe account holder of your organisation asked for everything in it to be deleted. " +
 		"Your account and everything in it will be deleted on " + at.UTC().Format("2 January 2006") + ". This cannot be undone.\r\n\r\n" +
 		"Until then you can sign in at " + issuer + " and export your data from each app. Mail sent to you is no longer delivered.\r\n"
 }

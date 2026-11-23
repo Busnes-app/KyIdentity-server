@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// erasureOrg is a household with an activated holder and the members given (id: status).
+// erasureOrg is a customer org with an activated holder and the members given (id: status).
 func erasureOrg(t *testing.T, s *Store, org string, members map[string]string) {
 	t.Helper()
 	newTestOrg(t, s, org, "active")
@@ -67,12 +67,12 @@ func TestErasureTriggers(t *testing.T) {
 	ins := func(org, holder, immediate string) string {
 		return `INSERT INTO org_erasures(org_id,holder_user_id,immediate,requested_at) VALUES('` + org + `','` + holder + `',` + immediate + `,CURRENT_TIMESTAMP)`
 	}
-	// Only the holder of an active person or household org asks, and immediate is exact.
-	refused(t, s, msgErasureAsk, ins("home", "home-kid", "FALSE"))
-	refused(t, s, msgErasureAsk, ins("home", "home-holder", "TRUE"))
-	refused(t, s, msgErasureAsk, ins("solo", "solo-holder", "FALSE"))
-	refused(t, s, msgErasureAsk, ins("gone", "nobody", "TRUE"))
-	refused(t, s, msgErasureAsk, ins(DefaultOrgID, "nobody", "TRUE"))
+	// Only the holder of an active customer org asks, and immediate is exact.
+	refused(t, s, msgErasureAskCustomer, ins("home", "home-kid", "FALSE"))
+	refused(t, s, msgErasureAskCustomer, ins("home", "home-holder", "TRUE"))
+	refused(t, s, msgErasureAskCustomer, ins("solo", "solo-holder", "FALSE"))
+	refused(t, s, msgErasureAskCustomer, ins("gone", "nobody", "TRUE"))
+	refused(t, s, msgErasureAskCustomer, ins(DefaultOrgID, "nobody", "TRUE"))
 	// Without a request, active never goes straight to deleted.
 	refused(t, s, msgDeleted, `UPDATE orgs SET status='deleted' WHERE id='solo'`)
 	refused(t, s, msgHolderNotLive, `UPDATE orgs SET account_holder_user_id=NULL WHERE id='solo'`)

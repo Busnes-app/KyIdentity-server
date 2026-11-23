@@ -112,7 +112,7 @@ does not refuse sign-in addresses outside the list. On the hosted (multi-tenant)
 list also bounds members' mailbox addresses (below), and a domain one of them uses cannot be
 removed until staff move those addresses.
 
-**Mailbox address (hosted platform only).** A member of a hosted person or household org may
+**Mailbox address (hosted platform only).** A member of a hosted customer org (any paid plan) may
 have a mailbox address: where KyPost delivers their hosted mail. It is separate from the
 sign-in email, which still receives activation and reset mail. It must be on a suite mail
 domain and unique across the platform, including against every other account's sign-in

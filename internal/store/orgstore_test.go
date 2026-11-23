@@ -64,7 +64,7 @@ func orgRows(t *testing.T, s *Store, org OrgID) []string {
 func TestOrgStoreRefusesAnotherOrgsIDs(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, b := testOrg(t, s, "household"), testOrg(t, s, "household")
+	a, b := testOrg(t, s, "customer"), testOrg(t, s, "customer")
 	userA, userB := testOrgUser(t, a, "user"), testOrgUser(t, b, "user")
 	groupA, groupB := testOrgGroup(t, a), testOrgGroup(t, b)
 	if err := b.SetGroupMembership(groupB.ID, userB.ID, true, nil); err != nil {
@@ -149,7 +149,7 @@ func TestStaffOrgRule(t *testing.T) {
 		t.Fatal(apps, err)
 	}
 	app := apps[0]
-	staff, member := testOrg(t, s, "staff"), testOrg(t, s, "household")
+	staff, member := testOrg(t, s, "staff"), testOrg(t, s, "customer")
 	for name, o := range map[string]*OrgStore{"staff": staff, "default": s.DefaultOrg()} {
 		admin := testOrgUser(t, o, "admin")
 		if admin.Org() != o.ID() {
@@ -211,7 +211,7 @@ func TestOrgNeedsAStoredPrincipal(t *testing.T) {
 func TestOrgStoreAppsRefuseAnotherOrgsIDs(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, b := testOrg(t, s, "household"), testOrg(t, s, "household")
+	a, b := testOrg(t, s, "customer"), testOrg(t, s, "customer")
 	adminA := testOrgUser(t, s.DefaultOrg(), "admin")
 	userA, userB := testOrgUser(t, a, "user"), testOrgUser(t, b, "user")
 	groupA, groupB := testOrgGroup(t, a), testOrgGroup(t, b)
@@ -308,7 +308,7 @@ func TestOrgStoreAppsRefuseAnotherOrgsIDs(t *testing.T) {
 func TestOrgStoreSessionsRefuseAnotherOrgsIDs(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, b := testOrg(t, s, "household"), testOrg(t, s, "household")
+	a, b := testOrg(t, s, "customer"), testOrg(t, s, "customer")
 	userB := testOrgUser(t, b, "user")
 	sessB := &Session{ID: uuid.NewString(), UserID: userB.ID, SessionTokenHash: uuid.NewString(), IPAddress: "1.2.3.4", UserAgent: "t", ExpiresAt: time.Now().UTC().Add(time.Hour)}
 	if err := s.CreateSession(sessB); err != nil {
@@ -372,7 +372,7 @@ func TestOrgStoreSessionsRefuseAnotherOrgsIDs(t *testing.T) {
 func TestLogoutDeliveriesCarryTheUsersOrg(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	b := testOrg(t, s, "household")
+	b := testOrg(t, s, "customer")
 	userB := testOrgUser(t, b, "user")
 	c := &OAuthClient{ID: "bcl", ClientName: "bcl", ClientType: "public", RedirectURIsJSON: `["https://a/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true, BackchannelLogoutURI: "https://a/logout"}
 	if err := s.CreateOAuthClient(c, nil); err != nil {
@@ -405,7 +405,7 @@ func TestLogoutDeliveriesCarryTheUsersOrg(t *testing.T) {
 func TestAuditAndAlertsAreReadPerOrg(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, b, staff := testOrg(t, s, "household"), testOrg(t, s, "household"), testOrg(t, s, "staff")
+	a, b, staff := testOrg(t, s, "customer"), testOrg(t, s, "customer"), testOrg(t, s, "staff")
 	userA, userB := testOrgUser(t, a, "user"), testOrgUser(t, b, "user")
 	for _, e := range []*AuditEvent{
 		{ID: "on-b", ActorID: userA.ID, Action: "x.on_b", TargetID: userB.ID, TargetType: "user", Outcome: "success"},
@@ -491,7 +491,7 @@ func TestAuditAndAlertsAreReadPerOrg(t *testing.T) {
 func TestSCIMConnectorsArePerOrg(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	a, b := testOrg(t, s, "household"), testOrg(t, s, "household")
+	a, b := testOrg(t, s, "customer"), testOrg(t, s, "customer")
 	c, err := b.CreateSCIMConnector("b-directory", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -534,7 +534,7 @@ func TestSCIMConnectorsArePerOrg(t *testing.T) {
 func TestProvisioningRowsAreInTheResourcesOrg(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
-	b := testOrg(t, s, "household")
+	b := testOrg(t, s, "customer")
 	userB := testOrgUser(t, b, "user")
 	provisioningFixture(t, s, "target")
 	if err := s.SaveSCIMUserLink("target", userB.ID, "remote-b"); err != nil {

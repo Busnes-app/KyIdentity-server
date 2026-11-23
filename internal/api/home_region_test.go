@@ -15,7 +15,7 @@ import (
 func TestSuiteOrgsCarryTheHomeRegion(t *testing.T) {
 	srv, db, orgA, _, cleanup := multiSuite(t)
 	defer cleanup()
-	eu, err := store.CreateOrgInRegionForTest(db, "household", "eu-central")
+	eu, err := store.CreateOrgInRegionForTest(db, "customer", "eu-central")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func regionalSuite(t *testing.T) (srv *Server, db *store.Store, euMember, localM
 	createClient(t, db, "kymessage", "confidential", crypto.HashSHA256("msg-secret"), "",
 		"https://us.chat.example.test/cb", "https://eu.chat.example.test/cb")
 	allowTestAppAccess(t, db, "kymessage")
-	eu, err := store.CreateOrgInRegionForTest(db, "household", "eu")
+	eu, err := store.CreateOrgInRegionForTest(db, "customer", "eu")
 	if err != nil {
 		t.Fatal(err)
 	}

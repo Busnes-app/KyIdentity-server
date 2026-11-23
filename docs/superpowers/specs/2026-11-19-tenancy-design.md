@@ -669,7 +669,7 @@ cannot click.
   compared after trimming and case folding. A mismatch is
   `400 address_mismatch` and changes nothing.
 - The account page shows the dialog. It lists each app the account can open, with a link to
-  that app's export, before the address field. Nothing can be got back afterwards.
+  that app's export, before the address field. Nothing can be recovered afterwards.
 - A replay changes nothing: the grant is single-use, and the clicker's sessions end with the
   first call, so a second call from the same browser is a `401`. A second request for the
   same org fails on the `org_erasures` primary key.
@@ -946,7 +946,9 @@ rows come only from tests. So:
   definition, so a Postgres snapshot of customer orgs restores into either.
 - Both backends recreate the triggers that named the old kinds: `org_erasures_holder` and
   `users_mailbox_insert`/`users_mailbox_update` (on Postgres, the function
-  `users_mailbox_check`).
+  `users_mailbox_check`). Versions 12 and 13, which created them, are
+  shipped and keep their `person`/`household` text; version 16 carries the customer text
+  itself, and `TestShippedMigrationsUnchanged` fails if any shipped version's schema changes.
 - Single-tenant behaviour and the golden files do not change.
 
 **Events.** The canonical name for a resume is `org.resumed` (Events back to billing).
