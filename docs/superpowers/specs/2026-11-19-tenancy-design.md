@@ -7,6 +7,9 @@ answer to KyPost open question 1. Amended 2026-11-22 with Home region (owner dec
 Amended 2026-11-23 with Plans and orgs (owner decisions: every paid plan, Business included, is an org on
 the shared install; only Enterprise gets a dedicated one), and with Org storage pool (owner decisions:
 one storage quota per org across all apps, held by KyIdentity; the over-quota rule for a seat change).
+Amended 2026-11-23 again with the owner's answers to Plans and orgs owner questions 1, 7 and 8, shared
+content under Delete everything, no automatic version pruning, and object storage only in multi-tenant
+mode (ky-launch#4).
 
 KyIdentity today is one organisation per install (`AGENTS.md:3`, `design.md:31` defers
 multi-tenancy). This spec adds a second mode to the same binary. **Single-tenant** is
@@ -720,6 +723,22 @@ org_erasures (org_id TEXT PRIMARY KEY REFERENCES orgs(id), holder_user_id TEXT N
    `DeleteAuditEventsOlderThan` and org deletion.
 6. Delete the `users` row, which cascades to every derived row.
 
+**Shared content (owner decision, 2026-11-23).** Erasing a person deletes their own data and
+nothing other members wrote. For each shared item in an app (a shared folder, notebook,
+calendar or room) that the erased person owns:
+
+- Ownership passes to the member of that item who has held its admin role longest, else to
+  the longest-standing editor, else to the longest-standing other member. Only an item with
+  no other member is deleted with the person.
+- The person's messages in shared rooms become tombstones: the entry stays in its place,
+  with its text and attachments deleted and the author shown as a deleted account.
+- Content other members wrote in a shared item is kept, whoever owned the item.
+
+This is each app's rule on `user.erased` and `GET /api/suite/erased` (`docs/SUITE-DIRECTORY.md`);
+each app knows its own sharing roles, and KyIdentity sends nothing more. It covers a member
+erasing themselves, the only path where other members stay. A holder's request deletes the
+whole org after the export window (P7), so every member's data goes with it.
+
 **Tombstones.**
 
 ```
@@ -957,26 +976,34 @@ KyMessages-Native still names `org.unsuspended` in `docs/PRODUCT.md:75` and
 (`docs/superpowers/specs/2026-11-22-tenancy-design.md:89`). KyIdentity sends no `org.*`
 event to anyone yet: the outbox is PR 4.
 
-**Storage backend.** Decided 2026-11-23 (Plans and orgs owner question 6): primary app content on the hosted
-install goes in S3-compatible object storage, with the volume backend kept behind the same
-interface; each app's spec owns it. KyIdentity stores no content: its database stays in
-PostgreSQL and is small, so it has no object-storage backend, and no bucket key reaches it.
+**Storage backend.** Decided 2026-11-23 (Plans and orgs owner question 6): in multi-tenant
+mode, primary app content goes in S3-compatible object storage **only**. There is no
+disk-volume fallback: an app started in multi-tenant mode without object storage configured
+refuses to start. Single-tenant installs keep their volumes, unchanged. Each app's spec owns
+its backend. KyIdentity stores no content: its database stays in PostgreSQL and is small, so
+it has no object-storage backend, and no bucket key reaches it.
 
-Owner questions, each with the default this design applies:
+Owner questions. 2 to 4 keep the default this design applies; the rest are decided.
 
-1. The seat ceiling `MaxSeats`. *Default: 1000*; above it is Enterprise.
+1. *Decided 2026-11-23:* the seat ceiling `MaxSeats` is 1000; above it is Enterprise.
 2. A downgrade below the seats in use. *Default: refused* (P3). The alternative is to accept
    it, refuse new seats, disable nobody, and signal `org.over_limit`, as first written.
 3. Who sets the per-org MFA requirement. *Default: staff only* (P5). Billing never.
 4. The export window when a business's holder deletes everything. *Default: 7 days, as for
    every plan* (P7).
 5. *Decided 2026-11-23:* one storage pool per org across apps (Org storage pool).
-6. *Decided 2026-11-23:* object storage for app content, volumes behind the same interface.
-7. What "seats" means for the Business pool. *Default: paid seats, `max_seats`* (S2). The
-   alternative is the members in use (`seats_used`).
-8. Incoming mail while over the pool. *Recommendation: 7 days' grace with up to 10% of the
-   pool over, then `452 4.2.2` for 3 days, then `552 5.2.2`* (Org storage
-   pool). KyPost's spec applies it.
+6. *Decided 2026-11-23:* object storage only for app content in multi-tenant mode, with no
+   disk-volume fallback (Storage backend). This replaces "launch may run on volumes".
+7. *Decided 2026-11-23:* a Business pool counts paid seats, `max_seats` (S2), not the
+   members in use.
+8. *Decided 2026-11-23:* incoming mail while over the pool gets 7 days' grace and up to +10%
+   of the pool (at least 2 GB), whichever ends first, then `452 4.2.2` for 3 days, then
+   `552 5.2.2`. Org status wins (Org storage pool, "Incoming mail while over the pool").
+   KyPost's spec applies it.
+9. *Decided 2026-11-23:* under Delete everything, shared content passes to another member,
+   a member's messages become tombstones, and nothing other members wrote is deleted
+   (Delete everything, "Shared content").
+10. *Decided 2026-11-23:* no automatic version pruning at launch (S7).
 
 Tests (code PR): the `CHECK` and the renamed kind on both backends (a customer org is
 accepted, `person` and `household` are refused, an upgraded Postgres database lands on the
@@ -995,8 +1022,8 @@ today (per upload, per user, per mailbox) stay as safety limits, but the figure 
 buys is the pool. **When a seat change leaves a Business org over its pool** (approved rule):
 (1) new uploads and new stored content are blocked until the org is back under the pool,
 (2) no data is ever deleted, (3) the org's admin is warned before the seat change takes
-effect. Primary content on the hosted install goes in S3-compatible object storage, with the
-volume backend kept behind the same interface (Plans and orgs owner question 6); that is each app's spec.
+effect. Primary content on the hosted install goes in S3-compatible object storage only, with
+no disk-volume fallback (Plans and orgs owner question 6, Storage backend); that is each app's spec.
 KyIdentity stores no content, so it has no object-storage backend and is not counted in the
 pool. Line references in this section are to `master` at `5604cd9`.
 
@@ -1012,6 +1039,7 @@ is those install limits.
 | S4 | **Usage is reported per org and per app** to `POST /api/suite/storage`, with a sequence number, and the answer is that app's **headroom grant**: a ceiling it may fill until the grant expires. The pool and the reports live in PostgreSQL (`org_storage`); no replica holds any of it. | A grant reserves bytes for one app, so two apps cannot both fill the last bytes, and an app checks every write against its ceiling locally, with no round trip per write. |
 | S5 | **A write over the pool is refused, never deleted.** An org whose usage passes its pool (after a pool reduction, or by the mail overage of owner question 8) gets grants of zero. Every app then refuses writes that add bytes and allows every write that removes or keeps bytes. | The approved rule, and the safe default for every plan, not only Business. |
 | S6 | **"The admin" is the account holder** (D9). Staff stay the only administrators (owner decision 6 at the top of this spec): the holder is warned, not made an administrator. | The holder is the billing contact who asks for the seat change. |
+| S7 | **No automatic version pruning at launch.** Every kept older version of an item counts in the pool until a person deletes it. No app removes a version on its own, over the pool or not. | Decided 2026-11-23. It follows S5: nothing is deleted unless a person asks. Pruning can come later as a choice the holder makes. |
 
 ### Schema
 
@@ -1127,8 +1155,8 @@ only.
 - After a pool reduction (a seat removed, a downgrade): the grants already handed out, at
   most `min(old pool / 8, 64 GiB)` for the whole org, for at most 15 minutes. After that every
   grant is zero until the org is back within the pool.
-- Plus incoming mail, if the owner chooses an overage (owner question 8): at most that
-  overage, which KyPost bounds.
+- Plus incoming mail (owner question 8): at most `max(pool / 10, 2 GB)`, accepted for at
+  most 7 days after `over_since`, which KyPost bounds.
 - Not bounded by this design: an app that reports less than it stores. Apps are
   platform-run and trusted for their own figure (threat model, "The operator is trusted").
 
@@ -1155,27 +1183,32 @@ only.
 - The org is back within its pool when the apps' reports sum to the pool or less; KyIdentity
   then clears `storage_over_since` and grants resume. Billing can also add seats.
 
-**Incoming mail while over the pool (open question 8, for the owner).** Rejecting mail bounces
-it to outside senders, who did nothing wrong. *Recommendation:* a grace period with a bounded
-overage, then a temporary failure, then a permanent one.
+**Incoming mail while over the pool (owner question 8, decided 2026-11-23).** Rejecting mail
+bounces it to outside senders, who did nothing wrong, so the rule is a grace period with a
+bounded overage, then a temporary failure, then a permanent one.
 
-- **Grace:** for **7 days** after `over_since`, KyPost keeps accepting mail for the org's
-  mailboxes beyond its grant, up to an overage of **10% of the pool** (2 GB for Personal), and
-  reports it as usage like any other mail. Members and the holder see a banner in KyPost:
-  "Your organisation is over its storage. Mail is still arriving until <date>."
+- **Grace:** from `over_since`, KyPost keeps accepting mail for the org's mailboxes beyond its
+  grant until **7 days** have passed or the mail accepted beyond the grant reaches
+  **`max(pool / 10, 2 GB)`**, whichever comes first (Personal: 2 GB; a 50-seat Business org:
+  150 GB). It reports that mail as usage like any other. Members and the holder see a banner
+  in KyPost: "Your organisation is over its storage. Mail is still arriving until <date>."
 - **Then a temporary failure:** `452 4.2.2` ("mailbox full", retry later) to senders for
-  **3 more days**, which most senders retry for about 4 to 5 days before they give up, so
-  freeing space in that time still gets the mail.
+  **3 days** from the end of the grace, which most senders retry for about 4 to 5 days
+  before they give up, so freeing space in that time still gets the mail.
 - **Then a permanent failure:** `552 5.2.2`, mail bounces, the sender is told the mailbox is
   full. Nothing already stored is touched.
+- Once the org is back within its pool, KyIdentity clears `over_since` and mail is accepted
+  normally. A later overrun sets a new `over_since`, so the steps start again.
 - **Org status wins.** A suspended or `deletion_scheduled` org gets K's answers (`550` during
   scheduled deletion, owner decision), whatever its storage. The receiving tier (K's hosted
   receiving spec) checks the org row KyPost already caches from `/api/suite/orgs`, which now
   carries `over_since`; it needs no new call to KyIdentity.
-- KyIdentity carries only what KyPost needs: `pool_bytes`, `org_used_bytes` and `over_since`.
-  The days, the percentage and the SMTP codes are KyPost's rule (K), not KyIdentity's.
+- **The contract KyPost needs is `over_since`**, with `pool_bytes`; `org_used_bytes` comes
+  in the storage answer. KyPost records when its own grace ended (by time or by overage)
+  in its database. The days, the overage and the SMTP codes are KyPost's rule (K), not
+  KyIdentity's: KyIdentity computes none of them.
 
-Tests (build, after the owner approves): the pool formula and S3's bounds on both backends;
+Tests (build; the owner approved it on 2026-11-23): the pool formula and S3's bounds on both backends;
 a stale `seq` in either order, a replay, the same `seq` with other bytes; two apps asking for
 the last bytes at once (one gets them); a grant of zero for a suspended org, a disabled app
 and an over-pool org; `unknown_org` for another app's org and a deleted one, identical; an
@@ -1366,7 +1399,7 @@ tests.
    - Folded into later PRs: PR 4 drops `kind` from `POST /orgs`, validates `max_seats`
      (P2) and refuses a downgrade (P3); PR 5 adds the staff seat field and the `org:` MFA
      scope (P5); PR 6 adds the activation backstop (P3).
-   - (c) Org storage pool, after the owner approves it: the schema version, the `orgs`
+   - (c) Org storage pool (approved for building 2026-11-23): the schema version, the `orgs`
      fields with `POST /orgs`/`PATCH`/`GET` (or with PR 4 if it has not merged),
      `POST /api/suite/storage`, `storage` in `/api/suite/orgs`, and `docs/SUITE-DIRECTORY.md`.
      It is required for launch, so `KYIDENTITY_TENANCY=multi` stays refused until it merges.
