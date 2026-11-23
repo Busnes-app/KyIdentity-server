@@ -39,25 +39,11 @@ func (e *DomainInUseError) Error() string {
 // The mailbox check: lowercase, a customer org, and no clash with another account's
 // sign-in email either way. The clash is a unique violation, so every user-creating
 // path already answers it as a conflict.
-const mailboxCustomerSQL = `NEW.mailbox_address IS NOT NULL AND (NEW.mailbox_address<>lower(NEW.mailbox_address) OR NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.kind='` + customerKind + `'))`
-
-// mailboxTriggersSQLite is the SQLite trigger pair; customer_kind recreates it.
-func mailboxTriggersSQLite() string {
-	clash := `EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email) OR u.email=NEW.mailbox_address))`
-	body := fmt.Sprintf(`BEGIN SELECT RAISE(ABORT,'%s') WHERE %s; SELECT RAISE(ABORT,'UNIQUE constraint failed: users.mailbox_address') WHERE %s; END;`, msgMailboxCustomerOnly, mailboxCustomerSQL, clash)
-	return `CREATE TRIGGER IF NOT EXISTS users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW ` + body + `
-CREATE TRIGGER IF NOT EXISTS users_mailbox_update BEFORE UPDATE OF email, mailbox_address ON users FOR EACH ROW ` + body
-}
-
-// mailboxCheckPostgres is the Postgres triggers' function; customer_kind replaces it.
-const mailboxCheckPostgres = `CREATE OR REPLACE FUNCTION users_mailbox_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
- IF (` + mailboxCustomerSQL + `) THEN RAISE EXCEPTION '` + msgMailboxCustomerOnly + `'; END IF;
- IF EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email::text) OR u.email=NEW.mailbox_address::citext)) THEN
-  RAISE EXCEPTION 'UNIQUE constraint failed: users.mailbox_address' USING ERRCODE = 'unique_violation'; END IF;
- RETURN NEW; END $$;
-`
+const mailboxCustomerSQL = `NEW.mailbox_address IS NOT NULL AND (NEW.mailbox_address<>lower(NEW.mailbox_address) OR NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.kind IN ('person','household')))`
 
 func migrateMailboxAddress(tx *sql.Tx) error {
+	clash := `EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email) OR u.email=NEW.mailbox_address))`
+	body := fmt.Sprintf(`BEGIN SELECT RAISE(ABORT,'%s') WHERE %s; SELECT RAISE(ABORT,'UNIQUE constraint failed: users.mailbox_address') WHERE %s; END;`, msgMailboxCustomerOnly, mailboxCustomerSQL, clash)
 	var n int
 	if err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info('users') WHERE name='mailbox_address'`).Scan(&n); err != nil {
 		return err
@@ -68,14 +54,20 @@ func migrateMailboxAddress(tx *sql.Tx) error {
 		}
 	}
 	_, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_mailbox_address ON users(mailbox_address) WHERE mailbox_address IS NOT NULL;
-` + mailboxTriggersSQLite())
+CREATE TRIGGER IF NOT EXISTS users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW ` + body + `
+CREATE TRIGGER IF NOT EXISTS users_mailbox_update BEFORE UPDATE OF email, mailbox_address ON users FOR EACH ROW ` + body)
 	return err
 }
 
 func migrateMailboxAddressPostgres(tx *sql.Tx) error {
 	_, err := tx.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS mailbox_address TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS users_mailbox_address ON users(mailbox_address) WHERE mailbox_address IS NOT NULL;
-` + mailboxCheckPostgres + `CREATE TRIGGER users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION users_mailbox_check();
+CREATE FUNCTION users_mailbox_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF (` + mailboxCustomerSQL + `) THEN RAISE EXCEPTION '` + msgMailboxCustomerOnly + `'; END IF;
+ IF EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email::text) OR u.email=NEW.mailbox_address::citext)) THEN
+  RAISE EXCEPTION 'UNIQUE constraint failed: users.mailbox_address' USING ERRCODE = 'unique_violation'; END IF;
+ RETURN NEW; END $$;
+CREATE TRIGGER users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION users_mailbox_check();
 CREATE TRIGGER users_mailbox_update BEFORE UPDATE OF email, mailbox_address ON users FOR EACH ROW EXECUTE FUNCTION users_mailbox_check();`)
 	return err
 }

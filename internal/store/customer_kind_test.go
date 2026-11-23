@@ -21,8 +21,9 @@ func TestCustomerKind(t *testing.T) {
 	tenancyExec(t, s, insert("org-customer", customerKind), insert("org-staff", "staff"))
 }
 
-// An install from before customer_kind: its triggers (and, on Postgres, its CHECK) name
-// person and household. The upgrade moves every row and object to customer.
+// An install from before customer_kind, built by the real migrations 1..15 as they
+// shipped (TestShippedMigrationsUnchanged holds them), with a household org. Version 16
+// moves every row and object to customer and leaves a fresh install's schema.
 func TestUpgradeToCustomerKind(t *testing.T) {
 	saved := migrations
 	t.Cleanup(func() { migrations = saved })
@@ -32,18 +33,7 @@ func TestUpgradeToCustomerKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := func(q string) string {
-		return strings.ReplaceAll(q, "o.kind='"+customerKind+"'", "o.kind IN ('person','household')")
-	}
-	holder := erasureHolderTrigger("unixepoch()")
-	stamp := `DROP TRIGGER org_erasures_holder; DROP TRIGGER users_mailbox_insert; DROP TRIGGER users_mailbox_update;
-` + sqliteTriggerSQL(holder, old(holder.refusal)) + old(mailboxTriggersSQLite())
-	if s.postgres {
-		holder = erasureHolderTrigger(`extract(epoch from now())`)
-		stamp = `DROP TRIGGER org_erasures_holder ON org_erasures; DROP FUNCTION org_erasures_holder();
-` + pgTriggerSQL(holder, old(holder.refusal)) + old(mailboxCheckPostgres)
-	}
-	tenancyExec(t, s, stamp, `INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES('org-old','Old','household','active','local',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+	tenancyExec(t, s, `INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES('org-old','Old','household','active','local',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -58,19 +48,10 @@ func TestUpgradeToCustomerKind(t *testing.T) {
 		t.Errorf("old household org is %q %v", kind, err)
 	}
 	refused(t, s, "kind", `INSERT INTO orgs(id,name,kind,status,home_region,created_at,updated_at) VALUES('org-h','n','household','active','local',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
-	// The upgraded orgs table is a fresh install's, CHECK included.
 	fresh, cleanup := setupTestStore(t)
 	defer cleanup()
-	if !s.postgres {
-		def := func(s *Store) (sql string) {
-			if err := s.db.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='orgs'`).Scan(&sql); err != nil {
-				t.Fatal(err)
-			}
-			return sql
-		}
-		if a, b := def(s), def(fresh); a != b || !strings.Contains(a, newKindCheck) {
-			t.Errorf("upgraded orgs:\n%s\nfresh:\n%s", a, b)
-		}
+	if a, b := schemaText(t, s), schemaText(t, fresh); a != b || strings.Contains(a, "household") {
+		t.Errorf("upgraded schema:\n%s\nfresh:\n%s", a, b)
 	}
 	if _, _, err := s.SetSuiteEmailDomains([]string{"example.com"}, nil); err != nil {
 		t.Fatal(err)

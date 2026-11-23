@@ -34,7 +34,7 @@ var (
 
 const (
 	msgErased       = "the account holder deleted this org; it cannot be undone"
-	msgErasureAsk   = "only the holder of an active customer org asks, immediate exactly when no other member is live"
+	msgErasureAsk   = "only the holder of an active person or household org asks, immediate exactly when no other member is live"
 	msgErasureKept  = "erasure records are never changed or deleted"
 	msgErasedReused = "an erased subject is never reused"
 )
@@ -58,7 +58,7 @@ func erasureTriggers(now string) []tenancyTrigger {
  AND NOT (OLD.status='active' AND ` + holderErasedSQL + `))`, msgDeleted},
 		{"orgs_erasure_held", "BEFORE UPDATE", "orgs", `OLD.status='deletion_scheduled' AND EXISTS(SELECT 1 FROM org_erasures e WHERE e.org_id=OLD.id)
  AND ((NEW.status IS DISTINCT FROM OLD.status AND NEW.status<>'deleted') OR NEW.delete_after IS DISTINCT FROM OLD.delete_after)`, msgErased},
-		{"org_erasures_holder", "BEFORE INSERT", "org_erasures", `NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.account_holder_user_id=NEW.holder_user_id AND o.status='active' AND o.kind='` + customerKind + `')
+		{"org_erasures_holder", "BEFORE INSERT", "org_erasures", `NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.account_holder_user_id=NEW.holder_user_id AND o.status='active' AND o.kind IN ('person','household'))
  OR (NEW.immediate) <> (NOT ` + otherLiveSQL("NEW.org_id", "NEW.holder_user_id") + `)`, msgErasureAsk},
 		{"org_erasures_kept_update", "BEFORE UPDATE", "org_erasures", "TRUE", msgErasureKept},
 		{"org_erasures_kept_delete", "BEFORE DELETE", "org_erasures", "TRUE", msgErasureKept},
@@ -108,7 +108,7 @@ func erasureError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case strings.Contains(err.Error(), msgErased), strings.Contains(err.Error(), msgErasureAsk):
+	case strings.Contains(err.Error(), msgErased), strings.Contains(err.Error(), msgErasureAskCustomer):
 		return ErrOrgErased
 	case strings.Contains(err.Error(), msgHolder):
 		return ErrAccountHolder

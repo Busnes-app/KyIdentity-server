@@ -18,13 +18,16 @@ const (
 	newKindCheck = `CHECK (kind IN ('default','` + customerKind + `','staff'))`
 )
 
-func erasureHolderTrigger(now string) tenancyTrigger {
-	for _, t := range erasureTriggers(now) {
-		if t.name == "org_erasures_holder" {
-			return t
-		}
-	}
-	panic("store: no org_erasures_holder trigger")
+// Versions 12 and 13 shipped with person and household; version 16 replaces their
+// org_erasures_holder trigger and mailbox check with these.
+const (
+	msgErasureAskCustomer  = "only the holder of an active customer org asks, immediate exactly when no other member is live"
+	mailboxCustomerKindSQL = `NEW.mailbox_address IS NOT NULL AND (NEW.mailbox_address<>lower(NEW.mailbox_address) OR NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.kind='` + customerKind + `'))`
+)
+
+func customerHolderTrigger() tenancyTrigger {
+	return tenancyTrigger{"org_erasures_holder", "BEFORE INSERT", "org_erasures", `NOT EXISTS(SELECT 1 FROM orgs o WHERE o.id=NEW.org_id AND o.account_holder_user_id=NEW.holder_user_id AND o.status='active' AND o.kind='` + customerKind + `')
+ OR (NEW.immediate) <> (NOT ` + otherLiveSQL("NEW.org_id", "NEW.holder_user_id") + `)`, msgErasureAskCustomer}
 }
 
 func migrateCustomerKind(tx *sql.Tx) error {
@@ -52,11 +55,14 @@ func migrateCustomerKind(tx *sql.Tx) error {
 	if err := tx.QueryRow(`PRAGMA integrity_check(orgs)`).Scan(&check); err != nil || check != "ok" {
 		return fmt.Errorf("store: customer_kind: integrity check %q %v", check, err)
 	}
-	t := erasureHolderTrigger("unixepoch()")
+	t := customerHolderTrigger()
+	clash := `EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email) OR u.email=NEW.mailbox_address))`
+	body := fmt.Sprintf(`BEGIN SELECT RAISE(ABORT,'%s') WHERE %s; SELECT RAISE(ABORT,'UNIQUE constraint failed: users.mailbox_address') WHERE %s; END;`, msgMailboxCustomerOnly, mailboxCustomerKindSQL, clash)
 	_, err := tx.Exec(`DROP TRIGGER IF EXISTS org_erasures_holder;
 DROP TRIGGER IF EXISTS users_mailbox_insert;
 DROP TRIGGER IF EXISTS users_mailbox_update;
-` + sqliteTriggerSQL(t, t.refusal) + mailboxTriggersSQLite())
+` + sqliteTriggerSQL(t, t.refusal) + `CREATE TRIGGER users_mailbox_insert BEFORE INSERT ON users FOR EACH ROW ` + body + `
+CREATE TRIGGER users_mailbox_update BEFORE UPDATE OF email, mailbox_address ON users FOR EACH ROW ` + body)
 	return err
 }
 
@@ -87,7 +93,7 @@ func editSchema(tx *sql.Tx, q string, args ...any) error {
 }
 
 func migrateCustomerKindPostgres(tx *sql.Tx) error {
-	t := erasureHolderTrigger(`extract(epoch from now())`)
+	t := customerHolderTrigger()
 	var b strings.Builder
 	b.WriteString(`ALTER TABLE orgs DROP CONSTRAINT orgs_kind_check;
 UPDATE orgs SET kind='` + customerKind + `' WHERE kind IN ('person','household');
@@ -96,7 +102,12 @@ DROP TRIGGER org_erasures_holder ON org_erasures;
 DROP FUNCTION org_erasures_holder();
 `)
 	b.WriteString(pgTriggerSQL(t, t.refusal))
-	b.WriteString(mailboxCheckPostgres)
+	b.WriteString(`CREATE OR REPLACE FUNCTION users_mailbox_check() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF (` + mailboxCustomerKindSQL + `) THEN RAISE EXCEPTION '` + msgMailboxCustomerOnly + `'; END IF;
+ IF EXISTS(SELECT 1 FROM users u WHERE u.id<>NEW.id AND (u.mailbox_address=lower(NEW.email::text) OR u.email=NEW.mailbox_address::citext)) THEN
+  RAISE EXCEPTION 'UNIQUE constraint failed: users.mailbox_address' USING ERRCODE = 'unique_violation'; END IF;
+ RETURN NEW; END $$;
+`)
 	_, err := tx.Exec(b.String())
 	return err
 }
