@@ -81,8 +81,8 @@ const (
 	DrillLease = "restore-drill"
 )
 
-// LeaseTTL is a variable only so tests can shorten it.
-var LeaseTTL = 2 * time.Minute
+// LeaseTTL bounds how long a dead replica can hold a backup or drill lease.
+const LeaseTTL = 2 * time.Minute
 
 // SettingsStore is the slice of the store this adapter needs; *store.Store satisfies it.
 type SettingsStore interface {

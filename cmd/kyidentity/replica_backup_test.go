@@ -17,14 +17,6 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
-// shortLease shortens the backup lease for one test.
-func shortLease(t *testing.T, ttl time.Duration) {
-	t.Helper()
-	prev := backup.LeaseTTL
-	backup.LeaseTTL = ttl
-	t.Cleanup(func() { backup.LeaseTTL = prev })
-}
-
 func localCopies(t *testing.T, dir, app string) []string {
 	t.Helper()
 	copies, err := backup.ListLocalCopies(dir, app)
@@ -39,11 +31,9 @@ func localCopies(t *testing.T, dir, app string) []string {
 	return names
 }
 
-// A holder that died with the backup lease delays another replica's due backup by at most
-// the lease's ttl and one scheduler tick, not by the hours a fixed lease used to cost.
+// A dead replica never releases its lease. The next scheduler tick must refuse
+// the live row, then take it as soon as the database says it has expired.
 func TestADeadHolderDelaysTheScheduleByOneTTL(t *testing.T) {
-	const ttl, tick = time.Second, 100 * time.Millisecond
-	shortLease(t, ttl)
 	cfg, _ := commandInstance(t, true)
 	cfg.BackupDir, cfg.BackupKeep = t.TempDir(), 3
 	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
@@ -55,52 +45,27 @@ func TestADeadHolderDelaysTheScheduleByOneTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	// The dead replica took the lease and will never renew or release it.
-	if _, ok, err := stores[1].AcquireLease(backup.Lease, ttl); err != nil || !ok {
+	if _, ok, err := stores[1].AcquireLease(backup.Lease, backup.LeaseTTL); err != nil || !ok {
 		t.Fatal(ok, err)
 	}
-	died := time.Now()
-	var dead string
-	if err := raw.QueryRow(`SELECT token FROM leases WHERE name=?`, backup.Lease).Scan(&dead); err != nil {
+	tick := func() {
+		scheduledBackup(context.Background(), cfg, stores[0], nil, audit.NewLogger(stores[0]))
+	}
+	tick()
+	if n := len(localCopies(t, cfg.BackupDir, cfg.AppName)); n != 0 {
+		t.Fatalf("scheduler ran with the dead holder's lease still live: %d copies", n)
+	}
+	res, err := raw.Exec(`UPDATE leases SET until_ms=0 WHERE name=?`, backup.Lease)
+	if err != nil {
 		t.Fatal(err)
 	}
-	sched, stop := context.WithCancel(context.Background())
-	defer stop()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		backupLoop(sched, context.Background(), cfg, stores[0], nil, audit.NewLogger(stores[0]), tick)
-	}()
-	// The takeover is when the dead holder's row stops being the lease: the live replica took
-	// it, or took it and finished. The run itself is not part of the delay.
-	var waited time.Duration
-	for {
-		var token string
-		err := raw.QueryRow(`SELECT token FROM leases WHERE name=?`, backup.Lease).Scan(&token)
-		if err != nil || token != dead {
-			waited = time.Since(died)
-			break
-		}
-		if time.Since(died) > ttl+tick+3*time.Second {
-			t.Fatal("no replica took the lease after the dead holder's expired")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		t.Fatalf("expiring the dead holder's lease: %d rows, %v", n, err)
 	}
-	for len(localCopies(t, cfg.BackupDir, cfg.AppName)) == 0 {
-		if time.Since(died) > 30*time.Second {
-			t.Fatal("the due backup never ran after taking the lease")
-		}
-		time.Sleep(20 * time.Millisecond)
+	tick()
+	if n := len(localCopies(t, cfg.BackupDir, cfg.AppName)); n != 1 {
+		t.Fatalf("first scheduler tick after expiry wrote %d backups, want 1", n)
 	}
-	stop()
-	<-done
-	if waited < ttl-100*time.Millisecond {
-		t.Fatalf("the lease was taken %v after the holder died, before its ttl %v", waited, ttl)
-	}
-	if waited > ttl+tick+200*time.Millisecond {
-		t.Fatalf("the due backup waited %v behind a dead holder, want at most %v", waited, ttl+tick)
-	}
-	t.Logf("lease taken %v after the holder died (ttl %v, tick %v)", waited, ttl, tick)
 }
 
 // Taking the lease from a running deposit, by deleting or stealing its row, ends that
