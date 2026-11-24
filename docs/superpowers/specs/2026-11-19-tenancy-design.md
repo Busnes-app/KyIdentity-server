@@ -957,13 +957,13 @@ one URL serving the `local` cell, as today.
 hostname (`us-east-2.calendar.<domain>`), because regions are hostnames, not an edge router;
 CalDAV, WebDAV and mail clients are configured with that host once, and C4 keeps it valid.
 
-**Open questions, each with a default.**
+**Owner answers, 2026-11-24** (the proposed defaults, approved):
 
-1. Slug convention `<geography>-<n>`: *default* yes, and the geography is the slug without its
-   trailing number. A residency label, if billing needs one, is billing's data.
-2. When a cell closes to new orgs: *default* when its app's load test shows less than 30 %
-   headroom on its busiest database; each app's load tests set the number.
-3. Raise the 32-cell cap: *default* no, until an app needs more.
+1. Slugs are `<geography>-<n>`, and the geography is the slug without its trailing number. A
+   residency label, if billing needs one, is billing's data.
+2. A cell closes to new orgs when its app's load test shows less than 30 % headroom on its
+   busiest database; each app's load tests set the number.
+3. The 32-cell cap stays until an app needs more.
 
 Tests: none new in KyIdentity (the Home region tests cover the slug and the map). Each app's
 own spec adds the C5 tests.
