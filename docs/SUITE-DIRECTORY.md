@@ -289,6 +289,11 @@ Then:
 
 An app with no region map is one URL, exactly as before.
 
+A region may be a **cell** (tenancy design, "Cells"): a finer slug such as `us-east-2`, one
+deployment of the app holding many organisations. Several cells may share one origin. A
+deployment serves only organisations whose `home_region` is one of its cells and refuses the
+rest.
+
 ### `GET /api/suite/erased`
 
 The people who used Delete everything (tenancy design, amendment 2026-11-21), and every
