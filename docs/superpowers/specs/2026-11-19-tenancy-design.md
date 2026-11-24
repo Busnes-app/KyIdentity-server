@@ -928,6 +928,46 @@ immutability, `local` for the default org, the Postgres insert without a region 
 routes, refusals and the single-tenant `404`), `TestRegionalLaunchURLs` (launcher, apps and
 peer), and the single-tenant golden files unchanged.
 
+## Cells (amendment, 2026-11-24)
+
+Owner decision, 2026-11-24: the shared install scales by **cells**, not by a database per org.
+A cell is one deployment of an app: its replicas, its PostgreSQL database and its object
+storage prefix, holding many orgs in the shared `org_id` tables every app already has. Every
+org lives in exactly one cell. The driver is scale; isolation stays the `org_id` model and its
+cross-org tests.
+
+A cell is a home region with a finer slug, so the Home region mechanism above routes it
+unchanged and KyIdentity needs no new code:
+
+| # | Decision | Why |
+|---|---|---|
+| C1 | A `home_region` value names a cell: `<geography>-<n>`, for example `us-east-1`, `us-east-2`, `eu-central-1`. `local` stays the one cell of a single-region install. | H1's slug already allows it, and an org's cell has every property H2 gives its region: fixed, set at provisioning, never in a token. |
+| C2 | Each app chooses how many databases serve the cells. An app's region map may point several cells at one origin (`client_region_origins` is keyed by region, not origin): KyCalendar can serve `us-east-1` and `us-east-2` from one deployment while KyDrive runs one per cell. | Apps grow at different rates. One suite-wide slug per org keeps every app's lookup the same (`suitedir.Peer.URLFor(home_region)`), and splitting a deployment later only adds rows. |
+| C3 | Billing picks the cell at checkout (H3): the open cell of the chosen geography. Staff keep the list of open cells; KyIdentity does not place orgs. | H3 already takes `home_region` from `POST /orgs`. Placement is capacity policy, which billing already owns for plans. |
+| C4 | A cell's orgs never move at launch (H2). Rebalancing is the later audited move flow H2 describes, now for cells as well as regions. | Moving an org copies every app's data. Opening a new cell for new orgs handles growth without it. |
+| C5 | A deployment serves only orgs whose `home_region` is one of its configured cells, and refuses every other org on every way in, as an org that does not serve. | Every deployment sees the whole `/api/suite/orgs` list. Without this check two cells could both accept one org and split its data. |
+
+**What each multi-tenant app adds.** A list of the cells it serves (for example `KY_CELLS`,
+which replaces a single `KY_REGION`), required in multi-tenant mode and checked at startup
+against its region map; the C5 refusal, with a test that an org of another cell is refused on
+every credential type; and a cell-scoped object storage prefix. An app with no region map is
+one URL serving the `local` cell, as today.
+
+**Limits.** At most 32 cells per app (the region map's cap). Each cell is its own app
+hostname (`us-east-2.calendar.<domain>`), because regions are hostnames, not an edge router;
+CalDAV, WebDAV and mail clients are configured with that host once, and C4 keeps it valid.
+
+**Open questions, each with a default.**
+
+1. Slug convention `<geography>-<n>`: *default* yes, and the geography is the slug without its
+   trailing number. A residency label, if billing needs one, is billing's data.
+2. When a cell closes to new orgs: *default* when its app's load test shows less than 30 %
+   headroom on its busiest database; each app's load tests set the number.
+3. Raise the 32-cell cap: *default* no, until an app needs more.
+
+Tests: none new in KyIdentity (the Home region tests cover the slug and the map). Each app's
+own spec adds the C5 tests.
+
 ## Plans and orgs (amendment, 2026-11-23)
 
 Owner decisions, 2026-11-23 (fixed): every paid account is an org. Personal is an org of 1
