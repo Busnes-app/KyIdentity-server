@@ -4,6 +4,7 @@ export const SETTINGS_SECTIONS = [
   ['account', 'Account'],
   ['devices', 'Phones & apps'],
   ['appearance', 'Appearance'],
+  ['keyring', 'Suite keyring'],
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number][0];
 

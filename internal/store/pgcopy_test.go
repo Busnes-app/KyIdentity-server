@@ -21,7 +21,7 @@ import (
 
 // copyFixture fills s through the store's own methods, with the ephemeral credential rows
 // the restore tests seed, so that most tables hold at least one row.
-func copyFixture(t *testing.T, s *Store) {
+func copyFixture(t *testing.T, s *Store) string {
 	t.Helper()
 	admin := &User{ID: uuid.NewString(), Username: "Zoë-Ångström", DisplayName: "Zoë 🙂 Ångström", Email: "Zoe@Example.test",
 		PasswordHash: "$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA", Role: "admin", Status: "active"}
@@ -170,6 +170,40 @@ func copyFixture(t *testing.T, s *Store) {
 	}
 	seedEphemeral(t, s, user.ID, "client-1")
 	tenancyFixture(t, s, app)
+	return user.ID
+}
+
+func copyKeyringFixture(t *testing.T, s *Store, userID string) {
+	t.Helper()
+	o := s.DefaultOrg()
+	sender := keyringTestSession(t, s, userID)
+	recipient := keyringTestSession(t, s, userID)
+	version := uuid.NewString()
+	device := keyringTestWrapper("device")
+	recovery := keyringTestWrapper("recovery")
+	if err := o.InitializeKeyring(sender, version, device, recovery, keyringTestGrant(t, s, sender, "initialize"), nil); err != nil {
+		t.Fatal(err)
+	}
+	var appID string
+	if err := s.db.QueryRow(`SELECT id FROM app_registry WHERE client_id='client-1'`).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.SetAppAssignment(appID, "users", userID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	app := KeyringAppKey{Version: 1, Sealed: device.Sealed}
+	if err := o.PutKeyringAppKey(sender, version, "client-1", app, keyringTestGrant(t, s, sender, "app key"), nil); err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewString()
+	req := KeyringTransferRequest{RecipientKey: strings.Repeat("A", 87), RequestMAC: strings.Repeat("B", 43)}
+	if _, err := o.RequestKeyringTransfer(recipient, version, id, req, nil); err != nil {
+		t.Fatal(err)
+	}
+	reply := KeyringTransferResponse{SenderKey: strings.Repeat("C", 87), Sealed: device.Sealed}
+	if err := o.ApproveKeyringTransfer(sender, id, device.ID, device.DeviceHash, reply, keyringTestGrant(t, s, sender, "approve"), nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // openSQLiteForTest opens a SQLite file read-only, whatever backend the suite runs on.
@@ -303,7 +337,7 @@ func TestCopyRoundTripIsLossless(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	copyFixture(t, lite)
+	copyKeyringFixture(t, lite, copyFixture(t, lite))
 	lite.Close()
 	pgPath := filepath.Join(dir, "pg")
 	if _, err := ImportSQLite(testURL(t, pgPath), first, ImportOptions{}); err != nil {
@@ -328,7 +362,7 @@ func TestCopyRoundTripIsLossless(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer origin.Close()
-	copyFixture(t, origin)
+	copyKeyringFixture(t, origin, copyFixture(t, origin))
 	mid := filepath.Join(dir, "mid.db")
 	if err := origin.SnapshotTo(mid); err != nil {
 		t.Fatal(err)

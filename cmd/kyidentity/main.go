@@ -1224,6 +1224,7 @@ func purgeExpired(s *store.Store, now time.Time) error {
 		{"MFA challenges", s.DeleteExpiredMFAChallenges},
 		{"WebAuthn challenges", s.DeleteExpiredWebAuthnChallenges},
 		{"step-up tokens", s.DeleteExpiredStepUpTokens},
+		{"expired keyring transfers", s.DeleteExpiredKeyringTransfers},
 		{"forward-auth codes and sessions", s.DeleteExpiredForwardRows},
 		{"delivered sync events", func() error { return s.DeleteDeliveredSyncEvents(now.Add(-7 * 24 * time.Hour)) }},
 		{"logout deliveries", func() error { return s.Platform().DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)) }},

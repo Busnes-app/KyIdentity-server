@@ -7,6 +7,7 @@ Own the product's user manual and documentation workflow.
 ## Ownership
 
 - `src/` owns manual chapters; existing reference documents and plans retain their own scope.
+- `KEYRING.md` owns the encrypted keyring wire format, API and lifecycle contract.
 - Root README owns the product entry point; CONTRIBUTING.md and SECURITY.md own their policies.
 
 ## Local Contracts

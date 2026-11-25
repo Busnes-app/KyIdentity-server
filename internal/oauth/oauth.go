@@ -764,6 +764,20 @@ func (e *Engine) verifyAccessToken(tokenString string) (map[string]any, error) {
 	return claims, nil
 }
 
+// KeyringAccessToken verifies the signature and purpose. The keyring store checks the
+// registered token, exact audience, user and session together with current app access.
+func (e *Engine) KeyringAccessToken(raw string) (sub, client, jti, org string, valid bool) {
+	claims, err := e.keyManager.VerifyJWT(raw, e.issuerURL, "access_token")
+	if err != nil || claims["export_only"] == true {
+		return "", "", "", "", false
+	}
+	sub, _ = claims["sub"].(string)
+	client, _ = claims["aud"].(string)
+	jti, _ = claims["jti"].(string)
+	org, _ = claims["org_id"].(string)
+	return sub, client, jti, org, sub != "" && client != "" && jti != "" && (!e.multiTenant || org != "")
+}
+
 // GetUserinfo returns OIDC profile claims for a valid, unrevoked access token.
 func (e *Engine) GetUserinfo(tokenString string) (map[string]any, error) {
 	claims, err := e.verifyAccessToken(tokenString)

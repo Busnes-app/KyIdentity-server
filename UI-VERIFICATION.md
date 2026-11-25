@@ -114,3 +114,17 @@ Workstation login gains Linux desktops and Macs sub-headings, a generated XCreds
 Administration › Suite settings (mail domains, suite default theme) and the sign-in page
 picking up the default, then giving way to a user's own choice: 1440x900 light captures,
 driver and run log in [docs/ui-suite-settings-2026-11-20](docs/ui-suite-settings-2026-11-20/README.md).
+
+## Suite keyring
+
+Chromium exercised the embedded Settings page on a disposable KyIdentity with both
+push relays off. Busnes Light at 1280×900 and Busnes Dark at 390×844 kept one
+primary navigation region, the selected Settings tab visible, and the document
+within the viewport.
+
+The browser run created and downloaded the Emergency Kit, verified its print
+output, reopened the keyring after reload, linked two independently signed-in
+browser profiles, rotated the kit, rejected the old recovery key, and revoked a
+browser. A Chromium virtual authenticator exercised PRF registration and unlock.
+The browser checks establish these paths on Chromium with synthetic credentials.
+Physical authenticators and other browser engines require separate qualification.
