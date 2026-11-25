@@ -25,7 +25,8 @@ func schemaText(t *testing.T, s *Store) string {
 		in := `IN (SELECT oid FROM pg_class WHERE relnamespace=current_schema()::regnamespace)`
 		qs = []string{
 			`SELECT table_name||' '||column_name||' '||data_type||' '||is_nullable||' '||coalesce(column_default,'') FROM information_schema.columns WHERE table_schema=current_schema() ORDER BY 1`,
-			`SELECT conrelid::regclass::text||' '||conname||' '||pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid ` + in + ` ORDER BY 1`,
+			// PostgreSQL 18 also lists NOT NULL here (contype n); is_nullable above has it.
+			`SELECT conrelid::regclass::text||' '||conname||' '||pg_get_constraintdef(oid) FROM pg_constraint WHERE contype<>'n' AND conrelid ` + in + ` ORDER BY 1`,
 			`SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() ORDER BY 1`,
 			`SELECT viewname||' '||definition FROM pg_views WHERE schemaname=current_schema() ORDER BY 1`,
 			`SELECT tgname||' '||pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal AND tgrelid ` + in + ` ORDER BY 1`,
