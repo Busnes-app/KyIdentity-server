@@ -61,6 +61,11 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "platform-token":
+			if err := runPlatformToken(os.Args[2:], os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "disable-user":
 			if err := runDisableUser(os.Args[2:], os.Stdout); err != nil {
 				log.Fatal(err)
@@ -327,6 +332,15 @@ func main() {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
+
+	if cfg.PlatformListen != "" {
+		go func() {
+			log.Printf("Platform provisioning API listening on %s", cfg.PlatformListen)
+			if err := server.StartPlatform(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("Platform listener error: %v", err)
+			}
+		}()
+	}
 
 	// Graceful shutdown handling
 	sigChan := make(chan os.Signal, 1)
@@ -1207,6 +1221,7 @@ func purgeExpired(s *store.Store, now time.Time) error {
 		{"logout deliveries", func() error { return s.Platform().DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)) }},
 		{"audit events", func() error { return s.DeleteAuditEventsOlderThan(now.Add(-auditRetention)) }},
 		{"alerts", func() error { return s.DeleteAlertsOlderThan(now.Add(-auditRetention)) }},
+		{"platform API answers", func() error { return s.Platform().DeleteExpiredPlatformRequests(now) }},
 		{"orphaned launcher icons", func() error { _, err := s.DeleteOrphanedLauncherIcons(time.Hour); return err }},
 	}
 	var errs []error

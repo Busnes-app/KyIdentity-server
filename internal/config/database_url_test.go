@@ -52,3 +52,27 @@ func TestDatabaseURL(t *testing.T) {
 		})
 	}
 }
+
+// KYIDENTITY_PLATFORM_LISTEN: an IP literal and port of its own, multi-tenant only.
+func TestPlatformListen(t *testing.T) {
+	for _, c := range []struct{ value, want string }{
+		{"10.0.0.5:5868", "multi-tenant mode only"}, // single-tenant
+		{"localhost:5868", "IP literal and port"},
+		{"10.0.0.5", "IP literal and port"},
+		{"10.0.0.5:0", "IP literal and port"},
+		{"10.0.0.5:99999", "IP literal and port"},
+	} {
+		t.Run(c.value, func(t *testing.T) {
+			t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+			t.Setenv("KYIDENTITY_PLATFORM_LISTEN", c.value)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want %q", err, c.want)
+			}
+		})
+	}
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+	t.Setenv("KYIDENTITY_PLATFORM_LISTEN", "")
+	if cfg, err := Load(); err != nil || cfg.PlatformListen != "" {
+		t.Fatalf("unset: %v %v", cfg, err)
+	}
+}

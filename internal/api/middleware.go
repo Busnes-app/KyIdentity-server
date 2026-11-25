@@ -303,6 +303,20 @@ func (m *MiddlewareManager) allowRateLimit(key string, maxTokens, refillRate flo
 	return ok
 }
 
+// peekLocal reports whether the in-memory bucket would admit one more request, spending
+// nothing: a caller that spends only on failure checks it first.
+func (m *MiddlewareManager) peekLocal(key string, maxTokens, refillRate float64) bool {
+	m.rateLimitersMutex.Lock()
+	limiter, exists := m.rateLimiters[key]
+	m.rateLimitersMutex.Unlock()
+	if !exists {
+		return true
+	}
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	return min(limiter.tokens+m.now().Sub(limiter.lastRefill).Seconds()*limiter.refillRate, maxTokens) >= 1
+}
+
 func (m *MiddlewareManager) allowLocal(key string, maxTokens, refillRate float64, now time.Time) bool {
 	m.rateLimitersMutex.Lock()
 	limiter, exists := m.rateLimiters[key]

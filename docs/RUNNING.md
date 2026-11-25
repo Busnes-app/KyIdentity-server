@@ -249,7 +249,7 @@ Shared: `KYIDENTITY_ISSUER_URL`, the secret and encryption keys, the RSA signing
 
 Per host, free to differ: port and listen host, data directory and SQLite path, the
 database URL (host lists may differ), key file paths, `TRUSTED_PROXY_CIDRS`,
-`KYIDENTITY_FORWARDED_HEADER`, `KYIDENTITY_BACKUP_DIR`/`_KEEP`, `BOOTSTRAP_ADMIN_*` and
+`KYIDENTITY_FORWARDED_HEADER`, `KYIDENTITY_PLATFORM_LISTEN` (multi-tenant only), `KYIDENTITY_BACKUP_DIR`/`_KEEP`, `BOOTSTRAP_ADMIN_*` and
 `KYIDENTITY_RECOVERY_KEY_ID`, so the rolling recovery-key replacement under Keys still works.
 
 Each value is an HMAC under a subkey of the encryption key, so someone who can read the

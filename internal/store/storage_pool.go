@@ -340,51 +340,61 @@ func (p *PlatformStore) SetOrgLimits(org OrgID, l OrgLimits, ack bool, audit *Au
 	if audit == nil {
 		return errors.New("store: SetOrgLimits needs its audit row")
 	}
-	if err := l.valid(); err != nil {
-		return err
-	}
 	now := time.Now().UTC()
 	tx, err := p.s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	details, err := setOrgLimitsTx(tx, org.id, l, ack, now)
+	if err != nil {
+		return err
+	}
+	audit.Action, audit.TargetID, audit.TargetType = "org.limits_changed", org.id, "org"
+	if err := orgAuditTx(tx, org.id, audit, details, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// setOrgLimitsTx is SetOrgLimits' change, for a caller that audits it; it returns the
+// figures for the audit row.
+func setOrgLimitsTx(tx *sql.Tx, org string, l OrgLimits, ack bool, now time.Time) (map[string]any, error) {
+	if err := l.valid(); err != nil {
+		return nil, err
+	}
 	var o poolOrg
-	err = tx.QueryRow(`SELECT status,storage_bytes,storage_per_seat_bytes,max_seats,storage_over_since FROM orgs WHERE id=? AND kind='`+customerKind+`' AND status<>'deleted'`, org.id).
+	err := tx.QueryRow(`SELECT status,storage_bytes,storage_per_seat_bytes,max_seats,storage_over_since FROM orgs WHERE id=? AND kind='`+customerKind+`' AND status<>'deleted'`, org).
 		Scan(&o.status, &o.storage, &o.perSeat, &o.seats, &o.overSince)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var seats int64
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM users u WHERE u.org_id=? AND `+seatSQL("u"), org.id).Scan(&seats); err != nil {
-		return err
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users u WHERE u.org_id=? AND `+seatSQL("u"), org).Scan(&seats); err != nil {
+		return nil, err
 	}
 	if l.MaxSeats < seats {
-		return &SeatsInUseError{SeatsUsed: seats}
+		return nil, &SeatsInUseError{SeatsUsed: seats}
 	}
-	used, err := orgUsedTx(tx, org.id)
+	used, err := orgUsedTx(tx, org)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	oldPool := PoolBytes(o.storage, o.perSeat, o.seats)
 	o.pool = PoolBytes(l.StorageBytes, l.StoragePerSeatBytes, l.MaxSeats)
 	if o.pool < oldPool && o.pool < used && !ack {
-		return &StorageOverPoolError{PoolBytes: o.pool, UsedBytes: used}
+		return nil, &StorageOverPoolError{PoolBytes: o.pool, UsedBytes: used}
 	}
 	if _, err := tx.Exec(`UPDATE orgs SET max_seats=?,storage_bytes=?,storage_per_seat_bytes=?,revision=`+nextOrgRevisionSQL+`,updated_at=? WHERE id=?`,
-		l.MaxSeats, l.StorageBytes, l.StoragePerSeatBytes, now, org.id); err != nil {
-		return err
+		l.MaxSeats, l.StorageBytes, l.StoragePerSeatBytes, now, org); err != nil {
+		return nil, err
 	}
-	if err := flipOverTx(tx, org.id, &o, used, now); err != nil {
-		return err
+	if err := flipOverTx(tx, org, &o, used, now); err != nil {
+		return nil, err
 	}
-	audit.Action, audit.TargetID, audit.TargetType = "org.limits_changed", org.id, "org"
-	if err := orgAuditTx(tx, org.id, audit, map[string]any{"max_seats": l.MaxSeats, "storage_bytes": l.StorageBytes,
-		"storage_per_seat_bytes": l.StoragePerSeatBytes, "pool_bytes": o.pool, "used_bytes": used, "storage_over_pool_ack": ack}, now); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return map[string]any{"max_seats": l.MaxSeats, "storage_bytes": l.StorageBytes,
+		"storage_per_seat_bytes": l.StoragePerSeatBytes, "pool_bytes": o.pool, "used_bytes": used, "storage_over_pool_ack": ack}, nil
 }
