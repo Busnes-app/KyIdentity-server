@@ -125,7 +125,7 @@ func (h *PlatformHandler) authenticate(scope string, next http.HandlerFunc) http
 			return
 		}
 		if !tok.Has(scope) {
-			h.record(r, tok, r.PathValue("id"), "platform.refused", "denied", map[string]any{"error": "insufficient_scope"})
+			h.observe(r, tok, r.PathValue("id"), "platform.refused", "denied", map[string]any{"error": "insufficient_scope"})
 			platformError(w, http.StatusForbidden, "insufficient_scope", nil)
 			return
 		}
@@ -142,9 +142,9 @@ func (h *PlatformHandler) caller(r *http.Request) store.PlatformCaller {
 	return store.PlatformCaller{TokenID: platformTokenFrom(r).ID, IP: h.middleware.ClientIP(r), UserAgent: r.UserAgent()}
 }
 
-// record audits a call the store did not: a read, a replay or a refusal. A call on one
-// org goes in that org's log.
-func (h *PlatformHandler) record(r *http.Request, tok *store.PlatformToken, org, action, outcome string, details map[string]any) {
+// observe audits a call the store did not: a read, a replay or a refusal. A call on one
+// org goes in that org's log; a lost row is logged, as Observe does.
+func (h *PlatformHandler) observe(r *http.Request, tok *store.PlatformToken, org, action, outcome string, details map[string]any) {
 	b, _ := json.Marshal(details)
 	e := &store.AuditEvent{ID: uuid.NewString(), ActorID: tok.ID, ActorUsername: "platform-token", Action: action, TargetID: org,
 		TargetType: "org", IPAddress: h.middleware.ClientIP(r), UserAgent: r.UserAgent(), Outcome: outcome, DetailsJSON: string(b), CreatedAt: time.Now().UTC()}
@@ -175,7 +175,7 @@ func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any,
 		dec := json.NewDecoder(bytes.NewReader(body))
 		dec.DisallowUnknownFields()
 		if dec.Decode(req) != nil || dec.Decode(&struct{}{}) != io.EOF {
-			h.record(r, tok, org, "platform.refused", "denied", map[string]any{"error": "invalid_request"})
+			h.observe(r, tok, org, "platform.refused", "denied", map[string]any{"error": "invalid_request"})
 			platformError(w, http.StatusBadRequest, "invalid_request", nil)
 			return
 		}
@@ -190,7 +190,7 @@ func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any,
 		if status == http.StatusInternalServerError {
 			log.Printf("platform api: %s %s: %v", r.Method, r.URL.Path, err)
 		}
-		h.record(r, tok, org, "platform.refused", "denied", map[string]any{"error": code, "method": r.Method, "path": r.URL.Path})
+		h.observe(r, tok, org, "platform.refused", "denied", map[string]any{"error": code, "method": r.Method, "path": r.URL.Path})
 		platformError(w, status, code, extra)
 		return
 	}
@@ -200,7 +200,7 @@ func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any,
 			_ = json.Unmarshal(ans.Body, &created)
 			org = created.ID
 		}
-		h.record(r, tok, org, "platform.replayed", "success", map[string]any{"method": r.Method, "path": r.URL.Path})
+		h.observe(r, tok, org, "platform.replayed", "success", map[string]any{"method": r.Method, "path": r.URL.Path})
 	}
 	writePlatformRaw(w, ans.Status, ans.Body)
 }
@@ -289,7 +289,7 @@ func (h *PlatformHandler) mailInvite(r *http.Request, send func(to, subject, bod
 	body := "Hello " + inv.Name + ",\r\n\r\nAn account for " + inv.Email + " was created for you. Open this link within 7 days to choose a password:\r\n\r\n" +
 		link + "\r\n\r\nIf you did not expect this, ignore this message.\r\n"
 	if err := send(inv.Email, "Activate your account", body); err != nil {
-		h.record(r, platformTokenFrom(r), "", "platform.invite_delivery", "failure", map[string]any{"user_id": inv.UserID, "error": err.Error()})
+		h.observe(r, platformTokenFrom(r), "", "platform.invite_delivery", "failure", map[string]any{"user_id": inv.UserID, "error": err.Error()})
 	}
 }
 
@@ -300,7 +300,7 @@ func (h *PlatformHandler) getOrg(w http.ResponseWriter, r *http.Request) {
 		platformError(w, status, code, nil)
 		return
 	}
-	h.record(r, platformTokenFrom(r), o.ID, "platform.org_read", "success", nil)
+	h.observe(r, platformTokenFrom(r), o.ID, "platform.org_read", "success", nil)
 	writePlatformJSON(w, http.StatusOK, o)
 }
 
@@ -317,7 +317,7 @@ func (h *PlatformHandler) listOrgs(w http.ResponseWriter, r *http.Request) {
 	if len(orgs) == limit {
 		out["next"] = orgs[len(orgs)-1].ID
 	}
-	h.record(r, platformTokenFrom(r), "", "platform.orgs_listed", "success", map[string]any{"count": len(orgs)})
+	h.observe(r, platformTokenFrom(r), "", "platform.orgs_listed", "success", map[string]any{"count": len(orgs)})
 	writePlatformJSON(w, http.StatusOK, out)
 }
 

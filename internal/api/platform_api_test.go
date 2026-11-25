@@ -332,7 +332,7 @@ func TestPlatformTokensAndScopes(t *testing.T) {
 	ps.remote = "192.0.2.50"
 	// A browser session or a SCIM-style bearer is no platform credential.
 	admin := newUser(t, ps.db, "admin")
-	cookie := newSession(t, ps.db, admin, time.Now().Add(time.Hour))
+	cookie := newSession(t, ps.db, admin, time.Now().UTC().Add(time.Hour))
 	req := httptest.NewRequest("GET", "/platform/v1/orgs", nil)
 	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	rr := httptest.NewRecorder()
@@ -442,7 +442,7 @@ func TestPlatformSuspensionSignIn(t *testing.T) {
 	if err := ps.srv.mfaEngine.SaveUserTOTP(u.ID, secret, nil); err != nil {
 		t.Fatal(err)
 	}
-	before := newSession(t, ps.db, u, time.Now().Add(time.Hour))
+	before := newSession(t, ps.db, u, time.Now().UTC().Add(time.Hour))
 	if rr := adminRequestNoStepUp(t, ps.srv, "GET", "/api/auth/me", before, ""); rr.Code != 200 {
 		t.Fatalf("me before: %d", rr.Code)
 	}
