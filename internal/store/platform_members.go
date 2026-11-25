@@ -90,7 +90,7 @@ func memberWriteTx(tx *sql.Tx, now time.Time, c PlatformCaller, org, holder stri
 	if holder == "" || holder == u.ID {
 		return nil, nil
 	}
-	h, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=? AND NOT pending AND status='active'`, holder))
+	h, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id=? AND id=? AND NOT pending AND status='active'`, org, holder))
 	if err != nil || h == nil {
 		return nil, err
 	}
