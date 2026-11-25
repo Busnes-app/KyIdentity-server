@@ -6,6 +6,7 @@ describe('hash routes', () => {
     expect(tabFromHash('#/admin-users')).toBe('admin-users');
     expect(tabFromHash('#/settings/devices')).toBe('settings/devices');
     expect(tabFromHash('#/settings/appearance')).toBe('settings/appearance');
+    expect(tabFromHash('#/settings/keyring')).toBe('settings/keyring');
     expect(tabFromHash(hashFor('settings/account'))).toBe('settings/account');
   });
 

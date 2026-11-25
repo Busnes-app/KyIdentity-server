@@ -171,6 +171,7 @@ func (s *Server) routes() *http.ServeMux {
 
 	// Authenticated User Routes
 	authM := s.middleware.RequireAuth
+	s.registerKeyring(mux)
 	mux.Handle("POST /api/auth/logout", authM(http.HandlerFunc(authH.Logout)))
 	mux.Handle("GET /api/auth/me", authM(http.HandlerFunc(authH.Me)))
 	mux.Handle("POST /api/auth/step-up", authM(s.middleware.RateLimit("step_up", 10, 0.2)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { authH.RequestStepUp(w, r, webauthnH) }))))

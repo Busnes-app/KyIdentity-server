@@ -413,7 +413,7 @@ func tombstoneTx(tx *sql.Tx, org, subject string, now time.Time) error {
 // the classification.
 var (
 	orgRowTables = []string{"erase_notices", "group_memberships", "suite_groups", "directory_groups", "scim_connectors",
-		"alerts", "audit_events", "org_apps", "org_storage", "users"}
+		"alerts", "audit_events", "org_apps", "org_storage", "keyring_transfers", "keyring_app_keys", "keyring_wrappers", "keyrings", "users"}
 	orgKeptTables = []string{"sync_delivery_attempts", "account_sync_events", "sync_resource_state", "scim_user_links", "logout_deliveries"}
 )
 

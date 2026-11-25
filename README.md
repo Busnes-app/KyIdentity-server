@@ -26,6 +26,7 @@ before upgrading.
    - **Emergency Recovery Codes**: Single-use recovery codes stored as HMAC-SHA256 under a key derived from the encryption key, bound to the user. Codes issued by older versions (bare SHA-256) still work until regenerated; `GET /api/auth/me` reports `recoveryCodesNeedRegeneration` while any remain.
 4. **90-Second Ephemeral Pairing**: Frictionless UI-based pairing with QR codes and short PINs for native mobile devices and downstream server applications.
 5. **Application Launcher**: Search and arrange the applications you can access, with saved groups, ordering and custom icons. The embedded React frontend follows system light/dark appearance with Busnes themes; older named presets remain available.
+6. **Suite keyring** uses trusted browsers, compatible passkeys and a printable Emergency Kit to unlock the user’s suite keys locally. KyIdentity holds the encrypted envelopes. [Keyring contract](docs/KEYRING.md)
 
 ---
 

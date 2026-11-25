@@ -1927,3 +1927,65 @@ details.settings-section[open] > summary::before { content: "▾"; }
 details.settings-section > summary::-webkit-details-marker { display: none; }
 details.settings-section > summary { list-style: none; }
 details.settings-section > :not(summary) { margin: 0 1.25rem 1rem; }
+
+@media (max-width: 600px) {
+  .ky-settings-tabs.settings-tabs-wrap {
+    flex-wrap: wrap;
+    overflow: visible;
+    mask-image: none;
+  }
+}
+
+.keyring-actions {
+  flex-wrap: wrap;
+}
+
+.keyring-actions > button {
+  flex: 0 1 auto;
+}
+
+.keyring-code {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.keyring-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.keyring-devices li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-block: 0.75rem;
+}
+
+.keyring-print, .keyring-code + .form-row {
+  margin-block: 0.75rem;
+}
+
+@media print {
+  body:has(.keyring-print) * {
+    visibility: hidden;
+  }
+
+  body:has(.keyring-print) .keyring-print,
+  body:has(.keyring-print) .keyring-print * {
+    visibility: visible;
+  }
+
+  body:has(.keyring-print) .keyring-print {
+    position: fixed;
+    inset: 0;
+    margin: 0;
+    padding: 1rem;
+    background: white;
+    color: black;
+    font-size: 12pt;
+  }
+}
