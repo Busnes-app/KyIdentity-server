@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -264,10 +265,13 @@ func (p *PlatformStore) CreateOrg(tx *sql.Tx, now time.Time, c PlatformCaller, r
 	return 201, o, inv, err
 }
 
-// validMemberEmail is a plain address check; delivery proves the rest.
+// validMemberEmail is a bare address (net/mail, no display name), one @, a dotted
+// domain; delivery proves the rest.
 func validMemberEmail(e string) bool {
-	at := strings.LastIndexByte(e, '@')
-	return at > 0 && at < len(e)-3 && len(e) <= 254 && !strings.ContainsAny(e, " \t\r\n<>,;\"") && strings.Contains(e[at:], ".")
+	a, err := mail.ParseAddress(e)
+	at := strings.IndexByte(e, '@')
+	return err == nil && a.Address == e && a.Name == "" && len(e) <= 254 && strings.Count(e, "@") == 1 &&
+		strings.Contains(e[at+1:], ".") && !strings.ContainsAny(e, " \t\r\n<>,;\"()[]\\")
 }
 
 // addPendingMemberTx creates a pending everyday account (username = email, D5), with its

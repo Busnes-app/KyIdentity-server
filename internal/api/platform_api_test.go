@@ -168,6 +168,10 @@ func TestPlatformCreateOrg(t *testing.T) {
 		{orgBody("x7", "x7@example.test", 1, `,"holder_mailbox_address":"x7@elsewhere.test"`), "mailbox_domain"},
 		{orgBody("x8", "x8@example.test", 1, `,"apps":{"kycalendar":{"enabled":true}}`), "invalid_request"},
 		{orgBody("x9", "x9@example.test", 1, `} {`), "invalid_request"},
+		{orgBody("y1", "alice@@example.test", 1, ""), "invalid_request"},
+		{orgBody("y2", "Alice <alice@example.test>", 1, ""), "invalid_request"},
+		{orgBody("y3", "alice@localhost", 1, ""), "invalid_request"},
+		{orgBody("y4", "al ice@example.test", 1, ""), "invalid_request"},
 	} {
 		code, out, raw := ps.call(ps.billing, "POST", "/platform/v1/orgs", "bad-"+c.want+c.body[len(c.body)-5:], c.body)
 		if code/100 != 4 || out["error"] != c.want {
