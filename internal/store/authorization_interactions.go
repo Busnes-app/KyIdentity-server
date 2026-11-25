@@ -97,10 +97,10 @@ func (s *Store) CreateAuthorizationInteraction(i *AuthorizationInteraction) erro
 		return err
 	}
 	// Bound concurrent tabs per browser and per account, independent of cookie rotation.
-	result, err := tx.Exec(`INSERT INTO authorization_interactions(hash,browser_hash,user_id,original_session_id,request,created_at,expires_at,client_id)
- SELECT ?,?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM authorization_interactions WHERE browser_hash=?)<10
+	result, err := tx.Exec(`INSERT INTO authorization_interactions(hash,browser_hash,user_id,original_session_id,session_id,request,created_at,expires_at,client_id)
+ SELECT ?,?,?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM authorization_interactions WHERE browser_hash=?)<10
  AND (?='' OR (SELECT COUNT(*) FROM authorization_interactions WHERE user_id=?)<10)
- AND (SELECT COUNT(*) FROM authorization_interactions)<10000`, i.Hash, i.BrowserHash, i.UserID, i.OriginalSessionID, i.Request, i.CreatedAt, i.ExpiresAt, i.ClientID, i.BrowserHash, i.UserID, i.UserID)
+ AND (SELECT COUNT(*) FROM authorization_interactions)<10000`, i.Hash, i.BrowserHash, i.UserID, i.OriginalSessionID, i.SessionID, i.Request, i.CreatedAt, i.ExpiresAt, i.ClientID, i.BrowserHash, i.UserID, i.UserID)
 	if err != nil {
 		return err
 	}
@@ -112,6 +112,23 @@ func (s *Store) CreateAuthorizationInteraction(i *AuthorizationInteraction) erro
 		return ErrAuthorizationInteraction
 	}
 	return tx.Commit()
+}
+
+func (s *Store) ExtendAuthorizationInteraction(hash, browserHash, sessionID string, expiresAt time.Time) error {
+	now := time.Now().UTC()
+	res, err := s.db.Exec(`UPDATE authorization_interactions SET expires_at=? WHERE hash=? AND browser_hash=? AND session_id=? AND session_id<>'' AND expires_at>?`,
+		expiresAt, hash, browserHash, sessionID, now)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrAuthorizationInteraction
+	}
+	return nil
 }
 
 func (s *Store) GetAuthorizationInteraction(hash, browserHash string) (*AuthorizationInteraction, error) {

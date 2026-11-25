@@ -29,6 +29,7 @@ import { PasswordChangeRequired } from './components/PasswordChangeRequired';
 import { LicenseFooter } from './components/LicenseFooter';
 import { SessionUnavailable } from './components/SessionUnavailable';
 import { DeviceApproval } from './components/DeviceApproval';
+import { KeyringHandoff } from './components/KeyringHandoff';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -138,6 +139,7 @@ export const App: React.FC = () => {
 
   // Workstation sign-in (RFC 8628): approve a code a computer shows.
   if (window.location.pathname === '/device') return <DeviceApproval user={currentUser} />;
+  if (window.location.pathname === '/keyring-handoff') return <KeyringHandoff user={currentUser} />;
 
   return (
     <div className="ky-app">

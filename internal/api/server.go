@@ -212,6 +212,9 @@ func (s *Server) routes() *http.ServeMux {
 	// expired session cannot authorise an SSO redirect.
 	mux.HandleFunc("GET /api/auth/authorization/{id}", oauthH.InteractionDetails)
 	mux.Handle("POST /api/auth/authorization/cancel", s.middleware.RateLimit("authorization_cancel", 20, 1)(http.HandlerFunc(oauthH.CancelInteraction)))
+	mux.Handle("GET /api/user/keyring/handoff/{id}", authM(s.middleware.RateLimit("keyring_handoff_read", 60, 2)(http.HandlerFunc(oauthH.KeyringHandoffDetails))))
+	mux.Handle("POST /api/user/keyring/handoff/{id}/complete", authM(s.middleware.RateLimit("keyring_handoff_write", 30, 0.5)(http.HandlerFunc(oauthH.KeyringHandoffComplete))))
+	mux.Handle("DELETE /api/user/keyring/handoff/{id}", authM(s.middleware.RateLimit("keyring_handoff_write", 30, 0.5)(http.HandlerFunc(oauthH.KeyringHandoffCancel))))
 	mux.Handle("GET /oauth/authorize", s.middleware.OptionalAuth(http.HandlerFunc(oauthH.Authorize)))
 	mux.Handle("GET /oauth/logout", s.middleware.OptionalAuth(s.middleware.RateLimit("oauth_logout", 30, 1.0)(http.HandlerFunc(oauthH.EndSession))))
 	mux.Handle("POST /oauth/logout", s.middleware.OptionalAuth(s.middleware.RateLimit("oauth_logout", 30, 1.0)(http.HandlerFunc(oauthH.EndSession))))
