@@ -972,6 +972,11 @@ CalDAV, WebDAV and mail clients are configured with that host once, and C4 keeps
    busiest database; each app's load tests set the number.
 3. The 32-cell cap stays until an app needs more.
 
+**Owner decision, 2026-11-25:** To start, the billing page shows where the customer's data is
+stored, mapping the org's `home_region` geography to a human-readable hosting location /
+residency label (billing's data, per answer 1 above). KyIdentity and the individual apps do
+not add a separate data-location display yet.
+
 Tests: none new in KyIdentity (the Home region tests cover the slug and the map). Each app's
 own spec adds the C5 tests.
 
