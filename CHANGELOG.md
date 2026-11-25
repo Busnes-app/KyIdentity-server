@@ -4,6 +4,8 @@
 
 ### Changes
 
+- **Release builds can never start multi-tenant.** The refusal of `KYIDENTITY_TENANCY=multi` is now a compile-time constant. Only a binary built with the test-only `kye2e` tag opens it, for the cross-app end-to-end harness, and such a binary refuses any issuer outside the reserved `.test` domain. CI fails if the tag appears in a Dockerfile, compose file or workflow, and checks every image it would publish as `:latest` or a release (`scripts/check-release-image.sh`): no `kye2e` in the binary's build info, and a complete multi-tenant configuration is refused. Nothing changes for an install.
+
 - **Organisations in the schema (tenancy, step 1).** Schema version 7 adds organisations: an `orgs` table, an `org_id` on every table that belongs to one, and the guards the hosted multi-tenant service will need. An existing install gets one default organisation, named after its branding (or "Organisation"), and every row is put in it, so nothing it does changes: no API, token or page changes. `KYIDENTITY_TENANCY` is new: `single` (the default) is today's install, and `multi` is refused in this release. The database records the mode, a start with the other one refuses, and on Postgres it joins the shared settings every replica must agree on. Design: [docs/superpowers/specs/2026-11-19-tenancy-design.md](docs/superpowers/specs/2026-11-19-tenancy-design.md).
 
 - **Replicas drain, recover and refuse a mismatched configuration.** See [Running more than one replica](docs/RUNNING.md#running-more-than-one-replica) and [the upgrade notes](docs/UPGRADES-AND-RECOVERY.md#replica-drain-leases-and-configuration-check).
