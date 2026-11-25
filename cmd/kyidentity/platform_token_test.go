@@ -72,6 +72,9 @@ func TestPlatformEventsSecretCommand(t *testing.T) {
 	if err := platformEventsSecret(cfg, strings.NewReader("short"), &bytes.Buffer{}); err == nil {
 		t.Fatal("a short secret was accepted")
 	}
+	if err := platformEventsSecret(cfg, strings.NewReader(strings.Repeat("k", 4097)), &bytes.Buffer{}); err == nil {
+		t.Fatal("an oversized secret was accepted")
+	}
 	secret := strings.Repeat("k", 48)
 	if err := platformEventsSecret(cfg, strings.NewReader(secret+"\n"), &bytes.Buffer{}); err != nil {
 		t.Fatal(err)

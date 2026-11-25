@@ -107,9 +107,12 @@ func platformEventsSecret(cfg *config.Config, in io.Reader, out io.Writer) error
 	if cfg.Tenancy != "multi" {
 		return errors.New("platform-events needs KYIDENTITY_TENANCY=multi")
 	}
-	b, err := io.ReadAll(io.LimitReader(in, 4096))
+	b, err := io.ReadAll(io.LimitReader(in, 4097))
 	if err != nil {
 		return err
+	}
+	if len(b) > 4096 {
+		return errors.New("the secret is longer than 4096 bytes; nothing was set")
 	}
 	s, err := openStore(cfg)
 	if err != nil {
