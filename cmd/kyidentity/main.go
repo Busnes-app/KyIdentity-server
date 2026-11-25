@@ -61,6 +61,11 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "platform-events":
+			if err := runPlatformEvents(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "platform-token":
 			if err := runPlatformToken(os.Args[2:], os.Stdout); err != nil {
 				log.Fatal(err)
@@ -181,6 +186,9 @@ func main() {
 	syncEngine := sync.NewEngine(dbStore, cfg.EncryptionKey)
 	syncEngine.SetMultiTenant(cfg.Tenancy == "multi")
 	syncEngine.SetIssuerURL(cfg.IssuerURL)
+	if cfg.PlatformEventsURL != "" {
+		syncEngine.SetPlatformEventsURL(cfg.PlatformEventsURL)
+	}
 	mfaEngine := mfa.NewEngine(dbStore, cfg.EncryptionKey)
 	relaySender, err := mfa.NewRelaySender(
 		mfa.RelayConfig{
@@ -1222,6 +1230,7 @@ func purgeExpired(s *store.Store, now time.Time) error {
 		{"audit events", func() error { return s.DeleteAuditEventsOlderThan(now.Add(-auditRetention)) }},
 		{"alerts", func() error { return s.DeleteAlertsOlderThan(now.Add(-auditRetention)) }},
 		{"platform API answers", func() error { return s.Platform().DeleteExpiredPlatformRequests(now) }},
+		{"delivered platform events", func() error { return s.Platform().DeleteDeliveredPlatformEvents(now.Add(-7 * 24 * time.Hour)) }},
 		{"orphaned launcher icons", func() error { _, err := s.DeleteOrphanedLauncherIcons(time.Hour); return err }},
 	}
 	var errs []error

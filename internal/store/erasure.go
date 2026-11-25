@@ -216,7 +216,7 @@ func (o *OrgStore) Erase(userID, sessionID, grantHash, operation string, audit *
 		out.DeleteAfter.Unix(), now, o.org); err != nil {
 		return nil, erasureError(err)
 	}
-	if err := queuePlatformEventTx(tx, o.org, "org.deletion_scheduled", "", now); err != nil {
+	if err := queuePlatformEventTx(tx, o.org, "org.deletion_scheduled", "", "", now); err != nil {
 		return nil, err
 	}
 	if err := recordAuditTx(tx, audit); err != nil {
@@ -291,7 +291,7 @@ func eraseUserTx(tx *sql.Tx, org string, u *User, audit *AuditEvent, now time.Ti
 	if _, err := tx.Exec(`DELETE FROM users WHERE org_id=? AND id=?`, org, u.ID); err != nil {
 		return erasureError(err)
 	}
-	if err := queuePlatformEventTx(tx, org, "org.member_changed", u.ID, now); err != nil {
+	if err := queuePlatformEventTx(tx, org, "org.member_changed", u.ID, "removed", now); err != nil {
 		return err
 	}
 	return reconcileProvisioningTx(tx, now)
@@ -446,7 +446,7 @@ func deleteOrgTx(tx *sql.Tx, org string, audit *AuditEvent, now time.Time) error
 	if err := reconcileProvisioningTx(tx, now); err != nil {
 		return err
 	}
-	if err := queuePlatformEventTx(tx, org, "org.deleted", "", now); err != nil {
+	if err := queuePlatformEventTx(tx, org, "org.deleted", "", "", now); err != nil {
 		return err
 	}
 	if audit == nil {
@@ -470,7 +470,7 @@ func deleteOrgTx(tx *sql.Tx, org string, audit *AuditEvent, now time.Time) error
 
 // queuePlatformEventTx queues an event to billing (tenancy design, "Events back to
 // billing"). The body holds IDs and counts only.
-func queuePlatformEventTx(tx *sql.Tx, org, typ, userID string, now time.Time) error {
+func queuePlatformEventTx(tx *sql.Tx, org, typ, userID, change string, now time.Time) error {
 	var billingRef, status, region string
 	var revision, seats int64
 	if err := tx.QueryRow(`SELECT COALESCE(billing_ref,''),status,home_region,revision,
@@ -482,7 +482,7 @@ func queuePlatformEventTx(tx *sql.Tx, org, typ, userID string, now time.Time) er
 	body := map[string]any{"event_id": id, "type": typ, "org_id": org, "home_region": region, "billing_ref": billingRef, "revision": revision,
 		"status": status, "seats_used": seats, "at": now.Unix()}
 	if userID != "" {
-		body["user_id"], body["change"] = userID, "removed"
+		body["user_id"], body["change"] = userID, change
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {

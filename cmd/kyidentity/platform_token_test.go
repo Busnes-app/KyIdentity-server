@@ -63,3 +63,32 @@ func TestPlatformTokenCommand(t *testing.T) {
 		t.Fatalf("audit rows: %d %v", n, err)
 	}
 }
+
+// platform-events set-secret seals the secret from stdin; a short one is refused.
+func TestPlatformEventsSecretCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kyidentity.db")
+	key := bytes.Repeat([]byte{7}, 32)
+	cfg := &config.Config{Tenancy: "multi", DBPath: path, EncryptionKey: key}
+	if err := platformEventsSecret(cfg, strings.NewReader("short"), &bytes.Buffer{}); err == nil {
+		t.Fatal("a short secret was accepted")
+	}
+	if err := platformEventsSecret(cfg, strings.NewReader(strings.Repeat("k", 4097)), &bytes.Buffer{}); err == nil {
+		t.Fatal("an oversized secret was accepted")
+	}
+	secret := strings.Repeat("k", 48)
+	if err := platformEventsSecret(cfg, strings.NewReader(secret+"\n"), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	got, err := s.PlatformEventsSecret(key)
+	if err != nil || string(got) != secret {
+		t.Fatalf("secret: %q %v", got, err)
+	}
+	if err := platformEventsSecret(&config.Config{Tenancy: "single", DBPath: path, EncryptionKey: key}, strings.NewReader(secret), &bytes.Buffer{}); err == nil {
+		t.Fatal("single-tenant install set the secret")
+	}
+}

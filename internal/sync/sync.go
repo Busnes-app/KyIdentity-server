@@ -31,6 +31,9 @@ type Engine struct {
 	multiTenant bool
 	// issuerURL is where an erase notice tells members to sign in; see SetIssuerURL.
 	issuerURL string
+	// platformEventsURL receives the events to billing; see SetPlatformEventsURL.
+	platformEventsURL string
+	platformClient    *http.Client
 }
 
 // SetIssuerURL sets the sign-in address erase notices give. Call it before the worker.
@@ -685,6 +688,9 @@ func (e *Engine) StartWorker(ctx context.Context) {
 	go e.alertWorker(ctx)
 	if e.multiTenant {
 		go e.eraseNoticeWorker(ctx)
+		if e.platformEventsURL != "" {
+			go e.platformEventsWorker(ctx)
+		}
 	}
 	go e.hrWorker(ctx)
 	// The reconcile tick's passes run on every replica with no lease. Each re-checks its rows

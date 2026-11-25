@@ -70,8 +70,26 @@ func TestPlatformListen(t *testing.T) {
 			}
 		})
 	}
-	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
 	t.Setenv("KYIDENTITY_PLATFORM_LISTEN", "")
+	for _, c := range []struct{ value, want string }{
+		{"https://billing.example.test/events", "multi-tenant mode only"}, // single-tenant
+		{"http://billing.example.test/events", "https URL"},
+		{"http://8.8.8.8/events", "https URL"},
+		{"https://user:pw@billing.example.test/events", "https URL"},
+		{"ftp://10.0.0.1/x", "https URL"},
+		{"::", "https URL"},
+		{"http://10.0.0.7:8080/events", "multi-tenant mode only"},
+	} {
+		t.Run(c.value, func(t *testing.T) {
+			t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+			t.Setenv("KYIDENTITY_PLATFORM_EVENTS_URL", c.value)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want %q", err, c.want)
+			}
+		})
+	}
+	t.Setenv("KYIDENTITY_DATA_DIR", t.TempDir())
+	t.Setenv("KYIDENTITY_PLATFORM_EVENTS_URL", "")
 	if cfg, err := Load(); err != nil || cfg.PlatformListen != "" {
 		t.Fatalf("unset: %v %v", cfg, err)
 	}

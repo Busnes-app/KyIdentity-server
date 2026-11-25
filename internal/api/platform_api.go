@@ -66,6 +66,12 @@ func (h *PlatformHandler) routes() http.Handler {
 	route("POST /platform/v1/orgs/{id}/resume", store.ScopeOrgsWrite, h.resumeOrg)
 	route("POST /platform/v1/orgs/{id}/schedule-deletion", store.ScopeOrgsWrite, h.scheduleDeletion)
 	route("DELETE /platform/v1/orgs/{id}", store.ScopeOrgsDelete, h.deleteOrg)
+	route("GET /platform/v1/orgs/{id}/members", store.ScopeMembersRead, h.listMembers)
+	route("POST /platform/v1/orgs/{id}/members", store.ScopeMembersWrite, h.memberWrite(h.addMember))
+	route("POST /platform/v1/orgs/{id}/members/{user_id}/resend-invite", store.ScopeMembersWrite, h.memberWrite(h.resendInvite))
+	route("POST /platform/v1/orgs/{id}/members/{user_id}/disable", store.ScopeMembersWrite, h.memberWrite(h.setMember(false)))
+	route("POST /platform/v1/orgs/{id}/members/{user_id}/enable", store.ScopeMembersWrite, h.memberWrite(h.setMember(true)))
+	route("DELETE /platform/v1/orgs/{id}/members/{user_id}", store.ScopeMembersWrite, h.memberWrite(h.removeMember))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { platformError(w, http.StatusNotFound, "not_found", nil) })
 	return withDeadline(limitRequestBody(mux), mux, requestDeadline)
 }
@@ -248,6 +254,14 @@ func platformErrorFor(err error) (int, string, map[string]any) {
 		return http.StatusBadRequest, "invalid_storage", nil
 	case errors.Is(err, store.ErrHolderNotMember):
 		return http.StatusBadRequest, "invalid_account_holder", nil
+	case errors.Is(err, store.ErrOrgNotActive):
+		return http.StatusConflict, "org_not_active", nil
+	case errors.Is(err, store.ErrNotPending):
+		return http.StatusConflict, "not_pending", nil
+	case errors.Is(err, store.ErrMemberState):
+		return http.StatusConflict, "member_state", nil
+	case errors.Is(err, store.ErrMailboxAddressSet):
+		return http.StatusConflict, "mailbox_address_set", nil
 	case errors.Is(err, errMailNotReady):
 		return http.StatusServiceUnavailable, "mail_not_configured", nil
 	case errors.As(err, &input):
@@ -370,4 +384,141 @@ func (h *PlatformHandler) deleteOrg(w http.ResponseWriter, r *http.Request) {
 		o, err := h.store.Platform().DeleteOrg(tx, now, h.caller(r), r.PathValue("id"))
 		return http.StatusOK, o, err
 	})
+}
+
+// memberWrite rate limits member writes per org (the portal acts for people, so a burst is
+// a bug or abuse) before the write.
+func (h *PlatformHandler) memberWrite(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !h.middleware.allowRateLimit("platform_org:"+r.PathValue("id"), 30, 0.5) {
+			platformError(w, http.StatusTooManyRequests, "rate_limited", nil)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (h *PlatformHandler) listMembers(w http.ResponseWriter, r *http.Request) {
+	members, err := h.store.Platform().PlatformMembers(r.PathValue("id"))
+	if err != nil {
+		status, code, _ := platformErrorFor(err)
+		if status == http.StatusInternalServerError {
+			log.Printf("platform api: list members: %v", err)
+		}
+		platformError(w, status, code, nil)
+		return
+	}
+	h.observe(r, platformTokenFrom(r), r.PathValue("id"), "platform.members_listed", "success", map[string]any{"count": len(members)})
+	writePlatformJSON(w, http.StatusOK, map[string]any{"members": members})
+}
+
+// memberMail is what a member write mails after it commits.
+type memberMail struct {
+	send    func(to, subject, body string) error
+	mailErr error
+	invite  *store.Invite
+	notice  *store.HolderNotice
+}
+
+// needMail loads the sender; a write that mails refuses without one.
+func (h *PlatformHandler) needMail(m *memberMail) error {
+	send, err := h.mailer()
+	if err != nil {
+		return err
+	}
+	if send == nil {
+		return errMailNotReady
+	}
+	m.send = send
+	return nil
+}
+
+func (h *PlatformHandler) deliver(fresh bool, r *http.Request, m *memberMail) {
+	if !fresh {
+		return
+	}
+	if m.send == nil {
+		// The change committed but its notice cannot go out: unconfigured or unreadable mail.
+		if m.notice != nil {
+			reason := "mail_not_configured"
+			if m.mailErr != nil {
+				reason = "mail_unavailable"
+			}
+			h.observe(r, platformTokenFrom(r), r.PathValue("id"), "platform.notice_delivery", "failure", map[string]any{"change": m.notice.Change, "error": reason})
+		}
+		return
+	}
+	if m.invite != nil {
+		h.mailInvite(r, m.send, m.invite)
+	}
+	if n := m.notice; n != nil {
+		body := "Hello " + n.Name + ",\r\n\r\nA member of your organisation changed: " + n.Member + " was " + n.Change +
+			".\r\n\r\nIf you did not expect this, contact support.\r\n"
+		if err := m.send(n.Email, "A change to your organisation", body); err != nil {
+			h.observe(r, platformTokenFrom(r), r.PathValue("id"), "platform.notice_delivery", "failure", map[string]any{"change": n.Change})
+		}
+	}
+}
+
+func (h *PlatformHandler) addMember(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email          string `json:"email"`
+		Name           string `json:"name"`
+		MailboxAddress string `json:"mailbox_address,omitempty"`
+	}
+	var m memberMail
+	fresh := h.write(w, r, &req, func(tx *sql.Tx, now time.Time) (int, any, error) {
+		if err := h.needMail(&m); err != nil {
+			return 0, nil, err
+		}
+		status, res, inv, notice, err := h.store.Platform().AddMember(tx, now, h.caller(r), r.PathValue("id"), req.Email, req.Name, req.MailboxAddress)
+		m.invite, m.notice = inv, notice
+		return status, res, err
+	})
+	h.deliver(fresh, r, &m)
+}
+
+func (h *PlatformHandler) resendInvite(w http.ResponseWriter, r *http.Request) {
+	if !h.middleware.allowRateLimit("platform_resend:"+r.PathValue("user_id"), 3, 1.0/600) {
+		platformError(w, http.StatusTooManyRequests, "rate_limited", nil)
+		return
+	}
+	var m memberMail
+	fresh := h.write(w, r, nil, func(tx *sql.Tx, now time.Time) (int, any, error) {
+		if err := h.needMail(&m); err != nil {
+			return 0, nil, err
+		}
+		res, inv, _, err := h.store.Platform().ResendInvite(tx, now, h.caller(r), r.PathValue("id"), r.PathValue("user_id"))
+		m.invite = inv
+		return http.StatusOK, res, err
+	})
+	h.deliver(fresh, r, &m)
+}
+
+func (h *PlatformHandler) setMember(enable bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var m memberMail
+		fresh := h.write(w, r, nil, func(tx *sql.Tx, now time.Time) (int, any, error) {
+			res, notice, err := h.store.Platform().SetMemberEnabled(tx, now, h.caller(r), r.PathValue("id"), r.PathValue("user_id"), enable)
+			if err == nil && notice != nil {
+				m.send, m.mailErr = h.mailer()
+			}
+			m.notice = notice
+			return http.StatusOK, res, err
+		})
+		h.deliver(fresh, r, &m)
+	}
+}
+
+func (h *PlatformHandler) removeMember(w http.ResponseWriter, r *http.Request) {
+	var m memberMail
+	fresh := h.write(w, r, nil, func(tx *sql.Tx, now time.Time) (int, any, error) {
+		res, notice, err := h.store.Platform().RemoveMember(tx, now, h.caller(r), r.PathValue("id"), r.PathValue("user_id"))
+		if err == nil && notice != nil {
+			m.send, m.mailErr = h.mailer()
+		}
+		m.notice = notice
+		return http.StatusOK, res, err
+	})
+	h.deliver(fresh, r, &m)
 }
