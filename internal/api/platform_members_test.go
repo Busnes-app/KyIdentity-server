@@ -274,3 +274,25 @@ func TestPlatformEventsAreSignedAndRetried(t *testing.T) {
 		t.Fatalf("the secret is not sealed: %v", err)
 	}
 }
+
+// A disable with mail gone still commits; the missed notice is audited.
+func TestPlatformMissedNoticeIsAudited(t *testing.T) {
+	ps := newPlatformSuite(t)
+	org := ps.create("q1", "holder-q1@example.test")["id"].(string)
+	ps.activate("holder-q1@example.test")
+	_, a, _ := ps.call(ps.portal, "POST", "/platform/v1/orgs/"+org+"/members", "a", `{"email":"q@example.test","name":"Q"}`)
+	ps.activate("q@example.test")
+	ps.noMail = true
+	if code, out, _ := ps.call(ps.portal, "POST", "/platform/v1/orgs/"+org+"/members/"+a["user_id"].(string)+"/disable", "d", ""); code != 200 {
+		t.Fatalf("disable: %d %v", code, out)
+	}
+	raw, err := store.OpenRawForTest(ps.srv.cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var n int
+	if err := raw.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action='platform.notice_delivery' AND outcome='failure' AND org_id=?`, org).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("missed notice audit rows: %d %v", n, err)
+	}
+}

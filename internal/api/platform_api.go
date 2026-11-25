@@ -414,9 +414,10 @@ func (h *PlatformHandler) listMembers(w http.ResponseWriter, r *http.Request) {
 
 // memberMail is what a member write mails after it commits.
 type memberMail struct {
-	send   func(to, subject, body string) error
-	invite *store.Invite
-	notice *store.HolderNotice
+	send    func(to, subject, body string) error
+	mailErr error
+	invite  *store.Invite
+	notice  *store.HolderNotice
 }
 
 // needMail loads the sender; a write that mails refuses without one.
@@ -433,7 +434,18 @@ func (h *PlatformHandler) needMail(m *memberMail) error {
 }
 
 func (h *PlatformHandler) deliver(fresh bool, r *http.Request, m *memberMail) {
-	if !fresh || m.send == nil {
+	if !fresh {
+		return
+	}
+	if m.send == nil {
+		// The change committed but its notice cannot go out: unconfigured or unreadable mail.
+		if m.notice != nil {
+			reason := "mail_not_configured"
+			if m.mailErr != nil {
+				reason = "mail_unavailable"
+			}
+			h.observe(r, platformTokenFrom(r), r.PathValue("id"), "platform.notice_delivery", "failure", map[string]any{"change": m.notice.Change, "error": reason})
+		}
 		return
 	}
 	if m.invite != nil {
@@ -489,7 +501,7 @@ func (h *PlatformHandler) setMember(enable bool) http.HandlerFunc {
 		fresh := h.write(w, r, nil, func(tx *sql.Tx, now time.Time) (int, any, error) {
 			res, notice, err := h.store.Platform().SetMemberEnabled(tx, now, h.caller(r), r.PathValue("id"), r.PathValue("user_id"), enable)
 			if err == nil && notice != nil {
-				m.send, _ = h.mailer()
+				m.send, m.mailErr = h.mailer()
 			}
 			m.notice = notice
 			return http.StatusOK, res, err
@@ -503,7 +515,7 @@ func (h *PlatformHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 	fresh := h.write(w, r, nil, func(tx *sql.Tx, now time.Time) (int, any, error) {
 		res, notice, err := h.store.Platform().RemoveMember(tx, now, h.caller(r), r.PathValue("id"), r.PathValue("user_id"))
 		if err == nil && notice != nil {
-			m.send, _ = h.mailer()
+			m.send, m.mailErr = h.mailer()
 		}
 		m.notice = notice
 		return http.StatusOK, res, err
