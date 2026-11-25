@@ -8,6 +8,8 @@ on:
   # merge without a CodeQL check on its head (#224). Matches ci.yml.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # The merge queue tests each PR on top of the queue before it merges.
+  merge_group:
   schedule:
     - cron: "23 6 * * 1"
 
