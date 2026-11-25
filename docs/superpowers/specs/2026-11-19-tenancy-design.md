@@ -1409,6 +1409,15 @@ tests.
        a live member afterwards. A pending holder past its token's expiry stays, and
        `org.holder_invite_expired` is queued once.
      - Events are signed and retried.
+   - **Status (2026-11-25).** Built in two stacked PRs. The first: the listener, tokens and
+     CLI, idempotency, revision, create, read, update, suspend, resume, schedule-deletion and
+     deletion, the account holder at create, `org_active` in the account flows, and their
+     tests. A replayed or refused call is audited too; only answers are stored under a key, so
+     a refusal (including `503 mail_not_configured`) can be retried under the same key. The
+     second: the member endpoints with the mailbox address, the holder's notices, outbox
+     delivery and `org.holder_invite_expired`, and the `credential_principals` allowlist.
+     `org_apps` written by the platform API stays step 6 (Entitlements): until then a body
+     with `apps` is refused (`400 invalid_request`).
    - **Mailbox address** (landed before PR 4, see Mailbox address): the column, its index
      and triggers, `OrgStore.SetMailboxAddress`, the `mailbox` webhook entry, the domain
      removal refusal, and the staff route and edit field. Before PR 5 an org route binds the

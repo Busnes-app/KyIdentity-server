@@ -44,9 +44,9 @@ func (o *OrgStore) IssueAccountToken(userID, kind, delivery string, ttl time.Dur
 	s := o.s
 	// An owned account the upstream marks inactive, or a local override holds down, gets
 	// no activation link: redeeming it could only produce a disabled account.
-	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)))`
+	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)) AND ` + orgActiveSQL("users") + `)`
 	if kind == "reset" {
-		eligible = `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND status='active' AND NOT pending)`
+		eligible = `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND status='active' AND NOT pending AND ` + orgActiveSQL("users") + `)`
 	}
 	raw, err := crypto.GenerateRandomHex(32)
 	if err != nil {
@@ -112,7 +112,7 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=FALSE, password_change_required=FALSE,
  status=CASE WHEN ?='activation' THEN CASE WHEN source_connector_id IS NULL OR (source_active AND NOT locally_disabled) THEN 'active' ELSE 'disabled' END ELSE status END,
  email_verified_at=CASE WHEN email_verified_at IS NOT NULL THEN email_verified_at WHEN ?='email' THEN ? END, updated_at=?
- WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending))`, passwordHash, kind, delivery, now, now, userID, kind, kind)
+ WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending)) AND `+orgActiveSQL("users")+``, passwordHash, kind, delivery, now, now, userID, kind, kind)
 		if errors.Is(staffOrgError(err), ErrSeatLimit) {
 			return ErrNotFound // the seat-cap backstop at activation reads as an expired link
 		}

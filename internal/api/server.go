@@ -34,8 +34,10 @@ type Server struct {
 	audit       *audit.Logger
 	middleware  *MiddlewareManager
 	httpServer  *http.Server
-	staticFS    fs.FS
-	forward     *ForwardHandler
+	// platformServer is the platform provisioning API's listener; nil when unset.
+	platformServer *http.Server
+	staticFS       fs.FS
+	forward        *ForwardHandler
 	// draining turns /readyz to 503 while a stopping replica leaves rotation; work is the
 	// deposits and drills in flight.
 	draining atomic.Bool
@@ -88,6 +90,10 @@ func NewServer(
 		IdleTimeout:       60 * time.Second,
 	}
 
+	if cfg.PlatformListen != "" && cfg.Tenancy == "multi" {
+		srv.platformServer = &http.Server{Addr: cfg.PlatformListen, Handler: newPlatformHandler(srv),
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	}
 	return srv
 }
 
@@ -526,8 +532,31 @@ func (s *Server) Start() error {
 	return s.Serve(ln)
 }
 
+// Shutdown closes both listeners at once, under one deadline.
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.httpServer.Shutdown(ctx)
+	done := make(chan struct{})
+	if s.platformServer != nil {
+		go func() {
+			defer close(done)
+			if err := s.platformServer.Shutdown(ctx); err != nil {
+				log.Printf("platform listener shutdown: %v", err)
+			}
+		}()
+	} else {
+		close(done)
+	}
+	err := s.httpServer.Shutdown(ctx)
+	<-done
+	return err
+}
+
+// StartPlatform serves the platform provisioning API until Shutdown; a no-op without
+// KYIDENTITY_PLATFORM_LISTEN.
+func (s *Server) StartPlatform() error {
+	if s.platformServer == nil {
+		return nil
+	}
+	return s.platformServer.ListenAndServe()
 }
 
 const defaultIndexHTML = `<!DOCTYPE html>

@@ -27,3 +27,31 @@ func TestMultiTenantGateIssuer(t *testing.T) {
 		}
 	})
 }
+
+// In the test build multi-tenant mode reaches the platform listener's own checks: an IP
+// literal and port, never the public port.
+func TestMultiTenantGatePlatformListen(t *testing.T) {
+	for value, want := range map[string]string{
+		"10.0.0.5:5868":  "",
+		"10.0.0.5:5867":  "on its own port",
+		"0.0.0.0:5867":   "on its own port",
+		"localhost:5868": "IP literal and port",
+	} {
+		t.Run(value, func(t *testing.T) {
+			env := multiEnv(t)
+			env["KYIDENTITY_PORT"] = "5867"
+			env["KYIDENTITY_PLATFORM_LISTEN"] = value
+			withEnv(t, env)
+			cfg, err := Load()
+			if want == "" {
+				if err != nil || cfg.PlatformListen != value {
+					t.Fatalf("cfg %v, err %v", cfg, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
+	}
+}

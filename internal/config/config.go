@@ -141,6 +141,9 @@ type Config struct {
 	// multi-tenant service, which this release refuses. The database records the mode, and
 	// a start with the other one refuses.
 	Tenancy string
+	// PlatformListen is KYIDENTITY_PLATFORM_LISTEN, the platform provisioning API's own
+	// listener (an IP literal and port). Empty means no platform API; multi-tenant only.
+	PlatformListen string
 }
 
 var certDigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -339,6 +342,16 @@ func Load() (*Config, error) {
 	default:
 		return nil, fmt.Errorf("KYIDENTITY_TENANCY must be single or multi, not %q", tenancy)
 	}
+	platformListen := os.Getenv("KYIDENTITY_PLATFORM_LISTEN")
+	if platformListen != "" {
+		host, p, err := net.SplitHostPort(platformListen)
+		if n, perr := strconv.Atoi(p); err != nil || net.ParseIP(host) == nil || perr != nil || n < 1 || n > 65535 {
+			return nil, errors.New("KYIDENTITY_PLATFORM_LISTEN must be an IP literal and port, for example 10.0.0.5:5868")
+		}
+		if tenancy != "multi" || p == port && (host == listenHost || listenHost == "" || net.ParseIP(host).IsUnspecified()) {
+			return nil, errors.New("KYIDENTITY_PLATFORM_LISTEN is for multi-tenant mode only, on its own port")
+		}
+	}
 	if replicated && databaseURL == "" {
 		return nil, errors.New("KYIDENTITY_REPLICATED is set but the database is a local SQLite file: replicas must share one database, so set KYIDENTITY_DATABASE_URL or KYIDENTITY_DATABASE_URL_FILE")
 	}
@@ -385,6 +398,7 @@ func Load() (*Config, error) {
 		AppAttestAppIDs:            appAttestAppIDs,
 		AppAttestAllowDevelopment:  appAttestAllowDevelopment,
 		Tenancy:                    tenancy,
+		PlatformListen:             platformListen,
 	}, nil
 }
 

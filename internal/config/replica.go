@@ -66,7 +66,7 @@ var replicaShared = map[string]string{
 var replicaPerHost = []string{
 	"Port", "ListenHost", "RPID", "Origin", "DBPath", "DatabaseURL", "DataDir",
 	"RSAKeyPath", "VAPIDKeyPath", "VAPIDKeyMounted", "TrustedProxyCIDRs", "ForwardedHeader",
-	"BootstrapUser", "BootstrapPass", "BackupDir", "BackupKeep", "RecoveryKeyID",
+	"BootstrapUser", "BootstrapPass", "BackupDir", "BackupKeep", "RecoveryKeyID", "PlatformListen",
 }
 
 // The key files' public halves, reported under the variables that name the files.
