@@ -111,6 +111,15 @@ func (o *OrgStore) SetMailboxAddress(userID, raw string, overwrite bool, audit *
 		return nil, false, err
 	}
 	defer tx.Rollback()
+	u, changed, err := setMailboxAddressTx(tx, o.org, userID, addr, overwrite, audit)
+	if err != nil || !changed {
+		return u, false, err
+	}
+	return u, true, tx.Commit()
+}
+
+// setMailboxAddressTx is SetMailboxAddress inside the caller's transaction, addr normalised.
+func setMailboxAddressTx(tx *sql.Tx, org, userID, addr string, overwrite bool, audit *AuditEvent) (*User, bool, error) {
 	// Read under the writer lock, so a domain removal cannot race this write.
 	domains, err := suiteEmailDomains(settingsTx{tx})
 	if err != nil {
@@ -119,7 +128,7 @@ func (o *OrgStore) SetMailboxAddress(userID, raw string, overwrite bool, audit *
 	if !slices.Contains(domains, mailboxDomain(addr)) {
 		return nil, false, ErrMailboxDomain
 	}
-	u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id=? AND id=?`, o.org, userID))
+	u, err := scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE org_id=? AND id=?`, org, userID))
 	if err != nil {
 		return nil, false, err
 	}
@@ -134,7 +143,7 @@ func (o *OrgStore) SetMailboxAddress(userID, raw string, overwrite bool, audit *
 		return nil, false, ErrMailboxAddressSet
 	}
 	now := rowTime()
-	if _, err := tx.Exec(`UPDATE users SET mailbox_address=?, updated_at=? WHERE org_id=? AND id=?`, addr, now, o.org, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE users SET mailbox_address=?, updated_at=? WHERE org_id=? AND id=?`, addr, now, org, userID); err != nil {
 		switch {
 		case strings.Contains(err.Error(), msgMailboxCustomerOnly):
 			return nil, false, ErrMailboxCustomerOnly
@@ -158,7 +167,7 @@ func (o *OrgStore) SetMailboxAddress(userID, raw string, overwrite bool, audit *
 	if err := recordAuditTx(tx, audit); err != nil {
 		return nil, false, err
 	}
-	return u, true, tx.Commit()
+	return u, true, nil
 }
 
 // refuseRemovingUsedDomainsTx is the safe rule for shrinking the suite domain list: a

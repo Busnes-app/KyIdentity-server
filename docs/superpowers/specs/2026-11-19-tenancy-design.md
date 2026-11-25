@@ -260,6 +260,13 @@ The fixed default org ID leaves room to add it later.
   keys from outside the data directory, so a multi-tenant install can gain a replica without
   moving its keys. A single server may still run with the flag. The check comes before the
   release gate, so `multi` stays refused until PR 6.
+  - **The `kye2e` gate (2026-11-25).** The release gate is the constant `multiTenantBuild`
+    (`internal/config/gate_release.go`, `false`). Only `go build -tags kye2e` selects
+    `gate_kye2e.go` (`true`), for the cross-app end-to-end harness (KyCalendar
+    `docs/superpowers/specs/2026-11-24-multi-tenant-e2e-design.md`); no variable, flag or
+    `-ldflags -X` reaches a constant. A tagged binary refuses an issuer whose host is not under
+    `.test`. CI keeps the tag out of every build file and workflow and fails an image built
+    with it or one that starts in `multi`, both before `:latest` and before a release push.
   - With the flag, a cached forward-auth answer that admits the request is first checked
     against its `forward_sessions` row (`Store.ForwardSessionLive`). A logout or revocation
     on one replica then holds on every replica at the next request.
@@ -965,6 +972,11 @@ CalDAV, WebDAV and mail clients are configured with that host once, and C4 keeps
    busiest database; each app's load tests set the number.
 3. The 32-cell cap stays until an app needs more.
 
+**Owner decision, 2026-11-25:** To start, the billing page shows where the customer's data is
+stored, mapping the org's `home_region` geography to a human-readable hosting location /
+residency label (billing's data, per answer 1 above). KyIdentity and the individual apps do
+not add a separate data-location display yet.
+
 Tests: none new in KyIdentity (the Home region tests cover the slug and the map). Each app's
 own spec adds the C5 tests.
 
@@ -1402,6 +1414,22 @@ tests.
        a live member afterwards. A pending holder past its token's expiry stays, and
        `org.holder_invite_expired` is queued once.
      - Events are signed and retried.
+   - **Status (2026-11-25).** Built in two stacked PRs. The first: the listener, tokens and
+     CLI, idempotency, revision, create, read, update, suspend, resume, schedule-deletion and
+     deletion, the account holder at create, `org_active` in the account flows, and their
+     tests. A replayed or refused call is audited too; only answers are stored under a key, so
+     a refusal (including `503 mail_not_configured`) can be retried under the same key. The
+     second: the member endpoints with the mailbox address, the holder's notices, outbox
+     delivery and `org.holder_invite_expired`, and the `credential_principals` allowlist.
+     The holder's notice is mailed after the change commits, best effort (a failure is
+     audited), not from an outbox. `org.holder_invite_expired` is queued when the expired
+     link is purged, in the same transaction, so once per expiry without a new column.
+     Disabling a pending member is `409 member_state`: delete it or re-invite it instead.
+     E8 of the cross-app e2e design: a customer member signs in with a password alone in
+     multi-tenant mode unless staff require a second factor with an enrollment policy
+     (D10); no passkey is pinned for customer members (only staff are pinned, PR 5).
+     `org_apps` written by the platform API stays step 6 (Entitlements): until then a body
+     with `apps` is refused (`400 invalid_request`).
    - **Mailbox address** (landed before PR 4, see Mailbox address): the column, its index
      and triggers, `OrgStore.SetMailboxAddress`, the `mailbox` webhook entry, the domain
      removal refusal, and the staff route and edit field. Before PR 5 an org route binds the

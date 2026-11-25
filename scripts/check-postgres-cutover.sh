@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Proves the documented SQLite -> PostgreSQL cutover with the real image: a SQLite install on
 # a named /data volume is stopped with `docker stop` at its default timeout, copied with the
-# image's migrate-to-postgres into an empty PostgreSQL 17 (C locale, pinned by digest) on a
+# image's migrate-to-postgres into an empty PostgreSQL 18 (C locale, pinned by digest) on a
 # private network, and started on PostgreSQL. Everything runs on an --internal network with
 # the push relays empty, so nothing can reach a production service. Every container, the
 # network and the volume this run made are removed on exit.
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 image=${1:-kyidentity-ci}
-pg_image=postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
+pg_image=postgres:18.7-trixie@sha256:c699303802144847d238196173655dbbecf7a96aeca1565f2b02eb671a1f0b6b
 run_id=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 name=kyidentity-cutover-$run_id
 net=$name volume=$name-data pg=$name-pg sqlite_app=$name-sqlite pg_app=$name-postgres
@@ -61,7 +61,7 @@ code=$(docker inspect -f '{{.State.ExitCode}}' "$sqlite_app")
 inspect 'test ! -e /data/kyidentity.db-wal' || fail "the stopped server left kyidentity.db-wal behind"
 before=$(inspect 'sha256sum /data/kyidentity.db' | cut -d' ' -f1)
 
-echo "3. PostgreSQL 17, C locale, on the private network"
+echo "3. PostgreSQL 18, C locale, on the private network"
 password=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
 docker run -d --name "$pg" --network "$net" -e POSTGRES_PASSWORD="$password" \
   -e POSTGRES_INITDB_ARGS='--locale=C --encoding=UTF8' "$pg_image" >/dev/null

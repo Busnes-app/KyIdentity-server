@@ -141,6 +141,12 @@ type Config struct {
 	// multi-tenant service, which this release refuses. The database records the mode, and
 	// a start with the other one refuses.
 	Tenancy string
+	// PlatformListen is KYIDENTITY_PLATFORM_LISTEN, the platform provisioning API's own
+	// listener (an IP literal and port). Empty means no platform API; multi-tenant only.
+	PlatformListen string
+	// PlatformEventsURL is KYIDENTITY_PLATFORM_EVENTS_URL, where events to billing are
+	// POSTed (multi-tenant only): https, or http to a loopback or private IP literal.
+	PlatformEventsURL string
 }
 
 var certDigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -218,6 +224,10 @@ func Load() (*Config, error) {
 	issuer, err := url.Parse(issuerURL)
 	if err != nil || issuer.Hostname() == "" || (issuer.Scheme != "https" && !issuerIsLocal(issuer)) {
 		return nil, fmt.Errorf("KYIDENTITY_ISSUER_URL must be an https URL (http is allowed only on loopback)")
+	}
+	// A test build serves only the reserved .test domain (RFC 2606), never a real issuer.
+	if multiTenantBuild && !strings.HasSuffix(strings.ToLower(issuer.Hostname()), ".test") {
+		return nil, errors.New("this is an end-to-end test build: KYIDENTITY_ISSUER_URL must be a host under .test")
 	}
 	rpID, rpOrigin, err := webauthn.RPIDFromIssuer(issuerURL)
 	if err != nil {
@@ -329,9 +339,35 @@ func Load() (*Config, error) {
 		if !replicated {
 			return nil, errors.New("KYIDENTITY_TENANCY=multi requires KYIDENTITY_REPLICATED=true, with its PostgreSQL database and key files")
 		}
-		return nil, errors.New("KYIDENTITY_TENANCY=multi is not available in this release; unset it or set single")
+		if !multiTenantBuild {
+			return nil, errors.New("KYIDENTITY_TENANCY=multi is not available in this release; unset it or set single")
+		}
 	default:
 		return nil, fmt.Errorf("KYIDENTITY_TENANCY must be single or multi, not %q", tenancy)
+	}
+	platformListen := os.Getenv("KYIDENTITY_PLATFORM_LISTEN")
+	if platformListen != "" {
+		host, p, err := net.SplitHostPort(platformListen)
+		if n, perr := strconv.Atoi(p); err != nil || net.ParseIP(host) == nil || perr != nil || n < 1 || n > 65535 {
+			return nil, errors.New("KYIDENTITY_PLATFORM_LISTEN must be an IP literal and port, for example 10.0.0.5:5868")
+		}
+		if tenancy != "multi" || p == port && (host == listenHost || listenHost == "" || net.ParseIP(host).IsUnspecified()) {
+			return nil, errors.New("KYIDENTITY_PLATFORM_LISTEN is for multi-tenant mode only, on its own port")
+		}
+	}
+	platformEventsURL := os.Getenv("KYIDENTITY_PLATFORM_EVENTS_URL")
+	if platformEventsURL != "" {
+		u, err := url.Parse(platformEventsURL)
+		if err != nil {
+			u = &url.URL{}
+		}
+		ip := net.ParseIP(u.Hostname())
+		if u.Hostname() == "" || u.User != nil || !(u.Scheme == "https" || u.Scheme == "http" && ip != nil && (ip.IsLoopback() || ip.IsPrivate())) {
+			return nil, errors.New("KYIDENTITY_PLATFORM_EVENTS_URL must be an https URL, or http to a loopback or private IP address")
+		}
+		if tenancy != "multi" {
+			return nil, errors.New("KYIDENTITY_PLATFORM_EVENTS_URL is for multi-tenant mode only")
+		}
 	}
 	if replicated && databaseURL == "" {
 		return nil, errors.New("KYIDENTITY_REPLICATED is set but the database is a local SQLite file: replicas must share one database, so set KYIDENTITY_DATABASE_URL or KYIDENTITY_DATABASE_URL_FILE")
@@ -379,6 +415,8 @@ func Load() (*Config, error) {
 		AppAttestAppIDs:            appAttestAppIDs,
 		AppAttestAllowDevelopment:  appAttestAllowDevelopment,
 		Tenancy:                    tenancy,
+		PlatformListen:             platformListen,
+		PlatformEventsURL:          platformEventsURL,
 	}, nil
 }
 

@@ -69,7 +69,7 @@ func TestHomeRegionIsPublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := queuePlatformEventTx(tx, org.id, "org.created", "", time.Now()); err != nil {
+	if err := queuePlatformEventTx(tx, org.id, "org.created", "", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {

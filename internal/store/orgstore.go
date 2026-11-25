@@ -42,6 +42,13 @@ func (o *OrgStore) ID() OrgID { return OrgID{o.org} }
 // and Store.Org refuses it.
 func (u *User) Org() OrgID { return OrgID{u.orgID} }
 
+// CredentialPrincipal is credential_principals (tenancy design, Views): an activated,
+// enabled account that has not ended (scanUser reads an ended one as disabled), whatever
+// its org's state. Only the credential steps of interactive sign-in ask it, and they grant
+// nothing; session creation then reads the org (ErrOrgSuspended). TestCredentialPrincipalCallers
+// lists every caller.
+func (u *User) CredentialPrincipal() bool { return u.Status == "active" }
+
 // DefaultOrg is the single-tenant org. A multi-tenant install has no such row, so a read
 // through it finds nothing and a write fails the org existence trigger. Only the
 // single-tenant operator paths and tests call it (TestDefaultOrgCallers).

@@ -44,9 +44,9 @@ func (o *OrgStore) IssueAccountToken(userID, kind, delivery string, ttl time.Dur
 	s := o.s
 	// An owned account the upstream marks inactive, or a local override holds down, gets
 	// no activation link: redeeming it could only produce a disabled account.
-	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)))`
+	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)) AND ` + orgActiveSQL("users") + `)`
 	if kind == "reset" {
-		eligible = `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND status='active' AND NOT pending)`
+		eligible = `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND status='active' AND NOT pending AND ` + orgActiveSQL("users") + `)`
 	}
 	raw, err := crypto.GenerateRandomHex(32)
 	if err != nil {
@@ -112,7 +112,7 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 		res, err = tx.Exec(`UPDATE users SET password_hash=?, pending=FALSE, password_change_required=FALSE,
  status=CASE WHEN ?='activation' THEN CASE WHEN source_connector_id IS NULL OR (source_active AND NOT locally_disabled) THEN 'active' ELSE 'disabled' END ELSE status END,
  email_verified_at=CASE WHEN email_verified_at IS NOT NULL THEN email_verified_at WHEN ?='email' THEN ? END, updated_at=?
- WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending))`, passwordHash, kind, delivery, now, now, userID, kind, kind)
+ WHERE id=? AND ((?='activation' AND pending) OR (?='reset' AND status='active' AND NOT pending)) AND `+orgActiveSQL("users")+``, passwordHash, kind, delivery, now, now, userID, kind, kind)
 		if errors.Is(staffOrgError(err), ErrSeatLimit) {
 			return ErrNotFound // the seat-cap backstop at activation reads as an expired link
 		}
@@ -133,6 +133,12 @@ func (s *Store) RedeemAccountToken(raw, kind, passwordHash string, audit *AuditE
 		}
 		if user, err = scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users WHERE id=?`, userID)); err != nil {
 			return err
+		}
+		// Billing hears of a customer member's activation (Events back to billing).
+		if kind == "activation" {
+			if err := queueCustomerMemberEventTx(tx, user, "activated", now); err != nil {
+				return err
+			}
 		}
 		// The row commits in this transaction, so it must name the account before it does.
 		if audit != nil {
@@ -180,7 +186,24 @@ func (o *OrgStore) ChangePassword(userID, keepSessionID, passwordHash string, au
 	})
 }
 
+// An expired, unused activation link of a pending account holder of an active customer
+// org with no other live link queues org.holder_invite_expired as it goes, once: the row
+// goes in the same transaction. The holder stays; billing re-invites or names another.
 func (s *Store) DeleteExpiredAccountTokens() error {
-	_, err := s.db.Exec(`DELETE FROM account_tokens WHERE expires_at<? OR used_at IS NOT NULL`, time.Now().UTC())
-	return err
+	return s.auditedTx(nil, func(tx *sql.Tx) error {
+		now := time.Now().UTC()
+		orgs, err := scanStrings(tx.Query(`SELECT DISTINCT o.id FROM account_tokens t JOIN users u ON u.id=t.user_id JOIN orgs o ON o.account_holder_user_id=u.id
+ WHERE t.kind='activation' AND t.used_at IS NULL AND t.expires_at<? AND u.pending AND o.status='active' AND o.kind='`+customerKind+`'
+ AND NOT EXISTS(SELECT 1 FROM account_tokens l WHERE l.user_id=u.id AND l.kind='activation' AND l.used_at IS NULL AND l.expires_at>=?) ORDER BY o.id`, now, now))
+		if err != nil {
+			return err
+		}
+		for _, org := range orgs {
+			if err := queuePlatformEventTx(tx, org, "org.holder_invite_expired", "", "", now); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(`DELETE FROM account_tokens WHERE expires_at<? OR used_at IS NOT NULL`, now)
+		return err
+	})
 }

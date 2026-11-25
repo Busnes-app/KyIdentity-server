@@ -1100,12 +1100,23 @@ func (o *OrgStore) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) er
 	if u == nil {
 		return sql.ErrNoRows
 	}
+	if err := deleteUserTx(tx, o.org, u, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := recordAuditTx(tx, audit); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// deleteUserTx is DeleteUserWithSyncEvents' deletion of u, read in tx.
+func deleteUserTx(tx *sql.Tx, org string, u *User, now time.Time) error {
+	userID := u.ID
 	if u.Role == "admin" && u.Status == "active" {
 		if err := requirePermanentAdminTx(tx, `id<>?`, userID); err != nil {
 			return err
 		}
 	}
-	now := time.Now().UTC()
 	if err := offboardUserTx(tx, u, true, now); err != nil {
 		return err
 	}
@@ -1117,23 +1128,17 @@ func (o *OrgStore) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) er
 	// The bare deletion is recorded as a target too, so the completion view cannot claim
 	// every connector is done while it is still queued.
 	for _, sys := range strangers {
-		if _, err := tx.Exec(`INSERT INTO sync_resource_state(org_id,system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,'user',FALSE,FALSE,0)`, o.org, sys, userID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO sync_resource_state(org_id,system_id,resource_id,kind,active,provisioned,revision) VALUES(?,?,?,'user',FALSE,FALSE,0)`, org, sys, userID); err != nil {
 			return err
 		}
 		if err := insertResourceEventTx(tx, sys, userID, "user.deleted", scimInactivePayload(userID), 0, now); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM users WHERE org_id = ? AND id = ?`, o.org, userID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM users WHERE org_id = ? AND id = ?`, org, userID); err != nil {
 		return err
 	}
-	if err := reconcileProvisioningTx(tx, now); err != nil {
-		return err
-	}
-	if err := recordAuditTx(tx, audit); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return reconcileProvisioningTx(tx, now)
 }
 
 // Session Management
