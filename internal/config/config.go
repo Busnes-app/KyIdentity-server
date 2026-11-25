@@ -225,6 +225,10 @@ func Load() (*Config, error) {
 	if err != nil || issuer.Hostname() == "" || (issuer.Scheme != "https" && !issuerIsLocal(issuer)) {
 		return nil, fmt.Errorf("KYIDENTITY_ISSUER_URL must be an https URL (http is allowed only on loopback)")
 	}
+	// A test build serves only the reserved .test domain (RFC 2606), never a real issuer.
+	if multiTenantBuild && !strings.HasSuffix(strings.ToLower(issuer.Hostname()), ".test") {
+		return nil, errors.New("this is an end-to-end test build: KYIDENTITY_ISSUER_URL must be a host under .test")
+	}
 	rpID, rpOrigin, err := webauthn.RPIDFromIssuer(issuerURL)
 	if err != nil {
 		return nil, fmt.Errorf("KYIDENTITY_ISSUER_URL cannot be used as a WebAuthn relying party: %w", err)
@@ -335,7 +339,9 @@ func Load() (*Config, error) {
 		if !replicated {
 			return nil, errors.New("KYIDENTITY_TENANCY=multi requires KYIDENTITY_REPLICATED=true, with its PostgreSQL database and key files")
 		}
-		return nil, errors.New("KYIDENTITY_TENANCY=multi is not available in this release; unset it or set single")
+		if !multiTenantBuild {
+			return nil, errors.New("KYIDENTITY_TENANCY=multi is not available in this release; unset it or set single")
+		}
 	default:
 		return nil, fmt.Errorf("KYIDENTITY_TENANCY must be single or multi, not %q", tenancy)
 	}
