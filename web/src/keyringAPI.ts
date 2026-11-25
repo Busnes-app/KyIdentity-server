@@ -1,5 +1,5 @@
 import { apiJson, apiRequest, isRecord } from './api';
-import { decodeKeyringBytes, isKeyringID } from './keyringCrypto';
+import { buildHandoffErrorURL, decodeKeyringBytes, isKeyringID } from './keyringCrypto';
 import type { RingContext } from './keyringCrypto';
 
 const base = '/api/user/keyring';
@@ -155,6 +155,40 @@ export function cancelHandoff(id: string) {
     redirect_uri: field(value, 'redirect_uri'),
     state: field(value, 'state'),
   }), { method: 'DELETE' });
+}
+
+// Outcome of completing a handoff. `retry`: the interaction was not consumed, so the
+// page may load it again. `restart`: it was consumed; only a fresh sign-in from the app
+// helps. `restart` is the app's error redirect (no code) or null if even that is invalid.
+export type HandoffOutcome =
+  | { kind: 'redirect'; target: string }
+  | { kind: 'retry'; error: unknown }
+  | { kind: 'restart'; error: unknown; restart: string | null };
+
+export async function finishHandoff(
+  complete: () => Promise<KeyringHandoffCompletion>,
+  build: (done: KeyringHandoffCompletion) => Promise<string> | string,
+): Promise<HandoffOutcome> {
+  let done: KeyringHandoffCompletion;
+  try {
+    done = await complete();
+  } catch (error) {
+    return { kind: 'retry', error };
+  }
+  try {
+    return { kind: 'redirect', target: await build(done) };
+  } catch (error) {
+    return { kind: 'restart', error, restart: restartURL(done) };
+  }
+}
+
+// OAuth error redirect (no code) telling the app to start a fresh sign-in; null if unusable.
+export function restartURL(target: { redirect_uri: string; state: string }): string | null {
+  try {
+    return buildHandoffErrorURL(target.redirect_uri, target.state, 'server_error', 'Keyring handoff failed. Sign in again.');
+  } catch {
+    return null;
+  }
 }
 
 export function saveAppKey(client: string, payload: KeyringAppKey, stepUpToken?: string) {

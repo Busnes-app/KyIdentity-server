@@ -10,14 +10,14 @@ import { createKeyringDevice, findKeyringDevice, forgetKeyringDevice } from '../
 import { getKeyringPasskey, keyringPRFAvailable } from '../keyringPRF';
 import {
   cancelHandoff, claimTransfer, completeHandoff, credentialBytes, fetchWrapper,
-  loadHandoff, ringPaths, saveAppKey, writeRing,
+  finishHandoff, loadHandoff, restartURL, ringPaths, saveAppKey, writeRing,
 } from '../keyringAPI';
-import type { KeyringHandoffDetails, WrapperInfo } from '../keyringAPI';
+import type { KeyringHandoffCompletion, KeyringHandoffDetails, WrapperInfo } from '../keyringAPI';
 import type { User } from '../types';
 import { AuthFrame } from './AuthFrame';
 import { isCancelled, useStepUp } from './StepUpPrompt';
 
-type Stage = 'loading' | 'setup_keyring' | 'unlock' | 'provision_app' | 'redirecting' | 'fatal';
+type Stage = 'loading' | 'setup_keyring' | 'unlock' | 'provision_app' | 'redirecting' | 'retry' | 'restart' | 'fatal';
 
 function ringContextFrom(details: KeyringHandoffDetails, versionOverride?: string): RingContext {
   return {
@@ -35,6 +35,25 @@ function downloadKit(text: string) {
   link.download = 'suite-emergency-kit.txt';
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Controls after a failed completion: retry or cancel before it was consumed, restart after. */
+export function HandoffRecovery({ stage, busy, restart, onRetry, onCancel }: {
+  stage: 'retry' | 'restart';
+  busy: boolean;
+  restart: string | null;
+  onRetry: () => void;
+  onCancel: () => void;
+}) {
+  return <div className="action-row" style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+    {stage === 'retry' ? <>
+      <button type="button" className="primary-btn" disabled={busy} onClick={onRetry}>Try again</button>
+      <button type="button" className="secondary-btn" disabled={busy} onClick={onCancel}>Cancel sign-in</button>
+    </> : <>
+      {restart && <button type="button" className="primary-btn" onClick={() => window.location.replace(restart)}>Restart sign-in</button>}
+      <a className="secondary-btn" href="/">Back to KyIdentity</a>
+    </>}
+  </div>;
 }
 
 /**
@@ -55,6 +74,8 @@ export function KeyringHandoff({ user }: { user: User }) {
   const [setupCode, setSetupCode] = useState<string | null>(null);
   const [setupConfirm, setSetupConfirm] = useState('');
   const [busy, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [restart, setRestart] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(
     interaction ? null : 'This sign-in link is missing its handoff token. Return to the application and sign in again.',
   );
@@ -84,27 +105,42 @@ export function KeyringHandoff({ user }: { user: User }) {
     keyVersion: number,
     subkey: Uint8Array<ArrayBuffer>,
   ) => {
-    setStage('redirecting');
     try {
-      const done = await completeHandoff(interaction);
-      const sealed = await sealHandoffKey({
-        context,
-        client: current.client_id,
-        version: keyVersion,
-        code: done.code,
-        redirect_uri: done.redirect_uri,
-        recipient_key: current.keyring_pk,
-      }, subkey);
-      const target = buildHandoffRedirectURL(done.redirect_uri, done.code, done.state, {
-        ...sealed,
-        key_version: keyVersion,
-        keyring_version: context.keyring_version,
+      await finish(async done => {
+        const sealed = await sealHandoffKey({
+          context,
+          client: current.client_id,
+          version: keyVersion,
+          code: done.code,
+          redirect_uri: done.redirect_uri,
+          recipient_key: current.keyring_pk,
+        }, subkey);
+        return buildHandoffRedirectURL(done.redirect_uri, done.code, done.state, {
+          ...sealed,
+          key_version: keyVersion,
+          keyring_version: context.keyring_version,
+        });
       });
-      clearSecrets();
-      window.location.replace(target);
     } finally {
       subkey.fill(0);
     }
+  };
+
+  // Completes the interaction and redirects. A failure never throws: it wipes all key
+  // material and leaves a stage with working controls (see HandoffRecovery).
+  const finish = async (build: (done: KeyringHandoffCompletion) => Promise<string> | string) => {
+    setStage('redirecting');
+    const outcome = await finishHandoff(() => completeHandoff(interaction), build);
+    clearSecrets();
+    if (outcome.kind === 'redirect') {
+      window.location.replace(outcome.target);
+      return;
+    }
+    setPendingTransfer(null);
+    setSetupCode(null);
+    setError(errorMessage(outcome.error, 'Could not complete sign-in.'));
+    if (outcome.kind === 'restart') setRestart(outcome.restart);
+    setStage(outcome.kind);
   };
 
   const deliverOrProvision = async (current: KeyringHandoffDetails, root: Uint8Array<ArrayBuffer>, context: RingContext) => {
@@ -169,12 +205,21 @@ export function KeyringHandoff({ user }: { user: User }) {
       } catch (err) {
         if (!active) return;
         setError(errorMessage(err, 'This keyring handoff could not be loaded. Return to the application and try again.'));
+        // On a retry the app's redirect is known: a spent interaction can still restart.
+        setRestart(details ? restartURL(details) : null);
         setStage('fatal');
       }
     })();
     return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interaction]);
+  }, [interaction, attempt]);
+
+  // The interaction is still live: load it again (auto-unlocks on a trusted browser).
+  const retry = () => {
+    setError(null);
+    setStage('loading');
+    setAttempt(n => n + 1);
+  };
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -377,12 +422,7 @@ export function KeyringHandoff({ user }: { user: User }) {
   };
 
   const continueWithoutKey = () => {
-    void run(async () => {
-      setStage('redirecting');
-      const done = await completeHandoff(interaction);
-      clearSecrets();
-      window.location.replace(buildHandoffRedirectURL(done.redirect_uri, done.code, done.state));
-    });
+    void run(() => finish(done => buildHandoffRedirectURL(done.redirect_uri, done.code, done.state)));
   };
 
   const handleCancel = () => {
@@ -414,10 +454,8 @@ export function KeyringHandoff({ user }: { user: User }) {
 
     {stage === 'redirecting' && <p>Completing sign-in to <strong>{details?.app_name ?? 'the application'}</strong>…</p>}
 
-    {stage === 'fatal' && (
-      <div className="action-row">
-        <a className="secondary-btn" href="/">Back to KyIdentity</a>
-      </div>
+    {(stage === 'retry' || stage === 'restart' || stage === 'fatal') && (
+      <HandoffRecovery stage={stage === 'retry' ? 'retry' : 'restart'} busy={busy} restart={restart} onRetry={retry} onCancel={handleCancel} />
     )}
 
     {stage === 'provision_app' && details && (

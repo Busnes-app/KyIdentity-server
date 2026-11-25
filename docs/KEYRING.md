@@ -159,6 +159,14 @@ to the app or plaintext keys to the server.
    (`user_id`), `client_id` and `redirect_uri`, opens `kh` with its ephemeral
    private key using the same AAD, and discards the ephemeral key pair.
 
+If `complete` fails, the interaction is still live: the page wipes all key
+material and offers **Try again** (reloads the interaction and unlocks again)
+and **Cancel sign-in**. If sealing or redirecting fails after `complete`
+succeeded, the interaction and its code are spent: the page wipes key material,
+drops the code and offers **Restart sign-in**, an OAuth error redirect
+(`error=server_error`, `state`, no `code`) so the app starts a fresh
+authorization with a new `keyring_pk`.
+
 Missing, unreleased or expired items return 404. Denied access and missing or
 spent grants return 403. Conflicts and count limits return 409. Excessive
 request rates return 429. The limits are 16 device/PRF wrappers,
