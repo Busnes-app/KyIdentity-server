@@ -148,6 +148,21 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
+      # The same build, loaded locally first: it must be a release build that refuses multi
+      # before anything is pushed. The push below reuses this build's cache.
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build the release image locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: kyidentity-release-check
+          build-args: VERSION=${{ steps.version.outputs.value }}
+      - run: scripts/check-release-image.sh kyidentity-release-check
+
       # Only the immutable tag here. :stable moves after the attestation verifies,
       # so a failed attest never leaves :stable on an unattested image.
       - name: Build and publish the immutable version tag

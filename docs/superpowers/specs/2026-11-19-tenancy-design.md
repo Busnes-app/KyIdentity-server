@@ -260,6 +260,13 @@ The fixed default org ID leaves room to add it later.
   keys from outside the data directory, so a multi-tenant install can gain a replica without
   moving its keys. A single server may still run with the flag. The check comes before the
   release gate, so `multi` stays refused until PR 6.
+  - **The `kye2e` gate (2026-11-25).** The release gate is the constant `multiTenantBuild`
+    (`internal/config/gate_release.go`, `false`). Only `go build -tags kye2e` selects
+    `gate_kye2e.go` (`true`), for the cross-app end-to-end harness (KyCalendar
+    `docs/superpowers/specs/2026-11-24-multi-tenant-e2e-design.md`); no variable, flag or
+    `-ldflags -X` reaches a constant. A tagged binary refuses an issuer whose host is not under
+    `.test`. CI keeps the tag out of every build file and workflow and fails an image built
+    with it or one that starts in `multi`, both before `:latest` and before a release push.
   - With the flag, a cached forward-auth answer that admits the request is first checked
     against its `forward_sessions` row (`Store.ForwardSessionLive`). A logout or revocation
     on one replica then holds on every replica at the next request.
