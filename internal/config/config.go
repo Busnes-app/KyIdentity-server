@@ -144,6 +144,9 @@ type Config struct {
 	// PlatformListen is KYIDENTITY_PLATFORM_LISTEN, the platform provisioning API's own
 	// listener (an IP literal and port). Empty means no platform API; multi-tenant only.
 	PlatformListen string
+	// PlatformEventsURL is KYIDENTITY_PLATFORM_EVENTS_URL, where events to billing are
+	// POSTed (multi-tenant only): https, or http to a loopback or private IP literal.
+	PlatformEventsURL string
 }
 
 var certDigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -346,6 +349,20 @@ func Load() (*Config, error) {
 			return nil, errors.New("KYIDENTITY_PLATFORM_LISTEN is for multi-tenant mode only, on its own port")
 		}
 	}
+	platformEventsURL := os.Getenv("KYIDENTITY_PLATFORM_EVENTS_URL")
+	if platformEventsURL != "" {
+		u, err := url.Parse(platformEventsURL)
+		if err != nil {
+			u = &url.URL{}
+		}
+		ip := net.ParseIP(u.Hostname())
+		if u.Hostname() == "" || u.User != nil || !(u.Scheme == "https" || u.Scheme == "http" && ip != nil && (ip.IsLoopback() || ip.IsPrivate())) {
+			return nil, errors.New("KYIDENTITY_PLATFORM_EVENTS_URL must be an https URL, or http to a loopback or private IP address")
+		}
+		if tenancy != "multi" {
+			return nil, errors.New("KYIDENTITY_PLATFORM_EVENTS_URL is for multi-tenant mode only")
+		}
+	}
 	if replicated && databaseURL == "" {
 		return nil, errors.New("KYIDENTITY_REPLICATED is set but the database is a local SQLite file: replicas must share one database, so set KYIDENTITY_DATABASE_URL or KYIDENTITY_DATABASE_URL_FILE")
 	}
@@ -393,6 +410,7 @@ func Load() (*Config, error) {
 		AppAttestAllowDevelopment:  appAttestAllowDevelopment,
 		Tenancy:                    tenancy,
 		PlatformListen:             platformListen,
+		PlatformEventsURL:          platformEventsURL,
 	}, nil
 }
 

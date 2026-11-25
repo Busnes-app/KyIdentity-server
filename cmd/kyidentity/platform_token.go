@@ -89,3 +89,37 @@ func platformToken(cfg *config.Config, action, name, scopes string, days int, id
 	}
 	return errors.New(platformTokenUsage)
 }
+
+// runPlatformEvents sets the secret that signs events to billing: kyidentity
+// platform-events set-secret, the secret on stdin (never an argument, which ps shows).
+func runPlatformEvents(args []string, in io.Reader, out io.Writer) error {
+	if len(args) != 1 || args[0] != "set-secret" {
+		return errors.New("usage: kyidentity platform-events set-secret < secret-file")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	return platformEventsSecret(cfg, in, out)
+}
+
+func platformEventsSecret(cfg *config.Config, in io.Reader, out io.Writer) error {
+	if cfg.Tenancy != "multi" {
+		return errors.New("platform-events needs KYIDENTITY_TENANCY=multi")
+	}
+	b, err := io.ReadAll(io.LimitReader(in, 4096))
+	if err != nil {
+		return err
+	}
+	s, err := openStore(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to open the database: %w", err)
+	}
+	defer s.Close()
+	audit := &store.AuditEvent{ID: uuid.NewString(), ActorUsername: "kyidentity-cli", Action: "platform.events_secret_set", TargetType: "settings",
+		TargetID: store.PlatformEventsSecretSetting, IPAddress: "container-local", UserAgent: "kyidentity-cli", Outcome: "success", CreatedAt: time.Now().UTC()}
+	if err := s.SetPlatformEventsSecret(strings.TrimSpace(string(b)), cfg.EncryptionKey, audit); err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(map[string]string{"status": "set"})
+}

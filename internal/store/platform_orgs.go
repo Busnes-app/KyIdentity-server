@@ -254,7 +254,7 @@ func (p *PlatformStore) CreateOrg(tx *sql.Tx, now time.Time, c PlatformCaller, r
 	if _, err := tx.Exec(`UPDATE orgs SET account_holder_user_id=? WHERE id=?`, inv.UserID, id); err != nil {
 		return 0, nil, nil, err
 	}
-	if err := queuePlatformEventTx(tx, id, "org.created", "", now); err != nil {
+	if err := queuePlatformEventTx(tx, id, "org.created", "", "", now); err != nil {
 		return 0, nil, nil, err
 	}
 	if err := orgAuditTx(tx, id, c.audit("platform.org_created", id, "org", now), map[string]any{"billing_ref": req.BillingRef,
@@ -473,7 +473,7 @@ func (p *PlatformStore) setOrgStatusTx(tx *sql.Tx, now time.Time, c PlatformCall
 			return nil, err
 		}
 	}
-	if err := queuePlatformEventTx(tx, o.ID, event, "", now); err != nil {
+	if err := queuePlatformEventTx(tx, o.ID, event, "", "", now); err != nil {
 		return nil, err
 	}
 	action := "platform." + strings.TrimPrefix(event, "org.")

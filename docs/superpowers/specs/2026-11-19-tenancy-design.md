@@ -1409,6 +1409,13 @@ tests.
      a refusal (including `503 mail_not_configured`) can be retried under the same key. The
      second: the member endpoints with the mailbox address, the holder's notices, outbox
      delivery and `org.holder_invite_expired`, and the `credential_principals` allowlist.
+     The holder's notice is mailed after the change commits, best effort (a failure is
+     audited), not from an outbox. `org.holder_invite_expired` is queued when the expired
+     link is purged, in the same transaction, so once per expiry without a new column.
+     Disabling a pending member is `409 member_state`: delete it or re-invite it instead.
+     E8 of the cross-app e2e design: a customer member signs in with a password alone in
+     multi-tenant mode unless staff require a second factor with an enrollment policy
+     (D10); no passkey is pinned for customer members (only staff are pinned, PR 5).
      `org_apps` written by the platform API stays step 6 (Entitlements): until then a body
      with `apps` is refused (`400 invalid_request`).
    - **Mailbox address** (landed before PR 4, see Mailbox address): the column, its index

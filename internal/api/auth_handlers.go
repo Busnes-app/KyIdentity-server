@@ -307,9 +307,9 @@ func (h *AuthHandler) loginRefusal(user *store.User, source string) (string, err
 	switch {
 	case user == nil:
 		return "user_not_found", nil
-	case user.Status != "active" && user.Pending:
+	case !user.CredentialPrincipal() && user.Pending:
 		return "user_pending", nil
-	case user.Status != "active":
+	case !user.CredentialPrincipal():
 		return "user_disabled", nil
 	}
 	locked, err := h.store.IsAccountLocked(user.ID, source)
@@ -429,7 +429,7 @@ func (h *AuthHandler) resolveMFAToken(w http.ResponseWriter, r *http.Request, ra
 	}
 
 	user, err := h.store.PrincipalByID(token.UserID)
-	if err != nil || user == nil || user.Status != "active" {
+	if err != nil || user == nil || !user.CredentialPrincipal() {
 		http.Error(w, `{"error":"invalid_user"}`, http.StatusUnauthorized)
 		return nil, nil, false
 	}
