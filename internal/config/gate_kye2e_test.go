@@ -55,3 +55,29 @@ func TestMultiTenantGatePlatformListen(t *testing.T) {
 		})
 	}
 }
+
+// In the test build multi-tenant mode reaches the events URL's own checks.
+func TestMultiTenantGatePlatformEventsURL(t *testing.T) {
+	for value, want := range map[string]string{
+		"https://billing.e2e.test/events": "",
+		"http://10.0.0.7:8080/events":     "",
+		"http://billing.e2e.test/events":  "https URL",
+		"http://8.8.8.8/events":           "https URL",
+	} {
+		t.Run(value, func(t *testing.T) {
+			env := multiEnv(t)
+			env["KYIDENTITY_PLATFORM_EVENTS_URL"] = value
+			withEnv(t, env)
+			cfg, err := Load()
+			if want == "" {
+				if err != nil || cfg.PlatformEventsURL != value {
+					t.Fatalf("cfg %v, err %v", cfg, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
+	}
+}
