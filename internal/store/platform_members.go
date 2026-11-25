@@ -117,7 +117,8 @@ func (p *PlatformStore) AddMember(tx *sql.Tx, now time.Time, c PlatformCaller, o
 		return 0, nil, nil, nil, err
 	}
 	if existing != nil {
-		if existing.Org().id != org || existing.Role != "user" {
+		// The same member only by sign-in email: a username left at an old address is not.
+		if existing.Org().id != org || existing.Role != "user" || existing.Email != email {
 			return 0, nil, nil, nil, ErrEmailInUse
 		}
 		if mailbox != "" {

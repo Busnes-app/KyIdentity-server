@@ -84,3 +84,22 @@ func TestHolderSurvivesDisableUser(t *testing.T) {
 		t.Fatalf("delete of the holder: %v", err)
 	}
 }
+
+// A member whose email changed but whose username kept the old address is not the member
+// at that old address: the add is email_in_use and the member is untouched.
+func TestAddMemberMatchesByEmailOnly(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	platformTestTokenRow(t, s)
+	org, holder := platformOrg(t, s, "um")
+	if _, err := s.db.Exec(`UPDATE users SET email='renamed@example.test' WHERE id=?`, holder.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := s.Platform().PlatformWrite("tok", "add", "h", func(tx *sql.Tx, now time.Time) (int, any, error) {
+		status, res, _, _, err := s.Platform().AddMember(tx, now, testCaller, org.ID, holder.Username, "Other", "")
+		return status, res, err
+	})
+	if !errors.Is(err, ErrEmailInUse) {
+		t.Fatalf("add at the old address: %v", err)
+	}
+}
