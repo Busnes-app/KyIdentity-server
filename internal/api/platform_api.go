@@ -157,19 +157,20 @@ func (h *PlatformHandler) observe(r *http.Request, tok *store.PlatformToken, org
 }
 
 // write is every POST, PATCH and DELETE: the Idempotency-Key, a strict JSON body into
-// req (nil for none), and fn in the store's idempotent transaction.
-func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any, fn func(tx *sql.Tx, now time.Time) (int, any, error)) {
+// req (nil for none), and fn in the store's idempotent transaction. It reports whether fn's
+// change committed now, so mail goes out only for a fresh write, never a replay.
+func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any, fn func(tx *sql.Tx, now time.Time) (int, any, error)) bool {
 	tok := platformTokenFrom(r)
 	org := r.PathValue("id")
 	key := r.Header.Get("Idempotency-Key")
 	if key == "" || len(key) > 128 {
 		platformError(w, http.StatusBadRequest, "idempotency_key_required", nil)
-		return
+		return false
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		platformError(w, http.StatusRequestEntityTooLarge, "invalid_request", nil)
-		return
+		return false
 	}
 	if req != nil {
 		dec := json.NewDecoder(bytes.NewReader(body))
@@ -177,11 +178,11 @@ func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any,
 		if dec.Decode(req) != nil || dec.Decode(&struct{}{}) != io.EOF {
 			h.observe(r, tok, org, "platform.refused", "denied", map[string]any{"error": "invalid_request"})
 			platformError(w, http.StatusBadRequest, "invalid_request", nil)
-			return
+			return false
 		}
 	} else if len(bytes.TrimSpace(body)) != 0 {
 		platformError(w, http.StatusBadRequest, "invalid_request", nil)
-		return
+		return false
 	}
 	hash := crypto.HashSHA256(r.Method + " " + r.URL.Path + "\n" + string(body))
 	ans, replayed, err := h.store.Platform().PlatformWrite(tok.ID, key, hash, fn)
@@ -192,7 +193,7 @@ func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any,
 		}
 		h.observe(r, tok, org, "platform.refused", "denied", map[string]any{"error": code, "method": r.Method, "path": r.URL.Path})
 		platformError(w, status, code, extra)
-		return
+		return false
 	}
 	if replayed {
 		if org == "" {
@@ -203,6 +204,7 @@ func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any,
 		h.observe(r, tok, org, "platform.replayed", "success", map[string]any{"method": r.Method, "path": r.URL.Path})
 	}
 	writePlatformRaw(w, ans.Status, ans.Body)
+	return !replayed
 }
 
 var errMailNotReady = errors.New("mail_not_configured")
@@ -258,7 +260,7 @@ func (h *PlatformHandler) createOrg(w http.ResponseWriter, r *http.Request) {
 	var req store.NewOrg
 	var invite *store.Invite
 	var send func(to, subject, body string) error
-	h.write(w, r, &req, func(tx *sql.Tx, now time.Time) (int, any, error) {
+	fresh := h.write(w, r, &req, func(tx *sql.Tx, now time.Time) (int, any, error) {
 		var err error
 		if send, err = h.mailer(); err != nil {
 			return 0, nil, err
@@ -271,7 +273,7 @@ func (h *PlatformHandler) createOrg(w http.ResponseWriter, r *http.Request) {
 		invite = inv
 		return status, org, err
 	})
-	if invite != nil {
+	if fresh && invite != nil {
 		h.mailInvite(r, send, invite)
 	}
 }

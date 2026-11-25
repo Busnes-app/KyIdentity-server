@@ -48,7 +48,7 @@ func createStepUpTokenTx(tx *sql.Tx, t *StepUpToken, audit *AuditEvent) error {
 	res, err := tx.Exec(`INSERT INTO step_up_tokens (id,user_id,session_id,token_hash,expires_at,created_at,operation,factor_method)
  SELECT ?,?,?,?,?,?,?,? WHERE ? <> '' AND EXISTS
  (SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
- WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND `+orgActiveSQL("users")+`)`,
+ WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.expires_at > ? AND users.status = 'active' AND `+sessionOrgSQL("sessions")+`)`,
 		t.ID, t.UserID, t.SessionID, t.TokenHash, t.ExpiresAt, t.CreatedAt, t.Operation, t.FactorMethod, t.Operation, t.SessionID, t.UserID, t.CreatedAt)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (s *Store) CancelStepUp(hash, userID, sessionID string) error {
 func (s *Store) ConsumeStepUpToken(hash, userID, sessionID, operation string) (bool, error) {
 	now := time.Now().UTC()
 	res, err := s.db.Exec(`UPDATE step_up_tokens SET used_at = ? WHERE token_hash = ? AND user_id = ? AND session_id = ? AND operation = ? AND used_at IS NULL AND expires_at > ?
- AND EXISTS (SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.id = step_up_tokens.session_id AND sessions.expires_at > ? AND users.status = 'active' AND `+orgActiveSQL("users")+`)`, now, hash, userID, sessionID, operation, now, now)
+ AND EXISTS (SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.id = step_up_tokens.session_id AND sessions.expires_at > ? AND users.status = 'active' AND `+sessionOrgSQL("sessions")+`)`, now, hash, userID, sessionID, operation, now, now)
 	if err != nil {
 		return false, err
 	}

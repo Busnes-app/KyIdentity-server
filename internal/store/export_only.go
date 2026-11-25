@@ -17,7 +17,8 @@ var ErrOrgSuspended = errors.New("store: the organisation is not active")
 
 // orgActiveSQL is org_active (tenancy design, Views): the users row u is in an active org.
 // The account flows outside sign-in add it to their own user rule: link issuance and
-// redemption, forgot-password and step-up.
+// redemption, and forgot-password. Step-up reads sessionOrgSQL instead, so an export-only
+// session can still step up for the password change and enrollment it is allowed.
 func orgActiveSQL(u string) string {
 	return `EXISTS(SELECT 1 FROM orgs o WHERE o.id=` + u + `.org_id AND o.status='active')`
 }

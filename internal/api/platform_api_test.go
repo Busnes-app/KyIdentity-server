@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Busnes-app/kyidentity-server/internal/config"
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -490,5 +491,33 @@ func TestPlatformSuspensionSignIn(t *testing.T) {
 	token = passwordLogin(t, ps.srv, u.Username, "correct-horse-battery")
 	if rr := anonPost(t, ps.srv, "/api/auth/mfa/recovery/verify", map[string]string{"mfaToken": token, "code": codes[0]}); rr.Code != 200 || !hasSessionCookie(rr) {
 		t.Fatalf("sign-in after resume: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// While billing has scheduled the deletion, the holder's export-only session may still step
+// up, for the password change and enrollment that session is allowed.
+func TestPlatformScheduledHolderCanStepUp(t *testing.T) {
+	ps := newPlatformSuite(t)
+	id := ps.create("x1", "x1@example.test")["id"].(string)
+	if rr := anonPost(t, ps.srv, "/api/auth/activate", map[string]string{"token": ps.activationLink("x1@example.test"), "password": "correct-horse-battery"}); rr.Code != 200 {
+		t.Fatalf("activate: %d", rr.Code)
+	}
+	if code, _, raw := ps.call(ps.billing, "POST", "/platform/v1/orgs/"+id+"/schedule-deletion", "sd", `{"grace_days":7,"revision":2}`); code != 200 {
+		t.Fatalf("schedule: %d %s", code, raw)
+	}
+	rr := login(t, ps.srv, "x1@example.test", "correct-horse-battery")
+	var cookie string
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "kyidentity_session" {
+			cookie = c.Value
+		}
+	}
+	if rr.Code != 200 || cookie == "" {
+		t.Fatalf("export-only sign-in: %d %s", rr.Code, rr.Body.String())
+	}
+	grant := eraseGrant(t, ps.srv, cookie, "totp")
+	sess, _ := ps.db.GetSessionByTokenHash(crypto.HashSHA256(cookie), time.Hour)
+	if ok, err := ps.db.ConsumeStepUpToken(crypto.HashSHA256(grant), sess.UserID, sess.ID, eraseOperation); err != nil || !ok {
+		t.Fatalf("step-up in an export-only session: %v %v", ok, err)
 	}
 }

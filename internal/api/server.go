@@ -532,13 +532,22 @@ func (s *Server) Start() error {
 	return s.Serve(ln)
 }
 
+// Shutdown closes both listeners at once, under one deadline.
 func (s *Server) Shutdown(ctx context.Context) error {
+	done := make(chan struct{})
 	if s.platformServer != nil {
-		if err := s.platformServer.Shutdown(ctx); err != nil {
-			log.Printf("platform listener shutdown: %v", err)
-		}
+		go func() {
+			defer close(done)
+			if err := s.platformServer.Shutdown(ctx); err != nil {
+				log.Printf("platform listener shutdown: %v", err)
+			}
+		}()
+	} else {
+		close(done)
 	}
-	return s.httpServer.Shutdown(ctx)
+	err := s.httpServer.Shutdown(ctx)
+	<-done
+	return err
 }
 
 // StartPlatform serves the platform provisioning API until Shutdown; a no-op without
