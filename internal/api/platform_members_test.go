@@ -44,7 +44,7 @@ func (ps *platformSuite) events(org string) []map[string]any {
 		ps.t.Fatal(err)
 	}
 	defer raw.Close()
-	rows, err := raw.Query(`SELECT payload_json FROM platform_events WHERE org_id=? ORDER BY created_at, rowid`, org)
+	rows, err := raw.Query(`SELECT payload_json FROM platform_events WHERE org_id=? ORDER BY created_at, id`, org)
 	if err != nil {
 		ps.t.Fatal(err)
 	}
