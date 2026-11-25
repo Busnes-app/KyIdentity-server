@@ -39,6 +39,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 3
+    # The CI PostgreSQL images are pinned to a major on purpose: a new major is a reviewed
+    # change (PostgreSQL 19 changes behaviour and its image's data layout), not a digest bump.
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
     groups:
       actions:
         patterns: ["*"]
