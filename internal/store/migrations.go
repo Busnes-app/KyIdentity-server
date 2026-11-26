@@ -63,9 +63,22 @@ var legacyRuns atomic.Int64
 const schemaMigrationsSQL = `CREATE TABLE IF NOT EXISTS schema_migrations (
  version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at DATETIME NOT NULL)`
 
+// Created reports whether this open created the database: it had no users table before
+// it migrated. Only that first open may record a tenancy mode other than single.
+func (s *Store) Created() bool { return s.created }
+
 // migrate brings the database to the version this code knows, then runs the per-start
 // reconciliation. New calls it under the migration lease.
 func (s *Store) migrate() error {
+	exists := `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'`
+	if s.postgres {
+		exists = `SELECT COUNT(*) FROM pg_tables WHERE schemaname=current_schema() AND tablename='users'`
+	}
+	var n int
+	if err := s.db.QueryRow(exists).Scan(&n); err != nil {
+		return err
+	}
+	s.created = n == 0
 	ddl := schemaMigrationsSQL
 	if s.postgres {
 		ddl = pgSchemaMigrationsSQL

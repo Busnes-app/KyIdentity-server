@@ -492,3 +492,71 @@ func TestStartRefusesTheOtherTenancyMode(t *testing.T) {
 		t.Fatalf("a single-tenant start on a multi-tenant database: %v", err)
 	}
 }
+
+// A database created by a multi-tenant open records multi and starts; a database that
+// existed before keeps its mode, so a single-tenant install still refuses multi, and a
+// multi-tenant one stays multi on its next open.
+func TestFreshDatabaseRecordsItsTenancyMode(t *testing.T) {
+	multi := &config.Config{Tenancy: "multi"}
+	single := &config.Config{Tenancy: "single"}
+	dir := t.TempDir()
+	open := func(name string, cfg *config.Config) *store.Store {
+		t.Helper()
+		// store.New, not NewTest: NewTest starts from an already migrated template.
+		s, err := store.New(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		if err := recordTenancy(cfg, s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	mode := func(s *store.Store) string {
+		t.Helper()
+		m, err := s.GetSetting(store.TenancySetting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	fresh := open("multi.db", multi)
+	if !fresh.Created() || mode(fresh) != "multi" {
+		t.Fatalf("a fresh multi-tenant database: created %v, mode %q", fresh.Created(), mode(fresh))
+	}
+	if err := checkTenancy(multi, fresh); err != nil {
+		t.Fatalf("a fresh multi-tenant start refused: %v", err)
+	}
+	again := open("multi.db", multi)
+	if again.Created() || mode(again) != "multi" || checkTenancy(multi, again) != nil {
+		t.Fatalf("the next multi-tenant open: created %v, mode %q", again.Created(), mode(again))
+	}
+	if err := checkTenancy(single, again); err == nil {
+		t.Fatal("a single-tenant start on a multi-tenant database")
+	}
+	existing := open("single.db", single)
+	if mode(existing) != "single" {
+		t.Fatalf("a fresh single-tenant database: %q", mode(existing))
+	}
+	later := open("single.db", multi)
+	if later.Created() || mode(later) != "single" {
+		t.Fatalf("an existing single-tenant database became %q", mode(later))
+	}
+	if err := checkTenancy(multi, later); err == nil || !strings.Contains(err.Error(), "created single-tenant") {
+		t.Fatalf("a multi-tenant start on a single-tenant database: %v", err)
+	}
+}
+
+// openStore, the one way every command and the server open the database, records it.
+func TestOpenStoreRecordsTheTenancyMode(t *testing.T) {
+	cfg := &config.Config{Tenancy: "multi", DBPath: filepath.Join(t.TempDir(), "kyidentity.db")}
+	s, err := openStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if m, err := s.GetSetting(store.TenancySetting); err != nil || m != "multi" {
+		t.Fatalf("mode %q: %v", m, err)
+	}
+}
