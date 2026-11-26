@@ -158,9 +158,9 @@ func TestCrossOrgMatrix(t *testing.T) {
 				t.Errorf("%s %s as A's %s: %d %s", rt.method, rt.path, name, code, body)
 			}
 		}
-		// Platform routes change what every org shares; TestPlatformRoutesNeedAnAdministrator
-		// covers them.
-		if rt.scope != orgRoute {
+		// Test all org-scoped routes with a customer org selected, including those
+		// that require the staff org.
+		if rt.scope != orgRoute && rt.scope != staffOrgRoute {
 			continue
 		}
 		covered++

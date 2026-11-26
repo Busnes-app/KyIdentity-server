@@ -387,7 +387,8 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
   - An **org** route gets an `OrgStore` bound to the selected org: users, groups,
     memberships, app and role *assignments*, `org_apps.access_mode` for apps the plan
     enables, access requests and approvals, expiry, offboarding, sessions, and the org's
-    audit and alerts.
+    audit and alerts. A **staff org** route also gets an `OrgStore` and requires the
+    staff org as the selection.
   - A **platform** route gets no `OrgStore`, and needs `Access.Admin`. That matches today's
     rule that only global administrators change global policy (`permissions.go:11-16`).
     These are: OAuth clients (create, edit, delete, secret rotation, back-channel URI);
@@ -397,7 +398,7 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
     attestation, rate-limit networks and push relays; backups, the drill and recovery keys;
     installer resources.
   - In single-tenant mode the flag changes nothing.
-  - PR 2 adds the flag and fails the build for an admin route that names neither.
+  - Route registration rejects an admin route with an invalid scope.
 - **Audit.** Every staff request on an org route writes an audit row in the selected org's
   log, naming the staff user and the org. Reads write `staff.read` with the route. Writes
   keep their existing audit rows, now carrying the org. A cross-org staff read writes one
@@ -409,6 +410,9 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
   the admin API refuses passwords on create and update and refuses any email change
   (`403 customer_credentials_protected`). Activation and reset use mail delivery to the
   address read in the token transaction. The response reports delivery and expiration.
+  Creating or updating an inbound connector, issuing its SCIM tokens and configuring HR
+  require the staff org selection (`403 customer_credentials_protected` for customer orgs).
+  Staff can still list customer connectors, view HR status, revoke tokens and delete connectors.
 - The last-admin rule (`ErrLastActiveAdmin`, `expiry.go:28`) is unchanged and applies to
   the staff org, the only org with administrators. There is no per-org rule.
 

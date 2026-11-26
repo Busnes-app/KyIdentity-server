@@ -146,6 +146,8 @@ const (
 	// orgRoute works on one org's directory: in a multi-tenant install the org staff
 	// selected (X-Ky-Org), else the caller's own.
 	orgRoute routeScope = iota + 1
+	// staffOrgRoute is org-scoped. In multi-tenant mode it requires selecting the staff org.
+	staffOrgRoute
 	// platformRoute changes what every org shares: apps, policies, settings. In a
 	// multi-tenant install only global administrators may call it. Single-tenant: no change.
 	platformRoute
@@ -184,7 +186,7 @@ func (s *Server) staffOrgRequest(w http.ResponseWriter, r *http.Request, user *s
 		writeForbidden(w)
 		return r, false
 	}
-	if scope != orgRoute {
+	if scope != orgRoute && scope != staffOrgRoute {
 		return r, true
 	}
 	raw := r.Header.Get(OrgHeader)
@@ -199,6 +201,10 @@ func (s *Server) staffOrgRequest(w http.ResponseWriter, r *http.Request, user *s
 	}
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return r, false
+	}
+	if scope == staffOrgRoute && customer {
+		writeAPIError(w, http.StatusForbidden, "customer_credentials_protected", "Staff cannot configure inbound provisioning or issue connector tokens for a customer organisation.")
 		return r, false
 	}
 	o := s.store.Org(org)

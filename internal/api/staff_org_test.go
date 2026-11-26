@@ -370,6 +370,40 @@ func TestStaffCannotSetCustomerCredentials(t *testing.T) {
 	}
 }
 
+func TestStaffCannotRedirectCustomerResetThroughSCIM(t *testing.T) {
+	srv, db, customer, staff := staffCredentialOrgs(t)
+	admin := newSession(t, db, newOrgUser(t, db, staff, "admin"), time.Now().Add(time.Hour))
+	conn, err := db.Org(customer).CreateSCIMConnector("customer-directory", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const connectors = "/api/admin/scim-connectors"
+	path := connectors + "/" + conn.ID
+	// Invalid inputs distinguish an authorization refusal from reaching the handler
+	// without changing customer connector state even if the guard is missing.
+	for _, tc := range []struct{ name, method, path, body string }{
+		{"create", http.MethodPost, connectors, "{"},
+		{"update", http.MethodPut, path, "{"},
+		{"issue token", http.MethodPost, path + "/tokens", `{"scope":"invalid"}`},
+		{"configure HR", http.MethodPut, path + "/hr", "{"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := staffCall(t, srv, tc.method, tc.path, admin, customer.String(), tc.body)
+			if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), `"error":"customer_credentials_protected"`) {
+				t.Fatalf("customer connector request returned %d, want customer_credentials_protected", rr.Code)
+			}
+			rr = staffCall(t, srv, tc.method, tc.path, admin, staff.String(), tc.body)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("staff connector request returned %d, want validation error", rr.Code)
+			}
+		})
+	}
+	rr := staffCall(t, srv, http.MethodGet, connectors, admin, customer.String(), "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), conn.ID) {
+		t.Fatalf("customer connector list returned %d or omitted the connector", rr.Code)
+	}
+}
+
 func staffCredentialOrgs(t *testing.T) (*Server, *store.Store, store.OrgID, store.OrgID) {
 	t.Helper()
 	srv, db, _, _, _, cleanup := setupTestServerWith(t, func(c *config.Config) { c.Tenancy = "multi" })

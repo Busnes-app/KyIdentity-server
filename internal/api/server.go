@@ -306,11 +306,11 @@ func (s *Server) routes() *http.ServeMux {
 		{"DELETE", "/api/admin/app-registry/{id}/roles/{roleId}/assignments/{kind}/{principal}", permAppGrants, orgRoute, true, http.HandlerFunc(adminH.SetAppRoleAssignment)},
 		{"PUT", "/api/admin/app-registry/{id}/claims", permAdmin, platformRoute, true, http.HandlerFunc(adminH.SetAppClaimSettings)},
 		{"GET", "/api/admin/scim-connectors", permRead, orgRoute, false, http.HandlerFunc(scimH.AdminList)},
-		{"PUT", "/api/admin/scim-connectors/{id}/hr", permAdmin, orgRoute, true, http.HandlerFunc(s.configureHR)},
+		{"PUT", "/api/admin/scim-connectors/{id}/hr", permAdmin, staffOrgRoute, true, http.HandlerFunc(s.configureHR)},
 		{"GET", "/api/admin/scim-connectors/{id}/hr", permRead, orgRoute, false, http.HandlerFunc(s.hrStatus)},
-		{"POST", "/api/admin/scim-connectors", permAdmin, orgRoute, true, http.HandlerFunc(scimH.AdminCreate)},
-		{"PUT", "/api/admin/scim-connectors/{id}", permAdmin, orgRoute, true, http.HandlerFunc(scimH.AdminUpdate)},
-		{"POST", "/api/admin/scim-connectors/{id}/tokens", permAdmin, orgRoute, true, http.HandlerFunc(scimH.AdminIssueToken)},
+		{"POST", "/api/admin/scim-connectors", permAdmin, staffOrgRoute, true, http.HandlerFunc(scimH.AdminCreate)},
+		{"PUT", "/api/admin/scim-connectors/{id}", permAdmin, staffOrgRoute, true, http.HandlerFunc(scimH.AdminUpdate)},
+		{"POST", "/api/admin/scim-connectors/{id}/tokens", permAdmin, staffOrgRoute, true, http.HandlerFunc(scimH.AdminIssueToken)},
 		{"DELETE", "/api/admin/scim-connectors/{id}/tokens/{tokenId}", permAdmin, orgRoute, false, http.HandlerFunc(scimH.AdminRevokeToken)},
 		{"DELETE", "/api/admin/scim-connectors/{id}", permAdmin, orgRoute, true, http.HandlerFunc(scimH.AdminDelete)},
 		{"GET", "/api/admin/mail", permRead, platformRoute, false, http.HandlerFunc(onboardH.GetMail)},
@@ -401,8 +401,8 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/access-requests/{id}/deny", permRequests, orgRoute, true, requestH.Decide(false)},
 	}
 	for _, rt := range s.adminRoutes {
-		if rt.scope != orgRoute && rt.scope != platformRoute && rt.scope != crossOrgRoute {
-			panic("admin route " + rt.method + " " + rt.path + " names neither org nor platform")
+		if rt.scope != orgRoute && rt.scope != staffOrgRoute && rt.scope != platformRoute && rt.scope != crossOrgRoute {
+			panic("admin route " + rt.method + " " + rt.path + " has invalid scope")
 		}
 		mux.Handle(rt.method+" "+rt.path, s.require(rt.perm, rt.scope, rt.stepUp, rt.h))
 	}
