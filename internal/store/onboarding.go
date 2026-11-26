@@ -64,7 +64,7 @@ func (o *OrgStore) issueAccountToken(userID, kind, delivery string, ttl time.Dur
 	}
 	now := time.Now().UTC()
 	var email string
-	err = o.s.auditedTx(audit, func(tx *sql.Tx) error {
+	err = o.auditedTx(audit, func(tx *sql.Tx) error {
 		err := tx.QueryRow(eligible, o.org, userID).Scan(&email)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound

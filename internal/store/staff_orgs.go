@@ -79,8 +79,7 @@ func (o *OrgStore) RecordStaffRead(e *AuditEvent) error {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	_, err := o.s.db.Exec(`INSERT INTO audit_events(org_id,id,actor_id,actor_username,action,target_id,target_type,ip_address,user_agent,outcome,details_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		o.org, e.ID, e.ActorID, e.ActorUsername, e.Action, e.TargetID, e.TargetType, e.IPAddress, e.UserAgent, e.Outcome, e.DetailsJSON, e.CreatedAt)
+	_, err := insertAuditEventInOrg(o.s.db, o.org, e)
 	return err
 }
 

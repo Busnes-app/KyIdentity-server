@@ -75,7 +75,7 @@ func (o *OrgStore) ListUserAppGrants(userID string) ([]AppGrant, error) {
 // RevokeSession removes one of userID's sessions with everything it minted. A session that
 // does not exist or belongs to someone else is ErrNotFound and writes nothing.
 func (o *OrgStore) RevokeSession(userID, sessionID string, audit *AuditEvent) error {
-	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.auditedTx(audit, func(tx *sql.Tx) error {
 		if err := requireOrgUserTx(tx, o.org, userID); err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func (o *OrgStore) RevokeOtherSessions(userID, keepSessionID string, audit *Audi
 // RevokeUserClientAccess revokes one app's tokens and pending codes for a user while
 // leaving browser sessions and other apps alone.
 func (o *OrgStore) RevokeUserClientAccess(userID, clientID string, audit *AuditEvent) error {
-	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.auditedTx(audit, func(tx *sql.Tx) error {
 		if err := requireOrgUserTx(tx, o.org, userID); err != nil {
 			return err
 		}
@@ -172,6 +172,16 @@ func revokeSessionGrantsTx(tx *sql.Tx, where string, now time.Time, args ...any)
 }
 
 func (s *Store) auditedTx(audit *AuditEvent, fn func(tx *sql.Tx) error) error {
+	return s.auditedTxInOrg("", audit, fn)
+}
+
+// auditedTx records the mutation in the org bound to the store, including when
+// the audit target is a global resource and the actor is from another org.
+func (o *OrgStore) auditedTx(audit *AuditEvent, fn func(tx *sql.Tx) error) error {
+	return o.s.auditedTxInOrg(o.org, audit, fn)
+}
+
+func (s *Store) auditedTxInOrg(org string, audit *AuditEvent, fn func(tx *sql.Tx) error) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -180,7 +190,7 @@ func (s *Store) auditedTx(audit *AuditEvent, fn func(tx *sql.Tx) error) error {
 	if err := fn(tx); err != nil {
 		return err
 	}
-	if err := recordAuditTx(tx, audit); err != nil {
+	if err := recordAuditInOrgTx(tx, org, audit); err != nil {
 		return err
 	}
 	return tx.Commit()

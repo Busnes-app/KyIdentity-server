@@ -78,7 +78,7 @@ func (s *Store) HRConnection(id string) (*HRConnection, error) {
 
 // Another org's connector is ErrHRConflict, like a missing one.
 func (o *OrgStore) ConfigureHR(c HRConnection, audit *AuditEvent) error {
-	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.auditedTx(audit, func(tx *sql.Tx) error {
 		var valid bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM scim_connectors c,paired_systems p WHERE c.org_id=? AND c.id=? AND p.id=? AND p.system_type='kypost' AND p.status<>'disabled' AND NOT p.provisioning_hold)`, o.org, c.ConnectorID, c.SystemID).Scan(&valid); err != nil {
 			return err

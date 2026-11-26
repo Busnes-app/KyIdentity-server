@@ -400,10 +400,11 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
   - In single-tenant mode the flag changes nothing.
   - Route registration rejects an admin route with an invalid scope.
 - **Audit.** Every staff request on an org route writes an audit row in the selected org's
-  log, naming the staff user and the org. Reads write `staff.read` with the route. Writes
-  keep their existing audit rows, now carrying the org. A cross-org staff read writes one
-  platform row (`org_id` NULL) that names every org whose rows it returned. Staff admins
-  read the audit across orgs by actor, so staff leads see what each staff member did.
+  log, naming the staff user and the org. Reads write `staff.read` with the route.
+  Mutations commit their audit row with the change. The bound `OrgStore` supplies the
+  org, including when the event targets a shared app or a deleted directory entry.
+  A cross-org staff read writes one platform row (`org_id` NULL) naming every org whose
+  rows it returned. Step 5 tracks the cross-org staff audit view by actor.
 - **What staff see.** Directory data: users, groups, sessions, assignments and audit.
   KyIdentity holds no app content, so none is reachable from here.
 - **No credential for a customer account.** For a customer account in multi-tenant mode,
