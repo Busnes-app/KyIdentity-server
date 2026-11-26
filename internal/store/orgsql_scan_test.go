@@ -304,7 +304,7 @@ var orgSQLAllowlist = map[string]string{
 // single-tenant org without one. Outside the store each call site is listed here, keyed
 // "file:function", so a handler cannot reach a user by a request-chosen name or ID.
 var preOrgCallers = map[string]string{
-	"cmd/kyidentity/main.go:ensureBootstrapAdmin":                                "operator bootstrap; single-tenant, so its admin is in the default org",
+	"cmd/kyidentity/main.go:bootstrapAdmin":                                      "operator bootstrap; default org in single-tenant mode, staff org in multi-tenant mode",
 	"cmd/kyidentity/main.go:clearFirstRunPasswordFile":                           "operator start-up: the first-run administrator, by username",
 	"internal/api/alert_handlers.go:AlertHandler.PutSettings":                    "a recipient named by username must be in the caller's org (checked)",
 	"internal/api/authorization_interactions.go:OAuthHandler.InteractionDetails": "the user bound to a pending authorization",

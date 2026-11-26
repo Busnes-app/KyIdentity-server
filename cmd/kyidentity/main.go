@@ -482,19 +482,27 @@ func bootstrapOnStart(dbStore *store.Store, username, password, dataDir string, 
 			return fmt.Errorf("failed to generate first-run admin password: %w", err)
 		}
 	}
-	created, err := ensureBootstrapAdmin(dbStore, username, "", password, "kyidentity-startup")
+	created, orgID, err := bootstrapAdmin(dbStore, username, "", password, "kyidentity-startup")
 	if err != nil || !created {
 		return err
 	}
 	if !generated {
-		log.Printf("Bootstrap administrator %q created from BOOTSTRAP_ADMIN_PASS.", username)
+		if orgID.String() != store.DefaultOrgID {
+			log.Printf("Bootstrap administrator %q created from BOOTSTRAP_ADMIN_PASS (staff org %s).", username, orgID)
+		} else {
+			log.Printf("Bootstrap administrator %q created from BOOTSTRAP_ADMIN_PASS.", username)
+		}
 		return nil
 	}
 	passFile, err := writeFirstRunPassword(dataDir, username, password)
 	if err != nil {
 		return err
 	}
-	log.Printf("Bootstrap admin created. Credentials written to %s (removed automatically after first sign-in).", passFile)
+	if orgID.String() != store.DefaultOrgID {
+		log.Printf("Bootstrap admin created in staff org %s. Credentials written to %s (removed automatically after first sign-in).", orgID, passFile)
+	} else {
+		log.Printf("Bootstrap admin created. Credentials written to %s (removed automatically after first sign-in).", passFile)
+	}
 	return nil
 }
 
@@ -567,7 +575,7 @@ func runBootstrap(args []string) {
 	}
 	defer dbStore.Close()
 
-	created, err := ensureBootstrapAdmin(dbStore, req.username, req.email, req.password, "kyidentity-cli")
+	created, orgID, err := bootstrapAdmin(dbStore, req.username, req.email, req.password, "kyidentity-cli")
 	if err != nil {
 		log.Fatalf("Bootstrap failed: %v", err)
 	}
@@ -583,6 +591,9 @@ func runBootstrap(args []string) {
 		fmt.Printf("Generated admin password written to %s (removed automatically after first sign-in).\n", passFile)
 	}
 	fmt.Printf("Admin user '%s' bootstrapped successfully.\n", req.username)
+	if orgID.String() != store.DefaultOrgID {
+		fmt.Printf("Staff org: %s\n", orgID)
+	}
 }
 
 // ensureBootstrapAdmin creates an administrator and its admin.user_created audit row in one
@@ -592,24 +603,57 @@ func runBootstrap(args []string) {
 // performed. An existing account that is not an active administrator is an error, never a
 // silent success: bootstrap neither promotes nor re-enables anyone.
 func ensureBootstrapAdmin(dbStore *store.Store, username, email, password, via string) (bool, error) {
+	created, _, err := bootstrapAdmin(dbStore, username, email, password, via)
+	return created, err
+}
+
+func bootstrapAdmin(dbStore *store.Store, username, email, password, via string) (bool, store.OrgID, error) {
+	mode, err := dbStore.GetSetting(store.TenancySetting)
+	if err != nil {
+		return false, store.OrgID{}, fmt.Errorf("failed to read tenancy mode: %w", err)
+	}
+	if mode != "single" && mode != "multi" {
+		return false, store.OrgID{}, fmt.Errorf("unknown tenancy mode %q", mode)
+	}
+	multi := mode == "multi"
+
 	existing, err := dbStore.GetUserByUsername(username)
 	if err != nil {
-		return false, fmt.Errorf("failed to check for an existing %q account: %w", username, err)
+		return false, store.OrgID{}, fmt.Errorf("failed to check for an existing %q account: %w", username, err)
 	}
 	if existing != nil {
 		if existing.Role == "admin" && existing.Status == "active" {
-			return false, nil
+			if multi {
+				staff, err := dbStore.IsStaffOrg(existing.Org())
+				if err != nil {
+					return false, store.OrgID{}, fmt.Errorf("failed to check staff org for %q: %w", username, err)
+				}
+				if !staff {
+					return false, store.OrgID{}, fmt.Errorf("account %q exists outside the staff org; bootstrap will not move it", username)
+				}
+			}
+			return false, existing.Org(), nil
 		}
-		return false, fmt.Errorf("account %q exists but is not an active administrator; bootstrap will not promote or re-enable it", username)
+		return false, store.OrgID{}, fmt.Errorf("account %q exists but is not an active administrator; bootstrap will not promote or re-enable it", username)
 	}
 
 	passHash, err := auth.HashPassword(password)
 	if err != nil {
-		return false, fmt.Errorf("bootstrap password rejected: %w", err)
+		return false, store.OrgID{}, fmt.Errorf("bootstrap password rejected: %w", err)
 	}
 	if email == "" {
 		email = username + "@local.kysecurity"
 	}
+
+	targetOrg := dbStore.DefaultOrg()
+	if multi {
+		staffOrgID, err := dbStore.EnsureStaffOrg()
+		if err != nil {
+			return false, store.OrgID{}, fmt.Errorf("failed to ensure the staff org: %w", err)
+		}
+		targetOrg = dbStore.Org(staffOrgID)
+	}
+
 	admin := &store.User{
 		ID:           uuid.New().String(),
 		Username:     username,
@@ -623,17 +667,16 @@ func ensureBootstrapAdmin(dbStore *store.Store, username, email, password, via s
 	}
 	event := audit.NewLogger(dbStore).Prepare("admin.user_created", "", "bootstrap", admin.ID, "user", "", via, "success",
 		map[string]any{"username": admin.Username, "role": admin.Role, "pending": false, "passwordChangeRequired": true})
-	// Single-tenant: the default org (multi-tenant creates the staff org, build plan PR 6).
-	if err := dbStore.DefaultOrg().CreateUserWithSyncEvents(admin, event.Row); err != nil {
+	if err := targetOrg.CreateUserWithSyncEvents(admin, event.Row); err != nil {
 		// Two first starts on one database both see no administrator; the name is unique,
 		// so one insert fails, and its account is the one the other just created.
-		if won, rerr := dbStore.GetUserByUsername(username); rerr == nil && won != nil && won.Role == "admin" && won.Status == "active" {
-			return false, nil
+		if won, rerr := dbStore.GetUserByUsername(username); rerr == nil && won != nil && won.Role == "admin" && won.Status == "active" && won.Org() == targetOrg.ID() {
+			return false, won.Org(), nil
 		}
-		return false, fmt.Errorf("failed to create the bootstrap administrator: %w", err)
+		return false, store.OrgID{}, fmt.Errorf("failed to create the bootstrap administrator: %w", err)
 	}
 	event.Committed()
-	return true, nil
+	return true, targetOrg.ID(), nil
 }
 
 func adminSessionExpiry() time.Time {

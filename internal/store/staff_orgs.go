@@ -20,6 +20,39 @@ func (s *Store) IsStaffOrg(org OrgID) (bool, error) {
 	return yes, err
 }
 
+// EnsureStaffOrg returns the install's staff org, creating it if none exists. Both
+// backends serialise write transactions, so concurrent first starts get the same org.
+func (s *Store) EnsureStaffOrg() (OrgID, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return OrgID{}, err
+	}
+	defer tx.Rollback()
+
+	var id string
+	err = tx.QueryRow(`SELECT id FROM orgs WHERE kind='staff' AND status<>'deleted' ORDER BY created_at, id LIMIT 1`).Scan(&id)
+	if err == nil {
+		return OrgID{id}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return OrgID{}, err
+	}
+
+	id = uuid.NewString()
+	now := time.Now().UTC()
+	if _, err := tx.Exec(
+		`INSERT INTO orgs(id,name,kind,status,home_region,max_seats,storage_bytes,storage_per_seat_bytes,revision,created_at,updated_at)
+ VALUES(?,'Staff','staff','active',?,0,0,0,`+nextOrgRevisionSQL+`,?,?)`,
+		id, HomeRegionLocal, now, now,
+	); err != nil {
+		return OrgID{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return OrgID{}, err
+	}
+	return OrgID{id}, nil
+}
+
 // StaffOrg is the org a staff member selected (X-Ky-Org), checked against orgs: a customer
 // org or the staff org that is not deleted. It also reports whether the selection is
 // a customer org. The caller must already have proven the request comes from staff.
