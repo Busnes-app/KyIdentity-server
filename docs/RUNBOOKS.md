@@ -1,4 +1,4 @@
-# KySignOn runbooks
+# KyIdentity runbooks
 
 Six procedures an operator runs rarely and under pressure. Each says what to do, what
 it changes, and what it does not fix. Restoring from a capsule has its own document,
@@ -24,9 +24,9 @@ that allows it or the reason it does not.
 
 ## Setting up an inbound SCIM connector
 
-The upstream directory pushes accounts to KySignOn. Create the connector, issue a token,
+The upstream directory pushes accounts to KyIdentity. Create the connector, issue a token,
 hand the token over once, and watch the first sync. The full route list and payload
-shapes are in the README under "Inbound SCIM"; what matters operationally:
+shapes are in [Provisioning](PROVISIONING.md); what matters operationally:
 
 - The token is shown once, at issue. There is no way to read it back; reissue instead.
 - A connector owns the accounts it creates. Local administrators cannot lift an
@@ -83,7 +83,7 @@ delivery or a reconciliation.
 
 ## Reconciling after a restore
 
-`kysignon restore` unpacks a capsule and marks the directory as restored. The next start
+`kyidentity restore` unpacks a capsule and marks the directory as restored. The next start
 invalidates the credentials the capsule carried (sessions, tokens, authorization codes,
 step-up and MFA challenges, invitation and reset links, device pairing tokens), closes
 out the queued outbound deliveries with a reason, and holds outbound provisioning on
@@ -132,21 +132,17 @@ those are in the capsule too. Recovery codes issued before the snapshot still wo
 rotate them for anyone whose account matters if the capsule's handling was not clean.
 Invitations and reset links sent before the snapshot are dead: reissue them.
 
-## What the downstream products do not do yet
+## Downstream product compatibility notes
 
-KySignOn can express more than the four suite products currently act on. Adopters
-should not read a feature's presence here as coverage end to end.
+KyIdentity can express more than every downstream product currently consumes. Adopters
+should not read a feature's presence here as end-to-end coverage across every client:
 
-- Back-channel logout is delivered and retried by this server, but the suite consumers
-  (D1–D4 in the plan) are not deployed against it yet, and the released
-  `ky-primitives` `oidcverify` has no logout-token path and does not check `typ`. A
-  receiver needs a dedicated verification primitive before it consumes logout tokens.
-- App roles are pushed in the `roles` claim and over SCIM. Until each product reads
-  them, the per-app legacy role claim stays on; turning it off is a per-app decision
-  once its consumer reads `roles`.
-- Expiring access, access requests and alerts are enforced and recorded here. A product
-  that caches authorization decisions locally will lag by its own cache, not by this
-  server's revision.
-
-The release gates that depend on those products stay open until they are deployed and
-verified; see [RELEASE-EVIDENCE.md](RELEASE-EVIDENCE.md).
+- **Back-channel logout**: delivered and retried by KyIdentity, but each relying party
+  must implement and register a verified logout-token receiver before it ends local
+  sessions on logout.
+- **App roles**: pushed in the `roles` claim and over SCIM. Until a consuming product
+  reads `roles`, keep its per-app legacy role claim enabled; turn it off per app once
+  the consumer reads `roles`.
+- **Expiring access, access requests, and alerts**: enforced and recorded by KyIdentity.
+  A product that caches authorization decisions locally will lag by its own cache
+  lifetime rather than by KyIdentity's revision.
