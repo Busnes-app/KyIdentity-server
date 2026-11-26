@@ -23,13 +23,28 @@ export function parseStaffOrgs(value: unknown): StaffOrg[] {
   });
 }
 
+/**
+ * The first selection: the first org the finder answers (the staff org). A single-tenant
+ * install answers 404, and any other failure is shown, but both leave no selection to
+ * make (org ''), so the admin pages still render and answer for themselves.
+ */
+export async function initialOrg(load: () => Promise<StaffOrg[]>): Promise<{ org: StaffOrg | null; error: string | null }> {
+  try {
+    const orgs = await load();
+    return orgs[0] ? { org: orgs[0], error: null } : { org: null, error: 'No staff organisation found.' };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return { org: null, error: null };
+    return { org: null, error: errorMessage(err, 'Could not load organisations') };
+  }
+}
+
 const label = (o: StaffOrg) => `${o.name}${o.kind === 'staff' ? ' (staff)' : ''}${o.status === 'active' ? '' : `, ${o.status}`}`;
 
 /**
  * The staff org selector (multi-tenant). It starts in the staff org, and staff find another
  * by its ID, billing reference or a member's exact email. A single-tenant install answers
  * 404 and the picker shows nothing. onReady gets the selected org's ID ('' when there is no
- * selection to make), and fires again on every change.
+ * selection to make, see initialOrg), and fires again on every change.
  */
 export function OrgPicker({ onReady }: { onReady: (org: string) => void }) {
   const [current, setCurrent] = useState<StaffOrg | null>(null);
@@ -47,15 +62,14 @@ export function OrgPicker({ onReady }: { onReady: (org: string) => void }) {
   };
 
   useEffect(() => {
-    apiJson('/api/admin/orgs', parseStaffOrgs)
-      .then(orgs => {
-        if (orgs[0]) select(orgs[0]);
-        else setError('No staff organisation found.');
-      })
-      .catch(err => {
-        if (err instanceof ApiError && err.status === 404) onReady('');
-        else setError(errorMessage(err, 'Could not load organisations'));
-      });
+    void initialOrg(() => apiJson('/api/admin/orgs', parseStaffOrgs)).then(({ org, error }) => {
+      if (org) {
+        select(org);
+        return;
+      }
+      setError(error);
+      onReady('');
+    });
     return () => setStaffOrg('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

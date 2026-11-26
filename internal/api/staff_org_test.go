@@ -175,6 +175,15 @@ func TestStaffOrgSelection(t *testing.T) {
 			t.Errorf("find %q = %q, want %q", q, got, want)
 		}
 	}
+	// Every staff persona that can open an admin page can pick an org: an app owner too.
+	createClient(t, db, "owned-app", "confidential", crypto.HashSHA256("owned-secret"), "", "https://owned.example.test/cb")
+	ownerUser := newOrgUser(t, db, staffOrg, "user")
+	if err := db.Org(staffOrg).SetDelegations(ownerUser.ID, store.Delegations{AppOwner: []string{suiteAppRecord(t, db, "owned-app")}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := find(newSession(t, db, ownerUser, exp), ""); len(got) != 1 || got[0] != staffOrg.String() {
+		t.Fatalf("an app owner's finder: %v", got)
+	}
 	var platformRows int
 	var details string
 	q = `SELECT COUNT(*),MAX(details_json) FROM audit_events WHERE action='staff.orgs_read' AND org_id IS NULL AND details_json LIKE ?`
