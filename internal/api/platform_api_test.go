@@ -166,7 +166,7 @@ func TestPlatformCreateOrg(t *testing.T) {
 		{strings.Replace(orgBody("x5", "x5@example.test", 1, ""), `10737418240`, `1`, 1), "invalid_storage"},
 		{orgBody("x6", "holder@example.test", 1, ""), "email_in_use"},
 		{orgBody("x7", "x7@example.test", 1, `,"holder_mailbox_address":"x7@elsewhere.test"`), "mailbox_domain"},
-		{orgBody("x8", "x8@example.test", 1, `,"apps":{"kycalendar":{"enabled":true}}`), "invalid_request"},
+		{orgBody("x8", "x8@example.test", 1, `,"apps":{"kycalendar":{"enabled":true}}`), "invalid_apps"},
 		{orgBody("x9", "x9@example.test", 1, `} {`), "invalid_request"},
 		{orgBody("y1", "alice@@example.test", 1, ""), "invalid_request"},
 		{orgBody("y2", "Alice <alice@example.test>", 1, ""), "invalid_request"},

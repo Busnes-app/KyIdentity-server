@@ -191,7 +191,7 @@ func (p *PlatformStore) PlatformOrgs(status, billingRef, cursor string, limit in
 	return out, rows.Err()
 }
 
-// NewOrg is POST /platform/v1/orgs. Apps are build plan step 6 and not here.
+// NewOrg is POST /platform/v1/orgs.
 type NewOrg struct {
 	Name                 string `json:"name"`
 	HomeRegion           string `json:"home_region"`
@@ -204,6 +204,8 @@ type NewOrg struct {
 	HolderMailboxAddress string `json:"holder_mailbox_address,omitempty"`
 	BillingRef           string `json:"billing_ref"`
 	Revision             int64  `json:"revision"`
+	// Apps is omitted from the create hash when empty, so a create without it hashes as before.
+	Apps map[string]OrgApp `json:"apps,omitempty"`
 }
 
 // Invite is an activation link to mail after the transaction commits. Raw is never stored.
@@ -254,11 +256,18 @@ func (p *PlatformStore) CreateOrg(tx *sql.Tx, now time.Time, c PlatformCaller, r
 	if _, err := tx.Exec(`UPDATE orgs SET account_holder_user_id=? WHERE id=?`, inv.UserID, id); err != nil {
 		return 0, nil, nil, err
 	}
+	apps, err := setOrgAppsTx(tx, id, req.Apps)
+	if err != nil {
+		return 0, nil, nil, err
+	}
 	if err := queuePlatformEventTx(tx, id, "org.created", "", "", now); err != nil {
 		return 0, nil, nil, err
 	}
-	if err := orgAuditTx(tx, id, c.audit("platform.org_created", id, "org", now), map[string]any{"billing_ref": req.BillingRef,
-		"plan": req.Plan, "max_seats": req.MaxSeats, "home_region": req.HomeRegion, "revision": req.Revision}, now); err != nil {
+	details := map[string]any{"billing_ref": req.BillingRef, "plan": req.Plan, "max_seats": req.MaxSeats, "home_region": req.HomeRegion, "revision": req.Revision}
+	if len(apps) > 0 {
+		details["apps"] = apps
+	}
+	if err := orgAuditTx(tx, id, c.audit("platform.org_created", id, "org", now), details, now); err != nil {
 		return 0, nil, nil, err
 	}
 	o, err := platformOrgTx(tx, id)
@@ -340,17 +349,18 @@ func lifecycleOrgTx(tx *sql.Tx, id string, revision int64) (*PlatformOrg, error)
 
 // OrgPatch is PATCH /platform/v1/orgs/{id}; nil leaves a field as it is.
 type OrgPatch struct {
-	Revision            int64   `json:"revision"`
-	Name                *string `json:"name"`
-	Plan                *string `json:"plan"`
-	MaxSeats            *int64  `json:"max_seats"`
-	StorageBytes        *int64  `json:"storage_bytes"`
-	StoragePerSeatBytes *int64  `json:"storage_per_seat_bytes"`
-	StorageOverPoolAck  bool    `json:"storage_over_pool_ack"`
-	AccountHolderUserID *string `json:"account_holder_user_id"`
+	Revision            int64             `json:"revision"`
+	Name                *string           `json:"name"`
+	Plan                *string           `json:"plan"`
+	MaxSeats            *int64            `json:"max_seats"`
+	StorageBytes        *int64            `json:"storage_bytes"`
+	StoragePerSeatBytes *int64            `json:"storage_per_seat_bytes"`
+	StorageOverPoolAck  bool              `json:"storage_over_pool_ack"`
+	AccountHolderUserID *string           `json:"account_holder_user_id"`
+	Apps                map[string]OrgApp `json:"apps"`
 }
 
-// PatchOrg changes an org's plan, limits, name or account holder.
+// PatchOrg changes an org's plan, limits, name, account holder or apps.
 func (p *PlatformStore) PatchOrg(tx *sql.Tx, now time.Time, c PlatformCaller, id string, req OrgPatch) (*PlatformOrg, error) {
 	o, err := lifecycleOrgTx(tx, id, req.Revision)
 	if err != nil {
@@ -396,6 +406,11 @@ func (p *PlatformStore) PatchOrg(tx *sql.Tx, now time.Time, c PlatformCaller, id
 			return nil, erasureError(err)
 		}
 		details["account_holder_user_id"] = *req.AccountHolderUserID
+	}
+	if apps, err := setOrgAppsTx(tx, id, req.Apps); err != nil {
+		return nil, err
+	} else if len(apps) > 0 {
+		details["apps"] = apps
 	}
 	if err := orgAuditTx(tx, id, c.audit("platform.org_updated", id, "org", now), details, now); err != nil {
 		return nil, err
