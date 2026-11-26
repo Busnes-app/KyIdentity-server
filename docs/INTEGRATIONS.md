@@ -22,8 +22,8 @@ injected authorization code (RFC 9700). A code stored without a challenge never 
 `"clientType":"public"` is passed explicitly. A suite server such as KyPost, KyDNS, KyNotes or KyCalendar can hold a secret, so it
 should be confidential; `public` exists for SPAs and native apps that genuinely cannot.
 The admin API refuses to register or switch these client IDs to public: `kypost`,
-`kycalendar`, `kydrive`, `kymessage`, `kydns`, `kypasswords`, `kynotes`, `kybookmarks`
-(`suiteClientIDs`). The suite directory needs their secret.
+`kycalendar`, `kydrive`, `kymessage`, `kydns`, `kynotes`, `kybookmarks`, `kypulse`,
+and the legacy `kypasswords` client ID (`suiteClientIDs`). The suite directory needs their secret.
 A confidential client with an empty `client_secret_hash` is rejected rather than
 authenticated by existing.
 
@@ -344,8 +344,7 @@ tested only against a generated CA; the simulator has no App Attest.
 These are KyIdentity context classes, not NIST assurance levels. Only `hwk` from a verified
 attestation asserts a hardware-backed key. Recovery does not claim ordinary MFA. The standard method names
 follow [RFC 8176](https://www.rfc-editor.org/rfc/rfc8176.html); the URNs are local contracts.
-Administrator per-app freshness policies are implemented as described above; further work
-is tracked in [the access lifecycle plan](access-lifecycle-plan.md).
+Administrator per-app freshness policies are enforced as described above.
 
 Existing sessions survive the upgrade but omit `auth_time`, `amr` and `acr` until a new
 login supplies evidence. Pending legacy authorization codes and MFA flows are invalidated;
