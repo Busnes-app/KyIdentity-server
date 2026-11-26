@@ -493,70 +493,99 @@ func TestStartRefusesTheOtherTenancyMode(t *testing.T) {
 	}
 }
 
-// A database created by a multi-tenant open records multi and starts; a database that
-// existed before keeps its mode, so a single-tenant install still refuses multi, and a
-// multi-tenant one stays multi on its next open.
 func TestFreshDatabaseRecordsItsTenancyMode(t *testing.T) {
-	multi := &config.Config{Tenancy: "multi"}
-	single := &config.Config{Tenancy: "single"}
-	dir := t.TempDir()
-	open := func(name string, cfg *config.Config) *store.Store {
+	multi := freshPostgresTenancy(t)
+	open := func(cfg *config.Config) *store.Store {
 		t.Helper()
-		// store.New, not NewTest: NewTest starts from an already migrated template.
-		s, err := store.New(filepath.Join(dir, name))
+		s, err := openStore(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = s.Close() })
-		if err := recordTenancy(cfg, s); err != nil {
-			t.Fatal(err)
-		}
 		return s
 	}
-	mode := func(s *store.Store) string {
-		t.Helper()
-		m, err := s.GetSetting(store.TenancySetting)
-		if err != nil {
-			t.Fatal(err)
+	for range 2 {
+		if err := checkTenancy(multi, open(multi)); err != nil {
+			t.Fatalf("multi-tenant start refused: %v", err)
 		}
-		return m
 	}
-	fresh := open("multi.db", multi)
-	if !fresh.Created() || mode(fresh) != "multi" {
-		t.Fatalf("a fresh multi-tenant database: created %v, mode %q", fresh.Created(), mode(fresh))
-	}
-	if err := checkTenancy(multi, fresh); err != nil {
-		t.Fatalf("a fresh multi-tenant start refused: %v", err)
-	}
-	again := open("multi.db", multi)
-	if again.Created() || mode(again) != "multi" || checkTenancy(multi, again) != nil {
-		t.Fatalf("the next multi-tenant open: created %v, mode %q", again.Created(), mode(again))
-	}
-	if err := checkTenancy(single, again); err == nil {
+	single := *multi
+	single.Tenancy = "single"
+	if err := checkTenancy(&single, open(&single)); err == nil {
 		t.Fatal("a single-tenant start on a multi-tenant database")
 	}
-	existing := open("single.db", single)
-	if mode(existing) != "single" {
-		t.Fatalf("a fresh single-tenant database: %q", mode(existing))
+	other := freshPostgresTenancy(t)
+	single.DatabaseURL = other.DatabaseURL
+	if err := checkTenancy(&single, open(&single)); err != nil {
+		t.Fatalf("single-tenant start refused: %v", err)
 	}
-	later := open("single.db", multi)
-	if later.Created() || mode(later) != "single" {
-		t.Fatalf("an existing single-tenant database became %q", mode(later))
-	}
-	if err := checkTenancy(multi, later); err == nil || !strings.Contains(err.Error(), "created single-tenant") {
+	if err := checkTenancy(other, open(other)); err == nil || !strings.Contains(err.Error(), "created single-tenant") {
 		t.Fatalf("a multi-tenant start on a single-tenant database: %v", err)
 	}
 }
 
-// openStore, the one way every command and the server open the database, records it.
-func TestOpenStoreRecordsTheTenancyMode(t *testing.T) {
-	cfg := &config.Config{Tenancy: "multi", DBPath: filepath.Join(t.TempDir(), "kyidentity.db")}
+func freshPostgresTenancy(t *testing.T) *config.Config {
+	t.Helper()
+	if !store.OnPostgresTest() {
+		t.Skip("needs PostgreSQL")
+	}
+	path := filepath.Join(t.TempDir(), "tenancy")
+	rawURL, err := store.PostgresURLForTest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &config.Config{Tenancy: "multi", DatabaseURL: rawURL, DBPath: path}
+}
+
+func TestInterruptedMultiTenantInitializationCanRetry(t *testing.T) {
+	cfg := freshPostgresTenancy(t)
+	raw, err := store.OpenRawForTest(cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	// Interrupt the first open after the baseline users table would have committed.
+	if _, err := raw.Exec(`CREATE TABLE active_principals (blocker int)`); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := openStore(cfg); err == nil {
+		s.Close()
+		t.Fatal("first open succeeded despite the conflicting relation")
+	} else if !strings.Contains(err.Error(), "active_principals") {
+		t.Fatalf("first open failed at the wrong point: %v", err)
+	}
+	if _, err := raw.Exec(`DROP TABLE active_principals`); err != nil {
+		t.Fatal(err)
+	}
 	s, err := openStore(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if m, err := s.GetSetting(store.TenancySetting); err != nil || m != "multi" {
-		t.Fatalf("mode %q: %v", m, err)
+	if err := checkTenancy(cfg, s); err != nil {
+		t.Fatalf("retry could not start in multi mode: %v", err)
+	}
+}
+
+func TestConcurrentFirstOpensRecordMultiTenantMode(t *testing.T) {
+	cfg := freshPostgresTenancy(t)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			s, err := openStore(cfg)
+			if err == nil {
+				err = checkTenancy(cfg, s)
+				s.Close()
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
 	}
 }

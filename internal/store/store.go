@@ -28,8 +28,6 @@ type Store struct {
 	limits     atomic.Pointer[SessionLimits]
 	limitsSeed atomic.Pointer[SessionLimits]
 	limitsAt   atomic.Int64
-	// created: this open made the database (no users table before it migrated).
-	created bool
 	// postgres is set on the shared Postgres backend (NewPostgres); migrationKey is its
 	// migration advisory lock.
 	postgres     bool

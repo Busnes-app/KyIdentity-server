@@ -680,34 +680,10 @@ func clearFirstRunPasswordFile(dbStore *store.Store, dataDir string) error {
 
 // openStore opens the shared Postgres database when one is configured, else the SQLite file.
 func openStore(cfg *config.Config) (*store.Store, error) {
-	var s *store.Store
-	var err error
 	if cfg.DatabaseURL != "" {
-		s, err = store.NewPostgres(cfg.DatabaseURL)
-	} else {
-		s, err = store.New(cfg.DBPath)
+		return store.NewPostgresWithTenancy(cfg.DatabaseURL, cfg.Tenancy)
 	}
-	if err != nil {
-		return nil, err
-	}
-	if err := recordTenancy(cfg, s); err != nil {
-		_ = s.Close()
-		return nil, err
-	}
-	return s, nil
-}
-
-// recordTenancy: the migrations record tenancy_mode=single. A database this open created
-// records the configured mode instead (D1, "recorded at first start"); any other keeps what
-// it has, so an existing single-tenant install can never become multi-tenant.
-func recordTenancy(cfg *config.Config, s *store.Store) error {
-	if !s.Created() || cfg.Tenancy != "multi" {
-		return nil
-	}
-	if err := s.SetSetting(store.TenancySetting, "multi"); err != nil {
-		return fmt.Errorf("recording the tenancy mode: %w", err)
-	}
-	return nil
+	return store.New(cfg.DBPath)
 }
 
 // openStoreForBackup opens the live database so backups can take a consistent snapshot

@@ -30,13 +30,18 @@ func (s *Store) Postgres() bool { return s.postgres }
 // NewPostgres opens the shared Postgres database at rawURL and brings its schema to the
 // version this code knows. Logs and errors name only the host and the database.
 func NewPostgres(rawURL string) (*Store, error) {
-	return openPostgres(rawURL, "", true, false)
+	return NewPostgresWithTenancy(rawURL, "single")
+}
+
+// NewPostgresWithTenancy records tenancy when creating a fresh database.
+func NewPostgresWithTenancy(rawURL, tenancy string) (*Store, error) {
+	return openPostgres(rawURL, "", true, false, tenancy == "multi")
 }
 
 // openPostgres opens the pools; migrate brings the schema up to date, otherwise the schema
 // must exist already. readOnly makes both pools read-only sessions (OpenInstallerStore's
 // inspection mode): every write is refused by the server, as SQLite's mode=ro does.
-func openPostgres(rawURL, searchPath string, migrate, readOnly bool) (*Store, error) {
+func openPostgres(rawURL, searchPath string, migrate, readOnly, initializeMulti bool) (*Store, error) {
 	where := pgdialect.Describe(rawURL)
 	s, read, err := connectPostgres(rawURL, searchPath, readOnly)
 	if err != nil {
@@ -49,6 +54,11 @@ func openPostgres(rawURL, searchPath string, migrate, readOnly bool) (*Store, er
 			}
 			if err := checkPostgresCollation(s.db); err != nil {
 				return err
+			}
+			if initializeMulti {
+				if err := s.initializeMultiTenantPostgres(); err != nil {
+					return fmt.Errorf("initializing multi-tenant schema: %w", err)
+				}
 			}
 			return s.migrate()
 		}); err != nil {
@@ -268,7 +278,7 @@ func newTestPostgres(rawURL, path string, migrate bool) (*Store, error) {
 			return nil, err
 		}
 	}
-	return openPostgres(rawURL, schema+",public", migrate, false)
+	return openPostgres(rawURL, schema+",public", migrate, false, false)
 }
 
 func createTestSchema(rawURL, schema, note string) error {
