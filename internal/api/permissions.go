@@ -157,6 +157,11 @@ const (
 // OrgHeader names the org a staff member works in on an org route (multi-tenant).
 const OrgHeader = "X-Ky-Org"
 
+func staffReadDetails(r *http.Request) string {
+	details, _ := json.Marshal(map[string]string{"route": r.Method + " " + r.Pattern, "path": r.URL.Path})
+	return string(details)
+}
+
 // staffOrgRequest runs once require has found an admin principal in a multi-tenant
 // install. The caller must be in the staff org. An org route then needs X-Ky-Org naming a
 // live customer org or the staff org (400 org_required, 404 unknown_org), and the request's
@@ -190,9 +195,8 @@ func (s *Server) staffOrgRequest(w http.ResponseWriter, r *http.Request, user *s
 	}
 	o := s.store.Org(org)
 	if r.Method == http.MethodGet {
-		b, _ := json.Marshal(map[string]string{"route": r.Method + " " + r.Pattern, "path": r.URL.Path})
 		if err := o.RecordStaffRead(&store.AuditEvent{ActorID: user.ID, ActorUsername: user.Username, Action: "staff.read", TargetID: org.String(), TargetType: "org",
-			IPAddress: s.middleware.ClientIP(r), UserAgent: r.UserAgent(), Outcome: "success", DetailsJSON: string(b)}); err != nil {
+			IPAddress: s.middleware.ClientIP(r), UserAgent: r.UserAgent(), Outcome: "success", DetailsJSON: staffReadDetails(r)}); err != nil {
 			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 			return r, false
 		}

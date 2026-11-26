@@ -6,10 +6,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -173,5 +175,64 @@ func TestAuditExportMarksIncompleteOutput(t *testing.T) {
 	started, _, _ := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.audit_export_started", Limit: 1})
 	if len(started) == 0 {
 		t.Fatal("export intent not recorded before streaming")
+	}
+}
+
+func TestStaffAuditListKeepsConsecutivePagesStable(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServerWith(t, func(c *config.Config) { c.Tenancy = "multi" })
+	defer cleanup()
+	org, err := store.CreateOrgForTest(db, "customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	staff, err := store.CreateOrgForTest(db, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := newSession(t, db, newOrgUser(t, db, staff, "admin"), time.Now().Add(time.Hour))
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		rr := staffRequest(t, srv, http.MethodGet, path, admin, org.String(), "", false)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, rr.Code, rr.Body.String())
+		}
+		return rr
+	}
+	for range 2 {
+		get("/api/admin/users")
+	}
+	prior := staffAudit(t, db, org, "staff.read")
+	if len(prior) != 2 {
+		t.Fatalf("expected the two user-list reads, got %d", len(prior))
+	}
+	page := func(n int) (string, int) {
+		t.Helper()
+		rr := get("/api/admin/audit-events?action=staff.read&limit=1&page=" + strconv.Itoa(n))
+		var body struct {
+			Events []store.AuditEvent `json:"auditEvents"`
+			Total  int                `json:"total"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil || len(body.Events) != 1 {
+			t.Fatalf("page %d: %v %s", n, err, rr.Body.String())
+		}
+		return body.Events[0].ID, body.Total
+	}
+	first, firstTotal := page(1)
+	second, secondTotal := page(2)
+	if first == second {
+		t.Fatalf("page two repeated page one's audit event %s", first)
+	}
+	if first != prior[0].ID || second != prior[1].ID || firstTotal != 2 || secondTotal != 2 {
+		t.Fatalf("pages = %s/%d, %s/%d, want %s/2, %s/2", first, firstTotal, second, secondTotal, prior[0].ID, prior[1].ID)
+	}
+	reads := staffAudit(t, db, org, "staff.read")
+	if len(reads) != 4 {
+		t.Fatalf("expected a stored audit event for each of the four reads, got %d", len(reads))
+	}
+	export := get("/api/admin/audit-events/export?format=jsonl&action=staff.read").Body.String()
+	for _, event := range reads {
+		if !strings.Contains(export, `"id":"`+event.ID+`"`) {
+			t.Fatalf("export omitted read %s", event.ID)
+		}
 	}
 }

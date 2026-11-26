@@ -11,7 +11,7 @@ import (
 
 // Audit search and export. Filters are bounded and indexed, order is total (created_at
 // then id) so paging never repeats or skips a row under tied timestamps, and export
-// streams the same filtered set with the same order. Retention is unchanged:
+// streams the filtered trail with the same order. Retention is unchanged:
 // DeleteAuditEventsOlderThan is the only thing that removes rows.
 
 // AuditFilter narrows the trail. Action matches by prefix (`oauth.` covers every OAuth
@@ -20,6 +20,8 @@ type AuditFilter struct {
 	Actor, Target, TargetType, Action, Outcome string
 	From, To                                   *time.Time
 	Limit, Offset                              int
+	// OmitStaffReadDetails keeps the listing's own read events out of its pages.
+	OmitStaffReadDetails string
 }
 
 func (s *Store) migrateAuditIndexes() error {
@@ -59,6 +61,10 @@ func (f AuditFilter) where(org string) (string, []any) {
 	}
 	if f.To != nil {
 		clauses, args = append(clauses, "created_at<?"), append(args, f.To.UTC())
+	}
+	if f.OmitStaffReadDetails != "" {
+		clauses = append(clauses, `(action<>'staff.read' OR COALESCE(details_json, '')<>?)`)
+		args = append(args, f.OmitStaffReadDetails)
 	}
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }

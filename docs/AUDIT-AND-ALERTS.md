@@ -9,7 +9,10 @@ Commands and unlinked file paths below are relative to the repository root.
 The audit log page filters by actor (id or username), target id, action prefix (for
 example `oauth.` covers every OAuth event), outcome and a time range entered in the
 operator's zone. Filters are bounded, indexed, and paged in a total order (time, then
-id), so paging never repeats or skips a row under tied timestamps. *Export CSV* and
+id), so paging never repeats or skips a row under tied timestamps. In multi-tenant mode,
+each audit page request records a `staff.read` event in the selected organisation. The
+page omits reads of the audit list itself to keep page offsets stable as you browse.
+Both export formats include those reads. *Export CSV* and
 *Export JSONL* carry the same filter as the page, over `GET
 /api/admin/audit-events/export?format=csv|jsonl&…`, at most 50,000 rows and 30 seconds
 per export (response headers `X-KyIdentity-Export-Total`, `-Limit` and `-Truncated` say
