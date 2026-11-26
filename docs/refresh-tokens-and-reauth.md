@@ -1,17 +1,12 @@
 # Refresh tokens, re-authentication timers and step-up
 
-Status: 2026-10-17. Covers Yoshi's requests 1–3; request 4 (issue #77) is fixed separately
-by raising the session idle default (see "Issue #77" below). Delivered as stacked PRs:
+This reference documents KyIdentity's OIDC refresh tokens, administrator-configurable
+session timers (Sign-in policies → Sign-in sessions), and step-up re-authentication
+semantics.
 
-1. #77: session idle default 30m → 8h.
-2. Refresh tokens: everything below except the admin-adjustable session timers.
-3. Session timers in the admin UI (Sign-in policies → Sign-in sessions) with the bounds
-   below, and a test proving the step-up semantics (`internal/api/stepup_oidc_test.go`).
+## Design principles
 
-## Why refresh tokens were left out, and what changed
-
-`docs/access-lifecycle-plan.md` lists refresh tokens as out of scope without a stated
-reason. The plan's actual concerns are visible elsewhere in it and in README:
+Refresh tokens are opt-in per confidential client and enforce three invariants:
 
 1. **Revocation must reach every credential.** Access loss, disable, session revocation,
    policy and role changes all revoke tokens in the mutation transaction. A long-lived

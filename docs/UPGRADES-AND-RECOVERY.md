@@ -122,10 +122,8 @@ stays inactive through a regrant. What reaches a resumed connector is what this
 directory wants now, not what the capsule was in the middle of. Passwords, enrolled
 factors and recovery codes are in the capsule and keep working, so the restore runbook
 asks for connector credentials to be reviewed for rotation before delivery resumes.
-Procedures are in [docs/RUNBOOKS.md](RUNBOOKS.md) and
-[docs/RESTORE.md](RESTORE.md); what has and has not been verified for a release is
-in [docs/RELEASE-EVIDENCE.md](RELEASE-EVIDENCE.md). Device attestation checks that need a
-physical phone are in [docs/attestation-verification-plan.md](attestation-verification-plan.md).
+Procedures are in [docs/RUNBOOKS.md](RUNBOOKS.md) and [docs/RESTORE.md](RESTORE.md);
+release verification steps are in [docs/VERIFYING-RELEASES.md](VERIFYING-RELEASES.md).
 
 ## Replica drain, leases and configuration check
 
