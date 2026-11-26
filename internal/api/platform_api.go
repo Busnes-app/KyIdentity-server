@@ -252,6 +252,8 @@ func platformErrorFor(err error) (int, string, map[string]any) {
 		return http.StatusBadRequest, "invalid_max_seats", nil
 	case errors.Is(err, store.ErrInvalidStorage):
 		return http.StatusBadRequest, "invalid_storage", nil
+	case errors.Is(err, store.ErrInvalidApps):
+		return http.StatusBadRequest, "invalid_apps", nil
 	case errors.Is(err, store.ErrHolderNotMember):
 		return http.StatusBadRequest, "invalid_account_holder", nil
 	case errors.Is(err, store.ErrOrgNotActive):

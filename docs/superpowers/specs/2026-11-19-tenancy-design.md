@@ -1428,8 +1428,7 @@ tests.
      E8 of the cross-app e2e design: a customer member signs in with a password alone in
      multi-tenant mode unless staff require a second factor with an enrollment policy
      (D10); no passkey is pinned for customer members (only staff are pinned, PR 5).
-     `org_apps` written by the platform API stays step 6 (Entitlements): until then a body
-     with `apps` is refused (`400 invalid_request`).
+     `org_apps` written by the platform API is step 6 (Entitlements).
    - **Mailbox address** (landed before PR 4, see Mailbox address): the column, its index
      and triggers, `OrgStore.SetMailboxAddress`, the `mailbox` webhook entry, the domain
      removal refusal, and the staff route and edit field. An org route binds the org staff select
@@ -1460,6 +1459,15 @@ tests.
      `over_limit`, `org_apps` from the platform API, and quotas in `/api/suite/orgs`.
    - Tests: the seat limit on each path, two parallel adds on Postgres with one seat free
      (one succeeds), and app disablement removing access and suite listing.
+   - **Status (2026-11-25).** Built. Seats were already enforced by triggers on every path,
+     with the activation backstop (Org storage pool); `over_limit` is gone (P3). `apps` on
+     `POST /orgs` and `PATCH` is `{client_id: {enabled, quotas?}}`: an unregistered client, a
+     missing `enabled` or quotas that are not a JSON object of at most 4 KiB are
+     `400 invalid_apps` and change nothing; quotas omitted keep the stored ones; staff's
+     `access_mode` is untouched. A change takes a new org revision, so `/api/suite/orgs`
+     lists it after `since`; disabling an app also ends the org's tokens, codes and client
+     sessions for it, as any lost access does. Tests: `TestPlatformOrgApps`,
+     `TestSeatRaceAcrossReplicas`, both backends.
 7. (Optional) **Postgres row-level security** as extra protection.
 8. **Delete everything** (amendment). Stacked PRs, each multi-tenant only:
    - (a) This amendment, `org_erasures`, `erased_subjects` and their triggers, the holder's
