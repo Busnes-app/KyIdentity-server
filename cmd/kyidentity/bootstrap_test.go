@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
@@ -235,6 +236,190 @@ func TestFirstRunPasswordFileWaitsForTheNamedAccount(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("the file survived the named administrator's sign-in")
+	}
+}
+
+func TestBootstrapSingleTenantUsesDefaultOrg(t *testing.T) {
+	db := testStore(t)
+	created, err := ensureBootstrapAdmin(db, "admin", "", "a-good-first-password", "test")
+	if err != nil || !created {
+		t.Fatalf("ensureBootstrapAdmin: created=%v err=%v", created, err)
+	}
+	admin, err := db.GetUserByUsername("admin")
+	if err != nil || admin == nil {
+		t.Fatalf("GetUserByUsername: %v %v", admin, err)
+	}
+	if admin.Org().String() != store.DefaultOrgID {
+		t.Fatalf("single-tenant admin org = %s, want default org %s", admin.Org(), store.DefaultOrgID)
+	}
+	if staff, err := db.IsStaffOrg(admin.Org()); err != nil || staff {
+		t.Fatalf("IsStaffOrg(default) = %v, %v; want false", staff, err)
+	}
+	orgs, err := db.Platform().FindOrgs("")
+	if err != nil || len(orgs) != 0 {
+		t.Fatalf("single-tenant bootstrap created staff orgs: %+v (%v)", orgs, err)
+	}
+}
+
+func TestBootstrapMultiTenantCreatesAndReusesStaffOrg(t *testing.T) {
+	db := testStore(t)
+	if err := db.SetSetting(store.TenancySetting, "multi"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bootstrapOnStart(db, "admin", "a-good-first-password", t.TempDir(), false); err != nil {
+		t.Fatalf("bootstrapOnStart: %v", err)
+	}
+	admin, err := db.GetUserByUsername("admin")
+	if err != nil || admin == nil {
+		t.Fatalf("GetUserByUsername(admin): %v %v", admin, err)
+	}
+	if admin.Org().String() == store.DefaultOrgID {
+		t.Fatalf("multi-tenant bootstrap placed admin in default org %s", store.DefaultOrgID)
+	}
+	if staff, err := db.IsStaffOrg(admin.Org()); err != nil || !staff {
+		t.Fatalf("IsStaffOrg(%s) = %v, %v; want true", admin.Org(), staff, err)
+	}
+	resolved, customer, err := db.StaffOrg(admin.Org().String())
+	if err != nil || resolved != admin.Org() || customer {
+		t.Fatalf("StaffOrg(%s) = (%s, %v, %v), want (%s, false, nil)", admin.Org(), resolved, customer, err, admin.Org())
+	}
+	events, _, err := db.Org(admin.Org()).SearchAuditEvents(store.AuditFilter{Action: "admin.user_created", Limit: 5})
+	if err != nil || len(events) != 1 || events[0].TargetID != admin.ID {
+		t.Fatalf("staff org audit events = %+v (%v), want 1 admin.user_created for %s", events, err, admin.ID)
+	}
+
+	// Re-running bootstrap for the same administrator is a no-op and keeps the password.
+	created, err := ensureBootstrapAdmin(db, "admin", "", "another-good-password", "kyidentity-cli")
+	if err != nil || created {
+		t.Fatalf("second ensureBootstrapAdmin(admin): created=%v err=%v", created, err)
+	}
+	if ok, _ := auth.VerifyPassword("a-good-first-password", admin.PasswordHash); !ok {
+		t.Fatal("initial password did not verify")
+	}
+
+	// Bootstrapping a second (rescue) administrator reuses the same staff org.
+	created, err = ensureBootstrapAdmin(db, "rescue", "rescue@example.test", "another-good-password", "kyidentity-cli")
+	if err != nil || !created {
+		t.Fatalf("ensureBootstrapAdmin(rescue): created=%v err=%v", created, err)
+	}
+	rescue, err := db.GetUserByUsername("rescue")
+	if err != nil || rescue == nil {
+		t.Fatalf("GetUserByUsername(rescue): %v %v", rescue, err)
+	}
+	if rescue.Org() != admin.Org() {
+		t.Fatalf("rescue admin org = %s, want staff org %s", rescue.Org(), admin.Org())
+	}
+	orgs, err := db.Platform().FindOrgs("")
+	if err != nil || len(orgs) != 1 || orgs[0].ID != admin.Org().String() || orgs[0].Kind != "staff" {
+		t.Fatalf("FindOrgs(\"\") = %+v (%v), want 1 staff org %s", orgs, err, admin.Org())
+	}
+}
+
+func TestBootstrapMultiTenantRefusesAdminOutsideStaffOrg(t *testing.T) {
+	db := testStore(t)
+	if _, err := ensureBootstrapAdmin(db, "admin", "", "a-good-first-password", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetSetting(store.TenancySetting, "multi"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ensureBootstrapAdmin(db, "admin", "", "another-good-password", "test")
+	if err == nil || !strings.Contains(err.Error(), "outside the staff org") {
+		t.Fatalf("ensureBootstrapAdmin in multi-tenant mode with default-org admin = %v, want outside-staff-org error", err)
+	}
+}
+
+func TestConcurrentMultiTenantFirstStartsCreateOneStaffOrgAndAdmin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi-first-start.db")
+	const replicas = 6
+	stores := make([]*store.Store, replicas)
+	for i := range replicas {
+		s, err := store.NewTest(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		stores[i] = s
+	}
+	if err := stores[0].SetSetting(store.TenancySetting, "multi"); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	start := make(chan struct{})
+	errs := make([]error, replicas)
+	var wg sync.WaitGroup
+	for i := range replicas {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs[i] = bootstrapOnStart(stores[i], "admin", "a-good-first-password", dir, false)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("replica %d: bootstrapOnStart: %v", i, err)
+		}
+	}
+	n, err := stores[0].Platform().CountAdmins()
+	if err != nil || n != 1 {
+		t.Fatalf("CountAdmins = %d (%v), want 1", n, err)
+	}
+	orgs, err := stores[0].Platform().FindOrgs("")
+	if err != nil || len(orgs) != 1 || orgs[0].Kind != "staff" {
+		t.Fatalf("FindOrgs(\"\") = %+v (%v), want 1 staff org", orgs, err)
+	}
+	admin, err := stores[0].GetUserByUsername("admin")
+	if err != nil || admin == nil || admin.Org().String() != orgs[0].ID {
+		t.Fatalf("admin = %+v (%v), want org %s", admin, err, orgs[0].ID)
+	}
+}
+
+func TestFreshMultiTenantPostgresBootstrapsStaffOrg(t *testing.T) {
+	multi := freshPostgresTenancy(t)
+	s, err := openStore(multi)
+	if err != nil {
+		t.Fatalf("openStore: %v", err)
+	}
+	defer s.Close()
+
+	if err := checkTenancy(multi, s); err != nil {
+		t.Fatalf("checkTenancy: %v", err)
+	}
+	if err := bootstrapOnStart(s, "admin", "a-good-first-password", t.TempDir(), false); err != nil {
+		t.Fatalf("bootstrapOnStart: %v", err)
+	}
+	admin, err := s.GetUserByUsername("admin")
+	if err != nil || admin == nil {
+		t.Fatalf("GetUserByUsername(admin): %v %v", admin, err)
+	}
+	if admin.Org().String() == store.DefaultOrgID {
+		t.Fatalf("multi-tenant Postgres bootstrap placed admin in default org %s", store.DefaultOrgID)
+	}
+	if staff, err := s.IsStaffOrg(admin.Org()); err != nil || !staff {
+		t.Fatalf("IsStaffOrg(%s) = %v, %v; want true", admin.Org(), staff, err)
+	}
+	orgs, err := s.Platform().FindOrgs("")
+	if err != nil || len(orgs) != 1 || orgs[0].ID != admin.Org().String() || orgs[0].Kind != "staff" {
+		t.Fatalf("FindOrgs(\"\") = %+v (%v), want 1 staff org %s", orgs, err, admin.Org())
+	}
+	policies, err := s.ListEnrollmentPolicies()
+	if err != nil {
+		t.Fatalf("ListEnrollmentPolicies: %v", err)
+	}
+	var pinned bool
+	for _, p := range policies {
+		if p.Scope == "administrators" && p.Required && strings.Join(p.AllowedMethods, ",") == "webauthn" && p.GraceSeconds == 0 {
+			pinned = true
+		}
+	}
+	if !pinned {
+		t.Fatalf("administrators passkey policy was not pinned: %+v", policies)
 	}
 }
 
