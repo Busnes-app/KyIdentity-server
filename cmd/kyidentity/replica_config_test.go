@@ -492,3 +492,39 @@ func TestStartRefusesTheOtherTenancyMode(t *testing.T) {
 		t.Fatalf("a single-tenant start on a multi-tenant database: %v", err)
 	}
 }
+
+// A multi-tenant start pins the administrators policy to passkeys, required, no grace,
+// and a single-tenant start leaves it as the operator set it.
+func TestMultiTenantStartPinsTheStaffPasskey(t *testing.T) {
+	cfg, _ := commandInstance(t, false)
+	s := handles(t, cfg.DBPath, 1)[0]
+	admins := func() store.EnrollmentPolicy {
+		t.Helper()
+		ps, err := s.ListEnrollmentPolicies()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range ps {
+			if p.Scope == "administrators" {
+				return p
+			}
+		}
+		t.Fatal("no administrators policy")
+		return store.EnrollmentPolicy{}
+	}
+	if err := checkTenancy(cfg, s); err != nil || admins().Required {
+		t.Fatalf("a single-tenant start changed the policy: %v %+v", err, admins())
+	}
+	if err := s.SetSetting(store.TenancySetting, "multi"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Tenancy = "multi"
+	for range 2 {
+		if err := checkTenancy(cfg, s); err != nil {
+			t.Fatal(err)
+		}
+		if p := admins(); !p.Required || strings.Join(p.AllowedMethods, ",") != "webauthn" || p.GraceSeconds != 0 || p.Revision != 2 {
+			t.Fatalf("pinned policy: %+v", p)
+		}
+	}
+}

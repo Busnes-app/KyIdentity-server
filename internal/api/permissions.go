@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 
@@ -99,6 +101,12 @@ func (s *Server) require(p permission, scope routeScope, stepUp bool, h http.Han
 			writeForbidden(w)
 			return
 		}
+		if s.cfg.Tenancy == "multi" {
+			var ok bool
+			if r, ok = s.staffOrgRequest(w, r, user, scope); !ok {
+				return
+			}
+		}
 		if p.protectAdmins && !a.Admin {
 			target, err := orgStore(r).GetUserByID(r.PathValue("id"))
 			if err != nil {
@@ -135,13 +143,62 @@ func (s *Server) require(p permission, scope routeScope, stepUp bool, h http.Han
 type routeScope int
 
 const (
-	// orgRoute works on one org's directory: the caller's own, until staff select an org
-	// (build plan PR 5).
+	// orgRoute works on one org's directory: in a multi-tenant install the org staff
+	// selected (X-Ky-Org), else the caller's own.
 	orgRoute routeScope = iota + 1
 	// platformRoute changes what every org shares: apps, policies, settings. In a
 	// multi-tenant install only global administrators may call it. Single-tenant: no change.
 	platformRoute
+	// crossOrgRoute reads across orgs for staff (the org finder) with no OrgStore of its
+	// own; multi-tenant only, every route of the class answers 404 in a single-tenant install.
+	crossOrgRoute
 )
+
+// OrgHeader names the org a staff member works in on an org route (multi-tenant).
+const OrgHeader = "X-Ky-Org"
+
+// staffOrgRequest runs once require has found an admin principal in a multi-tenant
+// install. The caller must be in the staff org. An org route then needs X-Ky-Org naming a
+// live customer org or the staff org (400 org_required, 404 unknown_org), and the request's
+// OrgStore is bound to it. A read on it is audited staff.read in that org's log.
+func (s *Server) staffOrgRequest(w http.ResponseWriter, r *http.Request, user *store.User, scope routeScope) (*http.Request, bool) {
+	staff, err := s.store.IsStaffOrg(user.Org())
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return r, false
+	}
+	if !staff {
+		writeForbidden(w)
+		return r, false
+	}
+	if scope != orgRoute {
+		return r, true
+	}
+	raw := r.Header.Get(OrgHeader)
+	if raw == "" {
+		writeAPIError(w, http.StatusBadRequest, "org_required", "Select an organisation.")
+		return r, false
+	}
+	org, err := s.store.StaffOrg(raw)
+	if errors.Is(err, store.ErrNotFound) {
+		writeAPIError(w, http.StatusNotFound, "unknown_org", "No such organisation.")
+		return r, false
+	}
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return r, false
+	}
+	o := s.store.Org(org)
+	if r.Method == http.MethodGet {
+		b, _ := json.Marshal(map[string]string{"route": r.Method + " " + r.Pattern, "path": r.URL.Path})
+		if err := o.RecordStaffRead(&store.AuditEvent{ActorID: user.ID, ActorUsername: user.Username, Action: "staff.read", TargetID: org.String(), TargetType: "org",
+			IPAddress: s.middleware.ClientIP(r), UserAgent: r.UserAgent(), Outcome: "success", DetailsJSON: string(b)}); err != nil {
+			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+			return r, false
+		}
+	}
+	return r.WithContext(context.WithValue(r.Context(), orgContextKey, o)), true
+}
 
 type adminRoute struct {
 	method, path string

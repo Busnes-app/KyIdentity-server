@@ -1432,9 +1432,8 @@ tests.
      with `apps` is refused (`400 invalid_request`).
    - **Mailbox address** (landed before PR 4, see Mailbox address): the column, its index
      and triggers, `OrgStore.SetMailboxAddress`, the `mailbox` webhook entry, the domain
-     removal refusal, and the staff route and edit field. Before PR 5 an org route binds the
-     caller's own org (staff), where a mailbox address is refused, so the staff path works
-     once PR 5 selects a customer org. Tests: uniqueness races, domain refusal, cross-org
+     removal refusal, and the staff route and edit field. An org route binds the org staff select
+     (PR 5), so the staff path sets a customer's mailbox address. Tests: uniqueness races, domain refusal, cross-org
      refusals, the single-tenant golden files unchanged, and a multi-tenant webhook golden.
 5. **Staff admin UI.**
    - Adds the org selector and `X-Ky-Org`, staff read audit and the cross-org audit by
@@ -1444,6 +1443,18 @@ tests.
    - Tests: the extended permission matrix with staff personas, a refusal of every change
      to the pinned policy, the existing UI verification flow (`UI-VERIFICATION.md`), and
      the export's content proven to hold no other org's rows.
+   - **Status (2026-11-25).** Org selection and the pinned passkey are built. In multi-tenant
+     mode an org route needs `X-Ky-Org` (`400 org_required`), checked against `orgs` after
+     the caller is proven staff (a customer org or the staff org, else `404 unknown_org`),
+     and a staff read writes `staff.read` in the selected org's log. The finder is
+     `GET /api/admin/orgs?q=` (ID, `billing_ref` or a member's exact email; empty is the
+     staff org), audited as one platform row `staff.orgs_read` naming the orgs returned. The
+     admin UI starts in the staff org and sends the header on admin calls. Every multi-tenant
+     start pins the `administrators` policy (required, passkey only, grace 0), and the admin
+     API refuses any change to it (`409 pinned_policy`). The cross-org matrix runs
+     multi-tenant with staff in org A. Not built yet: the cross-org audit by actor, the
+     customer-account guards, the holder's export page and deletion banner, the staff seat
+     and pool fields (P2, S3) and the `org:` MFA scope (P5).
 6. **Entitlements.**
    - Seat enforcement on every seat-adding path (member add, admin create, re-enable),
      `over_limit`, `org_apps` from the platform API, and quotas in `/api/suite/orgs`.

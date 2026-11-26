@@ -270,6 +270,7 @@ func (s *Server) routes() *http.ServeMux {
 	// stolen cookie answers it. The grant costs the password plus an enrolled factor,
 	// binds to this session and operation, and authorizes exactly one change.
 	s.adminRoutes = []adminRoute{
+		{"GET", "/api/admin/orgs", permDirectory, crossOrgRoute, false, http.HandlerFunc(adminH.FindOrgs)},
 		{"GET", "/api/admin/enrollment-policies", permRead, platformRoute, false, http.HandlerFunc(adminH.ListEnrollmentPolicies)},
 		{"POST", "/api/admin/enrollment-policies/preview", permAdmin, platformRoute, false, http.HandlerFunc(adminH.PreviewEnrollmentPolicy)},
 		{"PUT", "/api/admin/enrollment-policies", permAdmin, platformRoute, true, http.HandlerFunc(adminH.SetEnrollmentPolicy)},
@@ -397,7 +398,7 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/access-requests/{id}/deny", permRequests, orgRoute, true, requestH.Decide(false)},
 	}
 	for _, rt := range s.adminRoutes {
-		if rt.scope != orgRoute && rt.scope != platformRoute {
+		if rt.scope != orgRoute && rt.scope != platformRoute && rt.scope != crossOrgRoute {
 			panic("admin route " + rt.method + " " + rt.path + " names neither org nor platform")
 		}
 		mux.Handle(rt.method+" "+rt.path, s.require(rt.perm, rt.scope, rt.stepUp, rt.h))

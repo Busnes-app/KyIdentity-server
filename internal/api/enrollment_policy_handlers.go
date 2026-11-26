@@ -92,6 +92,9 @@ func (h *AdminHandler) PreviewEnrollmentPolicy(w http.ResponseWriter, r *http.Re
 		h.enrollmentDenied(w, r, "admin.mfa_enrollment_policy_previewed", p.Scope, err)
 		return
 	}
+	if h.pinnedPolicy(w, r, "admin.mfa_enrollment_policy_previewed", p) {
+		return
+	}
 	preview, err := h.store.PreviewEnrollmentPolicy(p, GetSessionFromContext(r.Context()).ID)
 	if err != nil {
 		h.enrollmentDenied(w, r, "admin.mfa_enrollment_policy_previewed", p.Scope, err)
@@ -108,6 +111,9 @@ func (h *AdminHandler) SetEnrollmentPolicy(w http.ResponseWriter, r *http.Reques
 	p, err := readEnrollmentPolicy(r)
 	if err != nil {
 		h.enrollmentDenied(w, r, "admin.mfa_enrollment_policy_changed", p.Scope, err)
+		return
+	}
+	if h.pinnedPolicy(w, r, "admin.mfa_enrollment_policy_changed", p) {
 		return
 	}
 	u := GetUserFromContext(r.Context())

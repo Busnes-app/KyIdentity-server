@@ -33,6 +33,17 @@ export async function fetchCSRF(forceRefresh = false): Promise<string> {
   return token;
 }
 
+let staffOrg = '';
+
+/**
+ * The org a staff member works in (multi-tenant): sent as X-Ky-Org on every admin call.
+ * The server binds org routes to it only after proving the caller is staff, and ignores it
+ * in a single-tenant install.
+ */
+export function setStaffOrg(id: string): void {
+  staffOrg = id;
+}
+
 export interface ApiOptions extends RequestInit {
   /** Step-up grant authorizing an account-security change. */
   stepUpToken?: string;
@@ -61,6 +72,9 @@ export async function apiRequest(path: string, options: ApiOptions = {}): Promis
     }
     if (stepUpToken) {
       headers.set('X-KyIdentity-StepUp', stepUpToken);
+    }
+    if (staffOrg && path.startsWith('/api/admin/')) {
+      headers.set('X-Ky-Org', staffOrg);
     }
     return fetch(path, { ...init, headers, credentials: 'same-origin' });
   };
