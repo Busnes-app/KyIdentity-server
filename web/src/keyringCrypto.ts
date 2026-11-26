@@ -175,3 +175,74 @@ export async function openTransfer(context: RingContext, pending: PendingTransfe
   const material = await transferMaterial(pending.privateKey, response.sender_key);
   return open(material, response.sealed, aad(context, 'transfer', pending.id, pending.request.recipient_key, response.sender_key), pending.secret);
 }
+
+export type HandoffBinding = {
+  context: RingContext;
+  client: string;
+  version: number;
+  code: string;
+  redirect_uri: string;
+  recipient_key: string;
+};
+
+export type HandoffPayload = {
+  sender_key: string;
+  sealed: string;
+};
+
+export const newHandoffPair = transferPair;
+
+export async function sealHandoffKey(binding: HandoffBinding, appKey: Uint8Array<ArrayBuffer>): Promise<HandoffPayload> {
+  const sender = await transferPair();
+  const material = await transferMaterial(sender.privateKey, binding.recipient_key);
+  const info = aad(binding.context, 'handoff', binding.client, binding.version,
+    binding.code, binding.redirect_uri, binding.recipient_key, sender.point);
+  return { sender_key: sender.point, sealed: await seal(material, appKey, info) };
+}
+
+export async function openHandoffKey(binding: HandoffBinding, recipientPrivateKey: CryptoKey, response: HandoffPayload) {
+  const material = await transferMaterial(recipientPrivateKey, response.sender_key);
+  const info = aad(binding.context, 'handoff', binding.client, binding.version,
+    binding.code, binding.redirect_uri, binding.recipient_key, response.sender_key);
+  return open(material, response.sealed, info);
+}
+
+function validatedRedirectTarget(redirectURI: string): URL {
+  const target = new URL(redirectURI);
+  if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+    throw new Error('Invalid application redirect URI.');
+  }
+  return target;
+}
+
+export function buildHandoffRedirectURL(
+  redirectURI: string,
+  code: string,
+  state: string,
+  handoff?: HandoffPayload & { key_version: number; keyring_version: string },
+): string {
+  const target = validatedRedirectTarget(redirectURI);
+  target.searchParams.set('code', code);
+  if (state) target.searchParams.set('state', state);
+  if (handoff) {
+    target.hash = new URLSearchParams({
+      kh: handoff.sealed,
+      kh_pk: handoff.sender_key,
+      kh_kv: String(handoff.key_version),
+      kh_rv: handoff.keyring_version,
+    }).toString();
+  } else {
+    target.hash = '';
+  }
+  return target.toString();
+}
+
+export function buildHandoffErrorURL(redirectURI: string, state: string, error: string, description: string): string {
+  const target = validatedRedirectTarget(redirectURI);
+  target.searchParams.set('error', error);
+  if (description) target.searchParams.set('error_description', description);
+  if (state) target.searchParams.set('state', state);
+  target.hash = '';
+  return target.toString();
+}
+
