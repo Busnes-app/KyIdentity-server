@@ -60,7 +60,7 @@ func (o *OrgStore) CreateGroup(g *Group, audit *AuditEvent) error {
 	if _, err = tx.Exec(`INSERT INTO directory_groups(org_id,id,name,description,created_at,updated_at) VALUES (?,?,?,?,?,?)`, o.org, g.ID, g.Name, g.Description, g.CreatedAt, g.UpdatedAt); err != nil {
 		return groupWriteError(err)
 	}
-	if err = recordAuditTx(tx, audit); err != nil {
+	if err = recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -94,7 +94,7 @@ func (o *OrgStore) UpdateGroup(g *Group, audit *AuditEvent) error {
 	if err = reconcileProvisioningTx(tx, g.UpdatedAt); err != nil {
 		return err
 	}
-	if err = recordAuditTx(tx, audit); err != nil {
+	if err = recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -115,7 +115,7 @@ func (o *OrgStore) DeleteGroupForSession(id, sessionID string, audit *AuditEvent
 		return err
 	}
 	setGroupAuditDetails(audit, map[string]string{"name": name})
-	if err = recordAuditTx(tx, audit); err != nil {
+	if err = recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -226,7 +226,7 @@ func (o *OrgStore) setGroupMembership(groupID, userID string, member bool, expir
 		return err
 	}
 	setGroupAuditDetails(audit, map[string]string{"userId": userID, "username": username, "groupName": groupName})
-	if err = recordAuditTx(tx, audit); err != nil {
+	if err = recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return err
 	}
 	return tx.Commit()

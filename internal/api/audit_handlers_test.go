@@ -6,10 +6,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -173,5 +175,124 @@ func TestAuditExportMarksIncompleteOutput(t *testing.T) {
 	started, _, _ := db.DefaultOrg().SearchAuditEvents(store.AuditFilter{Action: "admin.audit_export_started", Limit: 1})
 	if len(started) == 0 {
 		t.Fatal("export intent not recorded before streaming")
+	}
+}
+
+func TestStaffAuditListKeepsConsecutivePagesStable(t *testing.T) {
+	srv, db, _, _, _, cleanup := setupTestServerWith(t, func(c *config.Config) { c.Tenancy = "multi" })
+	defer cleanup()
+	org, err := store.CreateOrgForTest(db, "customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	staff, err := store.CreateOrgForTest(db, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := newSession(t, db, newOrgUser(t, db, staff, "admin"), time.Now().Add(time.Hour))
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		rr := staffRequest(t, srv, http.MethodGet, path, admin, org.String(), "", false)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, rr.Code, rr.Body.String())
+		}
+		return rr
+	}
+	for range 2 {
+		get("/api/admin/users")
+	}
+	prior := staffAudit(t, db, org, "staff.read")
+	if len(prior) != 2 {
+		t.Fatalf("expected the two user-list reads, got %d", len(prior))
+	}
+	page := func(n int) (string, int) {
+		t.Helper()
+		rr := get("/api/admin/audit-events?action=staff.read&limit=1&page=" + strconv.Itoa(n))
+		var body struct {
+			Events []store.AuditEvent `json:"auditEvents"`
+			Total  int                `json:"total"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil || len(body.Events) != 1 {
+			t.Fatalf("page %d: %v %s", n, err, rr.Body.String())
+		}
+		return body.Events[0].ID, body.Total
+	}
+	first, firstTotal := page(1)
+	second, secondTotal := page(2)
+	if first == second {
+		t.Fatalf("page two repeated page one's audit event %s", first)
+	}
+	if first != prior[0].ID || second != prior[1].ID || firstTotal != 2 || secondTotal != 2 {
+		t.Fatalf("pages = %s/%d, %s/%d, want %s/2, %s/2", first, firstTotal, second, secondTotal, prior[0].ID, prior[1].ID)
+	}
+	reads := staffAudit(t, db, org, "staff.read")
+	if len(reads) != 4 {
+		t.Fatalf("expected a stored audit event for each of the four reads, got %d", len(reads))
+	}
+	export := get("/api/admin/audit-events/export?format=jsonl&action=staff.read").Body.String()
+	for _, event := range reads {
+		if !strings.Contains(export, `"id":"`+event.ID+`"`) {
+			t.Fatalf("export omitted read %s", event.ID)
+		}
+	}
+}
+
+func TestStaffMutationAuditUsesSelectedOrg(t *testing.T) {
+	srv, db, customer, staff := staffCredentialOrgs(t)
+	actor := newOrgUser(t, db, staff, "admin")
+	cookie := newSession(t, db, actor, time.Now().Add(time.Hour))
+	member := newOrgUser(t, db, customer, "user")
+	const clientID = "audit-app"
+	if err := db.CreateOAuthClient(&store.OAuthClient{
+		ID: clientID, ClientName: clientID, ClientType: "public",
+		RedirectURIsJSON: `["https://app.example.test/cb"]`, AllowedScopesJSON: `["openid"]`, Enabled: true,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	app := suiteAppRecord(t, db, clientID)
+	role, err := db.CreateAppRole(app, "editor", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/api/admin/app-registry/" + app
+	for _, tc := range []struct{ action, suffix string }{
+		{"admin.app_assignment_added", "/assignments/users/" + member.ID},
+		{"admin.app_role_mapped", "/roles/" + role.ID + "/assignments/users/" + member.ID},
+	} {
+		rr := staffCall(t, srv, http.MethodPut, path+tc.suffix, cookie, customer.String(), "{}")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: mutation returned %d: %s", tc.action, rr.Code, rr.Body)
+		}
+		filter := "action=" + tc.action
+		checkEvent := func(t *testing.T, e store.AuditEvent) {
+			t.Helper()
+			if e.Action != tc.action || e.Outcome != "success" || e.TargetID != app ||
+				e.ActorID != actor.ID || e.ActorUsername != actor.Username {
+				t.Fatalf("wrong audit event: %+v", e)
+			}
+		}
+		t.Run(tc.action+"/list", func(t *testing.T) {
+			rr := staffRequest(t, srv, http.MethodGet, "/api/admin/audit-events?"+filter, cookie, customer.String(), "", false)
+			var body struct {
+				Events []store.AuditEvent `json:"auditEvents"`
+				Total  int                `json:"total"`
+			}
+			if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &body) != nil || body.Total != 1 || len(body.Events) != 1 {
+				t.Fatalf("customer audit list: %d %s", rr.Code, rr.Body)
+			}
+			checkEvent(t, body.Events[0])
+		})
+		t.Run(tc.action+"/export", func(t *testing.T) {
+			rr := staffRequest(t, srv, http.MethodGet, "/api/admin/audit-events/export?format=jsonl&"+filter, cookie, customer.String(), "", false)
+			var e store.AuditEvent
+			if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &e) != nil {
+				t.Fatalf("customer audit export: %d %s", rr.Code, rr.Body)
+			}
+			checkEvent(t, e)
+		})
+		if rows := staffAudit(t, db, staff, tc.action); len(rows) != 0 {
+			t.Errorf("%s appeared in the actor's org: %d rows", tc.action, len(rows))
+		}
 	}
 }

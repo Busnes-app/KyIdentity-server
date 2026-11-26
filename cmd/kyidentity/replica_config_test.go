@@ -492,3 +492,136 @@ func TestStartRefusesTheOtherTenancyMode(t *testing.T) {
 		t.Fatalf("a single-tenant start on a multi-tenant database: %v", err)
 	}
 }
+
+// A multi-tenant start pins the administrators policy to passkeys, required, no grace,
+// and a single-tenant start leaves it as the operator set it.
+func TestMultiTenantStartPinsTheStaffPasskey(t *testing.T) {
+	cfg, _ := commandInstance(t, false)
+	s := handles(t, cfg.DBPath, 1)[0]
+	admins := func() store.EnrollmentPolicy {
+		t.Helper()
+		ps, err := s.ListEnrollmentPolicies()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range ps {
+			if p.Scope == "administrators" {
+				return p
+			}
+		}
+		t.Fatal("no administrators policy")
+		return store.EnrollmentPolicy{}
+	}
+	if err := checkTenancy(cfg, s); err != nil || admins().Required {
+		t.Fatalf("a single-tenant start changed the policy: %v %+v", err, admins())
+	}
+	if err := s.SetSetting(store.TenancySetting, "multi"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Tenancy = "multi"
+	for range 2 {
+		if err := checkTenancy(cfg, s); err != nil {
+			t.Fatal(err)
+		}
+		if p := admins(); !p.Required || strings.Join(p.AllowedMethods, ",") != "webauthn" || p.GraceSeconds != 0 || p.Revision != 2 {
+			t.Fatalf("pinned policy: %+v", p)
+		}
+	}
+}
+
+func TestFreshDatabaseRecordsItsTenancyMode(t *testing.T) {
+	multi := freshPostgresTenancy(t)
+	open := func(cfg *config.Config) *store.Store {
+		t.Helper()
+		s, err := openStore(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	}
+	for range 2 {
+		if err := checkTenancy(multi, open(multi)); err != nil {
+			t.Fatalf("multi-tenant start refused: %v", err)
+		}
+	}
+	single := *multi
+	single.Tenancy = "single"
+	if err := checkTenancy(&single, open(&single)); err == nil {
+		t.Fatal("a single-tenant start on a multi-tenant database")
+	}
+	other := freshPostgresTenancy(t)
+	single.DatabaseURL = other.DatabaseURL
+	if err := checkTenancy(&single, open(&single)); err != nil {
+		t.Fatalf("single-tenant start refused: %v", err)
+	}
+	if err := checkTenancy(other, open(other)); err == nil || !strings.Contains(err.Error(), "created single-tenant") {
+		t.Fatalf("a multi-tenant start on a single-tenant database: %v", err)
+	}
+}
+
+func freshPostgresTenancy(t *testing.T) *config.Config {
+	t.Helper()
+	if !store.OnPostgresTest() {
+		t.Skip("needs PostgreSQL")
+	}
+	path := filepath.Join(t.TempDir(), "tenancy")
+	rawURL, err := store.PostgresURLForTest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &config.Config{Tenancy: "multi", DatabaseURL: rawURL, DBPath: path}
+}
+
+func TestInterruptedMultiTenantInitializationCanRetry(t *testing.T) {
+	cfg := freshPostgresTenancy(t)
+	raw, err := store.OpenRawForTest(cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	// Interrupt the first open after the baseline users table would have committed.
+	if _, err := raw.Exec(`CREATE TABLE active_principals (blocker int)`); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := openStore(cfg); err == nil {
+		s.Close()
+		t.Fatal("first open succeeded despite the conflicting relation")
+	} else if !strings.Contains(err.Error(), "active_principals") {
+		t.Fatalf("first open failed at the wrong point: %v", err)
+	}
+	if _, err := raw.Exec(`DROP TABLE active_principals`); err != nil {
+		t.Fatal(err)
+	}
+	s, err := openStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := checkTenancy(cfg, s); err != nil {
+		t.Fatalf("retry could not start in multi mode: %v", err)
+	}
+}
+
+func TestConcurrentFirstOpensRecordMultiTenantMode(t *testing.T) {
+	cfg := freshPostgresTenancy(t)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			s, err := openStore(cfg)
+			if err == nil {
+				err = checkTenancy(cfg, s)
+				s.Close()
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+}

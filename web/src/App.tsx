@@ -24,11 +24,13 @@ import { AdminSuiteSettings } from './components/AdminSuiteSettings';
 import { AdminSCIM } from './components/AdminSCIM';
 import { AdminAccessRequests } from './components/AdminAccessRequests';
 import { AdminAlerts } from './components/AdminAlerts';
+import { OrgPicker } from './components/OrgPicker';
 import { AccountLinkView } from './components/AccountLinkView';
 import { PasswordChangeRequired } from './components/PasswordChangeRequired';
 import { LicenseFooter } from './components/LicenseFooter';
 import { SessionUnavailable } from './components/SessionUnavailable';
 import { DeviceApproval } from './components/DeviceApproval';
+import { KeyringHandoff } from './components/KeyringHandoff';
 import { RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -38,6 +40,8 @@ export const App: React.FC = () => {
   const [activeTab, setTab] = useState(() => tabFromHash(window.location.hash));
   const [groupUser, setGroupUser] = useState<User | null>(null);
   const [logoutFailed, setLogoutFailed] = useState(false);
+  // The org staff work in (multi-tenant); '' when there is none to choose, null until known.
+  const [staffOrg, setStaffOrgState] = useState<string | null>(null);
 
   // The view lives in the URL hash, so links and the back button work.
   const setActiveTab = (tab: string) => {
@@ -138,6 +142,7 @@ export const App: React.FC = () => {
 
   // Workstation sign-in (RFC 8628): approve a code a computer shows.
   if (window.location.pathname === '/device') return <DeviceApproval user={currentUser} />;
+  if (window.location.pathname === '/keyring-handoff') return <KeyringHandoff user={currentUser} />;
 
   return (
     <div className="ky-app">
@@ -164,7 +169,10 @@ export const App: React.FC = () => {
         )}
 
         {canAdminister(currentUser.access) && (
-          <>
+          <div hidden={!activeTab.startsWith('admin-')}><OrgPicker onReady={org => { setGroupUser(null); setStaffOrgState(org); }} /></div>
+        )}
+        {canAdminister(currentUser.access) && staffOrg !== null && (
+          <React.Fragment key={staffOrg}>
             {activeTab === 'admin-enrollment' && <AdminEnrollmentPolicies />}
             {activeTab === 'admin-users' && <AdminUsers access={currentUser.access} onManageGroups={user => { setGroupUser(user); setActiveTab('admin-groups'); }} />}
             {activeTab === 'admin-groups' && <AdminGroups key={groupUser?.id ?? 'all'} user={groupUser} onClearUser={() => setGroupUser(null)} />}
@@ -180,7 +188,7 @@ export const App: React.FC = () => {
             {activeTab === 'admin-scim' && <AdminSCIM />}
             {activeTab === 'admin-requests' && <AdminAccessRequests />}
             {activeTab === 'admin-alerts' && <AdminAlerts access={currentUser.access} />}
-          </>
+          </React.Fragment>
         )}
         <LicenseFooter version={currentUser.version} className="ky-content-foot" />
       </main>

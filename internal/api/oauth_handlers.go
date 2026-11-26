@@ -76,12 +76,13 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid_request"}`, 400)
 		return
 	}
-	interactionHash := ""
+	interactionRaw, interactionHash := "", ""
 	if raw := q.Get("interaction"); raw != "" {
 		if len(q) != 1 || len(q["interaction"]) != 1 || len(raw) != 64 {
 			http.Error(w, `{"error":"invalid_request"}`, 400)
 			return
 		}
+		interactionRaw = raw
 		interactionHash = crypto.HashSHA256(raw)
 		i, err := h.store.GetAuthorizationInteraction(interactionHash, h.middleware.authorizationBrowserHash(r))
 		sess := GetSessionFromContext(r.Context())
@@ -144,6 +145,16 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(q["keyring_pk"]) > 1 {
+		redirectError(w, r, redirectURI, state, "invalid_request", "Duplicate keyring_pk parameter")
+		return
+	}
+	keyringPK := q.Get("keyring_pk")
+	if keyringPK != "" && !keyringPoint(keyringPK) {
+		redirectError(w, r, redirectURI, state, "invalid_request", "Invalid keyring_pk parameter")
+		return
+	}
+
 	grantedScope, err := h.oauthEngine.GrantedScope(clientID, scope)
 	if err != nil {
 		redirectError(w, r, redirectURI, state, "invalid_scope", "No requested scope is permitted for this client")
@@ -153,6 +164,10 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	requirements, err := oauth.ParseAuthenticationRequest(q)
 	if err != nil {
 		redirectError(w, r, redirectURI, state, "invalid_request", err.Error())
+		return
+	}
+	if keyringPK != "" && requirements.Silent {
+		redirectError(w, r, redirectURI, state, "interaction_required", "Keyring handoff cannot be used with prompt=none")
 		return
 	}
 	policy, err := h.store.ClientAuthenticationPolicy(clientID)
@@ -210,6 +225,17 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		}
 		h.beginInteraction(w, r, q)
 		return
+	}
+	if keyringPK != "" {
+		_, err := orgStore(r).KeyringStatus(store.KeyringSession{UserID: user.ID, SessionID: session.ID})
+		if err == nil {
+			h.beginKeyringHandoff(w, r, q, user, session, interactionRaw, interactionHash)
+			return
+		}
+		if !errors.Is(err, store.ErrKeyringDenied) {
+			redirectError(w, r, redirectURI, state, "server_error", "Could not check suite keyring")
+			return
+		}
 	}
 	code, err := h.oauthEngine.CreateAuthorizationCodeForInteraction(
 		clientID, session.ID, redirectURI, grantedScope, codeChallenge, codeChallengeMethod, nonce, requirements, interactionHash)

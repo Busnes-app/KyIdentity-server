@@ -329,7 +329,7 @@ func (o *OrgStore) SetAppRoleAssignment(appID, roleID, kind, principal string, a
 		return ErrAppLinkConflict
 	}
 	now := time.Now().UTC()
-	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.auditedTx(audit, func(tx *sql.Tx) error {
 		app, err := lockAppForRoles(tx, appID)
 		if err != nil {
 			return err

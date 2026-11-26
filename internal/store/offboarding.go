@@ -11,6 +11,8 @@ import (
 // both run it, so a later account end date can too. deleted sends user.deleted instead
 // of an inactive update.
 func offboardUserTx(tx *sql.Tx, u *User, deleted bool, now time.Time) error {
+	// Revoking sessions cascades into pending keyring transfers. Durable envelopes
+	// cascade only on deletion of the user, so re-enabling an account retains them.
 	if err := revokeUserAccessTx(tx, u.ID, now); err != nil {
 		return err
 	}

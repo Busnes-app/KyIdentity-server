@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiAllPages, apiJson, apiRequest, fetchCSRF, isSignedOut, isStepUpRequired, logout } from './api';
+import { ApiError, apiAllPages, apiJson, apiRequest, fetchCSRF, isSignedOut, isStepUpRequired, logout, setStaffOrg } from './api';
 
 /** A fetch stub that answers from a queue, recording what it was asked for. */
 function stubFetch(responses: Array<{ status?: number; body?: unknown; text?: string }>) {
@@ -199,5 +199,19 @@ describe('isSignedOut', () => {
     expect(isSignedOut(new ApiError(503, { error: 'temporarily_unavailable' }))).toBe(false);
     expect(isSignedOut(new ApiError(500, {}))).toBe(false);
     expect(isSignedOut(new TypeError('Failed to fetch'))).toBe(false);
+  });
+});
+
+describe('staff org selection', () => {
+  afterEach(() => setStaffOrg(''));
+
+  // Only admin calls carry the selected org; nothing else learns it, and no selection sends none.
+  it('sends X-Ky-Org on admin calls once an org is selected', async () => {
+    const calls = stubFetch([{ body: {} }, { body: {} }, { body: {} }]);
+    await apiRequest('/api/admin/users');
+    setStaffOrg('org-a');
+    await apiRequest('/api/admin/users');
+    await apiRequest('/api/user/profile');
+    expect(calls.map(c => c.init.headers.get('X-Ky-Org'))).toEqual([null, 'org-a', null]);
   });
 });

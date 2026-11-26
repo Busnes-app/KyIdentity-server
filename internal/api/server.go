@@ -177,6 +177,7 @@ func (s *Server) routes() *http.ServeMux {
 
 	// Authenticated User Routes
 	authM := s.middleware.RequireAuth
+	s.registerKeyring(mux)
 	mux.Handle("POST /api/auth/logout", authM(http.HandlerFunc(authH.Logout)))
 	mux.Handle("GET /api/auth/me", authM(http.HandlerFunc(authH.Me)))
 	mux.Handle("POST /api/auth/step-up", authM(s.middleware.RateLimit("step_up", 10, 0.2)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { authH.RequestStepUp(w, r, webauthnH) }))))
@@ -217,6 +218,9 @@ func (s *Server) routes() *http.ServeMux {
 	// expired session cannot authorise an SSO redirect.
 	mux.HandleFunc("GET /api/auth/authorization/{id}", oauthH.InteractionDetails)
 	mux.Handle("POST /api/auth/authorization/cancel", s.middleware.RateLimit("authorization_cancel", 20, 1)(http.HandlerFunc(oauthH.CancelInteraction)))
+	mux.Handle("GET /api/user/keyring/handoff/{id}", authM(s.middleware.RateLimit("keyring_handoff_read", 60, 2)(http.HandlerFunc(oauthH.KeyringHandoffDetails))))
+	mux.Handle("POST /api/user/keyring/handoff/{id}/complete", authM(s.middleware.RateLimit("keyring_handoff_write", 30, 0.5)(http.HandlerFunc(oauthH.KeyringHandoffComplete))))
+	mux.Handle("DELETE /api/user/keyring/handoff/{id}", authM(s.middleware.RateLimit("keyring_handoff_write", 30, 0.5)(http.HandlerFunc(oauthH.KeyringHandoffCancel))))
 	mux.Handle("GET /oauth/authorize", s.middleware.OptionalAuth(http.HandlerFunc(oauthH.Authorize)))
 	mux.Handle("GET /oauth/logout", s.middleware.OptionalAuth(s.middleware.RateLimit("oauth_logout", 30, 1.0)(http.HandlerFunc(oauthH.EndSession))))
 	mux.Handle("POST /oauth/logout", s.middleware.OptionalAuth(s.middleware.RateLimit("oauth_logout", 30, 1.0)(http.HandlerFunc(oauthH.EndSession))))
@@ -269,6 +273,7 @@ func (s *Server) routes() *http.ServeMux {
 	// stolen cookie answers it. The grant costs the password plus an enrolled factor,
 	// binds to this session and operation, and authorizes exactly one change.
 	s.adminRoutes = []adminRoute{
+		{"GET", "/api/admin/orgs", permDirectory, crossOrgRoute, false, http.HandlerFunc(adminH.FindOrgs)},
 		{"GET", "/api/admin/enrollment-policies", permRead, platformRoute, false, http.HandlerFunc(adminH.ListEnrollmentPolicies)},
 		{"POST", "/api/admin/enrollment-policies/preview", permAdmin, platformRoute, false, http.HandlerFunc(adminH.PreviewEnrollmentPolicy)},
 		{"PUT", "/api/admin/enrollment-policies", permAdmin, platformRoute, true, http.HandlerFunc(adminH.SetEnrollmentPolicy)},
@@ -301,11 +306,11 @@ func (s *Server) routes() *http.ServeMux {
 		{"DELETE", "/api/admin/app-registry/{id}/roles/{roleId}/assignments/{kind}/{principal}", permAppGrants, orgRoute, true, http.HandlerFunc(adminH.SetAppRoleAssignment)},
 		{"PUT", "/api/admin/app-registry/{id}/claims", permAdmin, platformRoute, true, http.HandlerFunc(adminH.SetAppClaimSettings)},
 		{"GET", "/api/admin/scim-connectors", permRead, orgRoute, false, http.HandlerFunc(scimH.AdminList)},
-		{"PUT", "/api/admin/scim-connectors/{id}/hr", permAdmin, orgRoute, true, http.HandlerFunc(s.configureHR)},
+		{"PUT", "/api/admin/scim-connectors/{id}/hr", permAdmin, staffOrgRoute, true, http.HandlerFunc(s.configureHR)},
 		{"GET", "/api/admin/scim-connectors/{id}/hr", permRead, orgRoute, false, http.HandlerFunc(s.hrStatus)},
-		{"POST", "/api/admin/scim-connectors", permAdmin, orgRoute, true, http.HandlerFunc(scimH.AdminCreate)},
-		{"PUT", "/api/admin/scim-connectors/{id}", permAdmin, orgRoute, true, http.HandlerFunc(scimH.AdminUpdate)},
-		{"POST", "/api/admin/scim-connectors/{id}/tokens", permAdmin, orgRoute, true, http.HandlerFunc(scimH.AdminIssueToken)},
+		{"POST", "/api/admin/scim-connectors", permAdmin, staffOrgRoute, true, http.HandlerFunc(scimH.AdminCreate)},
+		{"PUT", "/api/admin/scim-connectors/{id}", permAdmin, staffOrgRoute, true, http.HandlerFunc(scimH.AdminUpdate)},
+		{"POST", "/api/admin/scim-connectors/{id}/tokens", permAdmin, staffOrgRoute, true, http.HandlerFunc(scimH.AdminIssueToken)},
 		{"DELETE", "/api/admin/scim-connectors/{id}/tokens/{tokenId}", permAdmin, orgRoute, false, http.HandlerFunc(scimH.AdminRevokeToken)},
 		{"DELETE", "/api/admin/scim-connectors/{id}", permAdmin, orgRoute, true, http.HandlerFunc(scimH.AdminDelete)},
 		{"GET", "/api/admin/mail", permRead, platformRoute, false, http.HandlerFunc(onboardH.GetMail)},
@@ -396,8 +401,8 @@ func (s *Server) routes() *http.ServeMux {
 		{"POST", "/api/admin/access-requests/{id}/deny", permRequests, orgRoute, true, requestH.Decide(false)},
 	}
 	for _, rt := range s.adminRoutes {
-		if rt.scope != orgRoute && rt.scope != platformRoute {
-			panic("admin route " + rt.method + " " + rt.path + " names neither org nor platform")
+		if rt.scope != orgRoute && rt.scope != staffOrgRoute && rt.scope != platformRoute && rt.scope != crossOrgRoute {
+			panic("admin route " + rt.method + " " + rt.path + " has invalid scope")
 		}
 		mux.Handle(rt.method+" "+rt.path, s.require(rt.perm, rt.scope, rt.stepUp, rt.h))
 	}

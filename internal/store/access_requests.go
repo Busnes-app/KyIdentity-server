@@ -253,14 +253,13 @@ func (o *OrgStore) ListAccessRequests(f AccessRequestFilter) ([]AccessRequest, i
 // expiry, written through the same path as a manual grant.
 // Another org's request is ErrRequestNotPending, like a missing one.
 func (o *OrgStore) DecideAccessRequest(id, actorID string, approve bool, note string, audit *AuditEvent) (*AccessRequest, error) {
-	s := o.s
 	note = strings.TrimSpace(note)
 	if len(note) > maxReasonLength {
 		return nil, ErrAppLinkConflict
 	}
 	now := time.Now().UTC()
 	var out *AccessRequest
-	err := s.auditedTx(audit, func(tx *sql.Tx) error {
+	err := o.auditedTx(audit, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`UPDATE access_requests SET status=status WHERE id=? AND status='pending' AND user_id IN (SELECT id FROM users WHERE org_id=?)`, id, o.org)
 		if err != nil {
 			return err

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -403,5 +404,29 @@ func TestStorageReportRaceAcrossReplicas(t *testing.T) {
 	}
 	if ceiling > 16*gib || ceiling-14*gib > 2*gib {
 		t.Fatalf("grants sum past the pool or the cap: ceilings %d", ceiling)
+	}
+}
+
+// Replicas: many adds race for an org's last free seat; one wins, the rest are
+// ErrSeatLimit, and the org never holds more seats than max_seats (build plan 6).
+func TestSeatRaceAcrossReplicas(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	org, _ := poolFixture(t, s, OrgLimits{MaxSeats: 2, StorageBytes: 20 * gib})
+	if err := s.Org(org).CreateUser(&User{ID: "seat-0", Username: "seat-0", DisplayName: "seat-0", Email: "seat-0@test.invalid", Role: "user", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	results := race(replicasOf(t, s, proofHandles), proofPerHandle, func(i int, h *Store) once {
+		id := fmt.Sprintf("seat-race-%d", i)
+		err := h.Org(org).CreateUser(&User{ID: id, Username: id, DisplayName: id, Email: id + "@test.invalid", Role: "user", Status: "disabled", Pending: true})
+		if errors.Is(err, ErrSeatLimit) {
+			return once{}
+		}
+		return once{ok: err == nil, err: err}
+	})
+	exactlyOne(t, "the last seat", results)
+	var seats int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users u WHERE u.org_id=? AND `+seatSQL("u"), org.id).Scan(&seats); err != nil || seats != 2 {
+		t.Fatalf("seats %d: %v", seats, err)
 	}
 }

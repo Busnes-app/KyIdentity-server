@@ -158,7 +158,7 @@ func (o *OrgStore) RetryLogoutDeliveryNow(userID, id string, audit *AuditEvent) 
 	if err != nil || n == 0 {
 		return false, err
 	}
-	if err := recordAuditTx(tx, audit); err != nil {
+	if err := recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()

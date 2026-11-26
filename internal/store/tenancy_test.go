@@ -16,7 +16,7 @@ import (
 var (
 	orgOwnedTables = []string{"users", "directory_groups", "group_memberships", "account_sync_events", "audit_events",
 		"scim_user_links", "sync_delivery_attempts", "scim_connectors", "logout_deliveries", "sync_resource_state", "alerts",
-		"suite_groups", "org_apps", "erase_notices", "org_storage"}
+		"suite_groups", "org_apps", "erase_notices", "org_storage", "keyrings", "keyring_wrappers", "keyring_app_keys", "keyring_transfers"}
 	derivedTables = map[string]string{
 		"sessions": "users", "login_failures": "users", "native_devices": "users", "device_pairing_tokens": "users",
 		"mfa_methods": "users", "mfa_challenges": "users", "mfa_tokens": "users", "recovery_codes": "users",

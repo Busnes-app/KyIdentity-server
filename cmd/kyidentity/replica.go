@@ -50,6 +50,12 @@ func checkTenancy(cfg *config.Config, s *store.Store) error {
 	if mode != cfg.Tenancy {
 		return fmt.Errorf("KYIDENTITY_TENANCY is %s but this database was created %s-tenant; the mode cannot change on an existing install", cfg.Tenancy, mode)
 	}
+	if mode == "multi" {
+		// Staff sign in with a passkey (tenancy design, "Roles"), pinned on every start.
+		if _, err := s.PinStaffPasskey(); err != nil {
+			return fmt.Errorf("pinning the staff passkey policy: %w", err)
+		}
+	}
 	return nil
 }
 

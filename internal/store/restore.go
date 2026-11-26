@@ -29,6 +29,7 @@ const restoredRevision = -1
 // absent because they only ever refuse: emptying them would let an assertion spent
 // before the capsule was taken be replayed within its lifetime, so only expired ones go.
 var restoredCleared = []string{
+	"keyring_transfers",
 	"forward_codes",
 	"forward_sessions",
 	"sessions", // cascades oidc_client_sessions

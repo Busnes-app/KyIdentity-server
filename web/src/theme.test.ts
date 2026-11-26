@@ -49,6 +49,7 @@ describe('theme', () => {
     expect(html).toContain('<h1 class="ky-page-title">Settings</h1>');
     expect([...html.matchAll(/<a class="ky-nav-item" href="([^"]+)"( aria-current="page")?>([^<]+)</g)].map(m => [m[1], m[3], Boolean(m[2])])).toEqual([
       ['#/settings/account', 'Account', false], ['#/settings/devices', 'Phones &amp; apps', false], ['#/settings/appearance', 'Appearance', true],
+      ['#/settings/keyring', 'Suite keyring', false],
     ]);
     expect(html).toContain('Pick a palette and how it handles light and dark. Match system switches with your device’s setting; Light or Dark keeps one. Your choice applies straight away and is saved in this browser only.');
     expect(html.match(/type="radio"/g)).toHaveLength(18);

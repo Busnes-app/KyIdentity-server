@@ -681,7 +681,7 @@ func clearFirstRunPasswordFile(dbStore *store.Store, dataDir string) error {
 // openStore opens the shared Postgres database when one is configured, else the SQLite file.
 func openStore(cfg *config.Config) (*store.Store, error) {
 	if cfg.DatabaseURL != "" {
-		return store.NewPostgres(cfg.DatabaseURL)
+		return store.NewPostgresWithTenancy(cfg.DatabaseURL, cfg.Tenancy)
 	}
 	return store.New(cfg.DBPath)
 }
@@ -1224,6 +1224,7 @@ func purgeExpired(s *store.Store, now time.Time) error {
 		{"MFA challenges", s.DeleteExpiredMFAChallenges},
 		{"WebAuthn challenges", s.DeleteExpiredWebAuthnChallenges},
 		{"step-up tokens", s.DeleteExpiredStepUpTokens},
+		{"expired keyring transfers", s.DeleteExpiredKeyringTransfers},
 		{"forward-auth codes and sessions", s.DeleteExpiredForwardRows},
 		{"delivered sync events", func() error { return s.DeleteDeliveredSyncEvents(now.Add(-7 * 24 * time.Hour)) }},
 		{"logout deliveries", func() error { return s.Platform().DeleteLogoutDeliveriesOlderThan(now.Add(-7 * 24 * time.Hour)) }},

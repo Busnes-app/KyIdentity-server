@@ -55,9 +55,9 @@ func multiMailboxServer(t *testing.T) (*Server, *store.Store, store.OrgID, *stor
 	return srv, db, staffOrg, staff, newSession(t, db, staff, time.Now().UTC().Add(time.Hour)), cleanup
 }
 
-// Over HTTP, until staff select an org (build plan PR 5), an admin route binds the staff
-// org: a staff account is refused a mailbox address, another org's member answers exactly
-// as a missing one, and the route needs step-up.
+// Over HTTP, with the staff org selected: a staff account is refused a mailbox address,
+// another org's member answers exactly as a missing one, and the route needs step-up. With
+// the member's org selected (build plan PR 5), staff set it.
 func TestMailboxAddressRouteRefusals(t *testing.T) {
 	srv, db, staffOrg, _, cookie, cleanup := multiMailboxServer(t)
 	defer cleanup()
@@ -67,7 +67,7 @@ func TestMailboxAddressRouteRefusals(t *testing.T) {
 	}
 	userB := newOrgUser(t, db, orgB, "user")
 	put := func(id, body string) (int, string) {
-		res := adminRequest(t, srv, "PUT", "/api/admin/users/"+id+"/mailbox-address", cookie, body)
+		res := staffCall(t, srv, "PUT", "/api/admin/users/"+id+"/mailbox-address", cookie, staffOrg.String(), body)
 		return res.Code, strings.TrimSpace(res.Body.String())
 	}
 	colleague := newOrgUser(t, db, staffOrg, "user")
@@ -87,7 +87,7 @@ func TestMailboxAddressRouteRefusals(t *testing.T) {
 			t.Errorf("body %.40q: %d", body, code)
 		}
 	}
-	if res := adminRequestNoStepUp(t, srv, "PUT", "/api/admin/users/"+colleague.ID+"/mailbox-address", cookie, `{"mailboxAddress":"c@example.com"}`); res.Code != http.StatusForbidden {
+	if res := staffRequest(t, srv, "PUT", "/api/admin/users/"+colleague.ID+"/mailbox-address", cookie, staffOrg.String(), `{"mailboxAddress":"c@example.com"}`, false); res.Code != http.StatusForbidden {
 		t.Errorf("without step-up: %d %s", res.Code, res.Body)
 	}
 	member := newOrgUser(t, db, orgB, "user")
@@ -96,13 +96,20 @@ func TestMailboxAddressRouteRefusals(t *testing.T) {
 		t.Errorf("a member on their own account: %d %s", res.Code, res.Body)
 	}
 	// The staff org's list carries no mailbox domains.
-	if res := adminRequest(t, srv, "GET", "/api/admin/users", cookie, ""); strings.Contains(res.Body.String(), "mailboxDomains") {
-		t.Errorf("staff list: %s", res.Body)
+	if res := staffCall(t, srv, "GET", "/api/admin/users", cookie, staffOrg.String(), ""); res.Code != http.StatusOK || strings.Contains(res.Body.String(), "mailboxDomains") {
+		t.Errorf("staff list: %d %s", res.Code, res.Body)
+	}
+	// With B selected, staff set B's member's address.
+	if res := staffCall(t, srv, "PUT", "/api/admin/users/"+userB.ID+"/mailbox-address", cookie, orgB.String(), `{"mailboxAddress":"b@example.com"}`); res.Code != http.StatusOK {
+		t.Errorf("B selected: %d %s", res.Code, res.Body)
+	}
+	if got, _ := db.Org(orgB).GetUserByID(userB.ID); got.MailboxAddress != "b@example.com" {
+		t.Errorf("B's member has %q", got.MailboxAddress)
 	}
 }
 
 // boundTo calls an admin handler as staff with the request bound to org, as staff org
-// selection (build plan PR 5) will bind it.
+// selection (build plan PR 5) binds it.
 func boundTo(h http.HandlerFunc, db *store.Store, org store.OrgID, staff *store.User, method, path, id, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.SetPathValue("id", id)

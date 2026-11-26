@@ -616,7 +616,7 @@ func (o *OrgStore) ListAlerts(status string, limit, offset int) ([]Alert, int, e
 
 // Another org's alert is ErrAlertMissing, like a missing one.
 func (o *OrgStore) AcknowledgeAlert(id, actorID string, audit *AuditEvent) error {
-	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.auditedTx(audit, func(tx *sql.Tx) error {
 		var status string
 		if err := tx.QueryRow(`SELECT a.status FROM alerts a WHERE a.id=? AND `+alertVisibleSQL, id, o.org, o.org).Scan(&status); errors.Is(err, sql.ErrNoRows) {
 			return ErrAlertMissing
