@@ -74,8 +74,6 @@ export function OrgPicker({ onReady }: { onReady: (org: string) => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!current && !error) return null;
-
   const search = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -90,13 +88,33 @@ export function OrgPicker({ onReady }: { onReady: (org: string) => void }) {
   };
 
   return (
+    <OrgPickerView current={current} found={found} error={error} busy={busy} query={query}
+      onQuery={setQuery} onSearch={search} onSelect={select} />
+  );
+}
+
+interface OrgPickerViewProps {
+  current: StaffOrg | null;
+  found: StaffOrg[] | null;
+  error: string | null;
+  busy: boolean;
+  query: string;
+  onQuery: (value: string) => void;
+  onSearch: (event: React.FormEvent) => void;
+  onSelect: (org: StaffOrg) => void;
+}
+
+export function OrgPickerView({ current, found, error, busy, query, onQuery, onSearch, onSelect }: OrgPickerViewProps) {
+  if (!current && !error && !busy && found === null) return null;
+
+  return (
     <section className="settings-card" aria-label="Organisation">
       {current && <p role="status">Working in <strong>{label(current)}</strong> <code>{current.id}</code></p>}
       {error && <div className="alert-box error" role="alert">{error}</div>}
-      <form onSubmit={search} className="form-row">
+      <form onSubmit={onSearch} className="form-row">
         <label htmlFor="org-search">Find an organisation</label>
         <input id="org-search" className="form-input" value={query} disabled={busy} autoCapitalize="none" spellCheck={false}
-          placeholder="Org ID, billing reference or a member's exact email" onChange={e => setQuery(e.target.value)} />
+          placeholder="Org ID, billing reference or a member's exact email" onChange={e => onQuery(e.target.value)} />
         <button type="submit" className="secondary-btn" disabled={busy}>Find</button>
       </form>
       {found && (found.length === 0 ? <p>No organisation matches.</p> : (
@@ -104,7 +122,7 @@ export function OrgPicker({ onReady }: { onReady: (org: string) => void }) {
           {found.map(o => (
             <li key={o.id}>
               {label(o)} · {o.seatsUsed}{o.maxSeats ? ` of ${o.maxSeats}` : ''} seats{o.billingRef && ` · ${o.billingRef}`}{' '}
-              <button type="button" className="secondary-btn" disabled={o.id === current?.id} onClick={() => select(o)}>Work in this org</button>
+              <button type="button" className="secondary-btn" disabled={o.id === current?.id} onClick={() => onSelect(o)}>Work in this org</button>
             </li>
           ))}
         </ul>
