@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 
@@ -99,6 +101,12 @@ func (s *Server) require(p permission, scope routeScope, stepUp bool, h http.Han
 			writeForbidden(w)
 			return
 		}
+		if s.cfg.Tenancy == "multi" {
+			var ok bool
+			if r, ok = s.staffOrgRequest(w, r, user, scope); !ok {
+				return
+			}
+		}
 		if p.protectAdmins && !a.Admin {
 			target, err := orgStore(r).GetUserByID(r.PathValue("id"))
 			if err != nil {
@@ -135,13 +143,81 @@ func (s *Server) require(p permission, scope routeScope, stepUp bool, h http.Han
 type routeScope int
 
 const (
-	// orgRoute works on one org's directory: the caller's own, until staff select an org
-	// (build plan PR 5).
+	// orgRoute works on one org's directory: in a multi-tenant install the org staff
+	// selected (X-Ky-Org), else the caller's own.
 	orgRoute routeScope = iota + 1
+	// staffOrgRoute is org-scoped. In multi-tenant mode it requires selecting the staff org.
+	staffOrgRoute
 	// platformRoute changes what every org shares: apps, policies, settings. In a
 	// multi-tenant install only global administrators may call it. Single-tenant: no change.
 	platformRoute
+	// crossOrgRoute reads across orgs for staff (the org finder) with no OrgStore of its
+	// own; multi-tenant only, every route of the class answers 404 in a single-tenant install.
+	crossOrgRoute
 )
+
+// OrgHeader names the org a staff member works in on an org route (multi-tenant).
+const OrgHeader = "X-Ky-Org"
+
+const staffCustomerOrgKey contextKey = "staffCustomerOrg"
+
+// staffCustomerOrg reports a customer org selected by an authorised staff request.
+func staffCustomerOrg(r *http.Request) bool {
+	customer, _ := r.Context().Value(staffCustomerOrgKey).(bool)
+	return customer
+}
+
+func staffReadDetails(r *http.Request) string {
+	details, _ := json.Marshal(map[string]string{"route": r.Method + " " + r.Pattern, "path": r.URL.Path})
+	return string(details)
+}
+
+// staffOrgRequest runs once require has found an admin principal in a multi-tenant
+// install. The caller must be in the staff org. An org route then needs X-Ky-Org naming a
+// live customer org or the staff org (400 org_required, 404 unknown_org), and the request's
+// OrgStore is bound to it. A read on it is audited staff.read in that org's log.
+func (s *Server) staffOrgRequest(w http.ResponseWriter, r *http.Request, user *store.User, scope routeScope) (*http.Request, bool) {
+	staff, err := s.store.IsStaffOrg(user.Org())
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return r, false
+	}
+	if !staff {
+		writeForbidden(w)
+		return r, false
+	}
+	if scope != orgRoute && scope != staffOrgRoute {
+		return r, true
+	}
+	raw := r.Header.Get(OrgHeader)
+	if raw == "" {
+		writeAPIError(w, http.StatusBadRequest, "org_required", "Select an organisation.")
+		return r, false
+	}
+	org, customer, err := s.store.StaffOrg(raw)
+	if errors.Is(err, store.ErrNotFound) {
+		writeAPIError(w, http.StatusNotFound, "unknown_org", "No such organisation.")
+		return r, false
+	}
+	if err != nil {
+		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+		return r, false
+	}
+	if scope == staffOrgRoute && customer {
+		writeAPIError(w, http.StatusForbidden, "customer_credentials_protected", "Staff cannot configure inbound provisioning or issue connector tokens for a customer organisation.")
+		return r, false
+	}
+	o := s.store.Org(org)
+	if r.Method == http.MethodGet {
+		if err := o.RecordStaffRead(&store.AuditEvent{ActorID: user.ID, ActorUsername: user.Username, Action: "staff.read", TargetID: org.String(), TargetType: "org",
+			IPAddress: s.middleware.ClientIP(r), UserAgent: r.UserAgent(), Outcome: "success", DetailsJSON: staffReadDetails(r)}); err != nil {
+			http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
+			return r, false
+		}
+	}
+	ctx := context.WithValue(r.Context(), orgContextKey, o)
+	return r.WithContext(context.WithValue(ctx, staffCustomerOrgKey, customer)), true
+}
 
 type adminRoute struct {
 	method, path string

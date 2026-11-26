@@ -387,7 +387,8 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
   - An **org** route gets an `OrgStore` bound to the selected org: users, groups,
     memberships, app and role *assignments*, `org_apps.access_mode` for apps the plan
     enables, access requests and approvals, expiry, offboarding, sessions, and the org's
-    audit and alerts.
+    audit and alerts. A **staff org** route also gets an `OrgStore` and requires the
+    staff org as the selection.
   - A **platform** route gets no `OrgStore`, and needs `Access.Admin`. That matches today's
     rule that only global administrators change global policy (`permissions.go:11-16`).
     These are: OAuth clients (create, edit, delete, secret rotation, back-channel URI);
@@ -397,18 +398,22 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
     attestation, rate-limit networks and push relays; backups, the drill and recovery keys;
     installer resources.
   - In single-tenant mode the flag changes nothing.
-  - PR 2 adds the flag and fails the build for an admin route that names neither.
+  - Route registration rejects an admin route with an invalid scope.
 - **Audit.** Every staff request on an org route writes an audit row in the selected org's
-  log, naming the staff user and the org. Reads write `staff.read` with the route. Writes
-  keep their existing audit rows, now carrying the org. A cross-org staff read writes one
-  platform row (`org_id` NULL) that names every org whose rows it returned. Staff admins
-  read the audit across orgs by actor, so staff leads see what each staff member did.
+  log, naming the staff user and the org. Reads write `staff.read` with the route.
+  Mutations commit their audit row with the change. The bound `OrgStore` supplies the
+  org, including when the event targets a shared app or a deleted directory entry.
+  A cross-org staff read writes one platform row (`org_id` NULL) naming every org whose
+  rows it returned. Step 5 tracks the cross-org staff audit view by actor.
 - **What staff see.** Directory data: users, groups, sessions, assignments and audit.
   KyIdentity holds no app content, so none is reachable from here.
 - **No credential for a customer account.** For a customer account in multi-tenant mode,
-  the admin API refuses a password on create and update (`admin_handlers.go:102,172`) and
-  any email change (`:194`). Activation and reset links are always mailed: `send` is forced
-  on (`onboarding_handlers.go:116-119`), and the link is never returned to the screen.
+  the admin API refuses passwords on create and update and refuses any email change
+  (`403 customer_credentials_protected`). Activation and reset use mail delivery to the
+  address read in the token transaction. The response reports delivery and expiration.
+  Creating or updating an inbound connector, issuing its SCIM tokens and configuring HR
+  require the staff org selection (`403 customer_credentials_protected` for customer orgs).
+  Staff can still list customer connectors, view HR status, revoke tokens and delete connectors.
 - The last-admin rule (`ErrLastActiveAdmin`, `expiry.go:28`) is unchanged and applies to
   the staff org, the only org with administrators. There is no per-org rule.
 
@@ -1431,9 +1436,8 @@ tests.
      `org_apps` written by the platform API is step 6 (Entitlements).
    - **Mailbox address** (landed before PR 4, see Mailbox address): the column, its index
      and triggers, `OrgStore.SetMailboxAddress`, the `mailbox` webhook entry, the domain
-     removal refusal, and the staff route and edit field. Before PR 5 an org route binds the
-     caller's own org (staff), where a mailbox address is refused, so the staff path works
-     once PR 5 selects a customer org. Tests: uniqueness races, domain refusal, cross-org
+     removal refusal, and the staff route and edit field. An org route binds the org staff select
+     (PR 5), so the staff path sets a customer's mailbox address. Tests: uniqueness races, domain refusal, cross-org
      refusals, the single-tenant golden files unchanged, and a multi-tenant webhook golden.
 5. **Staff admin UI.**
    - Adds the org selector and `X-Ky-Org`, staff read audit and the cross-org audit by
@@ -1443,6 +1447,18 @@ tests.
    - Tests: the extended permission matrix with staff personas, a refusal of every change
      to the pinned policy, the existing UI verification flow (`UI-VERIFICATION.md`), and
      the export's content proven to hold no other org's rows.
+   - **Status (2026-11-25).** Org selection and the pinned passkey are built. In multi-tenant
+     mode an org route needs `X-Ky-Org` (`400 org_required`), checked against `orgs` after
+     the caller is proven staff (a customer org or the staff org, else `404 unknown_org`),
+     and a staff read writes `staff.read` in the selected org's log. The finder is
+     `GET /api/admin/orgs?q=` (ID, `billing_ref` or a member's exact email; empty is the
+     staff org), audited as one platform row `staff.orgs_read` naming the orgs returned. The
+     admin UI starts in the staff org and sends the header on admin calls. Every multi-tenant
+     start pins the `administrators` policy (required, passkey only, grace 0), and the admin
+     API refuses any change to it (`409 pinned_policy`). The cross-org matrix runs
+     multi-tenant with staff in org A. The HTTP tests cover the customer credential guards.
+     Remaining: the cross-org audit by actor, the holder's export page and deletion banner, the staff seat
+     and pool fields (P2, S3) and the `org:` MFA scope (P5).
 6. **Entitlements.**
    - Seat enforcement on every seat-adding path (member add, admin create, re-enable),
      `over_limit`, `org_apps` from the platform API, and quotas in `/api/suite/orgs`.

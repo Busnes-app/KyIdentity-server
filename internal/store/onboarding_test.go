@@ -350,3 +350,21 @@ func TestPromotionAndDelegationEndOutstandingLinks(t *testing.T) {
 		t.Fatalf("activation link survived a delegation: %v", err)
 	}
 }
+
+func TestMailedAccountLinkUsesRecordedRecipient(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	u := pendingUser(t, s)
+	org := s.DefaultOrg()
+	const updatedEmail = "current@example.test"
+	if _, err := org.EditUser(u.ID, nil, func(row *User) (bool, error) {
+		row.Email = updatedEmail
+		return false, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, to, err := org.IssueAccountTokenToEmail(u.ID, "activation", time.Hour, nil)
+	if err != nil || to != updatedEmail || raw == "" {
+		t.Fatalf("token issuance returned recipient %q: %v", to, err)
+	}
+}

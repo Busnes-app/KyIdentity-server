@@ -4,6 +4,8 @@
 
 ### Changes
 
+- **Staff choose the organisation they work in, and sign in with a passkey (tenancy, step 5; multi-tenant only).** The admin pages start in the staff organisation and gain a finder: an organisation's ID, its billing reference or a member's exact email. Every admin call then names that organisation (`X-Ky-Org`), checked against the database only after the caller is proven staff; a directory page without one answers `400 org_required`. Each staff read is recorded in that organisation's audit log, and each search as one platform audit row. Every multi-tenant start pins the administrators MFA policy to required, passkey only, no grace, and the admin API refuses to change it. A single-tenant install is unchanged: no finder, and the header is ignored.
+
 - **A new multi-tenant database records multi-tenant (tenancy; test builds only).** The first open of a new database with `KYIDENTITY_TENANCY=multi` now records that mode, so a `kye2e` build starts on a fresh PostgreSQL database instead of refusing it as single-tenant. A database that already exists keeps its recorded mode: a single-tenant install still refuses `multi`. Release builds still refuse `multi`.
 
 - **Billing sets each organisation's apps (tenancy, step 6; multi-tenant only).** `POST` and `PATCH /platform/v1/orgs` take `apps`, keyed by OAuth client ID: `{"kycalendar": {"enabled": true, "quotas": {...}}}`. Each app sees its own entry in `/api/suite/orgs` after the change. Turning an app off ends the organisation's tokens and sessions for that app. An unknown client, a missing `enabled` or quotas over 4 KiB are `400 invalid_apps`. A single-tenant install is unchanged.

@@ -29,12 +29,12 @@ func newOrgUser(t *testing.T, db *store.Store, org store.OrgID, role string) *st
 var takesID = regexp.MustCompile(`\{(principal|userId)\}|/(users|groups|access-requests|scim-connectors|alerts)/\{id\}`)
 
 // The cross-org matrix (tenancy design, "Isolation enforcement"). Orgs A and B, and a staff
-// org with an admin, a helpdesk and an auditor. Until staff select an org (build plan PR
-// 5) an admin route is bound to the caller's own org, so here B's IDs reach staff only
-// through a request, and must answer exactly as a missing ID does, changing nothing in B.
-// Every admin route refuses A's account holder and member as it refuses a non-admin.
+// org with an admin, a helpdesk and an auditor, in a multi-tenant install. Staff work with
+// org A selected (X-Ky-Org, build plan PR 5), so B's IDs reach them only through a request,
+// and must answer exactly as a missing ID does, changing nothing in B and writing nothing in
+// B's log. Every admin route refuses A's account holder and member as it refuses a non-admin.
 func TestCrossOrgMatrix(t *testing.T) {
-	srv, db, _, _, _, cleanup := setupTestServer(t)
+	srv, db, _, _, _, cleanup := setupTestServerWith(t, func(c *config.Config) { c.Tenancy = "multi" })
 	defer cleanup()
 	exp := time.Now().UTC().Add(time.Hour)
 	org := func(kind string) store.OrgID {
@@ -122,7 +122,7 @@ func TestCrossOrgMatrix(t *testing.T) {
 	}
 	before := snapshotB()
 	call := func(rt adminRoute, path, cookie string) (int, string) {
-		res := adminRequestWithStepUp(t, srv, rt.method, path, cookie, crossOrgBody(rt), mintStepUp(t, srv, cookie, rt.method+" "+path))
+		res := staffCall(t, srv, rt.method, path, cookie, orgA.String(), crossOrgBody(rt))
 		return res.Code, res.Body.String()
 	}
 	// fill puts user, group (or, on a groups {kind}, group as the principal) and request
@@ -158,9 +158,9 @@ func TestCrossOrgMatrix(t *testing.T) {
 				t.Errorf("%s %s as A's %s: %d %s", rt.method, rt.path, name, code, body)
 			}
 		}
-		// Platform routes change what every org shares; TestPlatformRoutesNeedAnAdministrator
-		// covers them.
-		if rt.scope != orgRoute {
+		// Test all org-scoped routes with a customer org selected, including those
+		// that require the staff org.
+		if rt.scope != orgRoute && rt.scope != staffOrgRoute {
 			continue
 		}
 		covered++
@@ -208,6 +208,10 @@ func TestCrossOrgMatrix(t *testing.T) {
 		if after := snapshotB(); after != before {
 			t.Fatalf("%s %s changed org B:\n before %s\n after  %s", rt.method, rt.path, before, after)
 		}
+	}
+	// Staff worked in A: their reads are in A's log, never in B's.
+	if len(staffAudit(t, db, orgA, "staff.read")) == 0 || len(staffAudit(t, db, orgB, "staff.read")) != 0 {
+		t.Fatal("staff reads were not audited in A's log alone")
 	}
 	if covered < 45 {
 		t.Fatalf("only %d routes covered", covered)

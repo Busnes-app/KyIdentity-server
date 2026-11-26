@@ -97,13 +97,12 @@ func rejectCrossIdentityTx(tx *sql.Tx, excludeID, username, email string) error 
 }
 
 func (o *OrgStore) CreateSCIMConnector(name string, audit *AuditEvent) (*SCIMConnector, error) {
-	s := o.s
 	now := rowTime()
 	c := &SCIMConnector{ID: uuid.NewString(), Name: strings.TrimSpace(name), Status: "active", CreatedAt: now, UpdatedAt: now}
 	if c.Name == "" {
 		return nil, InputError("name is required")
 	}
-	err := s.auditedTx(audit, func(tx *sql.Tx) error {
+	err := o.auditedTx(audit, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO scim_connectors (org_id, id, name, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`, o.org, c.ID, c.Name, c.Status, now, now)
 		return err
 	})
@@ -114,14 +113,13 @@ func (o *OrgStore) CreateSCIMConnector(name string, audit *AuditEvent) (*SCIMCon
 }
 
 func (o *OrgStore) UpdateSCIMConnector(id, name, status string, audit *AuditEvent) error {
-	s := o.s
 	if status != "active" && status != "disabled" {
 		return InputError("status must be active or disabled")
 	}
 	if name = strings.TrimSpace(name); name == "" {
 		return InputError("name is required")
 	}
-	return s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.auditedTx(audit, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`UPDATE scim_connectors SET name=?, status=?, updated_at=? WHERE org_id=? AND id=?`, name, status, time.Now().UTC(), o.org, id)
 		if err != nil {
 			return err
@@ -202,7 +200,6 @@ func (s *Store) CountSCIMConnectorUsers(connectorID string) (int, error) {
 // once; only its hash is stored. Earlier tokens stay valid until revoked, so a rotation
 // can overlap the upstream's cut-over.
 func (o *OrgStore) IssueSCIMToken(connectorID, scope string, audit *AuditEvent) (string, *SCIMConnectorToken, error) {
-	s := o.s
 	if scope != "read" && scope != "write" {
 		return "", nil, InputError("scope must be read or write")
 	}
@@ -211,7 +208,7 @@ func (o *OrgStore) IssueSCIMToken(connectorID, scope string, audit *AuditEvent) 
 		return "", nil, err
 	}
 	t := &SCIMConnectorToken{ID: uuid.NewString(), Scope: scope, CreatedAt: time.Now().UTC()}
-	err = s.auditedTx(audit, func(tx *sql.Tx) error {
+	err = o.auditedTx(audit, func(tx *sql.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM scim_connectors WHERE org_id=? AND id=?)`, o.org, connectorID).Scan(&exists); err != nil {
 			return err
@@ -229,7 +226,7 @@ func (o *OrgStore) IssueSCIMToken(connectorID, scope string, audit *AuditEvent) 
 }
 
 func (o *OrgStore) RevokeSCIMToken(connectorID, tokenID string, audit *AuditEvent) error {
-	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.auditedTx(audit, func(tx *sql.Tx) error {
 		if err := requireOrgConnectorTx(tx, o.org, connectorID); err != nil {
 			return err
 		}
@@ -421,10 +418,9 @@ func (s *Store) UpdateUpstreamUser(connectorID, id string, audit *AuditEvent, ed
 // kept as they are, or disabled first when the operator chose deactivation. Either way
 // the upstream can no longer touch them.
 func (o *OrgStore) DeleteSCIMConnector(id string, disableUsers bool, audit *AuditEvent) (int, error) {
-	s := o.s
 	now := rowTime()
 	affected := 0
-	err := s.auditedTx(audit, func(tx *sql.Tx) error {
+	err := o.auditedTx(audit, func(tx *sql.Tx) error {
 		if err := requireOrgConnectorTx(tx, o.org, id); err != nil {
 			return err
 		}

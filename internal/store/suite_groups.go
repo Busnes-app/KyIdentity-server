@@ -187,7 +187,7 @@ func (o *OrgStore) SetSuiteGroup(groupID string, enabled bool, apps map[string]b
 	if settings.Apps, err = suiteGroupAppsTx(tx, groupID); err != nil {
 		return settings, err
 	}
-	if err = recordAuditTx(tx, audit); err != nil {
+	if err = recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return settings, err
 	}
 	return settings, tx.Commit()

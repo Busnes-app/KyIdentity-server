@@ -104,6 +104,11 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		req.Status = "active"
 	}
 
+	if staffCustomerOrg(r) && req.Password != "" {
+		writeCustomerCredentialsProtected(w)
+		return
+	}
+
 	// No password invites the account: it stays pending and disabled until an activation
 	// link sets one, so no usable default credential ever exists.
 	user := &store.User{
@@ -179,6 +184,11 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	customer := staffCustomerOrg(r)
+	if customer && req.Password != "" {
+		writeCustomerCredentialsProtected(w)
+		return
+	}
 	req.DisplayName, req.Email = strings.TrimSpace(req.DisplayName), strings.TrimSpace(req.Email)
 	var endsAt *time.Time
 	var endsAtErr error
@@ -203,6 +213,9 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// request names, so a concurrent password reset or role change is never reverted.
 	updated := h.audit.Prepare("admin.user_updated", admin.ID, admin.Username, userID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
 	user, err := orgStore(r).EditUser(userID, updated.Row, func(user *store.User) (bool, error) {
+		if customer && req.Email != "" && req.Email != user.Email {
+			return false, errCustomerCredentialsProtected
+		}
 		if user.SourceConnectorID != "" && ((req.DisplayName != "" && req.DisplayName != user.DisplayName) || (req.Email != "" && !strings.EqualFold(req.Email, user.Email))) {
 			return false, errSourceOwned
 		}
@@ -267,6 +280,8 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
+		case errors.Is(err, errCustomerCredentialsProtected):
+			writeCustomerCredentialsProtected(w)
 		case errors.Is(err, errSourceOwned):
 			http.Error(w, `{"error":"source_owned","error_description":"Name and email of this account are managed by its SCIM connector"}`, http.StatusBadRequest)
 		case errors.Is(err, errAccountPending):
@@ -301,9 +316,14 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func writeCustomerCredentialsProtected(w http.ResponseWriter) {
+	writeAPIError(w, http.StatusForbidden, "customer_credentials_protected", "Staff cannot set a customer password or change a customer email address.")
+}
+
 var (
-	errSourceOwned    = errors.New("name and email are managed by the account's connector")
-	errAccountPending = errors.New("a pending account cannot be activated directly")
+	errCustomerCredentialsProtected = errors.New("customer credentials are protected")
+	errSourceOwned                  = errors.New("name and email are managed by the account's connector")
+	errAccountPending               = errors.New("a pending account cannot be activated directly")
 )
 
 // ResetUserMFA clears MFA methods/devices, revokes active sessions, and dispatches sync event.

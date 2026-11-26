@@ -80,6 +80,11 @@ func (h *AdminHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
+	if h.multiTenant {
+		// Every page request is audited. Keep those reads out of its offset-paged
+		// result so opening the next page cannot shift the offsets.
+		f.OmitStaffReadDetails = staffReadDetails(r)
+	}
 	events, total, err := orgStore(r).SearchAuditEventsContext(r.Context(), f)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -140,10 +145,10 @@ func jsonlSink(w http.ResponseWriter) exportSink {
 	}
 }
 
-// ExportAuditEvents streams the same filtered set the listing shows as JSONL or CSV,
-// bounded in rows and time, with credential-shaped detail keys redacted. The intent is
-// audited before a byte leaves, the outcome after; an export that stopped short of the
-// filtered set ends with an in-band incomplete marker as well as the headers.
+// ExportAuditEvents streams CSV or JSONL with the listing's filters and includes the
+// audit list's own reads. It bounds rows and time, redacts credential-shaped detail
+// keys, and records intent before streaming and the outcome afterwards. An incomplete
+// export ends with an in-band marker as well as the headers.
 func (h *AdminHandler) ExportAuditEvents(w http.ResponseWriter, r *http.Request) {
 	f, err := auditFilterFrom(r)
 	if err != nil {

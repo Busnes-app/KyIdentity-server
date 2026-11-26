@@ -198,7 +198,7 @@ func (o *OrgStore) setAppAssignment(id, kind, principal string, assigned bool, e
 	if err = appRegistryAudit(audit, map[string]any{"app": app, "kind": kind, "principalId": principal, "principalName": principalName, "assigned": assigned}); err != nil {
 		return err
 	}
-	if err = recordAuditTx(tx, audit); err != nil {
+	if err = recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return err
 	}
 	return tx.Commit()

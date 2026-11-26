@@ -164,7 +164,7 @@ func setMailboxAddressTx(tx *sql.Tx, org, userID, addr string, overwrite bool, a
 		b, _ := json.Marshal(map[string]string{"oldDomain": oldDomain, "domain": mailboxDomain(addr)})
 		audit.DetailsJSON = string(b)
 	}
-	if err := recordAuditTx(tx, audit); err != nil {
+	if err := recordAuditInOrgTx(tx, org, audit); err != nil {
 		return nil, false, err
 	}
 	return u, true, nil

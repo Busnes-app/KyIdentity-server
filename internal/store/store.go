@@ -925,7 +925,7 @@ func (o *OrgStore) CreateUserWithSyncEvents(u *User, audit *AuditEvent) error {
 	if err := reconcileProvisioningTx(tx, now); err != nil {
 		return err
 	}
-	if err := recordAuditTx(tx, audit); err != nil {
+	if err := recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1069,7 +1069,7 @@ func updateUserTx(tx *sql.Tx, org, id string, audit *AuditEvent, edit func(*sql.
 	if err := reconcileProvisioningTx(tx, now); err != nil {
 		return nil, err
 	}
-	if err := recordAuditTx(tx, audit); err != nil {
+	if err := recordAuditInOrgTx(tx, org, audit); err != nil {
 		return nil, err
 	}
 	return stored, nil
@@ -1103,7 +1103,7 @@ func (o *OrgStore) DeleteUserWithSyncEvents(userID string, audit *AuditEvent) er
 	if err := deleteUserTx(tx, o.org, u, time.Now().UTC()); err != nil {
 		return err
 	}
-	if err := recordAuditTx(tx, audit); err != nil {
+	if err := recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2895,28 +2895,35 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// An audit row is in the org of its target user or group, else of its actor; NULL is a
-// platform row (the CLI, a worker, a global setting with no user actor). A target deleted
-// in the same transaction falls back to the actor.
+// An explicit org comes from the store bound to the mutation. Without one, infer
+// the org from the target user or group, then the actor. NULL denotes a platform row.
 const insertAuditEventSQL = `INSERT INTO audit_events (org_id, id, actor_id, actor_username, action, target_id, target_type, ip_address, user_agent, outcome, details_json, created_at) VALUES (
- (SELECT COALESCE(CASE WHEN ?='user' THEN (SELECT org_id FROM users WHERE id=?) END, CASE WHEN ?='group' THEN (SELECT org_id FROM directory_groups WHERE id=?) END, (SELECT org_id FROM users WHERE id=?))),
+ (SELECT COALESCE(NULLIF(?, ''), CASE WHEN ?='user' THEN (SELECT org_id FROM users WHERE id=?) END, CASE WHEN ?='group' THEN (SELECT org_id FROM directory_groups WHERE id=?) END, (SELECT org_id FROM users WHERE id=?))),
  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 func insertAuditEvent(q execer, e *AuditEvent) (sql.Result, error) {
-	return q.Exec(insertAuditEventSQL, e.TargetType, e.TargetID, e.TargetType, e.TargetID, e.ActorID,
+	return insertAuditEventInOrg(q, "", e)
+}
+
+func insertAuditEventInOrg(q execer, org string, e *AuditEvent) (sql.Result, error) {
+	return q.Exec(insertAuditEventSQL, org, e.TargetType, e.TargetID, e.TargetType, e.TargetID, e.ActorID,
 		e.ID, e.ActorID, e.ActorUsername, e.Action, e.TargetID, e.TargetType, e.IPAddress, e.UserAgent, e.Outcome, e.DetailsJSON, e.CreatedAt)
 }
 
 // recordAuditTx writes the audit row for a mutation inside that mutation's transaction.
 // A nil event means the caller has no audit obligation for this path.
 func recordAuditTx(tx *sql.Tx, e *AuditEvent) error {
+	return recordAuditInOrgTx(tx, "", e)
+}
+
+func recordAuditInOrgTx(tx *sql.Tx, org string, e *AuditEvent) error {
 	if e == nil {
 		return nil
 	}
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	_, err := insertAuditEvent(tx, e)
+	_, err := insertAuditEventInOrg(tx, org, e)
 	return err
 }
 
@@ -3084,7 +3091,7 @@ func (o *OrgStore) ResetUserMFA(userID string, audit *AuditEvent) error {
 			return err
 		}
 	}
-	if err := recordAuditTx(tx, audit); err != nil {
+	if err := recordAuditInOrgTx(tx, o.org, audit); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3095,7 +3102,7 @@ func (o *OrgStore) ResetUserMFA(userID string, audit *AuditEvent) error {
 // tokens, in one transaction with its audit row.
 // RevokeUserAccess ends every grant of one of the org's users; another org's is ErrNotFound.
 func (o *OrgStore) RevokeUserAccess(userID string, audit *AuditEvent) error {
-	return o.s.auditedTx(audit, func(tx *sql.Tx) error {
+	return o.auditedTx(audit, func(tx *sql.Tx) error {
 		if err := requireOrgUserTx(tx, o.org, userID); err != nil {
 			return err
 		}
