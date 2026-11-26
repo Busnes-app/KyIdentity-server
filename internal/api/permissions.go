@@ -157,6 +157,14 @@ const (
 // OrgHeader names the org a staff member works in on an org route (multi-tenant).
 const OrgHeader = "X-Ky-Org"
 
+const staffCustomerOrgKey contextKey = "staffCustomerOrg"
+
+// staffCustomerOrg reports a customer org selected by an authorised staff request.
+func staffCustomerOrg(r *http.Request) bool {
+	customer, _ := r.Context().Value(staffCustomerOrgKey).(bool)
+	return customer
+}
+
 func staffReadDetails(r *http.Request) string {
 	details, _ := json.Marshal(map[string]string{"route": r.Method + " " + r.Pattern, "path": r.URL.Path})
 	return string(details)
@@ -184,7 +192,7 @@ func (s *Server) staffOrgRequest(w http.ResponseWriter, r *http.Request, user *s
 		writeAPIError(w, http.StatusBadRequest, "org_required", "Select an organisation.")
 		return r, false
 	}
-	org, err := s.store.StaffOrg(raw)
+	org, customer, err := s.store.StaffOrg(raw)
 	if errors.Is(err, store.ErrNotFound) {
 		writeAPIError(w, http.StatusNotFound, "unknown_org", "No such organisation.")
 		return r, false
@@ -201,7 +209,8 @@ func (s *Server) staffOrgRequest(w http.ResponseWriter, r *http.Request, user *s
 			return r, false
 		}
 	}
-	return r.WithContext(context.WithValue(r.Context(), orgContextKey, o)), true
+	ctx := context.WithValue(r.Context(), orgContextKey, o)
+	return r.WithContext(context.WithValue(ctx, staffCustomerOrgKey, customer)), true
 }
 
 type adminRoute struct {

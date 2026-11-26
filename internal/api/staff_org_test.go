@@ -276,3 +276,111 @@ func TestStaffPasskeyIsPinned(t *testing.T) {
 		t.Fatalf("policies changed:\n%s\n%s", before, after)
 	}
 }
+
+func TestStaffCustomerAccountLinksRequireMail(t *testing.T) {
+	srv, db, customer, staff := staffCredentialOrgs(t)
+	exp := time.Now().Add(time.Hour)
+	admin := newSession(t, db, newOrgUser(t, db, staff, "admin"), exp)
+	helpdesk := newOrgUser(t, db, staff, "user")
+	if err := db.Org(staff).SetDelegations(helpdesk.ID, store.Delegations{Helpdesk: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	helpdeskSession := newSession(t, db, helpdesk, exp)
+	active := newOrgUser(t, db, customer, "user")
+	invited := staffCall(t, srv, http.MethodPost, "/api/admin/users", admin, customer.String(),
+		`{"username":"invite","email":"invite@example.test"}`)
+	var invite struct{ User store.User }
+	if invited.Code != http.StatusOK || json.Unmarshal(invited.Body.Bytes(), &invite) != nil || !invite.User.Pending {
+		t.Fatalf("customer invitation did not create a pending account: %d", invited.Code)
+	}
+	for _, tc := range []struct{ userID, kind string }{{active.ID, "reset"}, {invite.User.ID, "activation"}} {
+		t.Run(tc.kind, func(t *testing.T) {
+			path := "/api/admin/users/" + tc.userID + "/" + tc.kind + "-link"
+			rr := staffCall(t, srv, http.MethodPost, path, helpdeskSession, customer.String(), `{"send":false}`)
+			var response map[string]json.RawMessage
+			err := json.Unmarshal(rr.Body.Bytes(), &response)
+			if err != nil || rr.Code != http.StatusBadRequest || string(response["error"]) != `"mail_not_configured"` || response["link"] != nil {
+				t.Fatalf("customer %s needs a configured relay and may not return a link: status %d, error %s, link present %t",
+					tc.kind, rr.Code, response["error"], response["link"] != nil)
+			}
+		})
+	}
+	if events := staffAudit(t, db, customer, "admin.account_link_issued"); len(events) != 0 {
+		t.Fatal("customer links were issued without a relay")
+	}
+
+	covDeadRelay(t, srv, admin)
+	for kind, id := range map[string]string{"reset": active.ID, "activation": invite.User.ID} {
+		path := "/api/admin/users/" + id + "/" + kind + "-link"
+		rr := staffCall(t, srv, http.MethodPost, path, helpdeskSession, customer.String(), `{"send":false}`)
+		var response map[string]json.RawMessage
+		err := json.Unmarshal(rr.Body.Bytes(), &response)
+		if err != nil || rr.Code != http.StatusBadGateway || string(response["error"]) != `"mail_failed"` || response["link"] != nil {
+			t.Fatalf("customer %s fell back to manual delivery: status %d, link present %t", kind, rr.Code, response["link"] != nil)
+		}
+	}
+	issued := staffAudit(t, db, customer, "admin.account_link_issued")
+	if len(issued) != 2 {
+		t.Fatalf("expected two audit records for mailed links, got %d", len(issued))
+	}
+	for _, event := range issued {
+		if !strings.Contains(event.DetailsJSON, `"delivery":"email"`) {
+			t.Fatal("a customer link was recorded as manual")
+		}
+	}
+
+	staffMember := newOrgUser(t, db, staff, "user")
+	rr := staffCall(t, srv, http.MethodPost, "/api/admin/users/"+staffMember.ID+"/reset-link", helpdeskSession, staff.String(), `{}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("manual link for a staff account returned %d", rr.Code)
+	}
+	var response struct{ Delivery string }
+	if json.Unmarshal(rr.Body.Bytes(), &response) != nil || response.Delivery != "manual" {
+		t.Fatal("manual link for a staff account lost its delivery mode")
+	}
+}
+
+func TestStaffCannotSetCustomerCredentials(t *testing.T) {
+	srv, db, customer, staff := staffCredentialOrgs(t)
+	admin := newSession(t, db, newOrgUser(t, db, staff, "admin"), time.Now().Add(time.Hour))
+	member := newOrgUser(t, db, customer, "user")
+	for _, tc := range []struct{ name, method, path, body string }{
+		{"create with password", http.MethodPost, "/api/admin/users", `{"username":"direct","email":"direct@example.test","password":"synthetic-password-123"}`},
+		{"set password", http.MethodPut, "/api/admin/users/" + member.ID, `{"password":"synthetic-password-123"}`},
+		{"change email", http.MethodPut, "/api/admin/users/" + member.ID, `{"email":"changed@example.test"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := staffCall(t, srv, tc.method, tc.path, admin, customer.String(), tc.body)
+			if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), `"error":"customer_credentials_protected"`) {
+				t.Fatalf("credential write was not refused: %d", rr.Code)
+			}
+		})
+	}
+	rr := staffCall(t, srv, http.MethodPut, "/api/admin/users/"+member.ID, admin, customer.String(),
+		`{"displayName":"Updated","email":"`+member.Email+`"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("profile edit with an unchanged email: %d", rr.Code)
+	}
+	updated, err := db.Org(customer).GetUserByID(member.ID)
+	if err != nil || updated == nil || updated.Email != member.Email || updated.PasswordHash != member.PasswordHash || updated.DisplayName != "Updated" {
+		t.Fatal("allowed profile update changed the customer's credentials")
+	}
+	if u, err := db.GetUserByUsername("direct"); err != nil || u != nil {
+		t.Fatal("customer account was created with an administrator-chosen password")
+	}
+}
+
+func staffCredentialOrgs(t *testing.T) (*Server, *store.Store, store.OrgID, store.OrgID) {
+	t.Helper()
+	srv, db, _, _, _, cleanup := setupTestServerWith(t, func(c *config.Config) { c.Tenancy = "multi" })
+	t.Cleanup(cleanup)
+	customer, err := store.CreateOrgForTest(db, "customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	staff, err := store.CreateOrgForTest(db, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return srv, db, customer, staff
+}

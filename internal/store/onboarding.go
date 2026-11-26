@@ -41,37 +41,48 @@ func (s *Store) migrateOnboarding() error {
 // token is returned once and never stored.
 // Another org's user is ErrNotFound, as an ineligible one is.
 func (o *OrgStore) IssueAccountToken(userID, kind, delivery string, ttl time.Duration, audit *AuditEvent) (string, error) {
-	s := o.s
+	raw, _, err := o.issueAccountToken(userID, kind, delivery, ttl, audit)
+	return raw, err
+}
+
+// IssueAccountTokenToEmail returns an email-delivered token and the recorded address
+// read in the issuing transaction. Callers do not choose the recipient.
+func (o *OrgStore) IssueAccountTokenToEmail(userID, kind string, ttl time.Duration, audit *AuditEvent) (string, string, error) {
+	return o.issueAccountToken(userID, kind, "email", ttl, audit)
+}
+
+func (o *OrgStore) issueAccountToken(userID, kind, delivery string, ttl time.Duration, audit *AuditEvent) (string, string, error) {
 	// An owned account the upstream marks inactive, or a local override holds down, gets
 	// no activation link: redeeming it could only produce a disabled account.
-	eligible := `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)) AND ` + orgActiveSQL("users") + `)`
+	eligible := `SELECT email FROM users WHERE org_id=? AND id=? AND pending AND (source_connector_id IS NULL OR (source_active AND NOT locally_disabled)) AND ` + orgActiveSQL("users")
 	if kind == "reset" {
-		eligible = `SELECT EXISTS(SELECT 1 FROM users WHERE org_id=? AND id=? AND status='active' AND NOT pending AND ` + orgActiveSQL("users") + `)`
+		eligible = `SELECT email FROM users WHERE org_id=? AND id=? AND status='active' AND NOT pending AND ` + orgActiveSQL("users")
 	}
 	raw, err := crypto.GenerateRandomHex(32)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	now := time.Now().UTC()
-	err = s.auditedTx(audit, func(tx *sql.Tx) error {
-		var ok bool
-		if err := tx.QueryRow(eligible, o.org, userID).Scan(&ok); err != nil {
-			return err
-		}
-		if !ok {
+	var email string
+	err = o.s.auditedTx(audit, func(tx *sql.Tx) error {
+		err := tx.QueryRow(eligible, o.org, userID).Scan(&email)
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
+		}
+		if err != nil {
+			return err
 		}
 		if err := expireAccountTokensTx(tx, now, `user_id=? AND kind=?`, userID, kind); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO account_tokens (id, user_id, kind, token_hash, delivery, expires_at, created_at) VALUES (?,?,?,?,?,?,?)`,
+		_, err = tx.Exec(`INSERT INTO account_tokens (id, user_id, kind, token_hash, delivery, expires_at, created_at) VALUES (?,?,?,?,?,?,?)`,
 			uuid.NewString(), userID, kind, crypto.HashSHA256(raw), delivery, now.Add(ttl), now)
 		return err
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return raw, nil
+	return raw, email, nil
 }
 
 func expireAccountTokensTx(tx *sql.Tx, now time.Time, where string, args ...any) error {

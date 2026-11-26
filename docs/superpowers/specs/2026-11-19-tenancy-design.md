@@ -406,9 +406,9 @@ read pool and every worker would need a bypass role. Deferred (open question 6).
 - **What staff see.** Directory data: users, groups, sessions, assignments and audit.
   KyIdentity holds no app content, so none is reachable from here.
 - **No credential for a customer account.** For a customer account in multi-tenant mode,
-  the admin API refuses a password on create and update (`admin_handlers.go:102,172`) and
-  any email change (`:194`). Activation and reset links are always mailed: `send` is forced
-  on (`onboarding_handlers.go:116-119`), and the link is never returned to the screen.
+  the admin API refuses passwords on create and update and refuses any email change
+  (`403 customer_credentials_protected`). Activation and reset use mail delivery to the
+  address read in the token transaction. The response reports delivery and expiration.
 - The last-admin rule (`ErrLastActiveAdmin`, `expiry.go:28`) is unchanged and applies to
   the staff org, the only org with administrators. There is no per-org rule.
 
@@ -1451,8 +1451,8 @@ tests.
      admin UI starts in the staff org and sends the header on admin calls. Every multi-tenant
      start pins the `administrators` policy (required, passkey only, grace 0), and the admin
      API refuses any change to it (`409 pinned_policy`). The cross-org matrix runs
-     multi-tenant with staff in org A. Not built yet: the cross-org audit by actor, the
-     customer-account guards, the holder's export page and deletion banner, the staff seat
+     multi-tenant with staff in org A. The HTTP tests cover the customer credential guards.
+     Remaining: the cross-org audit by actor, the holder's export page and deletion banner, the staff seat
      and pool fields (P2, S3) and the `org:` MFA scope (P5).
 6. **Entitlements.**
    - Seat enforcement on every seat-adding path (member add, admin create, re-enable),

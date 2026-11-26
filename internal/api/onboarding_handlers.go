@@ -66,7 +66,14 @@ func (h *OnboardingHandler) issue(r *http.Request, actor *store.User, u *store.U
 		delivery = "email"
 	}
 	pending := h.audit.Prepare("admin.account_link_issued", actor.ID, actor.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"kind": kind, "delivery": delivery})
-	raw, err := h.store.Org(u.Org()).IssueAccountToken(u.ID, kind, delivery, ttl, pending.Row)
+	org := h.store.Org(u.Org())
+	var raw, recipient string
+	var err error
+	if send {
+		raw, recipient, err = org.IssueAccountTokenToEmail(u.ID, kind, ttl, pending.Row)
+	} else {
+		raw, err = org.IssueAccountToken(u.ID, kind, delivery, ttl, pending.Row)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +83,7 @@ func (h *OnboardingHandler) issue(r *http.Request, actor *store.User, u *store.U
 		out["link"] = h.link(kind, raw)
 		return out, nil
 	}
-	if err := settings.Send(u.Email, h.subject(kind), h.body(u, kind, raw)); err != nil {
+	if err := settings.Send(recipient, h.subject(kind), h.body(u, kind, raw)); err != nil {
 		h.audit.Observe("admin.account_link_delivery", actor.ID, actor.Username, u.ID, "user", h.middleware.ClientIP(r), r.UserAgent(), "failure", map[string]any{"kind": kind, "error": err.Error()})
 		return nil, errMailFailed
 	}
@@ -116,7 +123,7 @@ func (h *OnboardingHandler) AdminIssueLink(kind string) http.HandlerFunc {
 			Send bool `json:"send"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		out, err := h.issue(r, admin, u, kind, req.Send)
+		out, err := h.issue(r, admin, u, kind, req.Send || staffCustomerOrg(r))
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			http.Error(w, `{"error":"link_not_applicable","error_description":"Activation links are for pending accounts and reset links for active ones"}`, http.StatusConflict)

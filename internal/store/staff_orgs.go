@@ -21,15 +21,15 @@ func (s *Store) IsStaffOrg(org OrgID) (bool, error) {
 }
 
 // StaffOrg is the org a staff member selected (X-Ky-Org), checked against orgs: a customer
-// org or the staff org that is not deleted. Anything else is ErrNotFound. The caller must
-// already have proven the request comes from staff.
-func (s *Store) StaffOrg(id string) (OrgID, error) {
-	var got string
-	err := s.db.QueryRow(`SELECT id FROM orgs WHERE id=? AND kind IN ('`+customerKind+`','staff') AND status<>'deleted'`, id).Scan(&got)
+// org or the staff org that is not deleted. It also reports whether the selection is
+// a customer org. The caller must already have proven the request comes from staff.
+func (s *Store) StaffOrg(id string) (OrgID, bool, error) {
+	var got, kind string
+	err := s.db.QueryRow(`SELECT id,kind FROM orgs WHERE id=? AND kind IN ('`+customerKind+`','staff') AND status<>'deleted'`, id).Scan(&got, &kind)
 	if errors.Is(err, sql.ErrNoRows) {
-		return OrgID{}, ErrNotFound
+		return OrgID{}, false, ErrNotFound
 	}
-	return OrgID{got}, err
+	return OrgID{got}, kind == customerKind, err
 }
 
 // StaffOrgRow is one org in the staff org finder: no member's name or email.
