@@ -681,7 +681,7 @@ func clearFirstRunPasswordFile(dbStore *store.Store, dataDir string) error {
 // openStore opens the shared Postgres database when one is configured, else the SQLite file.
 func openStore(cfg *config.Config) (*store.Store, error) {
 	if cfg.DatabaseURL != "" {
-		return store.NewPostgres(cfg.DatabaseURL)
+		return store.NewPostgresWithTenancy(cfg.DatabaseURL, cfg.Tenancy)
 	}
 	return store.New(cfg.DBPath)
 }
