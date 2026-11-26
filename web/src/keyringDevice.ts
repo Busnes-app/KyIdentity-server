@@ -1,5 +1,6 @@
 import { newDeviceCapability, newKeyringSecret, importKeyringSecret, keyringScope, wrapRoot } from './keyringCrypto';
 import type { RingContext } from './keyringCrypto';
+import { keepStorage } from './persist';
 
 type Device = { id: string; scope: string; secret: CryptoKey; capability: string };
 
@@ -33,6 +34,8 @@ export async function findKeyringDevice(context: RingContext, deviceIDs: string[
     const value = await deviceRequest('readonly', store => store.get(id));
     if (value && typeof value === 'object' && 'id' in value && value.id === id && 'scope' in value && value.scope === scope &&
         'secret' in value && value.secret instanceof CryptoKey && 'capability' in value && typeof value.capability === 'string') {
+      // Also covers browsers trusted before storage was kept.
+      void keepStorage();
       return { id, scope, secret: value.secret, capability: value.capability };
     }
   }
@@ -48,6 +51,7 @@ export async function createKeyringDevice(context: RingContext, root: Uint8Array
   // device usable if its ID appears in the next status response.
   const device = { id, scope: JSON.stringify(keyringScope(context)), secret, capability } satisfies Device;
   await deviceRequest('readwrite', store => store.add(device));
+  void keepStorage();
   return { device, wrapper: { id, kind: 'device', sealed, device_hash } };
 }
 
