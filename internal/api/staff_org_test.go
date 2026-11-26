@@ -17,11 +17,18 @@ import (
 // staffCall is an admin call with CSRF, a fresh step-up grant and, when org is set, X-Ky-Org.
 func staffCall(t *testing.T, srv *Server, method, path, cookie, org, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return staffRequest(t, srv, method, path, cookie, org, body, true)
+}
+
+func staffRequest(t *testing.T, srv *Server, method, path, cookie, org, body string, stepUp bool) *httptest.ResponseRecorder {
+	t.Helper()
 	csrf := srv.middleware.IssueCSRFToken(cookie)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrf)
-	req.Header.Set(StepUpHeader, mintStepUp(t, srv, cookie, method+" "+path))
+	if stepUp {
+		req.Header.Set(StepUpHeader, mintStepUp(t, srv, cookie, method+" "+path))
+	}
 	req.AddCookie(&http.Cookie{Name: "kyidentity_session", Value: cookie})
 	req.AddCookie(&http.Cookie{Name: "kyidentity_csrf", Value: csrf})
 	if org != "" {
