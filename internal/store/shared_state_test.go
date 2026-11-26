@@ -638,7 +638,7 @@ func shiftedClock(t *testing.T, path string, shift string) *Store {
 			t.Fatal(err)
 		}
 	}
-	s, err := openPostgres(testDatabaseURL(), schema+","+clock+",pg_catalog,public", false, false)
+	s, err := openPostgres(testDatabaseURL(), schema+","+clock+",pg_catalog,public", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -84,7 +84,7 @@ func OpenInstallerStore(path string, inspect bool) (*Store, error) {
 			}
 			searchPath = schema + ",public"
 		}
-		return openPostgres(rawURL, searchPath, false, inspect)
+		return openPostgres(rawURL, searchPath, false, inspect, false)
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
