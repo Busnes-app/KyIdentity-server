@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"strconv"
 	"strings"
@@ -160,6 +161,12 @@ func (e *Engine) ConfigureAD(sys *store.PairedSystem, ldapsURL, bindPassword str
 // DirectoryKeys authenticate agent keys and sign queue entries.
 func (e *Engine) DirectoryKeys() store.ADKeys { return store.NewADKeys(e.encryptionKey) }
 
+// adTLSConfig returns the LDAPS TLS configuration with pinned roots and Go's default
+// TLS groups (offering X25519MLKEM768 first with fallback for Windows Schannel).
+func adTLSConfig(roots *x509.CertPool, serverName string) *tls.Config {
+	return &tls.Config{RootCAs: roots, ServerName: serverName, MinVersion: tls.VersionTLS12}
+}
+
 // adConn binds to the directory over LDAPS with the pinned trust, through netguard's dialer.
 func (e *Engine) adConn(sys *store.PairedSystem, c *store.ADConnector, password string) (*ldap.Conn, error) {
 	if err := netguard.ValidateLDAPS(sys.CallbackURL, "ldapsUrl"); err != nil {
@@ -175,9 +182,13 @@ func (e *Engine) adConn(sys *store.PairedSystem, c *store.ADConnector, password 
 		addr = "ldaps://" + u.Host + ":636"
 	}
 	conn, err := ldap.DialURL(addr, ldap.DialWithDialer(netguard.Dialer(5*time.Second)),
-		ldap.DialWithTLSConfig(&tls.Config{RootCAs: roots, ServerName: u.Hostname(), MinVersion: tls.VersionTLS12}))
+		ldap.DialWithTLSConfig(adTLSConfig(roots, u.Hostname())))
 	if err != nil {
 		return nil, err
+	}
+	if state, ok := conn.TLSConnectionState(); ok {
+		log.Printf("[AD] ldaps connected connector=%s host=%s tls=%s group=%s",
+			sys.ID, u.Hostname(), tls.VersionName(state.Version), state.CurveID)
 	}
 	conn.SetTimeout(15 * time.Second)
 	if err := conn.Bind(c.BindDN, password); err != nil {

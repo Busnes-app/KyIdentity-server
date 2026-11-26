@@ -306,6 +306,12 @@ func (a *agent) pass(ctx context.Context) error {
 	return nil
 }
 
+// ldapsTLSConfig returns the LDAPS TLS configuration with pinned roots and Go's default
+// TLS groups (offering X25519MLKEM768 first with fallback for Windows Schannel).
+func (a *agent) ldapsTLSConfig(serverName string) *tls.Config {
+	return &tls.Config{RootCAs: a.roots, ServerName: serverName, MinVersion: tls.VersionTLS12}
+}
+
 func (a *agent) dial() (*ldap.Conn, error) {
 	u, _ := url.Parse(a.cfg.LDAPSURL)
 	addr := a.cfg.LDAPSURL
@@ -313,9 +319,13 @@ func (a *agent) dial() (*ldap.Conn, error) {
 		addr = "ldaps://" + u.Host + ":636"
 	}
 	conn, err := ldap.DialURL(addr, ldap.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}),
-		ldap.DialWithTLSConfig(&tls.Config{RootCAs: a.roots, ServerName: u.Hostname(), MinVersion: tls.VersionTLS12}))
+		ldap.DialWithTLSConfig(a.ldapsTLSConfig(u.Hostname())))
 	if err != nil {
 		return nil, err
+	}
+	if state, ok := conn.TLSConnectionState(); ok {
+		log.Printf("ldaps connected host=%s tls=%s group=%s",
+			u.Hostname(), tls.VersionName(state.Version), state.CurveID)
 	}
 	conn.SetTimeout(20 * time.Second)
 	if err := conn.Bind(a.cfg.BindDN, a.password); err != nil {
