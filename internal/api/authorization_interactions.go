@@ -32,16 +32,32 @@ func (m *MiddlewareManager) authorizationBrowserHash(r *http.Request) string {
 	return crypto.HashSHA256(raw)
 }
 
-func (h *OAuthHandler) beginInteraction(w http.ResponseWriter, r *http.Request, q url.Values) {
+func (h *OAuthHandler) ensureAuthorizationBrowserHash(w http.ResponseWriter, r *http.Request) (string, error) {
 	browserHash := h.middleware.authorizationBrowserHash(r)
-	if browserHash == "" {
-		raw, err := crypto.GenerateRandomHex(32)
-		if err != nil {
-			stepUpInternalError(w)
-			return
-		}
-		browserHash = crypto.HashSHA256(raw)
-		http.SetCookie(w, &http.Cookie{Name: authorizationBrowserCookie, Value: raw + "." + crypto.SignHMACSHA256(h.middleware.csrfKey, []byte("authorization-browser:"+raw)), Path: "/", HttpOnly: true, Secure: h.middleware.IsHTTPS(r) || strings.HasPrefix(h.oauthEngine.GetOIDCConfiguration().Issuer, "https://"), SameSite: http.SameSiteLaxMode})
+	if browserHash != "" {
+		return browserHash, nil
+	}
+	raw, err := crypto.GenerateRandomHex(32)
+	if err != nil {
+		return "", err
+	}
+	browserHash = crypto.HashSHA256(raw)
+	http.SetCookie(w, &http.Cookie{
+		Name:     authorizationBrowserCookie,
+		Value:    raw + "." + crypto.SignHMACSHA256(h.middleware.csrfKey, []byte("authorization-browser:"+raw)),
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   h.middleware.IsHTTPS(r) || strings.HasPrefix(h.oauthEngine.GetOIDCConfiguration().Issuer, "https://"),
+		SameSite: http.SameSiteLaxMode,
+	})
+	return browserHash, nil
+}
+
+func (h *OAuthHandler) beginInteraction(w http.ResponseWriter, r *http.Request, q url.Values) {
+	browserHash, err := h.ensureAuthorizationBrowserHash(w, r)
+	if err != nil {
+		stepUpInternalError(w)
+		return
 	}
 	raw, err := crypto.GenerateRandomHex(32)
 	if err != nil {
@@ -64,6 +80,51 @@ func (h *OAuthHandler) beginInteraction(w http.ResponseWriter, r *http.Request, 
 	}
 	h.audit.Observe("oauth.interaction", i.UserID, "", q.Get("client_id"), "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{"reason": "interaction_started"})
 	http.Redirect(w, r, "/login?interaction="+raw, http.StatusFound)
+}
+
+const keyringHandoffTTL = 10 * time.Minute
+
+func (h *OAuthHandler) beginKeyringHandoff(w http.ResponseWriter, r *http.Request, q url.Values, user *store.User, sess *store.Session, existingRaw, existingHash string) {
+	browserHash, err := h.ensureAuthorizationBrowserHash(w, r)
+	if err != nil {
+		redirectError(w, r, q.Get("redirect_uri"), q.Get("state"), "server_error", "Could not start keyring handoff")
+		return
+	}
+	now := time.Now().UTC()
+	raw := existingRaw
+	if raw != "" && existingHash != "" {
+		if err := h.store.ExtendAuthorizationInteraction(existingHash, browserHash, sess.ID, now.Add(keyringHandoffTTL)); err != nil {
+			redirectError(w, r, q.Get("redirect_uri"), q.Get("state"), "login_required", "Sign-in expired; restart from the application")
+			return
+		}
+	} else {
+		raw, err = crypto.GenerateRandomHex(32)
+		if err != nil {
+			redirectError(w, r, q.Get("redirect_uri"), q.Get("state"), "server_error", "Could not start keyring handoff")
+			return
+		}
+		i := &store.AuthorizationInteraction{
+			ClientID:    q.Get("client_id"),
+			Hash:        crypto.HashSHA256(raw),
+			BrowserHash: browserHash,
+			UserID:      user.ID,
+			SessionID:   sess.ID,
+			Request:     q.Encode(),
+			CreatedAt:   now,
+			ExpiresAt:   now.Add(keyringHandoffTTL),
+		}
+		if err := h.store.CreateAuthorizationInteraction(i); err != nil {
+			if errors.Is(err, store.ErrAuthorizationInteraction) {
+				redirectError(w, r, q.Get("redirect_uri"), q.Get("state"), "temporarily_unavailable", "Too many sign-in requests; wait a few minutes and restart")
+			} else {
+				redirectError(w, r, q.Get("redirect_uri"), q.Get("state"), "server_error", "Could not start keyring handoff")
+			}
+			return
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	http.Redirect(w, r, "/keyring-handoff?interaction="+raw, http.StatusFound)
 }
 
 func (h *OAuthHandler) CancelInteraction(w http.ResponseWriter, r *http.Request) {

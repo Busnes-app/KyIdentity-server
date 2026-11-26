@@ -100,6 +100,9 @@ unknown fields, trailing documents and bodies over 4 KiB.
 | PUT /transfers/{id}/approve | * `sender_key`, `sealed`, `device_id` plus that device's capability. Returns 204. |
 | POST /transfers/{id}/claim | The original session consumes approval and receives `sender_key`, `sealed` |
 | DELETE /transfers/{id} | The original session cancels the transfer and receives 204 |
+| GET /handoff/{id} | Browser-bound completed authorization interaction details, keyring metadata and current app envelope |
+| POST /handoff/{id}/complete | Atomically consumes the handoff interaction and mints a fresh OAuth `code`, `redirect_uri` and `state` |
+| DELETE /handoff/{id} | Cancels the handoff interaction and returns `redirect_uri` and `state` |
 
 Wrapper upload fields are `id`, `kind`, `sealed`, plus `device_hash` for a device
 or `credential_id` for PRF. The account's app routes resolve the OAuth client ID
@@ -108,10 +111,61 @@ through `app_registry` and check `effective_app_access` on every call.
 in `Authorization: Bearer`. It reads only that token's own client and subject
 and verifies its registered token/session and current effective app access.
 Apps cannot read SRK wrappers or write app envelopes with their tokens.
-An integrating app needs its own client-side handoff for its plaintext subkey.
-App keys are not placed in OIDC claims, and no cross-origin handoff is defined
-by these endpoints. Rotating a subkey replaces the prior envelope. Coordinate
-re-encryption or retention of the old key in the app before rotation.
+App keys are never placed in OIDC tokens or claims; cross-origin apps obtain
+their plaintext subkey through the OIDC key handoff below. Rotating a subkey
+replaces the prior envelope. Coordinate re-encryption or retention of the old
+key in the app before rotation.
+
+## Cross-origin OIDC key handoff
+
+An OIDC client on another origin can receive its own 32-byte plaintext app
+subkey during authorization code sign-in without exposing the Suite Root Key
+to the app or plaintext keys to the server.
+
+1. Before redirecting the browser to `GET /oauth/authorize`, the app generates
+   an ephemeral, non-extractable P-256 ECDH key pair in memory or IndexedDB,
+   encodes the 65-byte uncompressed SEC1 public point in canonical unpadded
+   base64url, and passes it as a single `keyring_pk` query parameter alongside
+   PKCE (`S256`) and `state`. `keyring_pk` with `prompt=none` returns
+   `interaction_required`; duplicate or invalid values return `invalid_request`.
+2. After normal authentication, MFA enrollment, password-change and
+   `effective_app_access` checks succeed, KyIdentity checks whether the account
+   is eligible for a suite keyring. Administrators, staff, export-only and
+   workstation sessions bypass the handoff silently and receive a normal OAuth
+   code redirect. Eligible member sessions are redirected (`302`,
+   `Cache-Control: no-store`) to `/keyring-handoff?interaction=<raw>` bound to
+   the `kyidentity_authorization_browser` cookie and the active session
+   (ten-minute TTL).
+3. On a trusted browser whose local device wrapper and active app subkey exist,
+   `/keyring-handoff` unwraps the SRK and target app subkey automatically with
+   no extra click. Otherwise it offers inline unlock (passkey PRF, `KYT1`
+   approval from another browser, or `KYR1` Emergency Kit), first-time keyring
+   setup, first-time app key provisioning, or continuing without an encryption
+   key.
+4. Once the plaintext app subkey is ready, the KyIdentity page calls
+   `POST /api/user/keyring/handoff/{id}/complete`, which rechecks app access
+   and atomically deletes the interaction while inserting a fresh single-use
+   authorization `code`. The page generates an ephemeral P-256 sender key pair,
+   derives the 32-byte ECDH shared secret against `keyring_pk`, and seals the
+   32-byte app subkey with HKDF-SHA-256 (32 zero-byte salt) and AES-256-GCM
+   using the compact JSON AAD:
+   `["ky-keyring/1","handoff",issuer,org_id,user_id,keyring_version,client_id,key_version,code,redirect_uri,recipient_key,sender_key]`.
+5. The page zeroes all local key material and redirects via
+   `window.location.replace` to
+   `<redirect_uri>?code=<code>&state=<state>#kh=<sealed>&kh_pk=<sender_key>&kh_kv=<key_version>&kh_rv=<keyring_version>`.
+   Because the sealed subkey lives strictly in the URL fragment, it is never
+   sent to any HTTP server or access log. The app clears `window.location.hash`
+   immediately, exchanges `code` via PKCE, confirms `issuer`, `org_id`, `sub`
+   (`user_id`), `client_id` and `redirect_uri`, opens `kh` with its ephemeral
+   private key using the same AAD, and discards the ephemeral key pair.
+
+If `complete` fails, the interaction is still live: the page wipes all key
+material and offers **Try again** (reloads the interaction and unlocks again)
+and **Cancel sign-in**. If sealing or redirecting fails after `complete`
+succeeded, the interaction and its code are spent: the page wipes key material,
+drops the code and offers **Restart sign-in**, an OAuth error redirect
+(`error=server_error`, `state`, no `code`) so the app starts a fresh
+authorization with a new `keyring_pk`.
 
 Missing, unreleased or expired items return 404. Denied access and missing or
 spent grants return 403. Conflicts and count limits return 409. Excessive

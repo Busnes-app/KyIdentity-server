@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  approveTransfer, decodeKeyringBytes, encodeKeyringBytes, formatRecoveryKey,
-  importKeyringSecret, newKeyringSecret, newTransfer, newWrappedAppKey, openTransfer,
-  parseRecoveryKey, parseTransferCode, transferCode, unwrapAppKey, unwrapRoot, wrapRoot,
+  approveTransfer, buildHandoffErrorURL, buildHandoffRedirectURL, decodeKeyringBytes,
+  encodeKeyringBytes, formatRecoveryKey, importKeyringSecret, newHandoffPair,
+  newKeyringSecret, newTransfer, newWrappedAppKey, openHandoffKey, openTransfer,
+  parseRecoveryKey, parseTransferCode, sealHandoffKey, transferCode, unwrapAppKey,
+  unwrapRoot, wrapRoot,
 } from './keyringCrypto';
-import type { RingContext, WrapperBinding } from './keyringCrypto';
+import type { HandoffBinding, RingContext, WrapperBinding } from './keyringCrypto';
 
 const context: RingContext = {
   issuer: 'https://identity.example.test', org_id: 'org-A', user_id: 'subject-55',
@@ -87,4 +89,76 @@ describe('Suite keyring wire v1', () => {
     await expect(openTransfer(context, receiving, { ...response, sealed: tamper(response.sealed) })).rejects.toThrow();
     await expect(openTransfer(context, receiving, { ...response, sender_key: unrelated.request.recipient_key })).rejects.toThrow();
   });
+
+  it('seals and opens cross-origin OIDC app subkeys bound to code, client, redirect URI and keys', async () => {
+    const appKey = newKeyringSecret();
+    const recipient = await newHandoffPair();
+    const unrelated = await newHandoffPair();
+    expect(recipient.privateKey.extractable).toBe(false);
+
+    const handoff: HandoffBinding = {
+      context,
+      client: 'kypost',
+      version: 1,
+      code: 'auth-code-12345',
+      redirect_uri: 'https://mail.example/cb',
+      recipient_key: recipient.point,
+    };
+
+    const payload = await sealHandoffKey(handoff, appKey);
+    expect(payload.sender_key).toHaveLength(87);
+    expect(payload.sealed).toHaveLength(80);
+    expect(await openHandoffKey(handoff, recipient.privateKey, payload)).toEqual(appKey);
+
+    for (const key of ['issuer', 'org_id', 'user_id', 'keyring_version'] as const) {
+      await expect(openHandoffKey({ ...handoff, context: { ...context, [key]: 'tampered' } }, recipient.privateKey, payload)).rejects.toThrow();
+    }
+    await expect(openHandoffKey({ ...handoff, client: 'kynotes' }, recipient.privateKey, payload)).rejects.toThrow();
+    await expect(openHandoffKey({ ...handoff, version: 2 }, recipient.privateKey, payload)).rejects.toThrow();
+    await expect(openHandoffKey({ ...handoff, code: 'other-code' }, recipient.privateKey, payload)).rejects.toThrow();
+    await expect(openHandoffKey({ ...handoff, redirect_uri: 'https://evil.example/cb' }, recipient.privateKey, payload)).rejects.toThrow();
+    await expect(openHandoffKey({ ...handoff, recipient_key: unrelated.point }, recipient.privateKey, payload)).rejects.toThrow();
+    await expect(openHandoffKey(handoff, unrelated.privateKey, payload)).rejects.toThrow();
+    await expect(openHandoffKey(handoff, recipient.privateKey, { ...payload, sealed: tamper(payload.sealed) })).rejects.toThrow();
+    await expect(openHandoffKey(handoff, recipient.privateKey, { ...payload, sender_key: unrelated.point })).rejects.toThrow();
+  });
+
+  it('builds fragment-only handoff callback URLs and rejects unsafe redirect schemes', async () => {
+    const recipient = await newHandoffPair();
+    const handoff: HandoffBinding = {
+      context,
+      client: 'kypost',
+      version: 3,
+      code: 'c-99',
+      redirect_uri: 'https://mail.example/cb?existing=1',
+      recipient_key: recipient.point,
+    };
+    const payload = await sealHandoffKey(handoff, newKeyringSecret());
+    const url = new URL(buildHandoffRedirectURL(handoff.redirect_uri, 'c-99', 'st-1', {
+      ...payload,
+      key_version: 3,
+      keyring_version: context.keyring_version,
+    }));
+    expect(url.searchParams.get('existing')).toBe('1');
+    expect(url.searchParams.get('code')).toBe('c-99');
+    expect(url.searchParams.get('state')).toBe('st-1');
+    expect(url.searchParams.get('kh')).toBeNull();
+    const frag = new URLSearchParams(url.hash.slice(1));
+    expect(frag.get('kh')).toBe(payload.sealed);
+    expect(frag.get('kh_pk')).toBe(payload.sender_key);
+    expect(frag.get('kh_kv')).toBe('3');
+    expect(frag.get('kh_rv')).toBe(context.keyring_version);
+
+    const noKey = new URL(buildHandoffRedirectURL('https://mail.example/cb', 'c-99', 'st-1'));
+    expect(noKey.hash).toBe('');
+    expect(noKey.searchParams.get('code')).toBe('c-99');
+
+    const errURL = new URL(buildHandoffErrorURL('https://mail.example/cb', 'st-1', 'access_denied', 'Cancelled'));
+    expect(errURL.searchParams.get('error')).toBe('access_denied');
+    expect(errURL.searchParams.get('state')).toBe('st-1');
+
+    expect(() => buildHandoffRedirectURL('javascript:alert(1)', 'c', 's')).toThrow();
+    expect(() => buildHandoffErrorURL('data:text/html,hi', 's', 'access_denied', '')).toThrow();
+  });
 });
+
