@@ -14,7 +14,6 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/auth"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
-	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -116,7 +115,7 @@ func TestReplicaRefusesToGenerateTheFirstPassword(t *testing.T) {
 func TestScheduledBackupRunsOnOneReplica(t *testing.T) {
 	cfg, _ := commandInstance(t, true)
 	cfg.BackupDir = t.TempDir()
-	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
+	if _, err := loadSigningKeys(cfg); err != nil {
 		t.Fatal(err)
 	}
 	stores := handles(t, cfg.DBPath, 4)
@@ -165,7 +164,7 @@ func TestScheduledBackupRunsOnOneReplica(t *testing.T) {
 func TestScheduledBackupOnAReplicaWithoutTheKeyFile(t *testing.T) {
 	cfg, _ := commandInstance(t, true)
 	cfg.BackupDir = t.TempDir()
-	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
+	if _, err := loadSigningKeys(cfg); err != nil {
 		t.Fatal(err)
 	}
 	s := handles(t, cfg.DBPath, 1)[0]

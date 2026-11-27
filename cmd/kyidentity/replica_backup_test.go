@@ -13,7 +13,6 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/backup"
 	"github.com/Busnes-app/kyidentity-server/internal/config"
-	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -36,7 +35,7 @@ func localCopies(t *testing.T, dir, app string) []string {
 func TestADeadHolderDelaysTheScheduleByOneTTL(t *testing.T) {
 	cfg, _ := commandInstance(t, true)
 	cfg.BackupDir, cfg.BackupKeep = t.TempDir(), 3
-	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
+	if _, err := loadSigningKeys(cfg); err != nil {
 		t.Fatal(err)
 	}
 	stores := handles(t, cfg.DBPath, 2)
@@ -79,7 +78,7 @@ func TestALostLeaseEndsTheRunningDeposit(t *testing.T) {
 			renew := make(chan time.Time)
 			store.LeaseTicksForTest(t, renew)
 			cfg, _ := commandInstance(t, true)
-			if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
+			if _, err := loadSigningKeys(cfg); err != nil {
 				t.Fatal(err)
 			}
 			stores := handles(t, cfg.DBPath, 2)
@@ -174,7 +173,7 @@ func TestLocalBackupDirectoryLayouts(t *testing.T) {
 	t.Run("shared", func(t *testing.T) {
 		cfg, _ := commandInstance(t, true)
 		cfg.BackupDir, cfg.BackupKeep = t.TempDir(), 2
-		if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
+		if _, err := loadSigningKeys(cfg); err != nil {
 			t.Fatal(err)
 		}
 		stores := handles(t, cfg.DBPath, 3)
@@ -210,7 +209,7 @@ func TestLocalBackupDirectoryLayouts(t *testing.T) {
 	})
 	t.Run("per replica", func(t *testing.T) {
 		cfg, _ := commandInstance(t, true)
-		if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
+		if _, err := loadSigningKeys(cfg); err != nil {
 			t.Fatal(err)
 		}
 		stores := handles(t, cfg.DBPath, 3)
