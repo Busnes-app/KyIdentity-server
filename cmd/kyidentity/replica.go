@@ -40,6 +40,7 @@ func loadSigningKeys(cfg *config.Config) (*crypto.JWTKeyManager, error) {
 	if cfg.Replicated && mldsaPath != "" {
 		if _, err := os.Stat(mldsaPath); errors.Is(err, os.ErrNotExist) {
 			mldsaPath = ""
+			cfg.MLDSAKeyPath = ""
 		} else if err != nil {
 			return nil, fmt.Errorf("ML-DSA-65 signing key %s: %w", mldsaPath, err)
 		}
