@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Busnes-app/ky-primitives/hybridsig"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -260,6 +261,67 @@ func VerifyECDSAP256(publicKey string, message []byte, signature string) bool {
 	}
 	digest := sha256.Sum256(message)
 	return ecdsa.VerifyASN1(pub, digest[:], sig)
+}
+
+// Domain-separation labels for ky-primitives/hybridsig software device signatures.
+// Must match KyAuth-Linux and any other client enrolling hybridsig device keys.
+const (
+	DevicePushResponseLabel = "kyidentity/1/push-response"
+	DevicePushTokenLabel    = "kyidentity/1/push-token-refresh"
+	DeviceAssertionLabel    = "kyidentity/1/device-assertion"
+)
+
+// DevicePublicKey holds a paired device's enrolled verification key: either a
+// ky-primitives/hybridsig (ML-DSA-65+Ed25519) key or a P-256 ECDSA key.
+// Exactly one field is non-nil.
+type DevicePublicKey struct {
+	Hybrid *hybridsig.PublicKey
+	P256   *ecdsa.PublicKey
+}
+
+// ParseDevicePublicKey parses a base64-encoded device public key in either
+// ky-primitives/hybridsig wire format (2000 bytes prefixed "mldsa65+ed25519\x00")
+// or P-256 (SPKI DER or uncompressed SEC1 point).
+func ParseDevicePublicKey(encoded string) (*DevicePublicKey, error) {
+	raw, err := decodeBase64Any(encoded)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > len(hybridsig.Alg) && string(raw[:len(hybridsig.Alg)]) == hybridsig.Alg && raw[len(hybridsig.Alg)] == 0 {
+		pub, err := hybridsig.ParsePublicKey(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid hybrid public key: %w", err)
+		}
+		return &DevicePublicKey{Hybrid: pub}, nil
+	}
+	pub, err := ParseP256PublicKey(encoded)
+	if err != nil {
+		return nil, err
+	}
+	return &DevicePublicKey{P256: pub}, nil
+}
+
+// VerifyDeviceSignature verifies a base64-encoded device signature over message against
+// publicKey. Hybrid keys verify with ky-primitives/hybridsig under label; P-256 keys verify
+// an ASN.1 DER ECDSA signature over SHA-256(message).
+func VerifyDeviceSignature(publicKey, label string, message []byte, signature string) bool {
+	pub, err := ParseDevicePublicKey(publicKey)
+	if err != nil {
+		return false
+	}
+	sig, err := decodeBase64Any(signature)
+	if err != nil {
+		return false
+	}
+	switch {
+	case pub.Hybrid != nil:
+		return pub.Hybrid.Verify(label, message, sig) == nil
+	case pub.P256 != nil:
+		digest := sha256.Sum256(message)
+		return ecdsa.VerifyASN1(pub.P256, digest[:], sig)
+	default:
+		return false
+	}
 }
 
 // JWTKeyManager manages OIDC signing keys (RS256 and optional ML-DSA-65) plus retired

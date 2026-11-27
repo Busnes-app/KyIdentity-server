@@ -1,7 +1,6 @@
 package oauth
 
 import (
-	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,14 +10,50 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/hybridsig"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
+// deviceAssertionHybridAlg is the JWS alg header for ky-primitives/hybridsig
+// (ML-DSA-65+Ed25519) device sign-on assertions.
+const deviceAssertionHybridAlg = "MLDSA65+Ed25519"
+
+type deviceAssertionHybridMethod struct{}
+
+func (deviceAssertionHybridMethod) Alg() string { return deviceAssertionHybridAlg }
+
+func (deviceAssertionHybridMethod) Verify(signingString string, sig []byte, key any) error {
+	pub, ok := key.(*hybridsig.PublicKey)
+	if !ok || pub == nil {
+		return jwt.ErrInvalidKeyType
+	}
+	if err := pub.Verify(crypto.DeviceAssertionLabel, []byte(signingString), sig); err != nil {
+		return jwt.ErrTokenSignatureInvalid
+	}
+	return nil
+}
+
+func (deviceAssertionHybridMethod) Sign(signingString string, key any) ([]byte, error) {
+	priv, ok := key.(*hybridsig.PrivateKey)
+	if !ok || priv == nil {
+		return nil, jwt.ErrInvalidKeyType
+	}
+	return priv.Sign(crypto.DeviceAssertionLabel, []byte(signingString))
+}
+
+var signingMethodHybridSig jwt.SigningMethod = deviceAssertionHybridMethod{}
+
+func init() {
+	jwt.RegisterSigningMethod(deviceAssertionHybridAlg, func() jwt.SigningMethod {
+		return signingMethodHybridSig
+	})
+}
+
 // deviceAssertion is the RFC 7523 assertion a paired KyAuth device signs with its
-// enrolled P-256 key to sign in to a suite app. Only the fields the grant checks.
+// enrolled signing key (P-256 or ML-DSA-65+Ed25519) to sign in to a suite app.
 type deviceAssertion struct {
 	DeviceID  string
 	Subject   string
@@ -32,7 +67,9 @@ type deviceAssertion struct {
 }
 
 const (
-	maxAssertionLen = 4096
+	// A hybridsig (ML-DSA-65+Ed25519) signature is 3389 raw bytes (~4519 base64url chars)
+	// plus compact JWS header and claims.
+	maxAssertionLen = 8192
 	maxOriginLen    = 256
 )
 
@@ -118,7 +155,7 @@ func cnfThumb(raw json.RawMessage) (string, error) {
 // parseDeviceAssertion verifies a compact JWS against the key that key returns for its
 // kid and subject, pinning the header to exactly what KyAuth emits. exp and iat are
 // checked against now with deviceAssertionSkew; aud must be audience.
-func parseDeviceAssertion(compact, audience string, now time.Time, key func(kid, sub string) (*ecdsa.PublicKey, error)) (*deviceAssertion, error) {
+func parseDeviceAssertion(compact, audience string, now time.Time, key func(kid, sub string) (any, error)) (*deviceAssertion, error) {
 	if len(compact) > maxAssertionLen {
 		return nil, errors.New("assertion too long")
 	}
@@ -127,7 +164,7 @@ func parseDeviceAssertion(compact, audience string, now time.Time, key func(kid,
 	_, err := jwt.ParseWithClaims(compact, &c, func(t *jwt.Token) (any, error) {
 		kid, _ = t.Header["kid"].(string)
 		if t.Header["typ"] != "JWT" || kid == "" || len(t.Header) != 3 {
-			return nil, errors.New("header must be exactly alg=ES256, typ=JWT, kid")
+			return nil, errors.New("header must be exactly alg, typ=JWT, kid")
 		}
 		if c.Issuer != "device:"+kid {
 			return nil, errors.New("iss does not name the kid device")
@@ -141,7 +178,7 @@ func parseDeviceAssertion(compact, audience string, now time.Time, key func(kid,
 		}
 		return key(kid, c.Subject)
 	},
-		jwt.WithValidMethods([]string{"ES256"}),
+		jwt.WithValidMethods([]string{"ES256", deviceAssertionHybridAlg}),
 		jwt.WithStrictDecoding(),
 		jwt.WithAudience(audience),
 		jwt.WithExpirationRequired(),
@@ -152,7 +189,7 @@ func parseDeviceAssertion(compact, audience string, now time.Time, key func(kid,
 	// The checks below run only once the signature verified, so the reasons stay audit-only.
 	switch {
 	case err == nil:
-	case errors.Is(err, jwt.ErrTokenSignatureInvalid):
+	case errors.Is(err, jwt.ErrTokenSignatureInvalid), errors.Is(err, jwt.ErrInvalidKeyType):
 		return nil, errAssertionSignature
 	case errors.Is(err, jwt.ErrTokenInvalidAudience):
 		return nil, errAssertionAudience
@@ -219,7 +256,7 @@ var beforeDeviceTokenRecord = func() {}
 func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string) (*TokenResponse, DeviceSignOnActor, error) {
 	now := time.Now().UTC()
 	var dev *store.NativeDevice
-	a, err := parseDeviceAssertion(compact, e.issuerURL+"/oauth/token", now, func(kid, sub string) (*ecdsa.PublicKey, error) {
+	a, err := parseDeviceAssertion(compact, e.issuerURL+"/oauth/token", now, func(kid, sub string) (any, error) {
 		d, err := e.store.GetNativeDevice(kid)
 		if err != nil {
 			return nil, err
@@ -227,12 +264,15 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 		if d == nil || d.UserID != sub || d.PublicKey == "" {
 			return nil, errUnknownDevice
 		}
-		pub, err := crypto.ParseP256PublicKey(d.PublicKey)
+		pub, err := crypto.ParseDevicePublicKey(d.PublicKey)
 		if err != nil {
 			return nil, errAssertionSignature
 		}
 		dev = d
-		return pub, nil
+		if pub.Hybrid != nil {
+			return pub.Hybrid, nil
+		}
+		return pub.P256, nil
 	})
 	if err != nil {
 		return nil, DeviceSignOnActor{}, err
