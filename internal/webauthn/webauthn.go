@@ -6,6 +6,7 @@ package webauthn
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/mldsa"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -36,8 +37,12 @@ func (a AuthenticatorData) UserVerified() bool   { return a.Flags&FlagUserVerifi
 func (a AuthenticatorData) BackupEligible() bool { return a.Flags&FlagBackupEligible != 0 }
 func (a AuthenticatorData) BackupState() bool    { return a.Flags&FlagBackupState != 0 }
 
-// ES256 only: every stored key is P-256 SPKI, and every mainstream passkey provider offers it.
-var credParams = []protocol.CredentialParameter{{Type: protocol.PublicKeyCredentialType, Algorithm: webauthncose.AlgES256}}
+// Prefer ML-DSA-65 (COSE -49) for PQ-capable authenticators and fall back to ES256 (-7)
+// everywhere else. Both store as standard DER SPKI in the existing column.
+var credParams = []protocol.CredentialParameter{
+	{Type: protocol.PublicKeyCredentialType, Algorithm: webauthncose.AlgMLDSA65},
+	{Type: protocol.PublicKeyCredentialType, Algorithm: webauthncose.AlgES256},
+}
 
 // relyingParty is built per ceremony so an issuer the library rejects as an RP ID (a loopback
 // IP) fails the ceremony, as browsers would, rather than server startup.
@@ -183,52 +188,69 @@ func VerifyAssertion(in AssertionInput) (AuthenticatorData, error) {
 
 func b64(b []byte) string { return protocol.URLEncodedBase64(b).String() }
 
-// parseES256PublicKey reads a DER SPKI public key and rejects anything that is not P-256.
-func parseES256PublicKey(spki []byte) (*ecdsa.PublicKey, error) {
+// spkiToCOSE converts a stored P-256 or ML-DSA-65 SPKI key to the COSE_Key form the library
+// verifies with.
+func spkiToCOSE(spki []byte) ([]byte, error) {
 	parsed, err := x509.ParsePKIXPublicKey(spki)
 	if err != nil {
 		return nil, fmt.Errorf("credential public key is not a valid SPKI key: %w", err)
 	}
-	pub, ok := parsed.(*ecdsa.PublicKey)
-	if !ok || pub.Curve != elliptic.P256() {
-		return nil, errors.New("credential public key is not a P-256 ECDSA key")
+	switch pub := parsed.(type) {
+	case *ecdsa.PublicKey:
+		if pub.Curve != elliptic.P256() {
+			return nil, errors.New("credential public key is not a P-256 ECDSA key")
+		}
+		point, err := pub.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		return webauthncbor.Marshal(webauthncose.EC2PublicKeyData{
+			PublicKeyData: webauthncose.PublicKeyData{KeyType: int64(webauthncose.EllipticKey), Algorithm: int64(webauthncose.AlgES256)},
+			Curve:         int64(webauthncose.P256),
+			XCoord:        point[1:33],
+			YCoord:        point[33:],
+		})
+	case *mldsa.PublicKey:
+		if pub.Parameters() != mldsa.MLDSA65() {
+			return nil, errors.New("credential public key is not an ML-DSA-65 key")
+		}
+		return webauthncbor.Marshal(webauthncose.AKPPublicKeyData{
+			PublicKeyData: webauthncose.PublicKeyData{KeyType: int64(webauthncose.AKP), Algorithm: int64(webauthncose.AlgMLDSA65)},
+			PublicKey:     pub.Bytes(),
+		})
+	default:
+		return nil, errors.New("credential public key is neither P-256 ECDSA nor ML-DSA-65")
 	}
-	return pub, nil
 }
 
-// spkiToCOSE converts a stored key to the COSE_Key form the library verifies with.
-func spkiToCOSE(spki []byte) ([]byte, error) {
-	pub, err := parseES256PublicKey(spki)
-	if err != nil {
-		return nil, err
-	}
-	point, err := pub.Bytes()
-	if err != nil {
-		return nil, err
-	}
-	return webauthncbor.Marshal(webauthncose.EC2PublicKeyData{
-		PublicKeyData: webauthncose.PublicKeyData{KeyType: int64(webauthncose.EllipticKey), Algorithm: int64(webauthncose.AlgES256)},
-		Curve:         int64(webauthncose.P256),
-		XCoord:        point[1:33],
-		YCoord:        point[33:],
-	})
-}
-
-// coseToSPKI converts a newly registered ES256 COSE_Key to the stored SPKI form.
+// coseToSPKI converts a newly registered ES256 or ML-DSA-65 COSE_Key to the stored SPKI form.
 func coseToSPKI(cose []byte) ([]byte, error) {
 	key, err := webauthncose.ParsePublicKey(cose)
 	if err != nil {
 		return nil, err
 	}
-	ec, ok := key.(webauthncose.EC2PublicKeyData)
-	if !ok || ec.Algorithm != int64(webauthncose.AlgES256) || ec.Curve != int64(webauthncose.P256) {
-		return nil, errors.New("credential public key is not ES256")
+	switch k := key.(type) {
+	case webauthncose.EC2PublicKeyData:
+		if k.Algorithm != int64(webauthncose.AlgES256) || k.Curve != int64(webauthncose.P256) {
+			return nil, errors.New("credential public key is not ES256")
+		}
+		pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), append(append([]byte{4}, k.XCoord...), k.YCoord...))
+		if err != nil {
+			return nil, err
+		}
+		return x509.MarshalPKIXPublicKey(pub)
+	case webauthncose.AKPPublicKeyData:
+		if k.Algorithm != int64(webauthncose.AlgMLDSA65) {
+			return nil, errors.New("credential public key is not ML-DSA-65")
+		}
+		pub, err := mldsa.NewPublicKey(mldsa.MLDSA65(), k.PublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ML-DSA-65 public key: %w", err)
+		}
+		return x509.MarshalPKIXPublicKey(pub)
+	default:
+		return nil, errors.New("credential public key is neither ES256 nor ML-DSA-65")
 	}
-	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), append(append([]byte{4}, ec.XCoord...), ec.YCoord...))
-	if err != nil {
-		return nil, err
-	}
-	return x509.MarshalPKIXPublicKey(pub)
 }
 
 // RPIDFromIssuer derives the relying party ID and the exact origin from the configured
