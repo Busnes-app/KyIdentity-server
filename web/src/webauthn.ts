@@ -37,7 +37,8 @@ export interface FinishRegistration {
   clientDataJSON: string;
 }
 
-/** ES256. The server verifies nothing else, so nothing else is offered. */
+/** Prefer ML-DSA-65 (COSE -49) for PQ-capable authenticators, falling back to ES256 (-7). */
+const MLDSA65 = -49;
 const ES256 = -7;
 
 export async function createPasskey(opts: BeginRegistration): Promise<FinishRegistration> {
@@ -50,7 +51,10 @@ export async function createPasskey(opts: BeginRegistration): Promise<FinishRegi
         name: opts.username,
         displayName: opts.username,
       },
-      pubKeyCredParams: [{ type: 'public-key', alg: ES256 }],
+      pubKeyCredParams: [
+        { type: 'public-key', alg: MLDSA65 },
+        { type: 'public-key', alg: ES256 },
+      ],
       // Attestation is not trusted server-side, so requesting it would only add a
       // consent prompt for data nobody acts on.
       attestation: 'none',

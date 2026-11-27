@@ -46,5 +46,9 @@ describe('createPasskey', () => {
 
     expect(finished).toEqual({ credentialId: 'AQI', attestationObject: 'AwQ', clientDataJSON: 'BQ' });
     expect(create.mock.calls[0][0].publicKey.attestation).toBe('none');
+    expect(create.mock.calls[0][0].publicKey.pubKeyCredParams).toEqual([
+      { type: 'public-key', alg: -49 },
+      { type: 'public-key', alg: -7 },
+    ]);
   });
 });
