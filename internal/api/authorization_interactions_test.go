@@ -99,6 +99,7 @@ func TestAuthorizationBrowserCookieTransport(t *testing.T) {
 				t.Fatal("expected a host-only Secure, HttpOnly, SameSite=Lax binding cookie")
 			}
 
+			// Go 1.27's cookiejar treats localhost and loopback IPs as secure origins.
 			// The client sees the public scheme even when a proxy forwards plain HTTP.
 			publicURL, _ := url.Parse(tc.origin + path)
 			jar.SetCookies(publicURL, []*http.Cookie{binding})
