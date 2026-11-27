@@ -182,8 +182,126 @@ export function parseOrgExportStatus(v: unknown): number {
   if (!isRecord(v) || typeof v.deleteAfter !== 'number' || !Number.isSafeInteger(v.deleteAfter) || v.deleteAfter <= 0) throw new Error('Export deadline is malformed');
   return v.deleteAfter;
 }
-export function HolderExportLink({ deadline }: { deadline: number }) {
-  return <div className="alert-box" role="status"><div><p>Your organisation is scheduled for permanent deletion on {new Date(deadline * 1000).toLocaleString()}. As account holder, you can download the organisation’s directory, memberships, assignments and audit log. App content is exported from each app separately.</p><a className="secondary-btn" href="/api/user/org-export" download="organisation.json">Download organisation directory (JSON)</a></div></div>;
+
+export type OrgExportContinuation =
+  | { readonly kind: 'complete' }
+  | { readonly kind: 'partial'; readonly truncatedSections: string[]; readonly nextAuditOffset: number | null };
+
+export function parseOrgExportContinuation(v: unknown): OrgExportContinuation {
+  if (!isRecord(v)) throw new Error('Organisation export is malformed');
+  if (v.partial !== true) return { kind: 'complete' };
+  const truncatedSections: string[] = [];
+  let nextAuditOffset: number | null = null;
+  if (isRecord(v.truncated)) {
+    for (const [section, info] of Object.entries(v.truncated)) {
+      truncatedSections.push(section);
+      if (section === 'audit' && isRecord(info) && typeof info.next_offset === 'number' && Number.isSafeInteger(info.next_offset) && info.next_offset > 0) {
+        nextAuditOffset = info.next_offset;
+      }
+    }
+  }
+  return { kind: 'partial', truncatedSections, nextAuditOffset };
+}
+
+export function orgExportUrl(auditOffset = 0): string {
+  return auditOffset > 0 ? `/api/user/org-export?audit_offset=${auditOffset}` : '/api/user/org-export';
+}
+
+export function orgExportFilename(auditOffset = 0): string {
+  return auditOffset > 0 ? `organisation-audit-from-${auditOffset}.json` : 'organisation.json';
+}
+
+function triggerJsonDownload(data: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+type ExportDownloadState =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'downloading'; readonly offset: number }
+  | { readonly kind: 'complete'; readonly pagesDownloaded: number }
+  | { readonly kind: 'partial'; readonly pagesDownloaded: number; readonly truncatedSections: string[]; readonly nextAuditOffset: number | null }
+  | { readonly kind: 'error'; readonly message: string; readonly retryOffset: number; readonly priorPages: number };
+
+export function HolderExportLink({ deadline, initialContinuation }: { deadline: number; initialContinuation?: OrgExportContinuation }) {
+  const [download, setDownload] = useState<ExportDownloadState>(() => {
+    if (!initialContinuation) return { kind: 'idle' };
+    if (initialContinuation.kind === 'complete') return { kind: 'complete', pagesDownloaded: 1 };
+    return { kind: 'partial', pagesDownloaded: 1, truncatedSections: initialContinuation.truncatedSections, nextAuditOffset: initialContinuation.nextAuditOffset };
+  });
+
+  const downloadPage = async (offset: number, priorPages: number) => {
+    setDownload({ kind: 'downloading', offset });
+    try {
+      const data = await apiRequest(orgExportUrl(offset));
+      const continuation = parseOrgExportContinuation(data);
+      triggerJsonDownload(data, orgExportFilename(offset));
+      const pagesDownloaded = priorPages + 1;
+      if (continuation.kind === 'complete') {
+        setDownload({ kind: 'complete', pagesDownloaded });
+      } else {
+        setDownload({ kind: 'partial', pagesDownloaded, truncatedSections: continuation.truncatedSections, nextAuditOffset: continuation.nextAuditOffset });
+      }
+    } catch (err) {
+      setDownload({ kind: 'error', message: errorMessage(err, 'Could not download the organisation export.'), retryOffset: offset, priorPages });
+    }
+  };
+
+  const nextAuditOffset = download.kind === 'partial' ? download.nextAuditOffset : null;
+
+  return (
+    <div className="alert-box" role="status">
+      <div>
+        <p>Your organisation is scheduled for permanent deletion on {new Date(deadline * 1000).toLocaleString()}. As account holder, you can download the organisation’s directory, memberships, assignments and audit log. App content is exported from each app separately.</p>
+        <div className="action-row">
+          <button
+            type="button"
+            className="secondary-btn"
+            disabled={download.kind === 'downloading'}
+            onClick={() => void downloadPage(0, 0)}
+          >
+            {download.kind === 'downloading' && download.offset === 0 ? 'Downloading…' : 'Download organisation directory (JSON)'}
+          </button>
+          {download.kind === 'partial' && nextAuditOffset !== null && (
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => void downloadPage(nextAuditOffset, download.pagesDownloaded)}
+            >
+              Download next audit page (from event {nextAuditOffset})
+            </button>
+          )}
+        </div>
+        {download.kind === 'partial' && (
+          <p role="alert">
+            Partial export saved ({download.pagesDownloaded} {download.pagesDownloaded === 1 ? 'file' : 'files'}).{' '}
+            {download.truncatedSections.length > 0
+              ? `These sections exceeded the per-download limit: ${download.truncatedSections.join(', ')}. `
+              : 'This export exceeded the per-download limit. '}
+            {download.nextAuditOffset !== null
+              ? `Use “Download next audit page” to fetch remaining audit events starting at offset ${download.nextAuditOffset}.`
+              : 'Contact support if you need additional pages for non-audit sections.'}
+          </p>
+        )}
+        {download.kind === 'complete' && (
+          <p>Organisation directory export downloaded ({download.pagesDownloaded} {download.pagesDownloaded === 1 ? 'file' : 'files'}).</p>
+        )}
+        {download.kind === 'error' && (
+          <p role="alert">
+            {download.message}{' '}
+            <button type="button" className="secondary-btn" onClick={() => void downloadPage(download.retryOffset, download.priorPages)}>
+              Try again
+            </button>
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
 function HolderOrgExport() {
   const [state, setState] = useState<number | 'loading' | 'hidden' | 'failed'>('loading');
