@@ -361,12 +361,16 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	} else if err != nil {
 		return nil, who, fmt.Errorf("failed to record issued token: %w", err)
 	}
+	alg, err := e.clientSigningAlg(clientID)
+	if err != nil {
+		return nil, who, err
+	}
 	access := map[string]any{
 		"iss": e.issuerURL, "sub": user.ID, "aud": clientID, "exp": exp.Unix(), "iat": now.Unix(),
 		"jti": accessJTI, "scope": scope, "token_use": "access_token",
 	}
 	e.addOrg(access, user.Org().String())
-	accessToken, err := e.keyManager.SignJWT(access)
+	accessToken, err := e.keyManager.SignJWTWithAlg(alg, "JWT", access)
 	if err != nil {
 		return nil, who, fmt.Errorf("failed to sign access token: %w", err)
 	}
@@ -401,7 +405,7 @@ func (e *Engine) ExchangeDeviceAssertion(compact, clientID, ip, userAgent string
 	if a.CnfThumb != "" {
 		claims["cnf"] = map[string]string{"spki#S256": a.CnfThumb}
 	}
-	idToken, err := e.keyManager.SignJWT(claims)
+	idToken, err := e.keyManager.SignJWTWithAlg(alg, "JWT", claims)
 	if err != nil {
 		return nil, who, fmt.Errorf("failed to sign ID token: %w", err)
 	}

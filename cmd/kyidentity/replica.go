@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -31,13 +32,33 @@ const keyDiffers = "KYIDENTITY_ENCRYPTION_KEY differs from the key recorded by a
 // is rewritten.
 const acceptSteps = "Use the same values on every server. After a deliberate change: stop every server, run `kyidentity accept-replica-config` once with the new values, then start them"
 
+// loadSigningKeys loads the RSA and ML-DSA-65 OIDC signing keys. Replicated deployments
+// never auto-generate a missing ML-DSA-65 key so replicas cannot diverge on separate keys;
+// single-node deployments create both keys on first start.
+func loadSigningKeys(cfg *config.Config) (*crypto.JWTKeyManager, error) {
+	mldsaPath := cfg.MLDSAKeyPath
+	if cfg.Replicated && mldsaPath != "" {
+		if _, err := os.Stat(mldsaPath); errors.Is(err, os.ErrNotExist) {
+			mldsaPath = ""
+			cfg.MLDSAKeyPath = ""
+		} else if err != nil {
+			return nil, fmt.Errorf("ML-DSA-65 signing key %s: %w", mldsaPath, err)
+		}
+	}
+	return crypto.LoadOrCreateSigningKeys(cfg.RSAKeyPath, mldsaPath)
+}
+
 // replicaKeys reads the public halves of the signing and VAPID keys this process loaded.
 func replicaKeys(km *crypto.JWTKeyManager, vapid *mfa.UnifiedPushSender) (config.ReplicaKeys, error) {
 	spki, err := x509.MarshalPKIXPublicKey(km.PublicKey)
 	if err != nil {
 		return config.ReplicaKeys{}, err
 	}
-	return config.ReplicaKeys{RSAPublic: spki, VAPIDPublic: vapid.VAPIDPublicKey()}, nil
+	keys := config.ReplicaKeys{RSAPublic: spki, VAPIDPublic: vapid.VAPIDPublicKey()}
+	if km.MLDSAPublicKey != nil {
+		keys.MLDSAPublic = km.MLDSAPublicKey.Bytes()
+	}
+	return keys, nil
 }
 
 // checkTenancy refuses a start whose KYIDENTITY_TENANCY differs from the mode the database
@@ -207,9 +228,9 @@ func runAcceptReplicaConfig(args []string, out, errOut io.Writer) error {
 
 // loadReplicaKeys loads the signing and VAPID keys the way a server start does.
 func loadReplicaKeys(cfg *config.Config) (config.ReplicaKeys, error) {
-	km, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath)
+	km, err := loadSigningKeys(cfg)
 	if err != nil {
-		return config.ReplicaKeys{}, fmt.Errorf("RSA signing key: %w", err)
+		return config.ReplicaKeys{}, fmt.Errorf("signing key: %w", err)
 	}
 	origin, err := mfa.IssuerOrigin(cfg.IssuerURL)
 	if err != nil {

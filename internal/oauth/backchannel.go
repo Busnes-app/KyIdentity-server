@@ -39,7 +39,11 @@ func (e *Engine) SignLogoutToken(clientID, subject, sid, org string) (string, er
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
 	}
 	e.addOrg(claims, org)
-	return e.keyManager.SignJWTWithType("logout+jwt", claims)
+	alg, err := e.clientSigningAlg(clientID)
+	if err != nil {
+		return "", err
+	}
+	return e.keyManager.SignJWTWithAlg(alg, "logout+jwt", claims)
 }
 
 // deliveryLease bounds one attempt. The HTTP timeout is shorter, so a lapsed lease means

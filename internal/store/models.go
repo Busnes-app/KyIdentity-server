@@ -220,9 +220,12 @@ type OAuthClient struct {
 	LauncherName string `json:"launcherName"`
 	// LauncherAudience is who sees the card: "" (unset) or LauncherEveryone, or
 	// LauncherAdmins. Display only: it never changes access.
-	LauncherAudience string    `json:"launcherAudience"`
-	Enabled          bool      `json:"enabled"`
-	CreatedAt        time.Time `json:"createdAt"`
+	LauncherAudience string `json:"launcherAudience"`
+	// IDTokenSignedResponseAlg chooses the JWS signing algorithm for tokens issued to this
+	// client: "" (default RS256 for third parties), "RS256", or "ML-DSA-65" (RFC 9964 for Ky RPs).
+	IDTokenSignedResponseAlg string    `json:"idTokenSignedResponseAlg,omitempty"`
+	Enabled                  bool      `json:"enabled"`
+	CreatedAt                time.Time `json:"createdAt"`
 }
 
 type AuthorizationCode struct {

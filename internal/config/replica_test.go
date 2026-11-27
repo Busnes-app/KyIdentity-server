@@ -31,7 +31,7 @@ func replicaConfig(t *testing.T) (*Config, ReplicaKeys) {
 		KyAuthCertSHA256: []string{strings.Repeat("a", 64)}, AppAttestAppIDs: []string{"TEAM.app"},
 		Tenancy: "single",
 	}, ReplicaKeys{
-		RSAPublic: []byte("rsa public"), VAPIDPublic: []byte("vapid public"),
+		RSAPublic: []byte("rsa public"), MLDSAPublic: []byte("mldsa public"), VAPIDPublic: []byte("vapid public"),
 	}
 }
 
@@ -122,8 +122,9 @@ func TestReplicaFingerprintFollowsTheClassification(t *testing.T) {
 		}
 	}
 	for name, other := range map[string]ReplicaKeys{
-		RSAPublicKeyField:   {RSAPublic: []byte("another rsa"), VAPIDPublic: k.VAPIDPublic},
-		VAPIDPublicKeyField: {RSAPublic: k.RSAPublic, VAPIDPublic: []byte("another vapid")},
+		RSAPublicKeyField:   {RSAPublic: []byte("another rsa"), MLDSAPublic: k.MLDSAPublic, VAPIDPublic: k.VAPIDPublic},
+		MLDSAPublicKeyField: {RSAPublic: k.RSAPublic, MLDSAPublic: []byte("another mldsa"), VAPIDPublic: k.VAPIDPublic},
+		VAPIDPublicKeyField: {RSAPublic: k.RSAPublic, MLDSAPublic: k.MLDSAPublic, VAPIDPublic: []byte("another vapid")},
 	} {
 		if diff := DiffFingerprint(base, fingerprint(t, c, other)); !slices.Equal(diff, []string{name}) {
 			t.Errorf("a different key file reported %v, want [%s]", diff, name)

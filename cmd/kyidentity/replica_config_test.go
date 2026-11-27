@@ -45,7 +45,7 @@ func replicaEnv(t *testing.T) (dbURL string, keyDir string) {
 		"KYIDENTITY_DATABASE_URL": dbURL, "KYIDENTITY_DATABASE_URL_FILE": "", "KYIDENTITY_REPLICATED": "true",
 		"KYIDENTITY_SECRET_KEY": hexKey(), "KYIDENTITY_ENCRYPTION_KEY": hexKey(),
 		"KYIDENTITY_SECRET_KEY_FILE": "", "KYIDENTITY_ENCRYPTION_KEY_FILE": "",
-		"KYIDENTITY_RSA_KEY_PATH": filepath.Join(keyDir, "rsa.key"), "KYIDENTITY_VAPID_KEY_PATH": filepath.Join(keyDir, "vapid.key"),
+		"KYIDENTITY_RSA_KEY_PATH": filepath.Join(keyDir, "rsa.key"), "KYIDENTITY_MLDSA_KEY_PATH": filepath.Join(keyDir, "mldsa.key"), "KYIDENTITY_VAPID_KEY_PATH": filepath.Join(keyDir, "vapid.key"),
 		"KYIDENTITY_ISSUER_URL": "http://localhost:5867", "KYIDENTITY_SECURE_COOKIES": "", "KYIDENTITY_SESSION_TTL": "", "KYIDENTITY_SESSION_IDLE_TTL": "",
 		"RATE_LIMIT_EXEMPT_CIDRS": "", "KYIDENTITY_ALLOW_PRIVATE_CALLBACKS": "",
 		"PUSH_RELAY_URL": "", "PUSH_RELAY_KEY": "", "APNS_RELAY_URL": "", "APNS_RELAY_KEY": "",
@@ -61,10 +61,13 @@ func replicaEnv(t *testing.T) (dbURL string, keyDir string) {
 	return dbURL, keyDir
 }
 
-// newKeys writes an RSA signing key and a VAPID key into dir.
+// newKeys writes RSA, ML-DSA-65, and VAPID signing keys into dir.
 func newKeys(t *testing.T, dir string) {
 	t.Helper()
 	if _, err := crypto.LoadOrCreateRSAKey(filepath.Join(dir, "rsa.key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := crypto.LoadOrCreateMLDSAKey(filepath.Join(dir, "mldsa.key")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := mfa.NewUnifiedPushSender(filepath.Join(dir, "vapid.key"), "http://localhost:5867", true); err != nil {
@@ -125,6 +128,7 @@ func TestReplicaConfigRefusesADifferentSharedSetting(t *testing.T) {
 		"KYIDENTITY_ISSUER_URL":                    "http://localhost:5999",
 		"KYIDENTITY_SECRET_KEY":                    hex.EncodeToString(other),
 		"KYIDENTITY_RSA_KEY_PATH":                  filepath.Join(otherKeys, "rsa.key"),
+		"KYIDENTITY_MLDSA_KEY_PATH":                filepath.Join(otherKeys, "mldsa.key"),
 		"KYIDENTITY_VAPID_KEY_PATH":                filepath.Join(otherKeys, "vapid.key"),
 		"KYIDENTITY_REPLICATED":                    "false",
 		"KYIDENTITY_SECURE_COOKIES":                "true",
@@ -189,7 +193,7 @@ func TestReplicaConfigRefusesADifferentSharedSetting(t *testing.T) {
 	})
 	t.Run("per-host settings may differ", func(t *testing.T) {
 		moved := t.TempDir()
-		for _, f := range []string{"rsa.key", "vapid.key"} {
+		for _, f := range []string{"rsa.key", "mldsa.key", "vapid.key"} {
 			raw, err := os.ReadFile(filepath.Join(keyDir, f))
 			if err != nil {
 				t.Fatal(err)
@@ -200,7 +204,7 @@ func TestReplicaConfigRefusesADifferentSharedSetting(t *testing.T) {
 		}
 		for k, v := range map[string]string{
 			"KYIDENTITY_PORT": "6001", "KYIDENTITY_LISTEN_HOST": "127.0.0.1", "KYIDENTITY_DATA_DIR": t.TempDir(),
-			"KYIDENTITY_RSA_KEY_PATH": filepath.Join(moved, "rsa.key"), "KYIDENTITY_VAPID_KEY_PATH": filepath.Join(moved, "vapid.key"),
+			"KYIDENTITY_RSA_KEY_PATH": filepath.Join(moved, "rsa.key"), "KYIDENTITY_MLDSA_KEY_PATH": filepath.Join(moved, "mldsa.key"), "KYIDENTITY_VAPID_KEY_PATH": filepath.Join(moved, "vapid.key"),
 			"TRUSTED_PROXY_CIDRS": "10.1.2.3/32", "KYIDENTITY_FORWARDED_HEADER": "X-Real-IP",
 			"KYIDENTITY_BACKUP_DIR": t.TempDir(), "KYIDENTITY_BACKUP_KEEP": "3",
 			"BOOTSTRAP_ADMIN_USER": "someone", "BOOTSTRAP_ADMIN_PASS": "a-different-first-password",

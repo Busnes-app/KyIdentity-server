@@ -127,9 +127,9 @@ func main() {
 		log.Fatalf("Failed to initialize database store: %v", err)
 	}
 	defer dbStore.Close()
-	keyManager, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath)
+	keyManager, err := loadSigningKeys(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize RSA key manager: %v", err)
+		log.Fatalf("Failed to initialize JWT signing key manager: %v", err)
 	}
 	pushOrigin, err := mfa.IssuerOrigin(cfg.IssuerURL)
 	if err != nil {
@@ -737,8 +737,8 @@ func openStore(cfg *config.Config) (*store.Store, error) {
 // fail on a missing file — and a capsule without the signing key cannot restore a working
 // service, which is why its absence is fatal rather than skipped.
 func openStoreForBackup(cfg *config.Config) *store.Store {
-	if _, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath); err != nil {
-		log.Fatalf("Failed to load the RSA signing key at %s: %v", cfg.RSAKeyPath, err)
+	if _, err := loadSigningKeys(cfg); err != nil {
+		log.Fatalf("Failed to load the signing keys at %s: %v", cfg.RSAKeyPath, err)
 	}
 	dbStore, err := openStore(cfg)
 	if err != nil {

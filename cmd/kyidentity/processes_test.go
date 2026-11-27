@@ -93,6 +93,7 @@ func (c *cluster) spawn(name string, extra ...string) *process {
 		"KYIDENTITY_SECRET_KEY_FILE=" + filepath.Join(c.secrets, "secret.key"),
 		"KYIDENTITY_ENCRYPTION_KEY_FILE=" + filepath.Join(c.secrets, "encryption.key"),
 		"KYIDENTITY_RSA_KEY_PATH=" + filepath.Join(c.secrets, "jwt_rs256.key"),
+		"KYIDENTITY_MLDSA_KEY_PATH=" + filepath.Join(c.secrets, "jwt_mldsa65.key"),
 		"KYIDENTITY_VAPID_KEY_PATH=" + filepath.Join(c.secrets, "push-vapid-private.key"),
 		"BOOTSTRAP_ADMIN_PASS=" + firstPassword,
 		"TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128",
@@ -416,6 +417,9 @@ func newClusterOn(t *testing.T, dir, databaseURL string) *cluster {
 		}
 	}
 	if _, err := crypto.LoadOrCreateRSAKey(filepath.Join(c.secrets, "jwt_rs256.key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := crypto.LoadOrCreateMLDSAKey(filepath.Join(c.secrets, "jwt_mldsa65.key")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := mfa.NewUnifiedPushSender(filepath.Join(c.secrets, "push-vapid-private.key"), "https://id.example", false); err != nil {
@@ -770,7 +774,7 @@ func TestServerProcessesThroughOperatorChanges(t *testing.T) {
 	// A single instance on SQLite, with keys it generated itself, gains an administrator, an
 	// app and a session.
 	single := c.spawn("single", "KYIDENTITY_REPLICATED=", "KYIDENTITY_DATABASE_URL_FILE=", "KYIDENTITY_SECRET_KEY_FILE=",
-		"KYIDENTITY_ENCRYPTION_KEY_FILE=", "KYIDENTITY_RSA_KEY_PATH=", "KYIDENTITY_VAPID_KEY_PATH=")
+		"KYIDENTITY_ENCRYPTION_KEY_FILE=", "KYIDENTITY_RSA_KEY_PATH=", "KYIDENTITY_MLDSA_KEY_PATH=", "KYIDENTITY_VAPID_KEY_PATH=")
 	c.waitReady(single)
 	setLive(single)
 	admin := newBrowser(t, "198.51.100.10")
@@ -800,9 +804,9 @@ func TestServerProcessesThroughOperatorChanges(t *testing.T) {
 		t.Fatalf("single exited %d on SIGTERM", code)
 	}
 
-	// The move in docs/RUNNING.md: the four key files into the Secret unchanged, the rows
-	// into Postgres, then two replicas. The session, the app and the signing key carry over.
-	for _, name := range []string{"secret.key", "encryption.key", "jwt_rs256.key", "push-vapid-private.key"} {
+	// The move in docs/RUNNING.md: the key files into the Secret unchanged, the rows
+	// into Postgres, then two replicas. The session, the app and the signing keys carry over.
+	for _, name := range []string{"secret.key", "encryption.key", "jwt_rs256.key", "jwt_mldsa65.key", "push-vapid-private.key"} {
 		raw, err := os.ReadFile(filepath.Join(single.dataDir, name))
 		if err != nil {
 			t.Fatal(err)

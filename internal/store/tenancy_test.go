@@ -368,9 +368,9 @@ func TestTenancyUpgradeKeepsEveryView(t *testing.T) {
 	for _, table := range orgColumnTables {
 		tenancyExec(t, s, `ALTER TABLE `+table+` ADD COLUMN org_id TEXT DEFAULT '`+DefaultOrgID+`'`)
 	}
-	tenancyExec(t, s, `ALTER TABLE users ADD COLUMN mailbox_address TEXT`, clientRegionOriginsSQL)
+	tenancyExec(t, s, `ALTER TABLE users ADD COLUMN mailbox_address TEXT`, `ALTER TABLE oauth_clients ADD COLUMN id_token_signed_response_alg TEXT NOT NULL DEFAULT ''`, clientRegionOriginsSQL)
 	copyFixture(t, s)
-	tenancyExec(t, s, `ALTER TABLE users DROP COLUMN mailbox_address`, `DROP TABLE client_region_origins`)
+	tenancyExec(t, s, `ALTER TABLE users DROP COLUMN mailbox_address`, `ALTER TABLE oauth_clients DROP COLUMN id_token_signed_response_alg`, `DROP TABLE client_region_origins`)
 	for _, table := range orgColumnTables {
 		tenancyExec(t, s, `ALTER TABLE `+table+` DROP COLUMN org_id`)
 	}

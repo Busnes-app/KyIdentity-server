@@ -71,7 +71,7 @@ func (b *blocker) wait(t *testing.T, what string) {
 // liveServer serves srv for cfg on a real loopback listener.
 func liveServer(t *testing.T, cfg *config.Config, s *store.Store) (*api.Server, string) {
 	t.Helper()
-	km, err := crypto.LoadOrCreateRSAKey(cfg.RSAKeyPath)
+	km, err := loadSigningKeys(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

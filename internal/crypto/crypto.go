@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/hmac"
+	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -19,6 +20,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -260,11 +262,18 @@ func VerifyECDSAP256(publicKey string, message []byte, signature string) bool {
 	return ecdsa.VerifyASN1(pub, digest[:], sig)
 }
 
-// JWTKeyManager manages RSA keys for OIDC ID Token signing and JWKS.
+// JWTKeyManager manages OIDC signing keys (RS256 and optional ML-DSA-65) plus retired
+// verification keys for multi-key JWKS rotation.
 type JWTKeyManager struct {
-	PrivateKey *rsa.PrivateKey
-	PublicKey  *rsa.PublicKey
-	KeyID      string
+	PrivateKey      *rsa.PrivateKey
+	PublicKey       *rsa.PublicKey
+	KeyID           string
+	MLDSAPrivateKey *mldsa.PrivateKey
+	MLDSAPublicKey  *mldsa.PublicKey
+	MLDSAKeyID      string
+
+	mu        sync.RWMutex
+	extraKeys []VerificationKey
 }
 
 const minimumRSASigningKeyBits = 2048
@@ -335,14 +344,16 @@ func LoadOrCreateRSAKey(keyPath string) (*JWTKeyManager, error) {
 	}, nil
 }
 
-// JWK represents an RFC 7517 JSON Web Key.
+// JWK represents an RFC 7517 JSON Web Key, including RFC 9964 AKP (Algorithm Key Pair) keys
+// carrying raw post-quantum public keys in `pub`.
 type JWK struct {
 	Kty string `json:"kty"`
 	Use string `json:"use"`
 	Alg string `json:"alg"`
 	Kid string `json:"kid"`
-	N   string `json:"n"`
-	E   string `json:"e"`
+	N   string `json:"n,omitempty"`
+	E   string `json:"e,omitempty"`
+	Pub string `json:"pub,omitempty"`
 }
 
 // JWKS represents a JSON Web Key Set.
@@ -350,23 +361,39 @@ type JWKS struct {
 	Keys []JWK `json:"keys"`
 }
 
-// GetJWKS returns the public keys in JWKS format.
+// GetJWKS returns all active signing public keys (RS256 and, when loaded, ML-DSA-65 AKP)
+// plus any retired verification keys in JWKS format, deduplicated by kid.
 func (m *JWTKeyManager) GetJWKS() JWKS {
-	nBytes := m.PublicKey.N.Bytes()
-	eBytes := big.NewInt(int64(m.PublicKey.E)).Bytes()
-
-	return JWKS{
-		Keys: []JWK{
-			{
-				Kty: "RSA",
-				Use: "sig",
-				Alg: "RS256",
-				Kid: m.KeyID,
-				N:   base64.RawURLEncoding.EncodeToString(nBytes),
-				E:   base64.RawURLEncoding.EncodeToString(eBytes),
-			},
-		},
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	keys := make([]JWK, 0, 2+len(m.extraKeys))
+	seen := make(map[string]struct{}, 2+len(m.extraKeys))
+	if m.PublicKey != nil {
+		keys = append(keys, rsaPublicToJWK(m.KeyID, m.PublicKey))
+		seen[m.KeyID] = struct{}{}
 	}
+	if m.MLDSAPublicKey != nil && m.MLDSAKeyID != "" {
+		keys = append(keys, mldsaPublicToJWK(m.MLDSAKeyID, m.MLDSAPublicKey))
+		seen[m.MLDSAKeyID] = struct{}{}
+	}
+	for _, k := range m.extraKeys {
+		if _, dup := seen[k.Kid]; dup {
+			continue
+		}
+		switch k.Alg {
+		case AlgRS256:
+			if pub, ok := k.PublicKey.(*rsa.PublicKey); ok && pub != nil {
+				keys = append(keys, rsaPublicToJWK(k.Kid, pub))
+				seen[k.Kid] = struct{}{}
+			}
+		case AlgMLDSA65:
+			if pub, ok := k.PublicKey.(*mldsa.PublicKey); ok && pub != nil {
+				keys = append(keys, mldsaPublicToJWK(k.Kid, pub))
+				seen[k.Kid] = struct{}{}
+			}
+		}
+	}
+	return JWKS{Keys: keys}
 }
 
 // SignJWT creates an RS256 signed JWT string with the given claims.
@@ -374,21 +401,55 @@ func (m *JWTKeyManager) SignJWT(claims map[string]any) (string, error) {
 	return m.SignJWTWithType("JWT", claims)
 }
 
-// SignJWTWithType signs claims under an explicit `typ` header, so tokens with a different
-// purpose (logout tokens are `logout+jwt`) are distinguishable before their claims are read.
+// SignJWTWithType signs claims under an explicit `typ` header using RS256, so tokens with
+// a different purpose (logout tokens are `logout+jwt`) are distinguishable before their
+// claims are read.
 func (m *JWTKeyManager) SignJWTWithType(typ string, claims map[string]any) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims(claims))
+	return m.SignJWTWithAlg(AlgRS256, typ, claims)
+}
+
+// SignJWTWithAlg signs claims under an explicit JWS algorithm (`RS256` or `ML-DSA-65`) and
+// `typ` header. An empty algorithm defaults to RS256.
+func (m *JWTKeyManager) SignJWTWithAlg(alg, typ string, claims map[string]any) (string, error) {
+	if alg == "" {
+		alg = AlgRS256
+	}
+	var (
+		method jwt.SigningMethod
+		kid    string
+		key    any
+	)
+	switch alg {
+	case AlgRS256:
+		if m.PrivateKey == nil {
+			return "", errors.New("RSA signing key is not loaded")
+		}
+		method = jwt.SigningMethodRS256
+		kid = m.KeyID
+		key = m.PrivateKey
+	case AlgMLDSA65:
+		if !m.HasMLDSA() {
+			return "", errors.New("ML-DSA-65 signing key is not loaded")
+		}
+		method = SigningMethodMLDSA65
+		kid = m.MLDSAKeyID
+		key = m.MLDSAPrivateKey
+	default:
+		return "", fmt.Errorf("unsupported JWT signing algorithm %q", alg)
+	}
+	token := jwt.NewWithClaims(method, jwt.MapClaims(claims))
 	token.Header["typ"] = typ
-	token.Header["kid"] = m.KeyID
-	signed, err := token.SignedString(m.PrivateKey)
+	token.Header["kid"] = kid
+	signed, err := token.SignedString(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign JWT: %w", err)
 	}
 	return signed, nil
 }
 
-// VerifyJWT verifies an RS256 token signed by this key: exp is required and must not have
-// passed, and iss and token_use must equal the given values.
+// VerifyJWT verifies an RS256 or ML-DSA-65 token signed by an active or retired key on this
+// manager: exp is required and must not have passed, and iss and token_use must equal the
+// given values.
 func (m *JWTKeyManager) VerifyJWT(tokenString, issuer, tokenUse string) (map[string]any, error) {
 	return m.verifyJWT(tokenString, issuer, tokenUse, false)
 }
@@ -404,13 +465,13 @@ func (m *JWTKeyManager) verifyJWT(tokenString, issuer, tokenUse string, allowExp
 	if issuer == "" || tokenUse == "" {
 		return nil, errors.New("verifier needs an issuer and token_use")
 	}
-	opts := []jwt.ParserOption{jwt.WithValidMethods([]string{"RS256"}), jwt.WithExpirationRequired(), jwt.WithIssuer(issuer)}
+	opts := []jwt.ParserOption{jwt.WithValidMethods(m.verificationAlgs()), jwt.WithExpirationRequired(), jwt.WithIssuer(issuer)}
 	if allowExpired {
 		// This also drops the exp-required and issuer options; both are rechecked below.
 		opts = append(opts, jwt.WithoutClaimsValidation())
 	}
 	claims := jwt.MapClaims{}
-	if _, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (any, error) { return m.PublicKey, nil }, opts...); err != nil {
+	if _, err := jwt.ParseWithClaims(tokenString, claims, m.resolveVerificationKey, opts...); err != nil {
 		return nil, err
 	}
 	// A missing exp is not "no expiry", it is a malformed token. Fail closed.

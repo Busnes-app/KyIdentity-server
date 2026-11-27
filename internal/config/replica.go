@@ -23,10 +23,10 @@ const ReplicaConfigSetting = "replica_config_fingerprint"
 const EncryptionKeyField = "KYIDENTITY_ENCRYPTION_KEY"
 
 // ReplicaKeys are the public halves of the key files every replica must hold the same:
-// the RSA signing key (SPKI DER) and the VAPID key (uncompressed point). Paths differ per
-// host; the keys may not.
+// the RSA signing key (SPKI DER), optional ML-DSA-65 signing key (raw FIPS 204 bytes), and
+// the VAPID key (uncompressed point). Paths differ per host; the keys may not.
 type ReplicaKeys struct {
-	RSAPublic, VAPIDPublic []byte
+	RSAPublic, MLDSAPublic, VAPIDPublic []byte
 }
 
 // replicaShared names, by Config field, every setting all replicas must agree on and the
@@ -59,19 +59,20 @@ var replicaShared = map[string]string{
 	"Tenancy":                    "KYIDENTITY_TENANCY",
 }
 
-// RSAKeyPath and VAPIDKeyPath are paths, so per host; the keys they name are compared as
-// RSAPublicKeyField and VAPIDPublicKeyField. RecoveryKeyID stays per host so the
-// documented rolling recovery-key replacement keeps working. RPID and Origin derive from
-// the issuer.
+// RSAKeyPath, MLDSAKeyPath and VAPIDKeyPath are paths, so per host; the keys they name are
+// compared as RSAPublicKeyField, MLDSAPublicKeyField and VAPIDPublicKeyField. RecoveryKeyID
+// stays per host so the documented rolling recovery-key replacement keeps working. RPID and
+// Origin derive from the issuer.
 var replicaPerHost = []string{
 	"Port", "ListenHost", "RPID", "Origin", "DBPath", "DatabaseURL", "DataDir",
-	"RSAKeyPath", "VAPIDKeyPath", "VAPIDKeyMounted", "TrustedProxyCIDRs", "ForwardedHeader",
+	"RSAKeyPath", "MLDSAKeyPath", "VAPIDKeyPath", "VAPIDKeyMounted", "TrustedProxyCIDRs", "ForwardedHeader",
 	"BootstrapUser", "BootstrapPass", "BackupDir", "BackupKeep", "RecoveryKeyID", "PlatformListen", "PlatformEventsURL",
 }
 
 // The key files' public halves, reported under the variables that name the files.
 const (
 	RSAPublicKeyField   = "KYIDENTITY_RSA_KEY_PATH"
+	MLDSAPublicKeyField = "KYIDENTITY_MLDSA_KEY_PATH"
 	VAPIDPublicKeyField = "KYIDENTITY_VAPID_KEY_PATH"
 )
 
@@ -89,11 +90,17 @@ func sharedValues(c *Config, k ReplicaKeys) ([][2]string, error) {
 		roots = hex.EncodeToString(sum[:])
 	}
 	rsaSum := sha256.Sum256(k.RSAPublic)
+	mldsaFP := ""
+	if len(k.MLDSAPublic) > 0 {
+		mldsaSum := sha256.Sum256(k.MLDSAPublic)
+		mldsaFP = hex.EncodeToString(mldsaSum[:])
+	}
 	f := replicaShared
 	return [][2]string{
 		{f["IssuerURL"], c.IssuerURL},
 		{f["SecretKey"], hex.EncodeToString(c.SecretKey)},
 		{RSAPublicKeyField, hex.EncodeToString(rsaSum[:])},
+		{MLDSAPublicKeyField, mldsaFP},
 		{VAPIDPublicKeyField, hex.EncodeToString(k.VAPIDPublic)},
 		{f["Replicated"], b(c.Replicated)},
 		{f["SecureCookies"], b(c.SecureCookies)},

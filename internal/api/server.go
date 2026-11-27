@@ -117,6 +117,7 @@ func (s *Server) routes() *http.ServeMux {
 	devH := NewDeviceHandler(s.store, s.mfaEngine, s.audit, s.middleware, s.cfg.IssuerURL)
 	devH.multiTenant = s.cfg.Tenancy == "multi"
 	adminH := NewAdminHandler(s.store, s.syncEngine, s.audit, s.middleware, s.cfg.IssuerURL)
+	adminH.keyManager = s.keyManager
 	adminH.multiTenant = s.cfg.Tenancy == "multi"
 	onboardH := NewOnboardingHandler(s.store, s.audit, s.middleware, s.cfg.IssuerURL, s.cfg.EncryptionKey)
 	requestH := NewAccessRequestHandler(s.store, s.audit, s.middleware, s.cfg.EncryptionKey)
