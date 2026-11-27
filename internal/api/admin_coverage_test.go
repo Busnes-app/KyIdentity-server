@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
 
@@ -162,6 +164,18 @@ func TestAdminCreateOAuthClientValidation(t *testing.T) {
 		t.Fatalf("public suite registration audited %d times, want 4", denied)
 	}
 
+	// On an RSA-only server, ML-DSA-65 must be rejected before creating the client.
+	covRefused(t, adminRequest(t, srv, "POST", "/api/admin/clients", admin, `{"clientName":"NoMLDSA","redirectUris":["http://127.0.0.1:8080/cb"],"idTokenSignedResponseAlg":"ML-DSA-65"}`), 400, "invalid_request")
+
+	// Once the server has an active ML-DSA-65 signing key, creation with ML-DSA-65 succeeds.
+	mldsaPriv, mldsaPub, mldsaKID, err := crypto.LoadOrCreateMLDSAKey(filepath.Join(t.TempDir(), "jwt_mldsa65.key"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateMLDSAKey: %v", err)
+	}
+	srv.keyManager.MLDSAPrivateKey = mldsaPriv
+	srv.keyManager.MLDSAPublicKey = mldsaPub
+	srv.keyManager.MLDSAKeyID = mldsaKID
+
 	// Loopback http is allowed for development; an omitted id is generated; the secret
 	// is shown once and the response is not cacheable.
 	rr := adminRequest(t, srv, "POST", "/api/admin/clients", admin, `{"clientName":"Dev","redirectUris":["http://127.0.0.1:8080/cb"],"postLogoutRedirectUris":["", "https://dev.example/bye"],"idTokenSignedResponseAlg":"ML-DSA-65"}`)
@@ -196,6 +210,7 @@ func TestAdminUpdateOAuthClientValidationAndRevocation(t *testing.T) {
 		{"unknown scope", `{"allowedScopes":["openid","offline_admin"]}`, "unknown_scope"},
 		{"bogus type", `{"clientType":"trusted"}`, "invalid_request"},
 		{"bogus signing alg", `{"idTokenSignedResponseAlg":"none"}`, "invalid_request"},
+		{"unavailable mldsa alg", `{"idTokenSignedResponseAlg":"ML-DSA-65"}`, "invalid_request"},
 		{"rotate public secret", `{"rotateSecret":true}`, "invalid_request"},
 		{"rename then bad scope", `{"clientName":"Renamed","allowedScopes":["root"]}`, "unknown_scope"},
 	} {
@@ -204,6 +219,15 @@ func TestAdminUpdateOAuthClientValidationAndRevocation(t *testing.T) {
 	if c, _ := db.GetOAuthClientByID("notes"); c.ClientName != "notes" || c.RedirectURIsJSON != `["https://notes.example/cb"]` || c.AllowedScopesJSON != `["openid"]` || c.ClientType != "public" || !c.Enabled || c.IDTokenSignedResponseAlg != "" {
 		t.Fatalf("a refused edit changed the client: %+v", c)
 	}
+
+	// Provision ML-DSA-65 on the server so updating a client to ML-DSA-65 succeeds.
+	mldsaPriv, mldsaPub, mldsaKID, err := crypto.LoadOrCreateMLDSAKey(filepath.Join(t.TempDir(), "jwt_mldsa65.key"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateMLDSAKey: %v", err)
+	}
+	srv.keyManager.MLDSAPrivateKey = mldsaPriv
+	srv.keyManager.MLDSAPublicKey = mldsaPub
+	srv.keyManager.MLDSAKeyID = mldsaKID
 
 	// Valid edits land; disabling the client revokes what was issued under it.
 	jti := issueToken(t, db, newUser(t, db, "user").ID, "notes")

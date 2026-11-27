@@ -24,6 +24,7 @@ import (
 
 type AdminHandler struct {
 	store      *store.Store
+	keyManager *crypto.JWTKeyManager
 	syncEngine *sync.Engine
 	audit      *audit.Logger
 	middleware *MiddlewareManager
@@ -40,6 +41,17 @@ func NewAdminHandler(s *store.Store, syncEngine *sync.Engine, audit *audit.Logge
 		middleware: mm,
 		issuerURL:  issuerURL,
 	}
+}
+
+func (h *AdminHandler) validateSigningAlg(raw string) (string, error) {
+	alg, err := crypto.NormalizeSigningAlg(raw)
+	if err != nil {
+		return "", err
+	}
+	if alg == crypto.AlgMLDSA65 && (h.keyManager == nil || !h.keyManager.HasMLDSA()) {
+		return "", errors.New("ML-DSA-65 signing is unavailable because no ML-DSA-65 signing key is configured on this server")
+	}
+	return alg, nil
 }
 
 // ListUsers lists all user accounts.
@@ -632,7 +644,7 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	signingAlg, err := crypto.NormalizeSigningAlg(req.IDTokenSignedResponseAlg)
+	signingAlg, err := h.validateSigningAlg(req.IDTokenSignedResponseAlg)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -733,7 +745,7 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 		client.LaunchURL = strings.TrimSpace(*req.LaunchURL)
 	}
 	if req.IDTokenSignedResponseAlg != nil {
-		alg, err := crypto.NormalizeSigningAlg(*req.IDTokenSignedResponseAlg)
+		alg, err := h.validateSigningAlg(*req.IDTokenSignedResponseAlg)
 		if err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
