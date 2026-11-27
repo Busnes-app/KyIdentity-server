@@ -52,7 +52,7 @@ const DefaultAppName = "KySignOn"
 // VAPIDKeyFile is the UnifiedPush VAPID private key, under the data directory.
 const VAPIDKeyFile = "push-vapid-private.key"
 
-// MLDSAKeyFile is the post-quantum ML-DSA-65 OIDC signing key, placed next to RSAKeyPath by default.
+// MLDSAKeyFile is the post-quantum ML-DSA-65 OIDC signing key, under the data directory by default.
 const MLDSAKeyFile = "jwt_mldsa65.key"
 
 // DefaultBackupKeep is how many sealed capsules a local backup directory retains.
@@ -203,7 +203,7 @@ func Load() (*Config, error) {
 	mldsaKeyPath := strings.TrimSpace(os.Getenv("KYIDENTITY_MLDSA_KEY_PATH"))
 	mldsaKeyMounted := mldsaKeyPath != ""
 	if !mldsaKeyMounted {
-		mldsaKeyPath = filepath.Join(filepath.Dir(rsaKeyPath), MLDSAKeyFile)
+		mldsaKeyPath = filepath.Join(dataDir, MLDSAKeyFile)
 	}
 	vapidKeyPath := strings.TrimSpace(os.Getenv("KYIDENTITY_VAPID_KEY_PATH"))
 	vapidKeyMounted := vapidKeyPath != ""
