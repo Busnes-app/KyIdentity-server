@@ -35,6 +35,23 @@ func TestStaffAuditByActorAndOrgLimits(t *testing.T) {
 	if res.Code != 200 || json.Unmarshal(res.Body.Bytes(), &result) != nil || result.Total != 2 || len(result.Events) != 2 || result.Events[0].OrgID == nil || result.Events[1].OrgID == nil || *result.Events[0].OrgID == *result.Events[1].OrgID || strings.Contains(res.Body.String(), "never-return") {
 		t.Fatal(res.Code, res.Body.String())
 	}
+	// Querying one's own actor without an action filter must not shift pages or grow totals from staff.audit_read.
+	unfiltered := "/api/admin/audit-by-actor?actor=" + adminUser.ID
+	var page1, page2 struct {
+		Events []store.PlatformAuditEvent `json:"auditEvents"`
+		Total  int                        `json:"total"`
+	}
+	r1 := staffCall(t, srv, "GET", unfiltered, admin, "", "")
+	r2 := staffCall(t, srv, "GET", unfiltered, admin, "", "")
+	if r1.Code != 200 || r2.Code != 200 || json.Unmarshal(r1.Body.Bytes(), &page1) != nil || json.Unmarshal(r2.Body.Bytes(), &page2) != nil {
+		t.Fatal(r1.Code, r2.Code)
+	}
+	if page1.Total != page2.Total || len(page1.Events) != len(page2.Events) || strings.Contains(r2.Body.String(), "staff.audit_read") {
+		t.Fatalf("unstable audit-by-actor pagination: first=%d (%d) second=%d (%d)", page1.Total, len(page1.Events), page2.Total, len(page2.Events))
+	}
+	if len(staffAudit(t, db, staff, "staff.audit_read")) < 3 {
+		t.Fatal("staff.audit_read rows were not recorded")
+	}
 	if res := staffCall(t, srv, "GET", "/api/admin/audit-by-actor", admin, "", ""); res.Code != 400 {
 		t.Fatal(res.Code)
 	}
@@ -206,6 +223,92 @@ func TestRestoreRefusesOldBillingResume(t *testing.T) {
 	body := fmt.Sprintf(`{"revision":999,"restore_generation":%q}`, generation)
 	code, resumed, out := ps.call(ps.billing, "POST", "/platform/v1/orgs/"+id+"/resume", "confirmed", body)
 	if code != 200 || resumed["status"] != "active" {
+		t.Fatal(code, out)
+	}
+}
+
+func TestStaffResumeRefusesBillingSuspensionAndPreservesBillingRevision(t *testing.T) {
+	ps := newPlatformSuite(t)
+	if err := ps.db.SetSetting(store.TenancySetting, "multi"); err != nil {
+		t.Fatal(err)
+	}
+	staffOrg, err := store.CreateOrgForTest(ps.db, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminUser := newOrgUser(t, ps.db, staffOrg, "admin")
+	admin := newSession(t, ps.db, adminUser, time.Now().UTC().Add(time.Hour))
+
+	// Create a customer org and suspend it through billing with reason=payment, with no restore.
+	org := ps.create("billing-payment", "pay-holder@example.test")
+	id := org["id"].(string)
+	code, suspended, out := ps.call(ps.billing, "POST", "/platform/v1/orgs/"+id+"/suspend", "pay-suspend", `{"revision":2,"reason":"payment"}`)
+	if code != 200 || suspended["status"] != "suspended" {
+		t.Fatal(code, out)
+	}
+	orgRev := int64(suspended["org_revision"].(float64))
+
+	// Staff admin cannot lift a billing-owned payment suspension.
+	res := staffCall(t, ps.srv, "POST", "/api/admin/org/resume", admin, id, fmt.Sprintf(`{"org_revision":%d}`, orgRev))
+	if res.Code != 409 {
+		t.Fatalf("expected 409 for payment suspension, got %d: %s", res.Code, res.Body.String())
+	}
+	code, read, out := ps.call(ps.billing, "GET", "/platform/v1/orgs/"+id, "", "")
+	if code != 200 || read["status"] != "suspended" || read["status_reason"] != "payment" {
+		t.Fatal(code, out)
+	}
+
+	// Billing's own next resume at revision 3 still succeeds.
+	code, resumed, out := ps.call(ps.billing, "POST", "/platform/v1/orgs/"+id+"/resume", "pay-resume", `{"revision":3}`)
+	if code != 200 || resumed["status"] != "active" {
+		t.Fatal(code, out)
+	}
+
+	// Also verify a billing-suspended org remains unresumable by staff even after a restore,
+	// while a restore-held org resumes via org_revision without advancing billing_revision.
+	other := ps.create("billing-payment-after-restore", "pay2-holder@example.test")
+	otherID := other["id"].(string)
+	code, otherSusp, out := ps.call(ps.billing, "POST", "/platform/v1/orgs/"+otherID+"/suspend", "pay2-suspend", `{"revision":2,"reason":"payment"}`)
+	if code != 200 || otherSusp["status"] != "suspended" {
+		t.Fatal(code, out)
+	}
+	if _, err := ps.db.ApplyRestoredState(time.Now().UTC(), nil); err != nil {
+		t.Fatal(err)
+	}
+	admin = newSession(t, ps.db, adminUser, time.Now().UTC().Add(time.Hour))
+	code, read, out = ps.call(ps.billing, "GET", "/platform/v1/orgs/"+id, "", "")
+	if code != 200 || read["status"] != "suspended" || read["status_reason"] != "restore_reconciliation" {
+		t.Fatal(code, out)
+	}
+	generation := read["restore_generation"].(string)
+	heldOrgRev := int64(read["org_revision"].(float64))
+	otherOrgRev := int64(otherSusp["org_revision"].(float64))
+
+	// Payment-suspended org cannot be resumed by staff even with the current restore_generation.
+	res = staffCall(t, ps.srv, "POST", "/api/admin/org/resume", admin, otherID, fmt.Sprintf(`{"org_revision":%d,"restore_generation":%q}`, otherOrgRev, generation))
+	if res.Code != 409 {
+		t.Fatalf("expected 409 for payment org after restore, got %d: %s", res.Code, res.Body.String())
+	}
+
+	// Stale org_revision is rejected with 409.
+	res = staffCall(t, ps.srv, "POST", "/api/admin/org/resume", admin, id, fmt.Sprintf(`{"org_revision":%d,"restore_generation":%q}`, heldOrgRev-1, generation))
+	if res.Code != 409 {
+		t.Fatalf("expected 409 for stale org_revision, got %d: %s", res.Code, res.Body.String())
+	}
+
+	// Matching org_revision + restore_generation resumes the restore-held org without touching billing_revision (still 3).
+	res = staffCall(t, ps.srv, "POST", "/api/admin/org/resume", admin, id, fmt.Sprintf(`{"org_revision":%d,"restore_generation":%q}`, heldOrgRev, generation))
+	if res.Code != 200 {
+		t.Fatalf("expected 200 for restore-held org, got %d: %s", res.Code, res.Body.String())
+	}
+	var staffResumed store.PlatformOrg
+	if err := json.Unmarshal(res.Body.Bytes(), &staffResumed); err != nil || staffResumed.Status != "active" || staffResumed.Revision != 3 || staffResumed.OrgRevision <= heldOrgRev {
+		t.Fatalf("unexpected staff resume result: %+v err=%v", staffResumed, err)
+	}
+
+	// Billing's next lifecycle write at revision 4 still succeeds.
+	code, afterBilling, out := ps.call(ps.billing, "POST", "/platform/v1/orgs/"+id+"/suspend", "post-staff-suspend", `{"revision":4,"reason":"payment"}`)
+	if code != 200 || afterBilling["status"] != "suspended" {
 		t.Fatal(code, out)
 	}
 }

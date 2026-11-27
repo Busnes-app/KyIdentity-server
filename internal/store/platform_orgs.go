@@ -137,6 +137,7 @@ type PlatformOrg struct {
 	Plan                string                     `json:"plan"`
 	BillingRef          string                     `json:"billing_ref"`
 	Revision            int64                      `json:"revision"`
+	OrgRevision         int64                      `json:"org_revision"`
 	MaxSeats            int64                      `json:"max_seats"`
 	SeatsUsed           int64                      `json:"seats_used"`
 	PendingInvites      int64                      `json:"pending_invites"`
@@ -149,7 +150,7 @@ type PlatformOrg struct {
 	StorageOverSince    *int64                     `json:"storage_over_since"`
 }
 
-var platformOrgColumns = `o.id,o.name,o.status,o.status_reason,o.home_region,o.plan,COALESCE(o.billing_ref,''),o.billing_revision,o.max_seats,
+var platformOrgColumns = `o.id,o.name,o.status,o.status_reason,o.home_region,o.plan,COALESCE(o.billing_ref,''),o.billing_revision,o.revision,o.max_seats,
  (SELECT COUNT(*) FROM users u WHERE u.org_id=o.id AND ` + seatSQL("u") + `),
  (SELECT COUNT(*) FROM users u WHERE u.org_id=o.id AND u.pending),
  COALESCE(o.account_holder_user_id,''),
@@ -159,7 +160,7 @@ var platformOrgColumns = `o.id,o.name,o.status,o.status_reason,o.home_region,o.p
 func scanPlatformOrg(r interface{ Scan(...any) error }) (*PlatformOrg, error) {
 	var o PlatformOrg
 	var del, over sql.NullInt64
-	if err := r.Scan(&o.ID, &o.Name, &o.Status, &o.StatusReason, &o.HomeRegion, &o.Plan, &o.BillingRef, &o.Revision, &o.MaxSeats,
+	if err := r.Scan(&o.ID, &o.Name, &o.Status, &o.StatusReason, &o.HomeRegion, &o.Plan, &o.BillingRef, &o.Revision, &o.OrgRevision, &o.MaxSeats,
 		&o.SeatsUsed, &o.PendingInvites, &o.AccountHolderUserID, &o.HolderActivated, &del, &o.StorageBytes, &o.StoragePerSeatBytes, &over); err != nil {
 		return nil, err
 	}
@@ -586,16 +587,48 @@ func (p *PlatformStore) DeleteOrg(tx *sql.Tx, now time.Time, c PlatformCaller, i
 	return platformOrgTx(tx, id)
 }
 
-// ResumeOrgForStaff records the staff confirmation in the normal lifecycle transaction.
-func (p *PlatformStore) ResumeOrgForStaff(org OrgID, revision int64, audit *AuditEvent, generation ...string) (*PlatformOrg, error) {
+// ResumeOrgForStaff resumes a customer org suspended after a restore. It refuses orgs
+// held for any other reason (including payment, abuse, deletion_scheduled or deleted),
+// requires a non-empty matching restore generation, and uses the org's own revision as
+// its concurrency token so billing_revision stays billing's alone.
+func (p *PlatformStore) ResumeOrgForStaff(org OrgID, expectedRevision int64, audit *AuditEvent, generation ...string) (*PlatformOrg, error) {
 	tx, err := p.s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	o, err := p.ResumeOrg(tx, time.Now().UTC(), PlatformCaller{TokenID: audit.ActorID, IP: audit.IPAddress, UserAgent: audit.UserAgent, ActorUsername: audit.ActorUsername}, org.id, revision, generation...)
+	now := time.Now().UTC()
+	var current string
+	if err := tx.QueryRow(`SELECT COALESCE((SELECT value FROM system_settings WHERE key=?),'')`, RestoreGenerationSetting).Scan(&current); err != nil {
+		return nil, err
+	}
+	o, err := platformOrgTx(tx, org.id)
 	if err != nil {
 		return nil, err
 	}
-	return o, tx.Commit()
+	if o.Status == "deleted" || o.Status != "suspended" || o.StatusReason != restoreOrgReason {
+		return nil, ErrOrgState
+	}
+	if current == "" || len(generation) != 1 || generation[0] != current {
+		return nil, ErrRestoreReconciliation
+	}
+	if expectedRevision != o.OrgRevision {
+		return nil, &StaleRevisionError{Current: o.OrgRevision}
+	}
+	c := PlatformCaller{TokenID: audit.ActorID, IP: audit.IPAddress, UserAgent: audit.UserAgent, ActorUsername: audit.ActorUsername}
+	if _, err := tx.Exec(`UPDATE orgs SET status='active',status_reason='',delete_after=NULL,revision=`+nextOrgRevisionSQL+`,updated_at=? WHERE id=?`, now, o.ID); err != nil {
+		return nil, erasureError(err)
+	}
+	if err := queuePlatformEventTx(tx, o.ID, "org.resumed", "", "", now); err != nil {
+		return nil, err
+	}
+	details := map[string]any{"from": o.Status, "to": "active", "reason": "", "org_revision": o.OrgRevision, "restore_generation": current}
+	if err := orgAuditTx(tx, o.ID, c.audit("platform.resumed", o.ID, "org", now), details, now); err != nil {
+		return nil, err
+	}
+	out, err := platformOrgTx(tx, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
 }

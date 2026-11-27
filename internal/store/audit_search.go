@@ -202,7 +202,7 @@ func (p *PlatformStore) AuditByActor(ctx context.Context, f AuditFilter) ([]Plat
 	if strings.TrimSpace(f.Actor) == "" || len(f.Actor) > 200 || f.Limit < 1 || f.Limit > 500 || f.Offset < 0 || f.Offset > 1000000 {
 		return nil, 0, InputError("actor and bounded pagination are required")
 	}
-	where, args := f.filters([]string{"TRUE"}, nil)
+	where, args := f.filters([]string{"action<>'staff.audit_read'"}, nil)
 	var total int
 	if err := p.s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err

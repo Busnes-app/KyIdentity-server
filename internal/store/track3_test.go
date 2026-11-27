@@ -103,15 +103,15 @@ func TestRestoreCustomerReconciliation(t *testing.T) {
 			if replay.CeilingBytes != 123 {
 				t.Fatal("replay restored headroom", replay)
 			}
-			if _, err := s.Platform().ResumeOrgForStaff(org, o.Revision+1, &AuditEvent{ActorID: "staff"}); !errors.Is(err, ErrRestoreReconciliation) {
+			if _, err := s.Platform().ResumeOrgForStaff(org, o.OrgRevision, &AuditEvent{ActorID: "staff"}); !errors.Is(err, ErrRestoreReconciliation) {
 				t.Fatal("stale resume admitted", err)
 			}
 			generation, err := s.Platform().OrgRestoreGeneration()
 			if err != nil {
 				t.Fatal(err)
 			}
-			resumed, err := s.Platform().ResumeOrgForStaff(org, o.Revision+1, &AuditEvent{ActorID: "staff"}, generation)
-			if err != nil || resumed.Status != "active" {
+			resumed, err := s.Platform().ResumeOrgForStaff(org, o.OrgRevision, &AuditEvent{ActorID: "staff"}, generation)
+			if err != nil || resumed.Status != "active" || resumed.Revision != o.Revision || resumed.OrgRevision <= o.OrgRevision {
 				t.Fatal(resumed, err)
 			}
 			if err := s.CreateSessionForInteraction(&Session{ID: uuid.NewString(), UserID: member.ID, SessionTokenHash: uuid.NewString(), ExpiresAt: now.Add(time.Hour)}, "", ""); err != nil {

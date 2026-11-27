@@ -138,15 +138,16 @@ func staffPlatformError(w http.ResponseWriter, err error) {
 	platformError(w, status, code, extra)
 }
 
-// ResumeRestoredOrg is an explicit staff confirmation, using the same revision and
-// lifecycle guards as billing. It cannot undo a holder's erasure request.
+// ResumeRestoredOrg is an explicit staff confirmation for an org suspended after a
+// restore. It uses the org's own revision as its concurrency token and never alters
+// billing_revision or lifts a billing-owned suspension or deletion schedule.
 func (h *AdminHandler) ResumeRestoredOrg(w http.ResponseWriter, r *http.Request) {
 	if !h.multiTenant {
 		http.NotFound(w, r)
 		return
 	}
 	var req struct {
-		Revision          int64  `json:"revision"`
+		OrgRevision       int64  `json:"org_revision"`
 		RestoreGeneration string `json:"restore_generation,omitempty"`
 	}
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
@@ -156,7 +157,7 @@ func (h *AdminHandler) ResumeRestoredOrg(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	u := GetUserFromContext(r.Context())
-	tx, err := h.store.Platform().ResumeOrgForStaff(orgStore(r).ID(), req.Revision, &store.AuditEvent{ID: uuid.NewString(), ActorID: u.ID, ActorUsername: u.Username, IPAddress: h.middleware.ClientIP(r), UserAgent: r.UserAgent()}, req.RestoreGeneration)
+	tx, err := h.store.Platform().ResumeOrgForStaff(orgStore(r).ID(), req.OrgRevision, &store.AuditEvent{ID: uuid.NewString(), ActorID: u.ID, ActorUsername: u.Username, IPAddress: h.middleware.ClientIP(r), UserAgent: r.UserAgent()}, req.RestoreGeneration)
 	if err != nil {
 		staffPlatformError(w, err)
 		return

@@ -10,13 +10,14 @@ export interface OrgLimitsData {
   pool_bytes: number;
   used_bytes: number;
   revision: number;
+  org_revision: number;
   status_reason: string;
   restore_generation: string;
   storage_usage: Record<string, { used_bytes: number; reported_at: number }>;
 }
 export function parseOrgLimits(v: unknown): OrgLimitsData {
   if (!isRecord(v)) throw new Error('Organisation limits are malformed');
-  const keys = ['max_seats', 'seats_used', 'storage_bytes', 'storage_per_seat_bytes', 'pool_bytes', 'used_bytes', 'revision'];
+  const keys = ['max_seats', 'seats_used', 'storage_bytes', 'storage_per_seat_bytes', 'pool_bytes', 'used_bytes', 'revision', 'org_revision'];
   for (const k of keys) if (typeof v[k] !== 'number' || !Number.isSafeInteger(v[k]) || v[k] < 0) throw new Error('Organisation limits are malformed');
   if (v.restore_generation !== undefined && typeof v.restore_generation !== 'string') throw new Error('Restore generation is malformed');
   if (typeof v.status_reason !== 'string' || !isRecord(v.storage_usage)) throw new Error('Organisation limits are malformed');
@@ -26,7 +27,7 @@ export function parseOrgLimits(v: unknown): OrgLimitsData {
     usage[app] = { used_bytes: u.used_bytes, reported_at: u.reported_at };
   }
   // Each field was checked at the JSON boundary above.
-  return { max_seats: Number(v.max_seats), seats_used: Number(v.seats_used), storage_bytes: Number(v.storage_bytes), storage_per_seat_bytes: Number(v.storage_per_seat_bytes), pool_bytes: Number(v.pool_bytes), used_bytes: Number(v.used_bytes), revision: Number(v.revision), status_reason: v.status_reason, restore_generation: typeof v.restore_generation === 'string' ? v.restore_generation : '', storage_usage: usage };
+  return { max_seats: Number(v.max_seats), seats_used: Number(v.seats_used), storage_bytes: Number(v.storage_bytes), storage_per_seat_bytes: Number(v.storage_per_seat_bytes), pool_bytes: Number(v.pool_bytes), used_bytes: Number(v.used_bytes), revision: Number(v.revision), org_revision: Number(v.org_revision), status_reason: v.status_reason, restore_generation: typeof v.restore_generation === 'string' ? v.restore_generation : '', storage_usage: usage };
 }
 
 export function OrgLimits({ onResumed }: { onResumed: () => void }) {
@@ -57,7 +58,7 @@ export function OrgLimits({ onResumed }: { onResumed: () => void }) {
     try {
       const path = '/api/admin/org/resume';
       const stepUpToken = await requestGrant('Confirm billing, cancellations and erasures have been reconciled, and every app has replaced its organisation cache. Resume this organisation?', `POST ${path}`);
-      await apiRequest(path, { method: 'POST', stepUpToken, body: JSON.stringify({ revision: data.revision + 1, restore_generation: data.restore_generation }) }); onResumed(); await load();
+      await apiRequest(path, { method: 'POST', stepUpToken, body: JSON.stringify({ org_revision: data.org_revision, restore_generation: data.restore_generation }) }); onResumed(); await load();
     } catch (e) { if (!isCancelled(e)) setError(errorMessage(e)); } finally { setBusy(false); }
   };
   return <div className="settings-section"><div className="modal-body">
