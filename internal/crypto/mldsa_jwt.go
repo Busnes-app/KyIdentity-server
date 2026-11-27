@@ -190,8 +190,23 @@ func (m *JWTKeyManager) AddVerificationKey(kid, alg string, pub any) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if (kid == m.KeyID && alg != AlgRS256) || (kid == m.MLDSAKeyID && alg != AlgMLDSA65) {
-		return fmt.Errorf("verification key kid %q collides with active signing key of a different algorithm", kid)
+	if kid == m.KeyID {
+		if alg != AlgRS256 {
+			return fmt.Errorf("verification key kid %q collides with active signing key of a different algorithm", kid)
+		}
+		if m.PublicKey == nil || !pub.(*rsa.PublicKey).Equal(m.PublicKey) {
+			return fmt.Errorf("verification key kid %q collides with active RS256 signing key", kid)
+		}
+		return nil
+	}
+	if m.MLDSAKeyID != "" && kid == m.MLDSAKeyID {
+		if alg != AlgMLDSA65 {
+			return fmt.Errorf("verification key kid %q collides with active signing key of a different algorithm", kid)
+		}
+		if m.MLDSAPublicKey == nil || !pub.(*mldsa.PublicKey).Equal(m.MLDSAPublicKey) {
+			return fmt.Errorf("verification key kid %q collides with active ML-DSA-65 signing key", kid)
+		}
+		return nil
 	}
 	for i := range m.extraKeys {
 		if m.extraKeys[i].Kid == kid {

@@ -43,9 +43,7 @@ type Snapshotter interface {
 func Members(cfg *config.Config) []string {
 	m := []string{dbRelPath, keyRelPath}
 	if cfg.MLDSAKeyPath != "" {
-		if _, err := os.Stat(cfg.MLDSAKeyPath); err == nil {
-			m = append(m, mldsaKeyRelPath)
-		}
+		m = append(m, mldsaKeyRelPath)
 	}
 	m = append(m, encKeyRelPath, secretKeyRelPath)
 	if _, err := os.Stat(RecoveryKeyPath(cfg.DataDir)); err == nil {
@@ -203,18 +201,19 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 	files = append(files, recoveryclient.File{Path: keyRelPath, Data: keyBytes, Mode: 0600})
 
 	// The ML-DSA-65 signing key, so restored deployments keep issuing and verifying PQ tokens
-	// under the same kid. Absent on pre-PQC capsules and RSA-only replicated deployments.
+	// under the same kid. Intentionally RSA-only deployments leave MLDSAKeyPath empty; when
+	// configured, a missing file fails collection instead of publishing an incomplete capsule.
 	hasMLDSAKey := false
 	if cfg.MLDSAKeyPath != "" {
-		if mldsaBytes, err := os.ReadFile(cfg.MLDSAKeyPath); err == nil {
-			if len(mldsaBytes) == 0 {
-				return nil, fmt.Errorf("ML-DSA-65 signing key %s is empty", cfg.MLDSAKeyPath)
-			}
-			files = append(files, recoveryclient.File{Path: mldsaKeyRelPath, Data: mldsaBytes, Mode: 0600})
-			hasMLDSAKey = true
-		} else if !errors.Is(err, os.ErrNotExist) {
+		mldsaBytes, err := os.ReadFile(cfg.MLDSAKeyPath)
+		if err != nil {
 			return nil, fmt.Errorf("failed to read ML-DSA-65 signing key %s: %w", cfg.MLDSAKeyPath, err)
 		}
+		if len(mldsaBytes) == 0 {
+			return nil, fmt.Errorf("ML-DSA-65 signing key %s is empty", cfg.MLDSAKeyPath)
+		}
+		files = append(files, recoveryclient.File{Path: mldsaKeyRelPath, Data: mldsaBytes, Mode: 0600})
+		hasMLDSAKey = true
 	}
 
 	// The deployment key material. The database ships every TOTP secret and paired-system

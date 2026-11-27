@@ -257,6 +257,24 @@ func TestMultiKeyJWKSRotationVerifiesRetiredKeys(t *testing.T) {
 	if err := newKM.AddVerificationKey("weak", AlgRS256, &weakRSA.PublicKey); err == nil {
 		t.Fatal("AddVerificationKey must reject <2048-bit RSA keys")
 	}
+
+	// Colliding with an active key's kid using a different public key must fail even
+	// when the algorithm matches; re-registering the identical active key is idempotent.
+	if err := newKM.AddVerificationKey(newKM.MLDSAKeyID, AlgMLDSA65, oldKM.MLDSAPublicKey); err == nil {
+		t.Fatal("AddVerificationKey must reject distinct ML-DSA key reusing active MLDSAKeyID")
+	}
+	if err := newKM.AddVerificationKey(newKM.KeyID, AlgRS256, oldKM.PublicKey); err == nil {
+		t.Fatal("AddVerificationKey must reject distinct RSA key reusing active KeyID")
+	}
+	if err := newKM.AddVerificationKey(newKM.MLDSAKeyID, AlgMLDSA65, newKM.MLDSAPublicKey); err != nil {
+		t.Fatalf("idempotent active ML-DSA re-registration failed: %v", err)
+	}
+	if err := newKM.AddVerificationKey(newKM.KeyID, AlgRS256, newKM.PublicKey); err != nil {
+		t.Fatalf("idempotent active RSA re-registration failed: %v", err)
+	}
+	if got := len(newKM.GetJWKS().Keys); got != 4 {
+		t.Fatalf("JWKS key count after idempotent re-registration = %d, want 4", got)
+	}
 }
 
 func TestNormalizeSigningAlg(t *testing.T) {

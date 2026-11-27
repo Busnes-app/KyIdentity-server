@@ -81,3 +81,17 @@ func TestBackupAndDrillCarriesAndVerifiesMLDSAKey(t *testing.T) {
 		t.Fatalf("RunRestoreDrill must fail Token Signing check when jwt_mldsa65.key is corrupted: %+v", badRes.Checks)
 	}
 }
+
+func TestCollectSealableFailsWhenConfiguredMLDSAKeyDisappears(t *testing.T) {
+	cfg, st := instance(t)
+	cfg.MLDSAKeyPath = filepath.Join(cfg.DataDir, config.MLDSAKeyFile)
+	if _, _, _, err := crypto.LoadOrCreateMLDSAKey(cfg.MLDSAKeyPath); err != nil {
+		t.Fatalf("LoadOrCreateMLDSAKey: %v", err)
+	}
+	if err := os.Remove(cfg.MLDSAKeyPath); err != nil {
+		t.Fatalf("remove mldsa key: %v", err)
+	}
+	if _, err := backup.CollectSealable(cfg, st, "1.0.0"); err == nil {
+		t.Fatal("CollectSealable must fail when configured MLDSAKeyPath is missing instead of producing an RSA-only capsule")
+	}
+}
