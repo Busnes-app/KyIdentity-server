@@ -1,8 +1,9 @@
 package store
 
 import (
-	"crypto/ecdh"
+	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -13,7 +14,7 @@ import (
 )
 
 // adStoreFixture is a directory connector with an agent key, its app, and one assigned user.
-func adStoreFixture(t *testing.T, s *Store, id string) (*ecdh.PrivateKey, string) {
+func adStoreFixture(t *testing.T, s *Store, id string) (*adpass.PrivateKey, string) {
 	t.Helper()
 	k, err := adpass.GenerateKey()
 	if err != nil {
@@ -568,5 +569,58 @@ func TestDirectoryPasswordUnacknowledgedWriteIsBehind(t *testing.T) {
 	}
 	if behind, _ := s.ADPasswordBehind("ad-1", u.ID); behind {
 		t.Fatal("still behind after the reset was acknowledged")
+	}
+}
+
+func TestDirectoryPasswordQueueRekeysLegacyToHybrid(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	_, app := adStoreFixture(t, s, "ad-upgrade")
+	user := createTestUser(t, s)
+	if err := s.DefaultOrg().SetAppAssignment(app, "users", user.ID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := adpass.ParsePrivateKey("x25519-private:" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hybrid, _ := adpass.GenerateKey()
+	c, _ := s.ADConnector("ad-upgrade")
+	var legacySeq int64
+	for _, key := range []*adpass.PrivateKey{legacy, hybrid} {
+		c.AgentPublicKey = adpass.EncodePublicKey(key.PublicKey())
+		c.AgentKeyMAC = testKeys.KeyMAC(c.SystemID, c.AgentPublicKey)
+		if err := s.ConfigureADSystem(c.SystemID, "ldaps://dc.example.test", "", c, nil); err != nil {
+			t.Fatal(err)
+		}
+		if entries, _ := s.PendingADPasswords(c.SystemID, time.Now(), 10); len(entries) != 0 {
+			t.Fatal("re-key kept old ciphertext")
+		}
+		pin := testKeys.SigningPublicKeyForAgent(c.AgentPublicKey)
+		again := NewADKeys(make([]byte, 32)).SigningPublicKeyForAgent(c.AgentPublicKey)
+		if pin != again {
+			t.Fatal("signing pin changed after restart")
+		}
+		if n, err := s.QueueDirectoryPassword(testKeys, user.ID, user.PasswordHash, []byte("Upgrade-Pass-1"), nil); err != nil || n != 1 {
+			t.Fatal(n, err)
+		}
+		entries, err := s.PendingADPasswords(c.SystemID, time.Now(), 10)
+		if err != nil || len(entries) != 1 {
+			t.Fatal(entries, err)
+		}
+		e := entries[0]
+		pub, err := adpass.ParseSigningKey(pin)
+		if err != nil || !adpass.VerifyEntry(pub, c.SystemID, user.ID, e.Seq, e.ExpiresAt, e.Ciphertext, e.Signature) {
+			t.Fatal("wrong signer after re-key", err)
+		}
+		plain, err := adpass.Open(key, c.SystemID, user.ID, e.Seq, e.Ciphertext)
+		if err != nil || string(plain) != "Upgrade-Pass-1" {
+			t.Fatal("wrong encryption suite", err)
+		}
+		if key == legacy {
+			legacySeq = e.Seq
+		} else if e.Seq <= legacySeq {
+			t.Fatal("re-key reset sequence")
+		}
 	}
 }

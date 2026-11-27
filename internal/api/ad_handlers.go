@@ -84,7 +84,7 @@ func (h *AdminHandler) GetActiveDirectory(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ldapsUrl": sys.CallbackURL, "settings": settings, "passwords": passwords,
-		"entrySigningKey": h.syncEngine.DirectoryKeys().SigningPublicKey()})
+		"entrySigningKey": h.syncEngine.DirectoryKeys().SigningPublicKeyForAgent(settings.AgentPublicKey)})
 }
 
 // PutActiveDirectory replaces a directory connector's settings. bindPassword, when given,

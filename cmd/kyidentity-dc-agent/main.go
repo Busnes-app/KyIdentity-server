@@ -1,5 +1,5 @@
 // Command kyidentity-dc-agent sets Active Directory passwords from KyIdentity's encrypted
-// queue. It holds the X25519 private key KyIdentity seals to, pulls its connector's
+// queue. It holds the X-Wing (or legacy X25519) private key KyIdentity seals to, pulls its connector's
 // entries, sets unicodePwd over LDAPS and reports each result. It never logs a password.
 // Operator guide: docs/ACTIVE-DIRECTORY.md.
 package main
@@ -7,11 +7,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ecdh"
-	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -32,8 +29,6 @@ import (
 	"github.com/Busnes-app/kyidentity-server/internal/adpass"
 	"github.com/go-ldap/ldap/v3"
 )
-
-const privatePrefix = "x25519-private:"
 
 type config struct {
 	KyIdentityURL    string `json:"kyidentityUrl"`
@@ -115,7 +110,7 @@ func readSecretFile(field, path string) ([]byte, error) {
 }
 
 // loadOrCreateKey is init's: it creates the key once and reloads it after.
-func loadOrCreateKey(path string) (*ecdh.PrivateKey, error) {
+func loadOrCreateKey(path string) (*adpass.PrivateKey, error) {
 	if path == "" {
 		return nil, errors.New("-key is required")
 	}
@@ -129,7 +124,7 @@ func loadOrCreateKey(path string) (*ecdh.PrivateKey, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := f.WriteString(privatePrefix + base64.StdEncoding.EncodeToString(k.Bytes()) + "\n"); err != nil {
+		if _, err := f.WriteString(adpass.EncodePrivateKey(k) + "\n"); err != nil {
 			return nil, errors.Join(err, f.Close())
 		}
 		return k, f.Close()
@@ -139,22 +134,18 @@ func loadOrCreateKey(path string) (*ecdh.PrivateKey, error) {
 
 // loadKey is run's: a missing key is an error, never a new key, because a new key would
 // fail to open every queued entry and the server would discard them.
-func loadKey(path string) (*ecdh.PrivateKey, error) {
+func loadKey(path string) (*adpass.PrivateKey, error) {
 	raw, err := readSecretFile("keyFile", path)
 	if err != nil {
 		return nil, err
 	}
-	b, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(strings.TrimSpace(string(raw)), privatePrefix))
-	if err != nil {
-		return nil, errors.New("key file is not an agent private key")
-	}
-	return ecdh.X25519().NewPrivateKey(b)
+	return adpass.ParsePrivateKey(string(raw))
 }
 
 type agent struct {
 	cfg      config
-	key      *ecdh.PrivateKey
-	signing  ed25519.PublicKey
+	key      *adpass.PrivateKey
+	signing  *adpass.SigningKey
 	token    string
 	password string
 	roots    *x509.CertPool

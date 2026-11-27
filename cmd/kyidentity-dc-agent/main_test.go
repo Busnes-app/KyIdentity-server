@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/Busnes-app/ky-primitives/hybridsig"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -279,12 +281,16 @@ func TestAgentKeyFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	raw, _ := os.ReadFile(path)
+	if !strings.HasPrefix(string(raw), "xwing-private:") {
+		t.Fatal("new key is not X-Wing")
+	}
 	info, _ := os.Stat(path)
 	if info.Mode().Perm() != 0o600 {
 		t.Fatal("key file mode", info.Mode())
 	}
 	again, err := loadOrCreateKey(path)
-	if err != nil || !again.Equal(k) {
+	if err != nil || adpass.EncodePrivateKey(again) != adpass.EncodePrivateKey(k) {
 		t.Fatal("key not reloaded", err)
 	}
 	if err := os.Chmod(path, 0o644); err != nil {
@@ -339,5 +345,97 @@ func TestAgentAcknowledgesNothingUntilItsStateIsSaved(t *testing.T) {
 	again, err := newAgent(filepath.Join(f.dir, "config.json"))
 	if err != nil || again.state["alice"] != 10 {
 		t.Fatal("an acknowledged sequence did not survive a restart", again, err)
+	}
+}
+
+func TestAgentHybridEntryAuthentication(t *testing.T) {
+	f := newFixture(t)
+	dn := f.account("alice")
+	k, err := hybridsig.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.signing, err = adpass.ParseSigningKey(adpass.EncodeHybridSigningKey(k.Public()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := f.seal(t, "alice", 10, "Hybrid-Pass-1")
+	e.Signature, err = adpass.SignHybridEntry(k, connector, e.UserID, e.Seq, e.ExpiresAt, e.Ciphertext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(e.Signature)
+	for _, i := range []int{len(hybridsig.Alg) + 1, len(raw) - 1} {
+		changed := bytes.Clone(raw)
+		changed[i] ^= 1
+		bad := e
+		bad.Signature = base64.StdEncoding.EncodeToString(changed)
+		f.run(t, bad)
+		if r := f.result("alice", 10); r["reason"] != "signature_invalid" {
+			t.Fatal("invalid half applied", r)
+		}
+	}
+	f.run(t, f.seal(t, "alice", 10, "Legacy-Signature-1"))
+	if r := f.result("alice", 10); r["reason"] != "signature_invalid" {
+		t.Fatal("legacy signature accepted under hybrid pin", r)
+	}
+	if len(f.dc.Get(dn).Attrs["unicodePwd"]) != 0 {
+		t.Fatal("invalid signature changed directory")
+	}
+	f.run(t, e)
+	if r := f.result("alice", 10); r["outcome"] != "applied" {
+		t.Fatal("hybrid entry not applied", r)
+	}
+	if f.dc.Get(dn).Attrs["unicodePwd"][0] != adpass.UnicodePwd("Hybrid-Pass-1") {
+		t.Fatal("password not set")
+	}
+}
+
+func TestAgentRetainsLegacyKeyAndSigningPin(t *testing.T) {
+	f := newFixture(t)
+	path := f.agent.cfg.KeyFile
+	legacy := "x25519-private:" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	writeSecret(t, path, legacy+"\n")
+	k, err := loadOrCreateKey(path)
+	if err != nil || !strings.HasPrefix(adpass.EncodePublicKey(k.PublicKey()), "x25519:") {
+		t.Fatal("init did not retain legacy key", err)
+	}
+	raw, _ := os.ReadFile(path)
+	if string(raw) != legacy+"\n" {
+		t.Fatal("legacy key overwritten")
+	}
+	again, err := newAgent(filepath.Join(f.dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent = again
+	dn := f.account("alice")
+	f.run(t, f.seal(t, "alice", 10, "Legacy-Pass-1"))
+	if r := f.result("alice", 10); r["outcome"] != "applied" {
+		t.Fatal(r)
+	}
+	if f.dc.Get(dn).Attrs["unicodePwd"][0] != adpass.UnicodePwd("Legacy-Pass-1") {
+		t.Fatal("legacy deployment broken")
+	}
+	// Re-key without losing replay state: the same path now holds X-Wing and init
+	// reloads it; old ciphertext cannot be opened with the replacement key.
+	old := f.seal(t, "alice", 11, "Old-Key-Pass-1")
+	hybrid, err := adpass.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSecret(t, path, adpass.EncodePrivateKey(hybrid)+"\n")
+	again, err = newAgent(filepath.Join(f.dir, "config.json"))
+	if err != nil || again.state["alice"] != 10 {
+		t.Fatal("re-key lost state", err)
+	}
+	f.agent = again
+	f.run(t, old)
+	if r := f.result("alice", 11); r["reason"] != "decrypt_failed" {
+		t.Fatal("old key ciphertext applied", r)
+	}
+	f.run(t, f.seal(t, "alice", 12, "New-Key-Pass-1"))
+	if r := f.result("alice", 12); r["outcome"] != "applied" {
+		t.Fatal("new key not applied", r)
 	}
 }
