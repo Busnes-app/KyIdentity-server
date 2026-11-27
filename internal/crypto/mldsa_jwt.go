@@ -213,12 +213,29 @@ func (m *JWTKeyManager) AddVerificationKey(kid, alg string, pub any) error {
 			if m.extraKeys[i].Alg != alg {
 				return fmt.Errorf("verification key kid %q already registered for %s", kid, m.extraKeys[i].Alg)
 			}
-			m.extraKeys[i].PublicKey = pub
+			if !sameVerificationPublicKey(alg, m.extraKeys[i].PublicKey, pub) {
+				return fmt.Errorf("verification key kid %q collides with an already registered retired %s key", kid, alg)
+			}
 			return nil
 		}
 	}
 	m.extraKeys = append(m.extraKeys, VerificationKey{Kid: kid, Alg: alg, PublicKey: pub})
 	return nil
+}
+
+func sameVerificationPublicKey(alg string, existing, candidate any) bool {
+	switch alg {
+	case AlgRS256:
+		a, okA := existing.(*rsa.PublicKey)
+		b, okB := candidate.(*rsa.PublicKey)
+		return okA && okB && a != nil && b != nil && a.Equal(b)
+	case AlgMLDSA65:
+		a, okA := existing.(*mldsa.PublicKey)
+		b, okB := candidate.(*mldsa.PublicKey)
+		return okA && okB && a != nil && b != nil && a.Equal(b)
+	default:
+		return false
+	}
 }
 
 func rsaPublicToJWK(kid string, pub *rsa.PublicKey) JWK {

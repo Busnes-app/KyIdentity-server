@@ -272,6 +272,27 @@ func TestMultiKeyJWKSRotationVerifiesRetiredKeys(t *testing.T) {
 	if err := newKM.AddVerificationKey(newKM.KeyID, AlgRS256, newKM.PublicKey); err != nil {
 		t.Fatalf("idempotent active RSA re-registration failed: %v", err)
 	}
+	// Colliding with a retired key's kid using a different public key must also fail
+	// even when the algorithm matches; re-registering the identical retired key is idempotent
+	// and preserves verification of tokens signed by the original retired key.
+	if err := newKM.AddVerificationKey(oldKM.MLDSAKeyID, AlgMLDSA65, newKM.MLDSAPublicKey); err == nil {
+		t.Fatal("AddVerificationKey must reject distinct ML-DSA key reusing retired MLDSAKeyID")
+	}
+	if err := newKM.AddVerificationKey(oldKM.KeyID, AlgRS256, newKM.PublicKey); err == nil {
+		t.Fatal("AddVerificationKey must reject distinct RSA key reusing retired KeyID")
+	}
+	if err := newKM.AddVerificationKey(oldKM.MLDSAKeyID, AlgMLDSA65, oldKM.MLDSAPublicKey); err != nil {
+		t.Fatalf("idempotent retired ML-DSA re-registration failed: %v", err)
+	}
+	if err := newKM.AddVerificationKey(oldKM.KeyID, AlgRS256, oldKM.PublicKey); err != nil {
+		t.Fatalf("idempotent retired RSA re-registration failed: %v", err)
+	}
+	if _, err := newKM.VerifyJWT(oldPQToken, "https://id.example.com", "id_token"); err != nil {
+		t.Fatalf("retired ML-DSA-65 token failed verification after rejected collision: %v", err)
+	}
+	if _, err := newKM.VerifyJWT(oldRSAToken, "https://id.example.com", "id_token"); err != nil {
+		t.Fatalf("retired RS256 token failed verification after rejected collision: %v", err)
+	}
 	if got := len(newKM.GetJWKS().Keys); got != 4 {
 		t.Fatalf("JWKS key count after idempotent re-registration = %d, want 4", got)
 	}
