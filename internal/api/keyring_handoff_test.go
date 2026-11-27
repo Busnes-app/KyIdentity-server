@@ -244,6 +244,15 @@ func TestKeyringHandoffValidationAndAdminBypass(t *testing.T) {
 		t.Fatalf("invalid keyring_pk: %d %s", r.Code, r.Header().Get("Location"))
 	}
 
+	// A present but empty key must fail, rather than silently bypassing handoff.
+	emptyQ, _ := testHandoffQuery("kycal", "https://cal.example/cb", "")
+	emptyQ.Set("keyring_pk", "")
+	r = browser("GET", "/oauth/authorize?"+emptyQ.Encode(), nil)
+	loc, _ = url.Parse(r.Header().Get("Location"))
+	if r.Code != http.StatusFound || loc.Query().Get("error") != "invalid_request" {
+		t.Fatalf("empty keyring_pk: %d %s", r.Code, r.Header().Get("Location"))
+	}
+
 	// Duplicate keyring_pk returns OIDC invalid_request redirect error.
 	pk := testHandoffPoint(t)
 	dupQ, _ := testHandoffQuery("kycal", "https://cal.example/cb", pk)
