@@ -133,9 +133,14 @@ subkey during authorization code sign-in without exposing the Suite Root Key
 to the app or plaintext keys to the server.
 
 1. Before redirecting the browser to `GET /oauth/authorize`, the app generates
-   an ephemeral X-Wing key pair (32-byte seed, 1216-byte public key) in memory,
+   an ephemeral X-Wing key pair (32-byte seed, 1216-byte public key),
    encodes the public key in canonical unpadded base64url (1622 characters), and passes it as a single `keyring_pk` query parameter alongside
    PKCE (`S256`), `state` and its OIDC `nonce`. An omitted nonce binds as the empty string.
+   Retain the private seed through the callback, bound to this sign-in's state/nonce:
+   memory works for a popup flow; a top-level redirect needs RP-owned browser storage
+   such as IndexedDB with a short expiry. WASM seeds are extractable byte arrays,
+   not WebCrypto non-extractable keys. Never send the seed to a server or log it;
+   delete it after one callback or expiry.
    Legacy RPs may still send their 65-byte P-256 SEC1 public point (87 characters).
    The key length selects the suite; invalid X-Wing keys fail without a downgrade. `keyring_pk` with `prompt=none` returns
    `interaction_required`; duplicate or invalid values return `invalid_request`.
