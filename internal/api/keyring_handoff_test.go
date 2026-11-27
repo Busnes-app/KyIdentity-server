@@ -203,6 +203,16 @@ func TestKeyringHandoffAlreadySignedInAndCancel(t *testing.T) {
 		t.Fatalf("signed-in handoff redirect: %d %s", r.Code, r.Header().Get("Location"))
 	}
 
+	var secureBinding bool
+	for _, c := range r.Result().Cookies() {
+		if c.Name == authorizationBrowserCookie {
+			secureBinding = c.Secure
+		}
+	}
+	if !secureBinding {
+		t.Fatal("signed-in handoff did not issue a Secure binding cookie")
+	}
+
 	// Cancel deletes the interaction and returns redirect_uri + state.
 	r = browser("DELETE", "/api/user/keyring/handoff/"+raw, nil)
 	if r.Code != http.StatusOK {

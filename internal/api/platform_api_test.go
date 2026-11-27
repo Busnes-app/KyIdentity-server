@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -209,6 +210,44 @@ func TestPlatformCreateNeedsMail(t *testing.T) {
 	ps.noMail = false
 	if code, _, raw := ps.call(ps.billing, "POST", "/platform/v1/orgs", "k1", orgBody("m1", "m1@example.test", 1, "")); code != 201 {
 		t.Fatalf("retry: %d %s", code, raw)
+	}
+}
+
+func TestPlatformWriteFailureLog(t *testing.T) {
+	ps := newPlatformSuite(t)
+	api := newPlatformAPI(ps.srv)
+	api.mailer = func() (func(to, subject, body string) error, error) {
+		return nil, errors.New("mail settings unavailable\nconfiguration read failed")
+	}
+	ps.h = api.routes()
+
+	finishCapture := captureOutput(t)
+	const path = "/platform/v1/orgs"
+	status, body, _ := ps.call(ps.billing, http.MethodPost, path, "log-test", orgBody("log", "holder@example.test", 1, ""))
+	logged := finishCapture()
+	if status != http.StatusInternalServerError || body["error"] != "internal_error" || len(body) != 1 {
+		t.Fatalf("write failure response: %d %v", status, body)
+	}
+	const diagnostic = `platform api: write failed: "mail settings unavailable\nconfiguration read failed"`
+	if !strings.Contains(logged, diagnostic) || strings.Contains(logged, http.MethodPost) || strings.Contains(logged, path) || strings.Count(logged, "\n") != 1 {
+		t.Fatalf("expected one escaped diagnostic without request fields, got %q", logged)
+	}
+
+	db, err := store.OpenRawForTest(ps.srv.cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var outcome, details string
+	if err := db.QueryRow(`SELECT outcome, details_json FROM audit_events WHERE action = 'platform.refused'`).Scan(&outcome, &details); err != nil {
+		t.Fatal(err)
+	}
+	var audit map[string]string
+	if err := json.Unmarshal([]byte(details), &audit); err != nil {
+		t.Fatal(err)
+	}
+	if outcome != "denied" || audit["error"] != "internal_error" || audit["method"] != http.MethodPost || audit["path"] != path {
+		t.Fatalf("unexpected refusal audit: %s %s", outcome, details)
 	}
 }
 

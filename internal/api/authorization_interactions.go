@@ -47,7 +47,7 @@ func (h *OAuthHandler) ensureAuthorizationBrowserHash(w http.ResponseWriter, r *
 		Value:    raw + "." + crypto.SignHMACSHA256(h.middleware.csrfKey, []byte("authorization-browser:"+raw)),
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   h.middleware.IsHTTPS(r) || strings.HasPrefix(h.oauthEngine.GetOIDCConfiguration().Issuer, "https://"),
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 	return browserHash, nil

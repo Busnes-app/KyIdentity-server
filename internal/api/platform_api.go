@@ -195,7 +195,7 @@ func (h *PlatformHandler) write(w http.ResponseWriter, r *http.Request, req any,
 	if err != nil {
 		status, code, extra := platformErrorFor(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("platform api: %s %s: %v", r.Method, r.URL.Path, err)
+			log.Printf("platform api: write failed: %q", err.Error())
 		}
 		h.observe(r, tok, org, "platform.refused", "denied", map[string]any{"error": code, "method": r.Method, "path": r.URL.Path})
 		platformError(w, status, code, extra)
