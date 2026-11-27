@@ -130,6 +130,7 @@ func (h *EraseHandler) OrgExportStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, status)
 }
+
 const maxOrgExportAuditOffset = 10_000_000
 
 func parseOrgExportOffset(r *http.Request) (int, error) {
