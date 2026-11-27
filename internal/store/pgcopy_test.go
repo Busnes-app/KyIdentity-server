@@ -196,11 +196,11 @@ func copyKeyringFixture(t *testing.T, s *Store, userID string) {
 		t.Fatal(err)
 	}
 	id := uuid.NewString()
-	req := KeyringTransferRequest{RecipientKey: strings.Repeat("A", 87), RequestMAC: strings.Repeat("B", 43)}
+	req := KeyringTransferRequest{RecipientKey: strings.Repeat("A", 1622), RequestMAC: strings.Repeat("B", 43)}
 	if _, err := o.RequestKeyringTransfer(recipient, version, id, req, nil); err != nil {
 		t.Fatal(err)
 	}
-	reply := KeyringTransferResponse{SenderKey: strings.Repeat("C", 87), Sealed: device.Sealed}
+	reply := KeyringTransferResponse{SenderKey: "xwing:1", Sealed: strings.Repeat("C", 1559)}
 	if err := o.ApproveKeyringTransfer(sender, id, device.ID, device.DeviceHash, reply, keyringTestGrant(t, s, sender, "approve"), nil); err != nil {
 		t.Fatal(err)
 	}
