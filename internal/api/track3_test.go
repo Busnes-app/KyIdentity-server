@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -186,13 +187,25 @@ func TestHolderDirectoryExportOverHTTP(t *testing.T) {
 		t.Fatal(code, body)
 	}
 	cookie = newSession(t, ps.db, u, time.Now().UTC().Add(time.Hour))
-	for _, path := range []string{"/api/user/org-export/status", "/api/user/org-export"} {
+	for _, path := range []string{"/api/user/org-export/status", "/api/user/org-export", "/api/user/org-export?audit_offset=0"} {
 		rr := adminRequestNoStepUp(t, ps.srv, "GET", path, cookie, "")
 		if rr.Code != http.StatusOK {
 			t.Fatal(path, rr.Code, rr.Body.String())
 		}
 		if strings.Contains(rr.Body.String(), "password_hash") {
 			t.Fatal("credential in export")
+		}
+	}
+	for _, bad := range []string{"/api/user/org-export?audit_offset=-1", "/api/user/org-export?audit_offset=10000001"} {
+		if rr := adminRequestNoStepUp(t, ps.srv, "GET", bad, cookie, ""); rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s: want 400, got %d %s", bad, rr.Code, rr.Body.String())
+		}
+	}
+	for raw, wantErr := range map[string]bool{"": false, "0": false, "42": false, "-1": true, "nope": true, "10000001": true} {
+		req := httptest.NewRequest("GET", "/api/user/org-export?audit_offset="+raw, nil)
+		_, err := parseOrgExportOffset(req)
+		if (err != nil) != wantErr {
+			t.Fatalf("parseOrgExportOffset(%q): err=%v wantErr=%v", raw, err, wantErr)
 		}
 	}
 }

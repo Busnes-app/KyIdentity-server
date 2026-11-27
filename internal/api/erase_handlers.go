@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -129,14 +130,33 @@ func (h *EraseHandler) OrgExportStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, status)
 }
+const maxOrgExportAuditOffset = 10_000_000
+
+func parseOrgExportOffset(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("audit_offset"))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 || n > maxOrgExportAuditOffset {
+		return 0, errors.New("audit_offset must be an integer between 0 and 10000000")
+	}
+	return n, nil
+}
+
 func (h *EraseHandler) ExportOrg(w http.ResponseWriter, r *http.Request) {
 	if !h.multiTenant {
 		http.NotFound(w, r)
 		return
 	}
+	auditOffset, err := parseOrgExportOffset(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	u := GetUserFromContext(r.Context())
 	event := h.audit.Prepare("account.org_exported", u.ID, u.Username, u.Org().String(), "org", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	data, err := orgStore(r).ExportOrg(r.Context(), u.ID, event.Row)
+	data, err := orgStore(r).ExportOrg(r.Context(), u.ID, event.Row, store.OrgExportOptions{AuditOffset: auditOffset})
 	if errors.Is(err, store.ErrNotFound) {
 		http.NotFound(w, r)
 		return

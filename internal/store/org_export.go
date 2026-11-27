@@ -21,20 +21,42 @@ func (o *OrgStore) OrgExportStatus(userID string) (OrgExportStatus, error) {
 	return s, err
 }
 
+// orgExportMaxRows bounds each section in a single JSON export response.
+// Package variable so tests can shrink it without seeding fifty thousand rows.
+var orgExportMaxRows = 50000
+
+// OrgExportOptions tunes a single directory export response.
+type OrgExportOptions struct {
+	// AuditOffset skips this many oldest audit rows (ORDER BY created_at, id) so large
+	// audit logs can be paged across successive requests instead of aborting the export.
+	AuditOffset int
+}
+
 // ExportOrg is a read-only directory export, never a capsule/import. Explicit columns
 // exclude credentials, keyring ciphertext, app secrets and delivery payloads. All rows
 // come from one snapshot and the access predicate is rechecked under the writer lock.
-func (o *OrgStore) ExportOrg(ctx context.Context, userID string, audit *AuditEvent) (map[string]any, error) {
-	return o.exportOrg(ctx, userID, false, audit)
+func (o *OrgStore) ExportOrg(ctx context.Context, userID string, audit *AuditEvent, opts ...OrgExportOptions) (map[string]any, error) {
+	var opt OrgExportOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	return o.exportOrg(ctx, userID, false, audit, opt)
 }
 
 // ExportOrgForStaff is the selected-org staff export, on request by its holder.
-func (o *OrgStore) ExportOrgForStaff(ctx context.Context, audit *AuditEvent) (map[string]any, error) {
-	return o.exportOrg(ctx, "", true, audit)
+func (o *OrgStore) ExportOrgForStaff(ctx context.Context, audit *AuditEvent, opts ...OrgExportOptions) (map[string]any, error) {
+	var opt OrgExportOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	return o.exportOrg(ctx, "", true, audit, opt)
 }
-func (o *OrgStore) exportOrg(ctx context.Context, userID string, staff bool, audit *AuditEvent) (map[string]any, error) {
+func (o *OrgStore) exportOrg(ctx context.Context, userID string, staff bool, audit *AuditEvent, opt OrgExportOptions) (map[string]any, error) {
 	if audit == nil {
 		return nil, errors.New("store: org export needs its audit row")
+	}
+	if opt.AuditOffset < 0 {
+		return nil, InputError("audit_offset must not be negative.")
 	}
 
 	tx, err := o.s.db.BeginTx(ctx, nil)
@@ -49,7 +71,7 @@ func (o *OrgStore) exportOrg(ctx context.Context, userID string, staff bool, aud
 	if !allowed {
 		return nil, ErrNotFound
 	}
-	out, err := exportOrgTx(ctx, tx, o.org)
+	out, err := exportOrgTx(ctx, tx, o.org, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -59,8 +81,10 @@ func (o *OrgStore) exportOrg(ctx context.Context, userID string, staff bool, aud
 	return out, tx.Commit()
 }
 
-func exportOrgTx(ctx context.Context, tx *sql.Tx, org string) (map[string]any, error) {
+func exportOrgTx(ctx context.Context, tx *sql.Tx, org string, opt OrgExportOptions) (map[string]any, error) {
+	maxRows := orgExportMaxRows
 	out := map[string]any{}
+	truncated := map[string]any{}
 	for _, part := range []struct{ name, query string }{
 		{"org", `SELECT id,name,status,status_reason,home_region,plan,max_seats,storage_bytes,storage_per_seat_bytes,account_holder_user_id,delete_after FROM orgs WHERE id=?`},
 		{"users", `SELECT id,username,display_name,email,mailbox_address,role,status,pending,created_at,updated_at FROM users WHERE org_id=? ORDER BY id`},
@@ -72,11 +96,17 @@ func exportOrgTx(ctx context.Context, tx *sql.Tx, org string) (map[string]any, e
 		{"group_roles", `SELECT a.role_id,a.group_id FROM app_role_group_assignments a JOIN directory_groups g ON g.id=a.group_id WHERE g.org_id=? ORDER BY a.role_id,a.group_id`},
 		{"audit", `SELECT id,actor_id,actor_username,action,target_id,target_type,outcome,details_json,created_at FROM audit_events WHERE org_id=? ORDER BY created_at,id`},
 	} {
-		rows, err := tx.QueryContext(ctx, part.query+` LIMIT 50001`, org)
+		query := part.query + ` LIMIT ?`
+		args := []any{org, maxRows + 1}
+		if part.name == "audit" && opt.AuditOffset > 0 {
+			query += ` OFFSET ?`
+			args = append(args, opt.AuditOffset)
+		}
+		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, err
 		}
-		data, err := exportRows(rows)
+		data, more, err := exportRows(rows, maxRows)
 		rows.Close()
 		if err != nil {
 			return nil, err
@@ -86,19 +116,35 @@ func exportOrgTx(ctx context.Context, tx *sql.Tx, org string) (map[string]any, e
 		} else {
 			out[part.name] = data
 		}
+		if more {
+			info := map[string]any{
+				"returned": len(data),
+				"limit":    maxRows,
+				"more":     true,
+			}
+			if part.name == "audit" {
+				info["offset"] = opt.AuditOffset
+				info["next_offset"] = opt.AuditOffset + len(data)
+			}
+			truncated[part.name] = info
+		}
+	}
+	if len(truncated) > 0 {
+		out["partial"] = true
+		out["truncated"] = truncated
 	}
 	return out, nil
 }
 
-func exportRows(rows *sql.Rows) ([]map[string]any, error) {
+func exportRows(rows *sql.Rows, maxRows int) ([]map[string]any, bool, error) {
 	cols, err := rows.Columns()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := []map[string]any{}
 	for rows.Next() {
-		if len(out) == 50000 {
-			return nil, InputError("The directory export exceeds its row limit; ask staff for an export.")
+		if len(out) == maxRows {
+			return out, true, rows.Err()
 		}
 		values := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
@@ -106,7 +152,7 @@ func exportRows(rows *sql.Rows) ([]map[string]any, error) {
 			ptrs[i] = &values[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		row := map[string]any{}
 		for i, col := range cols {
@@ -123,5 +169,5 @@ func exportRows(rows *sql.Rows) ([]map[string]any, error) {
 		}
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	return out, false, rows.Err()
 }

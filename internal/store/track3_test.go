@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +256,88 @@ func TestHolderOrgExportIsolation(t *testing.T) {
 	}
 	if _, err := o.ExportOrg(context.Background(), "member", &AuditEvent{}); !errors.Is(err, ErrNotFound) {
 		t.Fatal("member exported org", err)
+	}
+}
+
+func TestExportOrgTruncatesAndPagesLargeAudit(t *testing.T) {
+	s, done := setupTestStore(t)
+	defer done()
+	prev := orgExportMaxRows
+	orgExportMaxRows = 2
+	t.Cleanup(func() { orgExportMaxRows = prev })
+
+	erasureOrg(t, s, "biglog", map[string]string{"member": "active"})
+	var org, holder string
+	if err := s.db.QueryRow(`SELECT id,account_holder_user_id FROM orgs WHERE account_holder_user_id IS NOT NULL AND id='biglog'`).Scan(&org, &holder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE orgs SET status='deletion_scheduled',delete_after=? WHERE id=?`, time.Now().Add(time.Hour).Unix(), org); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC().Add(-time.Hour)
+	for i := 0; i < 5; i++ {
+		e := &AuditEvent{
+			ID:      fmt.Sprintf("seed-audit-%d", i),
+			Action:  fmt.Sprintf("seed.event.%d", i),
+			ActorID: holder,
+			Outcome: "success",
+		}
+		if err := orgAuditTx(tx, org, e, nil, base.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	o := s.Org(OrgID{org})
+	// Both holder and staff exports must succeed with users intact and partial/truncated markers when audit exceeds orgExportMaxRows.
+	staffData, err := o.ExportOrgForStaff(context.Background(), &AuditEvent{Action: "staff.org_exported", ActorID: "staff-1"})
+	if err != nil {
+		t.Fatalf("staff export failed on large audit log: %v", err)
+	}
+	if staffData["partial"] != true {
+		t.Fatalf("expected partial=true on staff export, got %#v", staffData["partial"])
+	}
+	if users, ok := staffData["users"].([]map[string]any); !ok || len(users) != 2 {
+		t.Fatalf("expected 2 users intact in staff export, got %#v", staffData["users"])
+	}
+
+	page1, err := o.ExportOrg(context.Background(), holder, &AuditEvent{Action: "account.org_exported", ActorID: holder})
+	if err != nil {
+		t.Fatalf("holder export page 1 failed: %v", err)
+	}
+	if page1["partial"] != true {
+		t.Fatalf("expected partial=true on page 1, got %#v", page1["partial"])
+	}
+	trunc1, ok := page1["truncated"].(map[string]any)["audit"].(map[string]any)
+	if !ok || trunc1["returned"] != 2 || trunc1["limit"] != 2 || trunc1["more"] != true || trunc1["next_offset"] != 2 {
+		t.Fatalf("unexpected page 1 truncated metadata: %#v", page1["truncated"])
+	}
+	audit1 := page1["audit"].([]map[string]any)
+	if len(audit1) != 2 || audit1[0]["id"] != "seed-audit-0" || audit1[1]["id"] != "seed-audit-1" {
+		t.Fatalf("unexpected page 1 audit rows: %#v", audit1)
+	}
+
+	page2, err := o.ExportOrg(context.Background(), holder, &AuditEvent{Action: "account.org_exported", ActorID: holder}, OrgExportOptions{AuditOffset: 2})
+	if err != nil {
+		t.Fatalf("holder export page 2 failed: %v", err)
+	}
+	audit2 := page2["audit"].([]map[string]any)
+	if len(audit2) != 2 || audit2[0]["id"] != "seed-audit-2" || audit2[1]["id"] != "seed-audit-3" {
+		t.Fatalf("unexpected page 2 audit rows: %#v", audit2)
+	}
+	trunc2 := page2["truncated"].(map[string]any)["audit"].(map[string]any)
+	if trunc2["offset"] != 2 || trunc2["next_offset"] != 4 {
+		t.Fatalf("unexpected page 2 truncated metadata: %#v", trunc2)
+	}
+
+	if _, err := o.ExportOrg(context.Background(), holder, &AuditEvent{Action: "account.org_exported", ActorID: holder}, OrgExportOptions{AuditOffset: -1}); err == nil {
+		t.Fatal("expected error for negative AuditOffset")
 	}
 }
 

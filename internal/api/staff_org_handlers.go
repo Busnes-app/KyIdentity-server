@@ -170,9 +170,14 @@ func (h *AdminHandler) ExportOrg(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	auditOffset, err := parseOrgExportOffset(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	u := GetUserFromContext(r.Context())
 	event := h.audit.Prepare("staff.org_exported", u.ID, u.Username, orgStore(r).ID().String(), "org", h.middleware.ClientIP(r), r.UserAgent(), "success", nil)
-	data, err := orgStore(r).ExportOrgForStaff(r.Context(), event.Row)
+	data, err := orgStore(r).ExportOrgForStaff(r.Context(), event.Row, store.OrgExportOptions{AuditOffset: auditOffset})
 	if err != nil {
 		writeInputError(w, "export_failed", err)
 		return
