@@ -314,8 +314,8 @@ func (e *Engine) RegisterNativeDevice(req *NativeDeviceRegisterRequest, audit fu
 	if !PlatformAllowsTransport(platform, transport) {
 		return nil, errInvalidPushTarget
 	}
-	if _, err := crypto.ParseP256PublicKey(req.PublicKey); err != nil {
-		return nil, store.InputError("device public key is not a valid P-256 key")
+	if _, err := crypto.ParseDevicePublicKey(req.PublicKey); err != nil {
+		return nil, store.InputError("device public key is not a valid P-256 or hybrid signing key")
 	}
 
 	var validToken *store.DevicePairingToken
@@ -726,7 +726,7 @@ func (e *Engine) verifyDeviceSignature(ch *store.MFAChallenge, deviceID string, 
 		Origin: e.issuerOrigin, UserID: ch.UserID, DeviceID: dev.ID, ChallengeID: ch.ID,
 		Purpose: ch.Purpose, ExpiresAtMS: ch.ExpiresAt.UnixMilli(),
 	}, approve, selectedDigits)
-	if err != nil || !crypto.VerifyECDSAP256(dev.PublicKey, msg, signature) {
+	if err != nil || !crypto.VerifyDeviceSignature(dev.PublicKey, crypto.DevicePushResponseLabel, msg, signature) {
 		return nil, errBad
 	}
 	return dev, nil

@@ -49,8 +49,8 @@ func testClaims() map[string]any {
 }
 
 // parseForTest verifies against pub at a time inside testClaims' validity window.
-func parseForTest(compact string, pub *ecdsa.PublicKey) (*deviceAssertion, error) {
-	return parseDeviceAssertion(compact, "https://id.example/oauth/token", time.Unix(1100, 0), func(string, string) (*ecdsa.PublicKey, error) { return pub, nil })
+func parseForTest(compact string, pub any) (*deviceAssertion, error) {
+	return parseDeviceAssertion(compact, "https://id.example/oauth/token", time.Unix(1100, 0), func(string, string) (any, error) { return pub, nil })
 }
 
 // withSignature replaces the signature segment of a compact JWS.
@@ -79,7 +79,7 @@ func TestParseDeviceAssertionKeyLookup(t *testing.T) {
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	compact := signDeviceAssertionForTest(t, priv, testHeader("dev-1"), testClaims())
 	var gotKid, gotSub string
-	_, err := parseDeviceAssertion(compact, "https://id.example/oauth/token", time.Unix(1100, 0), func(kid, sub string) (*ecdsa.PublicKey, error) {
+	_, err := parseDeviceAssertion(compact, "https://id.example/oauth/token", time.Unix(1100, 0), func(kid, sub string) (any, error) {
 		gotKid, gotSub = kid, sub
 		return nil, errUnknownDevice
 	})
@@ -93,7 +93,7 @@ func TestParseDeviceAssertionTimeAndAudience(t *testing.T) {
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	compact := signDeviceAssertionForTest(t, priv, testHeader("dev-1"), testClaims())
 	parseAt := func(now int64, aud string) error {
-		_, err := parseDeviceAssertion(compact, aud, time.Unix(now, 0), func(string, string) (*ecdsa.PublicKey, error) { return &priv.PublicKey, nil })
+		_, err := parseDeviceAssertion(compact, aud, time.Unix(now, 0), func(string, string) (any, error) { return &priv.PublicKey, nil })
 		return err
 	}
 	const aud = "https://id.example/oauth/token"

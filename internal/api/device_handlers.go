@@ -185,7 +185,7 @@ func (h *DeviceHandler) RefreshNativeDevicePushToken(w http.ResponseWriter, r *h
 		return
 	}
 	message, err := mfa.PushTokenRefreshMessage(origin, deviceID, req.IssuedAt, transport, req.PushToken, req.PushP256dh, req.PushAuth)
-	if err != nil || dev == nil || dev.PublicKey == "" || !crypto.VerifyECDSAP256(dev.PublicKey, message, req.Signature) {
+	if err != nil || dev == nil || dev.PublicKey == "" || !crypto.VerifyDeviceSignature(dev.PublicKey, crypto.DevicePushTokenLabel, message, req.Signature) {
 		http.Error(w, `{"error":"device_authentication_failed"}`, http.StatusUnauthorized)
 		return
 	}
