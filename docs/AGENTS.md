@@ -8,6 +8,7 @@ Own the product's user manual and documentation workflow.
 
 - `src/` owns manual chapters; existing reference documents and plans retain their own scope.
 - `ACTIVE-DIRECTORY.md` owns AD connector setup, password-queue formats and the X25519-to-X-Wing/HybridSig agent re-key procedure.
+- `RESTORE.md` owns whole-install restore and multi-tenant billing/erasure reconciliation before customer access resumes. `SUITE-DIRECTORY.md` owns the org-cache generation reset contract.
 - `KEYRING.md` owns the encrypted keyring wire format, API and lifecycle contract.
 - Root README owns the product entry point; CONTRIBUTING.md and SECURITY.md own their policies.
 

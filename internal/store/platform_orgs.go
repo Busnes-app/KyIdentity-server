@@ -23,13 +23,14 @@ const PlatformRequestTTL = 30 * 24 * time.Hour
 const PlatformActivationTTL = 7 * 24 * time.Hour
 
 var (
-	ErrIdempotencyConflict = errors.New("the idempotency key was used with another request")
-	ErrBillingRefConflict  = errors.New("billing_ref belongs to an org created by another request")
-	ErrOrgState            = errors.New("the org is not in a state that allows this")
-	ErrInvalidHomeRegion   = errors.New("invalid home_region")
-	ErrInvalidOrg          = InputError("name 1-200 characters, plan up to 64, billing_ref 1-128, revision at least 1")
-	ErrHolderNotMember     = errors.New("the account holder must be a live member of the org")
-	ErrEmailInUse          = errors.New("the email or mailbox address is in use")
+	ErrIdempotencyConflict   = errors.New("the idempotency key was used with another request")
+	ErrBillingRefConflict    = errors.New("billing_ref belongs to an org created by another request")
+	ErrRestoreReconciliation = errors.New("confirm the current restore generation before resuming")
+	ErrOrgState              = errors.New("the org is not in a state that allows this")
+	ErrInvalidHomeRegion     = errors.New("invalid home_region")
+	ErrInvalidOrg            = InputError("name 1-200 characters, plan up to 64, billing_ref 1-128, revision at least 1")
+	ErrHolderNotMember       = errors.New("the account holder must be a live member of the org")
+	ErrEmailInUse            = errors.New("the email or mailbox address is in use")
 )
 
 // StaleRevisionError: a lifecycle write whose revision is at or below the org's.
@@ -38,10 +39,14 @@ type StaleRevisionError struct{ Current int64 }
 func (e *StaleRevisionError) Error() string { return "stale_revision" }
 
 // PlatformCaller is the token behind a call, for the audit row.
-type PlatformCaller struct{ TokenID, IP, UserAgent string }
+type PlatformCaller struct{ TokenID, IP, UserAgent, ActorUsername string }
 
 func (c PlatformCaller) audit(action, targetID, targetType string, now time.Time) *AuditEvent {
-	return &AuditEvent{ID: uuid.NewString(), ActorID: c.TokenID, ActorUsername: "platform-token", Action: action, TargetID: targetID,
+	name := c.ActorUsername
+	if name == "" {
+		name = "platform-token"
+	}
+	return &AuditEvent{ID: uuid.NewString(), ActorID: c.TokenID, ActorUsername: name, Action: action, TargetID: targetID,
 		TargetType: targetType, IPAddress: c.IP, UserAgent: c.UserAgent, Outcome: "success", CreatedAt: now}
 }
 
@@ -111,29 +116,41 @@ func (p *PlatformStore) DeleteExpiredPlatformRequests(now time.Time) error {
 	return err
 }
 
-// PlatformOrg is GET /platform/v1/orgs/{id}: no user's name or email.
-type PlatformOrg struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	Status              string `json:"status"`
-	StatusReason        string `json:"status_reason"`
-	HomeRegion          string `json:"home_region"`
-	Plan                string `json:"plan"`
-	BillingRef          string `json:"billing_ref"`
-	Revision            int64  `json:"revision"`
-	MaxSeats            int64  `json:"max_seats"`
-	SeatsUsed           int64  `json:"seats_used"`
-	PendingInvites      int64  `json:"pending_invites"`
-	AccountHolderUserID string `json:"account_holder_user_id,omitempty"`
-	HolderActivated     bool   `json:"holder_activated"`
-	DeleteAfter         *int64 `json:"delete_after"`
-	StorageBytes        int64  `json:"storage_bytes"`
-	StoragePerSeatBytes int64  `json:"storage_per_seat_bytes"`
-	PoolBytes           int64  `json:"pool_bytes"`
-	StorageOverSince    *int64 `json:"storage_over_since"`
+// ReportedStorage is one app’s last accepted report, not a live storage scan.
+type ReportedStorage struct {
+	UsedBytes    int64 `json:"used_bytes"`
+	Seq          int64 `json:"seq"`
+	CeilingBytes int64 `json:"ceiling_bytes"`
+	ReportedAt   int64 `json:"reported_at"`
 }
 
-var platformOrgColumns = `o.id,o.name,o.status,o.status_reason,o.home_region,o.plan,COALESCE(o.billing_ref,''),o.billing_revision,o.max_seats,
+// PlatformOrg is GET /platform/v1/orgs/{id}: no user's name or email.
+type PlatformOrg struct {
+	RestoreGeneration   string                     `json:"restore_generation,omitempty"`
+	StorageUsage        map[string]ReportedStorage `json:"storage_usage"`
+	UsedBytes           int64                      `json:"used_bytes"`
+	ID                  string                     `json:"id"`
+	Name                string                     `json:"name"`
+	Status              string                     `json:"status"`
+	StatusReason        string                     `json:"status_reason"`
+	HomeRegion          string                     `json:"home_region"`
+	Plan                string                     `json:"plan"`
+	BillingRef          string                     `json:"billing_ref"`
+	Revision            int64                      `json:"revision"`
+	OrgRevision         int64                      `json:"org_revision"`
+	MaxSeats            int64                      `json:"max_seats"`
+	SeatsUsed           int64                      `json:"seats_used"`
+	PendingInvites      int64                      `json:"pending_invites"`
+	AccountHolderUserID string                     `json:"account_holder_user_id,omitempty"`
+	HolderActivated     bool                       `json:"holder_activated"`
+	DeleteAfter         *int64                     `json:"delete_after"`
+	StorageBytes        int64                      `json:"storage_bytes"`
+	StoragePerSeatBytes int64                      `json:"storage_per_seat_bytes"`
+	PoolBytes           int64                      `json:"pool_bytes"`
+	StorageOverSince    *int64                     `json:"storage_over_since"`
+}
+
+var platformOrgColumns = `o.id,o.name,o.status,o.status_reason,o.home_region,o.plan,COALESCE(o.billing_ref,''),o.billing_revision,o.revision,o.max_seats,
  (SELECT COUNT(*) FROM users u WHERE u.org_id=o.id AND ` + seatSQL("u") + `),
  (SELECT COUNT(*) FROM users u WHERE u.org_id=o.id AND u.pending),
  COALESCE(o.account_holder_user_id,''),
@@ -143,7 +160,7 @@ var platformOrgColumns = `o.id,o.name,o.status,o.status_reason,o.home_region,o.p
 func scanPlatformOrg(r interface{ Scan(...any) error }) (*PlatformOrg, error) {
 	var o PlatformOrg
 	var del, over sql.NullInt64
-	if err := r.Scan(&o.ID, &o.Name, &o.Status, &o.StatusReason, &o.HomeRegion, &o.Plan, &o.BillingRef, &o.Revision, &o.MaxSeats,
+	if err := r.Scan(&o.ID, &o.Name, &o.Status, &o.StatusReason, &o.HomeRegion, &o.Plan, &o.BillingRef, &o.Revision, &o.OrgRevision, &o.MaxSeats,
 		&o.SeatsUsed, &o.PendingInvites, &o.AccountHolderUserID, &o.HolderActivated, &del, &o.StorageBytes, &o.StoragePerSeatBytes, &over); err != nil {
 		return nil, err
 	}
@@ -159,12 +176,44 @@ func scanPlatformOrg(r interface{ Scan(...any) error }) (*PlatformOrg, error) {
 
 func platformOrgTx(q interface {
 	QueryRow(string, ...any) *sql.Row
+	Query(string, ...any) (*sql.Rows, error)
 }, id string) (*PlatformOrg, error) {
 	o, err := scanPlatformOrg(q.QueryRow(`SELECT `+platformOrgColumns+` FROM orgs o WHERE o.id=? AND o.kind='`+customerKind+`'`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return o, err
+	if err != nil {
+		return nil, err
+	}
+	if err := platformUsage(q, o); err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+func platformUsage(q interface {
+	Query(string, ...any) (*sql.Rows, error)
+	QueryRow(string, ...any) *sql.Row
+}, o *PlatformOrg) error {
+	if err := q.QueryRow(`SELECT COALESCE((SELECT value FROM system_settings WHERE key=?),'')`, RestoreGenerationSetting).Scan(&o.RestoreGeneration); err != nil {
+		return err
+	}
+	rows, err := q.Query(`SELECT COALESCE(a.client_id,a.id),s.used_bytes,s.seq,s.ceiling_bytes,s.reported_at FROM org_storage s JOIN app_registry a ON a.id=s.app_id WHERE s.org_id=? ORDER BY a.id`, o.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	o.StorageUsage = map[string]ReportedStorage{}
+	for rows.Next() {
+		var app string
+		var u ReportedStorage
+		if err := rows.Scan(&app, &u.UsedBytes, &u.Seq, &u.CeilingBytes, &u.ReportedAt); err != nil {
+			return err
+		}
+		o.StorageUsage[app] = u
+		o.UsedBytes += u.UsedBytes
+	}
+	return rows.Err()
 }
 
 // PlatformOrg reads one customer org; any other ID is ErrNotFound.
@@ -188,7 +237,16 @@ func (p *PlatformStore) PlatformOrgs(status, billingRef, cursor string, limit in
 		}
 		out = append(out, *o)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for i := range out {
+		if err := platformUsage(p.s.db, &out[i]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // NewOrg is POST /platform/v1/orgs.
@@ -450,7 +508,15 @@ func (p *PlatformStore) SuspendOrg(tx *sql.Tx, now time.Time, c PlatformCaller, 
 
 // ResumeOrg makes a suspended org, or one scheduled for deletion before delete_after,
 // active again. Sessions do not come back; pending members need a new invite.
-func (p *PlatformStore) ResumeOrg(tx *sql.Tx, now time.Time, c PlatformCaller, id string, revision int64) (*PlatformOrg, error) {
+func (p *PlatformStore) ResumeOrg(tx *sql.Tx, now time.Time, c PlatformCaller, id string, revision int64, generation ...string) (*PlatformOrg, error) {
+	var current string
+	if err := tx.QueryRow(`SELECT COALESCE((SELECT value FROM system_settings WHERE key=?),'')`, RestoreGenerationSetting).Scan(&current); err != nil {
+		return nil, err
+	}
+	if current != "" && (len(generation) != 1 || generation[0] != current) {
+		return nil, ErrRestoreReconciliation
+	}
+
 	o, err := lifecycleOrgTx(tx, id, revision)
 	if err != nil {
 		return nil, err
@@ -492,7 +558,11 @@ func (p *PlatformStore) setOrgStatusTx(tx *sql.Tx, now time.Time, c PlatformCall
 		return nil, err
 	}
 	action := "platform." + strings.TrimPrefix(event, "org.")
-	if err := orgAuditTx(tx, o.ID, c.audit(action, o.ID, "org", now), map[string]any{"from": o.Status, "to": status, "reason": reason, "revision": revision}, now); err != nil {
+	details := map[string]any{"from": o.Status, "to": status, "reason": reason, "revision": revision}
+	if event == "org.resumed" && o.RestoreGeneration != "" {
+		details["restore_generation"] = o.RestoreGeneration
+	}
+	if err := orgAuditTx(tx, o.ID, c.audit(action, o.ID, "org", now), details, now); err != nil {
 		return nil, err
 	}
 	return platformOrgTx(tx, o.ID)
@@ -515,4 +585,50 @@ func (p *PlatformStore) DeleteOrg(tx *sql.Tx, now time.Time, c PlatformCaller, i
 		return nil, err
 	}
 	return platformOrgTx(tx, id)
+}
+
+// ResumeOrgForStaff resumes a customer org suspended after a restore. It refuses orgs
+// held for any other reason (including payment, abuse, deletion_scheduled or deleted),
+// requires a non-empty matching restore generation, and uses the org's own revision as
+// its concurrency token so billing_revision stays billing's alone.
+func (p *PlatformStore) ResumeOrgForStaff(org OrgID, expectedRevision int64, audit *AuditEvent, generation ...string) (*PlatformOrg, error) {
+	tx, err := p.s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	var current string
+	if err := tx.QueryRow(`SELECT COALESCE((SELECT value FROM system_settings WHERE key=?),'')`, RestoreGenerationSetting).Scan(&current); err != nil {
+		return nil, err
+	}
+	o, err := platformOrgTx(tx, org.id)
+	if err != nil {
+		return nil, err
+	}
+	if o.Status == "deleted" || o.Status != "suspended" || o.StatusReason != restoreOrgReason {
+		return nil, ErrOrgState
+	}
+	if current == "" || len(generation) != 1 || generation[0] != current {
+		return nil, ErrRestoreReconciliation
+	}
+	if expectedRevision != o.OrgRevision {
+		return nil, &StaleRevisionError{Current: o.OrgRevision}
+	}
+	c := PlatformCaller{TokenID: audit.ActorID, IP: audit.IPAddress, UserAgent: audit.UserAgent, ActorUsername: audit.ActorUsername}
+	if _, err := tx.Exec(`UPDATE orgs SET status='active',status_reason='',delete_after=NULL,revision=`+nextOrgRevisionSQL+`,updated_at=? WHERE id=?`, now, o.ID); err != nil {
+		return nil, erasureError(err)
+	}
+	if err := queuePlatformEventTx(tx, o.ID, "org.resumed", "", "", now); err != nil {
+		return nil, err
+	}
+	details := map[string]any{"from": o.Status, "to": "active", "reason": "", "org_revision": o.OrgRevision, "restore_generation": current}
+	if err := orgAuditTx(tx, o.ID, c.audit("platform.resumed", o.ID, "org", now), details, now); err != nil {
+		return nil, err
+	}
+	out, err := platformOrgTx(tx, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
 }

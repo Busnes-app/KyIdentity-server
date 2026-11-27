@@ -53,7 +53,7 @@ func (p EnrollmentPolicy) mask() int {
 	return mask
 }
 func (p EnrollmentPolicy) Valid() bool {
-	return (p.Scope == "organization" || p.Scope == "administrators" || (strings.HasPrefix(p.Scope, "group:") && len(p.Scope) > 6 && len(p.Scope) <= 512)) && p.mask() > 0 && p.GraceSeconds >= 0 && p.GraceSeconds <= 90*86400 && p.Revision > 0
+	return (p.Scope == "organization" || p.Scope == "administrators" || ((strings.HasPrefix(p.Scope, "group:") && len(p.Scope) > 6 || strings.HasPrefix(p.Scope, "org:") && len(p.Scope) > 4) && len(p.Scope) <= 512)) && p.mask() > 0 && p.GraceSeconds >= 0 && p.GraceSeconds <= 90*86400 && p.Revision > 0
 }
 
 type EnrollmentStatus struct {
@@ -81,7 +81,7 @@ func (s *Store) SessionEnrollmentStatus(userID, sessionID string) (EnrollmentSta
 	return enrollmentStatus(s.db.QueryRow(enrollmentStatusSQL, sessionID, sessionID, userID))
 }
 func (s *Store) ListEnrollmentPolicies() ([]EnrollmentPolicy, error) {
-	rows, err := s.db.Query(`SELECT scope,required,allowed_mask,grace_seconds,revision FROM enrollment_policies WHERE group_id IS NULL ORDER BY scope`)
+	rows, err := s.db.Query(`SELECT scope,required,allowed_mask,grace_seconds,revision FROM enrollment_policies WHERE scope IN ('organization','administrators') ORDER BY scope`)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +104,15 @@ func (s *Store) ListEnrollmentPolicies() ([]EnrollmentPolicy, error) {
 func applyEnrollmentPolicyTx(tx *sql.Tx, p EnrollmentPolicy) error {
 	if !p.Valid() {
 		return ErrEnrollmentPolicy
+	}
+	if strings.HasPrefix(p.Scope, "org:") {
+		var exists bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM orgs WHERE id=? AND status<>'deleted' AND `+orgEnrollmentEnabled+`)`, strings.TrimPrefix(p.Scope, "org:")).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
 	}
 	res, err := tx.Exec(`UPDATE enrollment_policies SET required=?,allowed_mask=?,grace_seconds=?,revision=revision+1 WHERE scope=? AND revision=?`, p.Required, p.mask(), p.GraceSeconds, p.Scope, p.Revision)
 	if err != nil {
@@ -137,9 +146,9 @@ type EnrollmentPreview struct {
 
 func previewEnrollmentTx(tx *sql.Tx, sessionID, scope string) (EnrollmentPreview, error) {
 	var p EnrollmentPreview
-	err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM enrollment_requirements r JOIN users u ON u.id=r.user_id WHERE r.required AND u.status='active' AND (? NOT LIKE 'group:%' OR EXISTS(SELECT 1 FROM group_memberships m WHERE m.user_id=r.user_id AND 'group:'||m.group_id=?))),
- (SELECT COUNT(*) FROM enrollment_requirements r JOIN users u ON u.id=r.user_id WHERE r.required AND u.status='active' AND NOT EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=r.user_id AND (f.bit&r.allowed_mask)<>0) AND (? NOT LIKE 'group:%' OR EXISTS(SELECT 1 FROM group_memberships m WHERE m.user_id=r.user_id AND 'group:'||m.group_id=?))),
- (SELECT COUNT(*) FROM mfa_session_access a JOIN sessions s ON s.id=a.id WHERE NOT a.allowed AND s.expires_at>? AND (? NOT LIKE 'group:%' OR EXISTS(SELECT 1 FROM group_memberships m WHERE m.user_id=a.user_id AND 'group:'||m.group_id=?)))`, scope, scope, scope, scope, time.Now().UTC(), scope, scope).Scan(&p.Affected, &p.MissingFactor, &p.RestrictedSessions)
+	err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM enrollment_requirements r JOIN users u ON u.id=r.user_id WHERE r.required AND u.status='active' AND (? NOT LIKE 'org:%' OR 'org:'||u.org_id=?) AND (? NOT LIKE 'group:%' OR EXISTS(SELECT 1 FROM group_memberships m WHERE m.user_id=r.user_id AND 'group:'||m.group_id=?))),
+ (SELECT COUNT(*) FROM enrollment_requirements r JOIN users u ON u.id=r.user_id WHERE r.required AND u.status='active' AND NOT EXISTS(SELECT 1 FROM enrolled_factors f WHERE f.user_id=r.user_id AND (f.bit&r.allowed_mask)<>0) AND (? NOT LIKE 'org:%' OR 'org:'||u.org_id=?) AND (? NOT LIKE 'group:%' OR EXISTS(SELECT 1 FROM group_memberships m WHERE m.user_id=r.user_id AND 'group:'||m.group_id=?))),
+ (SELECT COUNT(*) FROM mfa_session_access a JOIN sessions s ON s.id=a.id WHERE NOT a.allowed AND s.expires_at>? AND (? NOT LIKE 'org:%' OR EXISTS(SELECT 1 FROM users u WHERE u.id=a.user_id AND 'org:'||u.org_id=?)) AND (? NOT LIKE 'group:%' OR EXISTS(SELECT 1 FROM group_memberships m WHERE m.user_id=a.user_id AND 'group:'||m.group_id=?)))`, scope, scope, scope, scope, scope, scope, scope, scope, time.Now().UTC(), scope, scope, scope, scope).Scan(&p.Affected, &p.MissingFactor, &p.RestrictedSessions)
 	if err != nil {
 		return p, err
 	}
@@ -190,9 +199,22 @@ func (s *Store) SetEnrollmentPolicy(p EnrollmentPolicy, sessionID string, audit 
 	if !preview.CanActivate {
 		return ErrEmergencyAdministrator
 	}
-	if _, err = tx.Exec(`DELETE FROM authorization_codes; DELETE FROM authorization_interactions; DELETE FROM forward_codes; DELETE FROM forward_sessions; UPDATE issued_tokens SET revoked_at=? WHERE revoked_at IS NULL`, time.Now().UTC()); err != nil {
-		return err
+	if strings.HasPrefix(p.Scope, "org:") {
+		ids, err := scanStrings(tx.Query(`SELECT id FROM users WHERE org_id=?`, strings.TrimPrefix(p.Scope, "org:")))
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := invalidateUserEnrollmentTx(tx, id); err != nil {
+				return err
+			}
+		}
+	} else {
+		if _, err = tx.Exec(`DELETE FROM authorization_codes; DELETE FROM authorization_interactions; DELETE FROM forward_codes; DELETE FROM forward_sessions; UPDATE issued_tokens SET revoked_at=? WHERE revoked_at IS NULL`, time.Now().UTC()); err != nil {
+			return err
+		}
 	}
+
 	details := map[string]any{"policy": p, "impact": preview}
 	if strings.HasPrefix(p.Scope, "group:") {
 		var name string
@@ -204,7 +226,12 @@ func (s *Store) SetEnrollmentPolicy(p EnrollmentPolicy, sessionID string, audit 
 	if err = appRegistryAudit(audit, details); err != nil {
 		return err
 	}
-	if err = recordAuditTx(tx, audit); err != nil {
+	if strings.HasPrefix(p.Scope, "org:") && audit != nil {
+		err = orgAuditTx(tx, strings.TrimPrefix(p.Scope, "org:"), audit, details, time.Now().UTC())
+	} else {
+		err = recordAuditTx(tx, audit)
+	}
+	if err != nil {
 		return err
 	}
 	return tx.Commit()

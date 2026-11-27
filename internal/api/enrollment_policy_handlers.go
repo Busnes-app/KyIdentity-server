@@ -25,8 +25,19 @@ func enrollmentError(w http.ResponseWriter, err error) {
 	}
 }
 func (h *AdminHandler) ListEnrollmentPolicies(w http.ResponseWriter, r *http.Request) {
-	p, err := h.store.ListEnrollmentPolicies()
-	if groupID := r.URL.Query().Get("groupId"); groupID != "" {
+	var p []store.EnrollmentPolicy
+	var err error
+	if strings.HasPrefix(r.URL.Path, "/api/admin/org/") {
+		if !h.multiTenant {
+			http.NotFound(w, r)
+			return
+		}
+		p, err = orgStore(r).OrgEnrollmentPolicies()
+	} else {
+		p, err = h.store.ListEnrollmentPolicies()
+	}
+
+	if groupID := r.URL.Query().Get("groupId"); groupID != "" && !strings.HasPrefix(r.URL.Path, "/api/admin/org/") {
 		var policy store.EnrollmentPolicy
 		policy, err = h.store.GroupEnrollmentPolicy(groupID)
 		p = []store.EnrollmentPolicy{policy}
@@ -92,6 +103,9 @@ func (h *AdminHandler) PreviewEnrollmentPolicy(w http.ResponseWriter, r *http.Re
 		h.enrollmentDenied(w, r, "admin.mfa_enrollment_policy_previewed", p.Scope, err)
 		return
 	}
+	if !h.policyScopeAllowed(w, r, p) {
+		return
+	}
 	if h.pinnedPolicy(w, r, "admin.mfa_enrollment_policy_previewed", p) {
 		return
 	}
@@ -111,6 +125,9 @@ func (h *AdminHandler) SetEnrollmentPolicy(w http.ResponseWriter, r *http.Reques
 	p, err := readEnrollmentPolicy(r)
 	if err != nil {
 		h.enrollmentDenied(w, r, "admin.mfa_enrollment_policy_changed", p.Scope, err)
+		return
+	}
+	if !h.policyScopeAllowed(w, r, p) {
 		return
 	}
 	if h.pinnedPolicy(w, r, "admin.mfa_enrollment_policy_changed", p) {
@@ -144,7 +161,7 @@ func enrollmentRouteAllowed(method, path string) bool {
 // gates its codes and tokens.
 func exportRouteAllowed(method, path string) bool {
 	switch method + " " + path {
-	case "GET /api/auth/me", "POST /api/auth/logout", "GET /api/user/applications":
+	case "GET /api/auth/me", "POST /api/auth/logout", "GET /api/user/applications", "GET /api/user/org-export", "GET /api/user/org-export/status":
 		return true
 	}
 	return false
@@ -156,4 +173,15 @@ func enrollmentOperationAllowed(operation string) bool {
 		return true
 	}
 	return false
+}
+
+// Org policies are reachable only through the selected-org route; global policies
+// remain platform settings. A foreign scope answers like an unknown policy.
+func (h *AdminHandler) policyScopeAllowed(w http.ResponseWriter, r *http.Request, p store.EnrollmentPolicy) bool {
+	orgRoute := strings.HasPrefix(r.URL.Path, "/api/admin/org/")
+	if orgRoute && (!h.multiTenant || p.Scope != "org:"+orgStore(r).ID().String()) || !orgRoute && strings.HasPrefix(p.Scope, "org:") {
+		writeAPIError(w, 404, "not_found", "")
+		return false
+	}
+	return true
 }

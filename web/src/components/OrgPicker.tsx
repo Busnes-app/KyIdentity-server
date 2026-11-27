@@ -1,3 +1,5 @@
+import { OrgLimits } from './OrgLimits';
+import { AdminEnrollmentPolicies } from './AdminEnrollmentPolicies';
 import React, { useEffect, useState } from 'react';
 import { ApiError, apiJson, errorMessage, isRecord, setStaffOrg } from '../api';
 
@@ -46,7 +48,7 @@ const label = (o: StaffOrg) => `${o.name}${o.kind === 'staff' ? ' (staff)' : ''}
  * 404 and the picker shows nothing. onReady gets the selected org's ID ('' when there is no
  * selection to make, see initialOrg), and fires again on every change.
  */
-export function OrgPicker({ onReady }: { onReady: (org: string) => void }) {
+export function OrgPicker({ onReady, canEdit = false }: { onReady: (org: string) => void; canEdit?: boolean }) {
   const [current, setCurrent] = useState<StaffOrg | null>(null);
   const [query, setQuery] = useState('');
   const [found, setFound] = useState<StaffOrg[] | null>(null);
@@ -88,8 +90,12 @@ export function OrgPicker({ onReady }: { onReady: (org: string) => void }) {
   };
 
   return (
-    <OrgPickerView current={current} found={found} error={error} busy={busy} query={query}
+    <><OrgPickerView current={current} found={found} error={error} busy={busy} query={query}
       onQuery={setQuery} onSearch={search} onSelect={select} />
+    {canEdit && current?.kind === 'customer' && <div key={current.id}>
+      <details className="policy-note"><summary>Organisation seats, storage and restore hold</summary><OrgLimits onResumed={() => setCurrent(value => value?.id === current.id ? { ...value, status: 'active' } : value)} /></details>
+      <details className="policy-note"><summary>Organisation MFA policy</summary><AdminEnrollmentPolicies org /></details>
+    </div>}</>
   );
 }
 

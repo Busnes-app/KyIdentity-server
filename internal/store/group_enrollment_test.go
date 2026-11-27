@@ -241,7 +241,7 @@ func TestGroupEnrollmentUpgradePreservesLegacyPolicy(t *testing.T) {
 	// Reconstruct the PR06a tables, including its scope CHECK and deadline foreign key.
 	_, err = s.db.Exec(`DROP VIEW mfa_session_access; DROP VIEW enrollment_requirements; DROP VIEW applicable_enrollment_policies;
  DROP TRIGGER enrollment_new_user; DROP TRIGGER enrollment_user_role; DROP TRIGGER enrollment_new_group; DROP TRIGGER enrollment_new_member; DROP TRIGGER enrollment_role_compatibility;
- CREATE TEMP TABLE old_p AS SELECT scope,required,allowed_mask,grace_seconds,revision FROM enrollment_policies WHERE group_id IS NULL;
+ CREATE TEMP TABLE old_p AS SELECT scope,required,allowed_mask,grace_seconds,revision FROM enrollment_policies WHERE scope IN ('organization','administrators');
  CREATE TEMP TABLE old_d AS SELECT * FROM enrollment_deadlines WHERE scope IN ('organization','administrators');
  DROP TABLE enrollment_deadlines; DROP TABLE enrollment_policies;
  CREATE TABLE enrollment_policies(scope TEXT PRIMARY KEY CHECK(scope IN ('organization','administrators')),required BOOLEAN NOT NULL DEFAULT 0,allowed_mask INTEGER NOT NULL DEFAULT 7,grace_seconds INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 1);

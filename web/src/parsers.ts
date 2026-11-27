@@ -786,6 +786,7 @@ export function parseEnrollmentStatus(value: unknown): EnrollmentStatus {
 function enrollmentScope(o: Record<string, unknown>): EnrollmentPolicy['scope'] {
  const scope = str(o, 'scope');
  if (scope === 'organization' || scope === 'administrators') return scope;
+ if (scope.startsWith('org:') && scope.length > 4 && scope.length <= 512) return `org:${scope.slice(4)}`;
  if (scope.startsWith('group:') && scope.length > 6 && scope.length <= 512) return `group:${scope.slice(6)}`;
  return fail('an enrollment policy scope');
 }

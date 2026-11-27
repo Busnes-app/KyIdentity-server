@@ -158,6 +158,8 @@ func TestOrgSQLNamesOrgID(t *testing.T) {
 // "pre-org" and "platform" entries stay; an entry naming a build plan step (2b, 2c, 2d,
 // PR 3) goes when that step scopes it. The test fails on an entry with nothing left to allow.
 var orgSQLAllowlist = map[string]string{
+	"PlatformStore.AuditByActor":                    "platform: bounded staff-only cross-org audit query",
+	"orgRequirementsSQL":                            "migration: org-bound policy scopes through enrollmentScopesSQL",
 	"OrgStore.AcknowledgeAlert":                     "fragment: alertVisibleSQL binds the org (a.org_id=?)",
 	"OrgStore.ListAlerts":                           "fragment: alertVisibleSQL binds the org (a.org_id=?)",
 	"OrgStore.CountAuditEvents":                     "fragment: AuditFilter.where binds the org first",

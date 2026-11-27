@@ -20,7 +20,8 @@ type AuditFilter struct {
 	Actor, Target, TargetType, Action, Outcome string
 	From, To                                   *time.Time
 	Limit, Offset                              int
-	// OmitStaffReadDetails keeps the listing's own read events out of its pages.
+	// OmitStaffReadDetails excludes the listing's own staff.audit_read events from
+	// both pages and totals so offset pagination remains stable while reads stay audited.
 	OmitStaffReadDetails string
 }
 
@@ -40,7 +41,9 @@ func likePrefix(s string) string {
 // where filters the trail for one org: its own rows, and platform rows (NULL) for the org
 // that administers the install (the default org, or the staff org).
 func (f AuditFilter) where(org string) (string, []any) {
-	clauses, args := []string{`(org_id=? OR org_id IS NULL AND EXISTS(SELECT 1 FROM orgs o WHERE o.id=? AND o.kind IN ('default','staff')))`}, []any{org, org}
+	return f.filters([]string{`(org_id=? OR org_id IS NULL AND EXISTS(SELECT 1 FROM orgs o WHERE o.id=? AND o.kind IN ('default','staff')))`}, []any{org, org})
+}
+func (f AuditFilter) filters(clauses []string, args []any) (string, []any) {
 	if f.Actor != "" {
 		clauses, args = append(clauses, "(actor_id=? OR actor_username=?)"), append(args, f.Actor, f.Actor)
 	}
@@ -72,10 +75,10 @@ func (f AuditFilter) where(org string) (string, []any) {
 const auditSelect = `SELECT id, actor_id, actor_username, action, target_id, target_type, ip_address, user_agent, outcome, details_json, created_at FROM audit_events`
 const auditOrder = ` ORDER BY created_at DESC, id DESC`
 
-func scanAuditEvent(rows *sql.Rows) (AuditEvent, error) {
+func scanAuditEvent(rows *sql.Rows, extra ...any) (AuditEvent, error) {
 	var e AuditEvent
 	var actorID, actorUser, targetID, targetType, details sql.NullString
-	if err := rows.Scan(&e.ID, &actorID, &actorUser, &e.Action, &targetID, &targetType, &e.IPAddress, &e.UserAgent, &e.Outcome, &details, &e.CreatedAt); err != nil {
+	if err := rows.Scan(append([]any{&e.ID, &actorID, &actorUser, &e.Action, &targetID, &targetType, &e.IPAddress, &e.UserAgent, &e.Outcome, &details, &e.CreatedAt}, extra...)...); err != nil {
 		return e, err
 	}
 	e.ActorID, e.ActorUsername, e.TargetID, e.TargetType, e.DetailsJSON = actorID.String, actorUser.String, targetID.String, targetType.String, details.String
@@ -186,4 +189,43 @@ func redactValue(v any) any {
 		return t
 	}
 	return v
+}
+
+// PlatformAuditEvent names the original org even when its user has since been removed.
+type PlatformAuditEvent struct {
+	AuditEvent
+	OrgID *string `json:"orgId"`
+}
+
+// AuditByActor is a bounded cross-org staff query. It requires an exact actor and is
+// deliberately available only on PlatformStore, never an OrgStore escape hatch.
+func (p *PlatformStore) AuditByActor(ctx context.Context, f AuditFilter) ([]PlatformAuditEvent, int, error) {
+	if strings.TrimSpace(f.Actor) == "" || len(f.Actor) > 200 || f.Limit < 1 || f.Limit > 500 || f.Offset < 0 || f.Offset > 1000000 {
+		return nil, 0, InputError("actor and bounded pagination are required")
+	}
+	where, args := f.filters([]string{"action<>'staff.audit_read'"}, nil)
+	var total int
+	if err := p.s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := p.s.db.QueryContext(ctx, `SELECT id,actor_id,actor_username,action,target_id,target_type,ip_address,user_agent,outcome,details_json,created_at,org_id FROM audit_events`+where+auditOrder+` LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := []PlatformAuditEvent{}
+	for rows.Next() {
+		var e PlatformAuditEvent
+		var org sql.NullString
+		e.AuditEvent, err = scanAuditEvent(rows, &org)
+		if err != nil {
+			return nil, 0, err
+		}
+		if org.Valid {
+			e.OrgID = &org.String
+		}
+		e.DetailsJSON = RedactAuditDetails(e.DetailsJSON)
+		out = append(out, e)
+	}
+	return out, total, rows.Err()
 }

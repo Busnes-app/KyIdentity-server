@@ -486,9 +486,10 @@ describe('pairing expiry', () => {
 
 describe('group enrollment policies', () => {
   it('accepts a stable group scope', () => {
+    expect(parseEnrollmentPolicies({policies:[{scope:'org:o1',required:true,allowedMethods:['totp'],graceSeconds:3600,revision:2}]} )[0].scope).toBe('org:o1');
     expect(parseEnrollmentPolicies({policies:[{scope:'group:g1',required:true,allowedMethods:['totp'],graceSeconds:3600,revision:2}]} )[0].scope).toBe('group:g1');
   });
-  it.each(['group:', 'group', 'group:'+'x'.repeat(513)])('rejects invalid scope %p', scope => {
+  it.each(['org:', 'group:', 'group', 'group:'+'x'.repeat(513)])('rejects invalid scope %p', scope => {
     expect(() => parseEnrollmentPolicies({policies:[{scope,required:true,allowedMethods:['totp'],graceSeconds:0,revision:1}]})).toThrow();
   });
 });
