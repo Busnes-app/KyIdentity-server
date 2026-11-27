@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/hybridsig"
 	"github.com/Busnes-app/kyidentity-server/internal/adpass"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/google/uuid"
@@ -49,14 +50,21 @@ func migrateADPostgres(tx *sql.Tx) error {
 // ADKeys are derived from the deployment encryption key, which never lives in the
 // database: a database writer can neither swap an agent key unnoticed nor forge an entry.
 type ADKeys struct {
-	mac  []byte
-	sign ed25519.PrivateKey
+	mac    []byte
+	sign   ed25519.PrivateKey
+	hybrid *hybridsig.PrivateKey
 }
 
 // NewADKeys derives the agent-key MAC key and the entry-signing key.
 func NewADKeys(encryptionKey []byte) ADKeys {
+	// Keep the legacy Ed25519 seed unchanged; the ML-DSA seed has its own domain.
+	edSeed := crypto.DeriveKey(encryptionKey, "kyidentity:ad-entry-signing")
+	hybrid, err := hybridsig.FromSeeds(crypto.DeriveKey(encryptionKey, "kyidentity:ad-entry-signing:mldsa65"), edSeed)
+	if err != nil {
+		panic("fixed-size AD signing seed derivation failed")
+	}
 	return ADKeys{mac: crypto.DeriveKey(encryptionKey, "kyidentity:ad-agent-key-mac"),
-		sign: ed25519.NewKeyFromSeed(crypto.DeriveKey(encryptionKey, "kyidentity:ad-entry-signing"))}
+		sign: ed25519.NewKeyFromSeed(edSeed), hybrid: hybrid}
 }
 
 // KeyMAC binds an agent public key to its connector.
@@ -68,7 +76,16 @@ func (k ADKeys) KeyMAC(systemID, publicKey string) string {
 
 // SigningPublicKey is what the agent pins to verify entries.
 func (k ADKeys) SigningPublicKey() string {
-	return adpass.EncodeSigningKey(k.sign.Public().(ed25519.PublicKey))
+	return adpass.EncodeHybridSigningKey(k.hybrid.Public())
+}
+
+// SigningPublicKeyForAgent preserves the pin used by existing X25519 agents.
+// Moving a connector to X-Wing deliberately switches it to the hybrid signing pin.
+func (k ADKeys) SigningPublicKeyForAgent(agentPublicKey string) string {
+	if strings.HasPrefix(agentPublicKey, "x25519:") {
+		return adpass.EncodeSigningKey(k.sign.Public().(ed25519.PublicKey))
+	}
+	return k.SigningPublicKey()
 }
 
 // ADConnector is an Active Directory connector's settings. The LDAPS URL is the paired
@@ -261,7 +278,15 @@ func (s *Store) QueueDirectoryPassword(keys ADKeys, userID, passwordHash string,
 			return 0, err
 		}
 		expires := now.Add(time.Duration(t.ttl) * time.Minute).Truncate(time.Second)
-		sig := adpass.SignEntry(keys.sign, t.id, userID, seq, expires.Unix(), ct)
+		var sig string
+		if strings.HasPrefix(t.key, "x25519:") {
+			sig = adpass.SignEntry(keys.sign, t.id, userID, seq, expires.Unix(), ct)
+		} else {
+			sig, err = adpass.SignHybridEntry(keys.hybrid, t.id, userID, seq, expires.Unix(), ct)
+			if err != nil {
+				return 0, err
+			}
+		}
 		if _, err := tx.Exec(`INSERT INTO ad_passwords (system_id,user_id,seq,ciphertext,signature,expires_at,password_tag) VALUES (?,?,?,?,?,?,?)
  ON CONFLICT(system_id,user_id) DO UPDATE SET seq=excluded.seq,ciphertext=excluded.ciphertext,signature=excluded.signature,expires_at=excluded.expires_at,
  attempts=0,last_error='',password_tag=excluded.password_tag`,

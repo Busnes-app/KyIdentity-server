@@ -1,85 +1,172 @@
-// Package adpass seals a password for the Active Directory agent: HPKE (RFC 9180) with
-// DHKEM(X25519, HKDF-SHA256), HKDF-SHA256 and AES-256-GCM. KyIdentity holds only the
-// public key; the agent holds the private key. The info string binds the ciphertext to
-// one connector, one user and one sequence number, so it cannot be moved or reordered.
+// Package adpass seals Active Directory passwords to the DC agent and authenticates
+// queue entries. New agents use X-Wing HPKE and HybridSig; legacy agents retain
+// X25519 HPKE and Ed25519 until the operator re-keys them.
 package adpass
 
 import (
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/hpke"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"strconv"
 	"strings"
 	"unicode/utf16"
+
+	"github.com/Busnes-app/ky-primitives/hybridsig"
+	"github.com/Busnes-app/ky-primitives/xwing"
 )
 
-const keyPrefix = "x25519:"
+const (
+	keyPrefix   = "x25519:"
+	xwingPrefix = "xwing:"
+)
 
-// ErrKey is a public or private key that is not a well-formed X25519 key.
-var ErrKey = errors.New("agent key must be x25519: followed by 32 bytes of base64")
+var ErrKey = errors.New("agent key must be xwing: (1216-byte public key / 32-byte private seed) or x25519: (32 bytes), base64 encoded")
+
+// PublicKey and PrivateKey keep the selected suite with its key material. Readers
+// dispatch by the pinned key, never by attacker-controlled ciphertext or fallback.
+type PublicKey struct {
+	legacy *ecdh.PublicKey
+	hybrid xwing.PublicKey
+}
+type PrivateKey struct {
+	legacy *ecdh.PrivateKey
+	hybrid xwing.PrivateKey
+}
+
+func (k *PrivateKey) PublicKey() *PublicKey {
+	if k.legacy != nil {
+		return &PublicKey{legacy: k.legacy.PublicKey()}
+	}
+	return &PublicKey{hybrid: k.hybrid.Public()}
+}
 
 func suite() (hpke.KDF, hpke.AEAD) { return hpke.HKDFSHA256(), hpke.AES256GCM() }
 
-func info(systemID, userID string, seq int64) []byte {
-	return []byte("kyidentity-ad-password/1\x00" + systemID + "\x00" + userID + "\x00" + strconv.FormatInt(seq, 10))
+func info(version, systemID, userID string, seq int64) []byte {
+	return []byte("kyidentity-ad-password/" + version + "\x00" + systemID + "\x00" + userID + "\x00" + strconv.FormatInt(seq, 10))
 }
 
 // ParsePublicKey reads the form EncodePublicKey writes.
-func ParsePublicKey(s string) (*ecdh.PublicKey, error) {
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(strings.TrimSpace(s), keyPrefix))
-	if err != nil || !strings.HasPrefix(strings.TrimSpace(s), keyPrefix) {
+func ParsePublicKey(s string) (*PublicKey, error) {
+	s = strings.TrimSpace(s)
+	prefix, b64, ok := strings.Cut(s, ":")
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if !ok || err != nil {
 		return nil, ErrKey
 	}
-	k, err := ecdh.X25519().NewPublicKey(raw)
-	if err != nil {
+	switch prefix {
+	case "xwing":
+		k, err := xwing.ParsePublicKey(raw)
+		if err != nil {
+			return nil, ErrKey
+		}
+		return &PublicKey{hybrid: k}, nil
+	case "x25519":
+		k, err := ecdh.X25519().NewPublicKey(raw)
+		if err != nil {
+			return nil, ErrKey
+		}
+		return &PublicKey{legacy: k}, nil
+	default:
 		return nil, ErrKey
 	}
-	return k, nil
 }
 
 // EncodePublicKey is the text the admin pastes into KyIdentity.
-func EncodePublicKey(k *ecdh.PublicKey) string {
-	return keyPrefix + base64.StdEncoding.EncodeToString(k.Bytes())
+func EncodePublicKey(k *PublicKey) string {
+	if k.legacy != nil {
+		return keyPrefix + base64.StdEncoding.EncodeToString(k.legacy.Bytes())
+	}
+	return xwingPrefix + base64.StdEncoding.EncodeToString(k.hybrid.Bytes())
 }
 
-// GenerateKey makes a new agent key.
-func GenerateKey() (*ecdh.PrivateKey, error) { return ecdh.X25519().GenerateKey(rand.Reader) }
+// GenerateKey makes a new X-Wing agent key.
+func GenerateKey() (*PrivateKey, error) {
+	k, err := xwing.Generate()
+	if err != nil {
+		return nil, err
+	}
+	return &PrivateKey{hybrid: k}, nil
+}
 
-// Seal encrypts plaintext to the agent's public key for one user and sequence number.
+// EncodePrivateKey persists only the seed for X-Wing. Legacy encodings are retained.
+func EncodePrivateKey(k *PrivateKey) string {
+	if k.legacy != nil {
+		return "x25519-private:" + base64.StdEncoding.EncodeToString(k.legacy.Bytes())
+	}
+	return "xwing-private:" + base64.StdEncoding.EncodeToString(k.hybrid.Seed())
+}
+
+// ParsePrivateKey refuses unknown prefixes and wrong lengths, including public keys.
+func ParsePrivateKey(s string) (*PrivateKey, error) {
+	prefix, b64, ok := strings.Cut(strings.TrimSpace(s), ":")
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if !ok || err != nil {
+		return nil, ErrKey
+	}
+	switch prefix {
+	case "xwing-private":
+		k, err := xwing.FromSeed(raw)
+		if err != nil {
+			return nil, ErrKey
+		}
+		return &PrivateKey{hybrid: k}, nil
+	case "x25519-private":
+		k, err := ecdh.X25519().NewPrivateKey(raw)
+		if err != nil {
+			return nil, ErrKey
+		}
+		return &PrivateKey{legacy: k}, nil
+	default:
+		return nil, ErrKey
+	}
+}
+
+// Seal encrypts to the suite selected by the registered public key. Connector and
+// user IDs are globally unique here; callers carry no separate tenant/org context.
 func Seal(publicKey, systemID, userID string, seq int64, plaintext []byte) (string, error) {
 	pk, err := ParsePublicKey(publicKey)
 	if err != nil {
 		return "", err
 	}
-	hpk, err := hpke.NewDHKEMPublicKey(pk)
-	if err != nil {
-		return "", err
-	}
-	kdf, aead := suite()
-	ct, err := hpke.Seal(hpk, kdf, aead, info(systemID, userID, seq), plaintext)
-	if err != nil {
-		return "", err
+	var ct []byte
+	if pk.legacy != nil {
+		hpk, err := hpke.NewDHKEMPublicKey(pk.legacy)
+		if err != nil {
+			return "", err
+		}
+		kdf, aead := suite()
+		ct, err = hpke.Seal(hpk, kdf, aead, info("1", systemID, userID, seq), plaintext)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		ct, err = xwing.Seal(pk.hybrid, info("2", systemID, userID, seq), nil, plaintext)
+		if err != nil {
+			return "", err
+		}
 	}
 	return base64.StdEncoding.EncodeToString(ct), nil
 }
 
-// Open decrypts what Seal produced; it fails unless systemID, userID and seq are the ones
-// the ciphertext was sealed for.
-func Open(k *ecdh.PrivateKey, systemID, userID string, seq int64, ciphertext string) ([]byte, error) {
+// Open fails unless the ciphertext matches the key suite, connector, user and seq.
+func Open(k *PrivateKey, systemID, userID string, seq int64, ciphertext string) ([]byte, error) {
 	raw, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
 		return nil, err
 	}
-	hk, err := hpke.NewDHKEMPrivateKey(k)
+	if k.legacy == nil {
+		return xwing.Open(k.hybrid, info("2", systemID, userID, seq), nil, raw)
+	}
+	hk, err := hpke.NewDHKEMPrivateKey(k.legacy)
 	if err != nil {
 		return nil, err
 	}
 	kdf, aead := suite()
-	return hpke.Open(hk, kdf, aead, info(systemID, userID, seq), raw)
+	return hpke.Open(hk, kdf, aead, info("1", systemID, userID, seq), raw)
 }
 
 // Marker is the adminDescription value on every directory object a connector created.
@@ -99,8 +186,29 @@ func UnicodePwd(password string) string {
 
 const signingPrefix = "ed25519:"
 
-// ErrSigningKey is a KyIdentity entry-signing key that is not ed25519: and 32 bytes.
-var ErrSigningKey = errors.New("KyIdentity signing key must be ed25519: followed by 32 bytes of base64")
+// ErrSigningKey reports a malformed or unsupported KyIdentity verification pin.
+var ErrSigningKey = errors.New("KyIdentity signing key must be hybridsig: or ed25519: followed by its base64 public key")
+
+// SigningKey selects exactly one verification algorithm; a hybrid pin never falls back.
+type SigningKey struct {
+	legacy ed25519.PublicKey
+	hybrid *hybridsig.PublicKey
+}
+
+const hybridEntryLabel = "kyidentity-ad-entry/2"
+
+// SignHybridEntry authenticates every entry field with both ML-DSA-65 and Ed25519.
+func SignHybridEntry(k *hybridsig.PrivateKey, systemID, userID string, seq, expires int64, ciphertext string) (string, error) {
+	raw, err := k.Sign(hybridEntryLabel, entryMessage(systemID, userID, seq, expires, ciphertext))
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+func EncodeHybridSigningKey(pub *hybridsig.PublicKey) string {
+	return "hybridsig:" + base64.StdEncoding.EncodeToString(pub.Bytes())
+}
 
 func entryMessage(systemID, userID string, seq, expires int64, ciphertext string) []byte {
 	return []byte("kyidentity-ad-entry/1\x00" + systemID + "\x00" + userID + "\x00" + strconv.FormatInt(seq, 10) + "\x00" + strconv.FormatInt(expires, 10) + "\x00" + ciphertext)
@@ -113,9 +221,16 @@ func SignEntry(k ed25519.PrivateKey, systemID, userID string, seq, expires int64
 }
 
 // VerifyEntry reports whether sig is KyIdentity's signature over exactly this entry.
-func VerifyEntry(pub ed25519.PublicKey, systemID, userID string, seq, expires int64, ciphertext, sig string) bool {
+func VerifyEntry(pub *SigningKey, systemID, userID string, seq, expires int64, ciphertext, sig string) bool {
 	raw, err := base64.StdEncoding.DecodeString(sig)
-	return err == nil && ed25519.Verify(pub, entryMessage(systemID, userID, seq, expires, ciphertext), raw)
+	if err != nil {
+		return false
+	}
+	msg := entryMessage(systemID, userID, seq, expires, ciphertext)
+	if pub.hybrid != nil {
+		return pub.hybrid.Verify(hybridEntryLabel, msg, raw) == nil
+	}
+	return ed25519.Verify(pub.legacy, msg, raw)
 }
 
 // EncodeSigningKey is the text the admin copies into the agent configuration.
@@ -124,11 +239,25 @@ func EncodeSigningKey(pub ed25519.PublicKey) string {
 }
 
 // ParseSigningKey reads the form EncodeSigningKey writes.
-func ParseSigningKey(s string) (ed25519.PublicKey, error) {
-	s = strings.TrimSpace(s)
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(s, signingPrefix))
-	if err != nil || !strings.HasPrefix(s, signingPrefix) || len(raw) != ed25519.PublicKeySize {
+func ParseSigningKey(s string) (*SigningKey, error) {
+	prefix, b64, ok := strings.Cut(strings.TrimSpace(s), ":")
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if !ok || err != nil {
 		return nil, ErrSigningKey
 	}
-	return ed25519.PublicKey(raw), nil
+	switch prefix {
+	case "hybridsig":
+		pub, err := hybridsig.ParsePublicKey(raw)
+		if err != nil {
+			return nil, ErrSigningKey
+		}
+		return &SigningKey{hybrid: pub}, nil
+	case "ed25519":
+		if len(raw) != ed25519.PublicKeySize {
+			return nil, ErrSigningKey
+		}
+		return &SigningKey{legacy: ed25519.PublicKey(raw)}, nil
+	default:
+		return nil, ErrSigningKey
+	}
 }

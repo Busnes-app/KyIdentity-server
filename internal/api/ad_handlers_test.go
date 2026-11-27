@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log"
@@ -85,12 +86,25 @@ func createADConnector(t *testing.T, srv *Server, cookie, name, publicKey string
 }
 
 func TestActiveDirectoryPasswordQueueEndToEnd(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "xwing-hybridsig"
+		if legacy {
+			name = "legacy-x25519-ed25519"
+		}
+		t.Run(name, func(t *testing.T) { testActiveDirectoryPasswordQueueEndToEnd(t, legacy) })
+	}
+}
+
+func testActiveDirectoryPasswordQueueEndToEnd(t *testing.T, legacy bool) {
 	output := captureOutput(t)
 	srv, db, engine, _, _, cleanup := setupTestServer(t)
 	defer cleanup()
 	admin := newUser(t, db, "admin")
 	cookie := newSession(t, db, admin, time.Now().UTC().Add(time.Hour))
 	key, _ := adpass.GenerateKey()
+	if legacy {
+		key, _ = adpass.ParsePrivateKey("x25519-private:" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	}
 	sys1, token1 := createADConnector(t, srv, cookie, "dc-one", adpass.EncodePublicKey(key.PublicKey()))
 	other, _ := adpass.GenerateKey()
 	sys2, token2 := createADConnector(t, srv, cookie, "dc-two", adpass.EncodePublicKey(other.PublicKey()))
@@ -152,6 +166,16 @@ func TestActiveDirectoryPasswordQueueEndToEnd(t *testing.T) {
 	e := page.Entries[0]
 	var settings struct{ EntrySigningKey string }
 	_ = json.Unmarshal(adminRequest(t, srv, "GET", "/api/admin/systems/"+sys1+"/active-directory", cookie, "").Body.Bytes(), &settings)
+	wantPrefix := "hybridsig:"
+	if legacy {
+		wantPrefix = "ed25519:"
+	}
+	if !strings.HasPrefix(settings.EntrySigningKey, wantPrefix) {
+		t.Fatal("wrong signing pin for agent suite")
+	}
+	if !legacy && len(settings.EntrySigningKey) < 2600 {
+		t.Fatal("hybrid pin was truncated")
+	}
 	signer, err := adpass.ParseSigningKey(settings.EntrySigningKey)
 	if err != nil || !adpass.VerifyEntry(signer, sys1, user.ID, e.Seq, e.ExpiresAt, e.Ciphertext, e.Signature) {
 		t.Fatal("entry not signed with the key the settings page shows", err)

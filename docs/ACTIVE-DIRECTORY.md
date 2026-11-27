@@ -85,8 +85,11 @@ On the agent host:
 kyidentity-dc-agent init -key /var/lib/kyidentity-dc-agent/agent.key
 ```
 
-It creates the X25519 private key with mode 0600 (and refuses to use one readable by group
-or others) and prints only the public key, `x25519:…`.
+It creates an X-Wing private seed with mode 0600 (and refuses to use a key readable by
+group or others) and prints only the public key, `xwing:…`. The public key is 1216 bytes
+(1630 characters including prefix and base64); the private file is
+`xwing-private:` plus the base64 32-byte seed. `init` reloads an existing file without
+replacing it, including an existing `x25519-private:` key. `run` never creates a key.
 
 ### 3. The connector
 
@@ -105,7 +108,7 @@ passwords the old key sealed.
 ```json
 {
   "kyidentityUrl": "https://id.example.org",
-  "kyidentitySigningKey": "ed25519:<KyIdentity signing key from the connector panel>",
+  "kyidentitySigningKey": "hybridsig:<KyIdentity signing key from the connector panel>",
   "connectorId": "<connector ID from Suite sync>",
   "tokenFile": "/etc/kyidentity-dc-agent/token",
   "keyFile": "/var/lib/kyidentity-dc-agent/agent.key",
@@ -135,14 +138,59 @@ keeps the highest sequence number it applied per user in `stateFile` and refuses
 older, so an old ciphertext cannot be replayed. Build it with
 `go build ./cmd/kyidentity-dc-agent`.
 
+## Upgrade an existing agent to X-Wing
+
+A server upgrade leaves existing X25519 agents and their `ed25519:` pins working.
+The connector panel chooses its signing pin from the registered agent key. Existing
+agents remain classical until deliberately re-keyed; changing only the binary does not
+upgrade their stored key.
+
+1. Upgrade KyIdentity and the agent binary, then stop the agent.
+2. Keep the existing private key and configuration securely for rollback. Generate a
+   new key at a **new path** with `init -key /var/lib/kyidentity-dc-agent/agent-xwing.key`.
+   Re-running `init` on the old path only prints the old public key.
+3. Paste the new `xwing:` public key into the connector and save with step-up. This clears
+   undelivered ciphertext for the old key; it cannot be re-encrypted because KyIdentity
+   has no copy of those passwords.
+4. Copy the panel's new `hybridsig:` signing pin into `kyidentitySigningKey`, and point
+   `keyFile` at the new private file. Keep `stateFile` and `connectorId` unchanged to
+   retain replay protection. The token and directory credentials are unchanged.
+5. Restart the agent and have an assigned user change their password. Check the connector
+   reports In directory and verify directory sign-in. Other users' delivered passwords
+   continue working; users whose queued passwords were cleared must set them again.
+
+The server derives separate ML-DSA-65 and Ed25519 seeds from `encryption.key` using
+`kyidentity:ad-entry-signing:mldsa65` and `kyidentity:ad-entry-signing` respectively.
+The latter is the original Ed25519 derivation, so legacy pins survive restarts and
+upgrades. Do not replace `encryption.key`. The hybrid public encoding is `hybridsig:`
+plus standard base64 of the tagged primitive public key (2678 characters in total).
+The admin inputs have no HTML length cap, the API accepts 64 KiB of connector settings,
+and the agent configuration loader accepts the complete pin. No schema migration is
+needed: queue ciphertext and signature columns are TEXT.
+
+Hybrid signatures authenticate **KyIdentity to the agent**. Poll requests and applied,
+rejected or retry results continue using the connector-scoped Bearer token over verified
+HTTPS; there was no Ed25519 agent request/result signature to migrate. Protect that token
+as before. X-Wing protects queued passwords, not the separate LDAPS hop to Windows or
+Samba, which can negotiate classical TLS.
+
 ## Password queue
 
 - Captured when an admin creates a user with a password or sets one, when an activation or
   reset link is redeemed, and when a user changes their own password. Only users the
   connector currently holds are queued.
-- Each entry is HPKE (X25519, HKDF-SHA256, AES-256-GCM) sealed to the agent key, bound to
-  the connector, the user and a sequence number, and signed (Ed25519) over all of these and
-  its expiry. The stored agent public key carries an HMAC under a key derived from the
+- New `xwing:` entries use HPKE X-Wing (KEM `0x647A`, ML-KEM-768 + X25519),
+  HKDF-SHA256 and AES-256-GCM through `ky-primitives/xwing`, with info domain
+  `kyidentity-ad-password/2`. Legacy `x25519:` keys retain their exact HPKE wire format
+  and `kyidentity-ad-password/1` info. Both bind the connector ID, user ID and sequence;
+  these IDs are globally unique, and the current queue callers carry no separate org
+  context. The agent selects the suite from its local key, with no ciphertext fallback.
+- X-Wing queue entries are signed with `ky-primitives/hybridsig` (ML-DSA-65 + Ed25519,
+  **both required**) under label `kyidentity-ad-entry/2`. The signed message is the
+  existing `kyidentity-ad-entry/1` field encoding: connector, user, sequence, expiry and
+  ciphertext separated by NUL bytes. Legacy X25519 connectors keep Ed25519 signatures
+  and their existing verification pin. A `hybridsig:` pin never accepts Ed25519 alone.
+- The stored agent public key carries an HMAC under a key derived from the
   encryption key, so a key swapped in the database is refused before anything is sealed. A newer password replaces an older one
   that has not been delivered.
 - Entries are cleared when the agent acknowledges them and expire after the password
