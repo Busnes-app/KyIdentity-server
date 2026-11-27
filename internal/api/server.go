@@ -206,6 +206,8 @@ func (s *Server) routes() *http.ServeMux {
 	mux.Handle("DELETE /api/user/sessions/{id}", authM(http.HandlerFunc(sessH.RevokeOwn)))
 	mux.Handle("POST /api/user/sessions/revoke-others", authM(http.HandlerFunc(sessH.RevokeOthers)))
 	eraseH := &EraseHandler{store: s.store, audit: s.audit, middleware: s.middleware, multiTenant: s.cfg.Tenancy == "multi"}
+	mux.Handle("GET /api/user/org-export/status", authM(http.HandlerFunc(eraseH.OrgExportStatus)))
+	mux.Handle("GET /api/user/org-export", authM(s.middleware.RateLimit("org_export", 5, 0.1)(http.HandlerFunc(eraseH.ExportOrg))))
 	mux.Handle("GET /api/user/erase", authM(http.HandlerFunc(eraseH.Options)))
 	mux.Handle("POST /api/user/erase", authM(s.middleware.RateLimit("erase", 5, 0.05)(http.HandlerFunc(eraseH.Erase))))
 
@@ -273,6 +275,15 @@ func (s *Server) routes() *http.ServeMux {
 	// stolen cookie answers it. The grant costs the password plus an enrolled factor,
 	// binds to this session and operation, and authorizes exactly one change.
 	s.adminRoutes = []adminRoute{
+		{"GET", "/api/admin/org/export", permAdmin, orgRoute, false, s.middleware.RateLimit("org_export", 5, 0.1)(http.HandlerFunc(adminH.ExportOrg))},
+		{"POST", "/api/admin/org/resume", permAdmin, orgRoute, true, http.HandlerFunc(adminH.ResumeRestoredOrg)},
+		{"GET", "/api/admin/audit-by-actor", permAdmin, crossOrgRoute, false, http.HandlerFunc(adminH.AuditByActor)},
+		{"GET", "/api/admin/org/limits", permAdmin, orgRoute, false, http.HandlerFunc(adminH.OrgLimits)},
+		{"PUT", "/api/admin/org/limits", permAdmin, orgRoute, true, http.HandlerFunc(adminH.OrgLimits)},
+		{"GET", "/api/admin/org/enrollment-policies", permAdmin, orgRoute, false, http.HandlerFunc(adminH.ListEnrollmentPolicies)},
+		{"POST", "/api/admin/org/enrollment-policies/preview", permAdmin, orgRoute, false, http.HandlerFunc(adminH.PreviewEnrollmentPolicy)},
+		{"PUT", "/api/admin/org/enrollment-policies", permAdmin, orgRoute, true, http.HandlerFunc(adminH.SetEnrollmentPolicy)},
+
 		{"GET", "/api/admin/orgs", permDirectory, crossOrgRoute, false, http.HandlerFunc(adminH.FindOrgs)},
 		{"GET", "/api/admin/enrollment-policies", permRead, platformRoute, false, http.HandlerFunc(adminH.ListEnrollmentPolicies)},
 		{"POST", "/api/admin/enrollment-policies/preview", permAdmin, platformRoute, false, http.HandlerFunc(adminH.PreviewEnrollmentPolicy)},

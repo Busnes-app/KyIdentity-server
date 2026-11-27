@@ -299,6 +299,48 @@ before, and start.
 4. Check the audit log: the last events before the restore are there, followed by your
    sign-in.
 
+## Multi-tenant restore: reconcile organisations before reopening
+
+Multi-tenant mode remains test-only (`kye2e`); release builds still refuse it.
+Stop every KyIdentity replica **and every relying app** before a whole-install restore.
+Keep customer traffic closed throughout reconciliation. A capsule cannot establish
+which organisations or subjects were cancelled or erased after it was taken.
+
+On restore, active customer organisations become `suspended` with
+`status_reason: restore_reconciliation`. The platform/staff organisation is unchanged;
+existing suspensions, deletion schedules, erasure requests and deleted tombstones remain.
+Storage reports retain their bytes and sequence numbers, but their grant headroom is
+cleared. Snapshot-era billing idempotency answers are removed and queued platform events
+are failed; fresh `org.restore_reconciliation_required` events and per-org audit rows name
+all customer organisations, including deleted ones.
+
+1. Reconcile the restored directory against **live billing and erasure records**, including
+   changes after the capsule. Reapply cancellations, erasures, limits, entitlements and
+   membership removals before admitting any restored customer. A restore cannot recover
+   a post-capsule erasure record; replay it from the authoritative external record.
+2. Read `/api/suite/orgs` from the beginning for each app and replace its entire org cache,
+   treating an absent organisation as unavailable. Reconcile `/api/suite/erased` from the
+   beginning too, and settle any post-capsule removals. Do not merely merge restored rows
+   into an old cache. The org response includes a new `restore_generation`; subsequent
+   `since`/`cursor` requests must send that generation. A missing or old generation answers
+   `409 org_resync_required`, even if the old cursor is beyond the restored revision.
+   Apps must finish that full replacement before customer traffic returns. This is an
+   operator gate; the generation response alone does not prove an app has reconciled.
+3. Apps report current storage with sequences above the retained values. A stale sequence
+   is still refused; an equal-sequence replay cannot recover cleared headroom. Allow up
+   to the old grant TTL (15 minutes) to pass before reopening writes.
+4. Billing confirms each eligible organisation with the existing platform `resume` call
+   and a fresh revision/idempotency key. After any restore, every resume must also send
+   `restore_generation` from the platform org read; missing or old values return
+   `409 restore_reconciliation_required`, even when an old retry has a higher revision
+   than the restored row. A saved pre-restore resume request is never confirmation.
+   Alternatively, staff select the organisation,
+   open **Organisation seats, storage and restore hold**, and explicitly confirm
+   reconciliation and resume (step-up required). Sessions and invitations cleared by the
+   restore stay cleared; users sign in again and pending members need fresh invitations.
+   An erasure requested by the holder cannot be resumed. Keep cancelled or unconfirmed
+   organisations suspended, and retain the audit and billing reconciliation evidence.
+
 ## Step 5: decide what to trust
 
 The restore proves the service works. It does not make the restored state current or safe.

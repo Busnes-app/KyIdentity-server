@@ -59,6 +59,7 @@ export interface ApiOptions extends RequestInit {
  */
 export async function apiRequest(path: string, options: ApiOptions = {}): Promise<unknown> {
   const { stepUpToken, ...init } = options;
+  const selectedOrg = staffOrg; // Keep CSRF waits and retries bound to the original selection.
   const method = init.method || 'GET';
   const isMutating = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
 
@@ -73,8 +74,8 @@ export async function apiRequest(path: string, options: ApiOptions = {}): Promis
     if (stepUpToken) {
       headers.set('X-KyIdentity-StepUp', stepUpToken);
     }
-    if (staffOrg && path.startsWith('/api/admin/')) {
-      headers.set('X-Ky-Org', staffOrg);
+    if (selectedOrg && path.startsWith('/api/admin/')) {
+      headers.set('X-Ky-Org', selectedOrg);
     }
     return fetch(path, { ...init, headers, credentials: 'same-origin' });
   };

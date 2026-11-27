@@ -84,7 +84,10 @@ Residual risks (accepted):
   (which write `sessions`) in every other org. Per-org rate limits soften this but do not
   remove it. Capacity is unmeasured (open question 8).
 - **A restore rolls back every org.** Restoring a capsule to fix one customer's problem
-  loses every other customer's writes since that capsule was taken.
+  loses every other customer's writes since that capsule was taken. The current owner
+  requirement (Track 3 completion, 2026-11-26) supersedes the earlier no-hold decision:
+  active customer orgs are suspended until live billing/erasure reconciliation confirms
+  them; the platform org is preserved. See `docs/RESTORE.md`.
 - **Global uniqueness leaks existence.** One org can tell an email is taken elsewhere
   (see the table). The billing service's checkout and portal must not echo `email_in_use`
   to a buyer in a way that confirms another customer's address.
@@ -792,9 +795,12 @@ described under Views. This amendment widens it:
 the same transactions, as for billing's own calls. A billing `DELETE /orgs/{id}` after a
 holder's request finds the org already `deleted`, or still inside its grace (`409`).
 
-**Restore.** A KyIdentity capsule taken before the click brings the org back, because a
-restore rolls every org back (Residual risks). The apps' own restores are covered by the
-`deleted` tombstone and `erased_subjects` (K).
+**Restore.** A KyIdentity capsule taken before the click brings back the old directory,
+but active customer orgs are held as `suspended` / `restore_reconciliation`. Live billing
+and erasure records must be reconciled before resume; never resume an org that those
+records say was erased. Apps replace org caches and reset erased-subject cursors before
+customer traffic reopens (`docs/RESTORE.md`). The apps' own restores retain the `deleted`
+tombstone and `erased_subjects` protections (K).
 
 **Tests.** Every new trigger path and its refusals (immediate with another live member,
 scheduled with none, a non-holder, a non-`active` org, `resume` and a new `delete_after` under
@@ -1202,8 +1208,9 @@ only.
   Its reports are then `stale` with the stored `seq`; the operator's restore step advances
   the app's sequence past that value, and the next report wins. An app never advances it on
   its own, so a stale replica cannot overwrite a newer figure. After a restore of
-  KyIdentity, the stored rows are older, and the apps' next reports (higher `seq`) replace
-  them.
+  KyIdentity, stored reports are older, grant headroom is cleared and active customer orgs
+  are held for reconciliation. Apps' next reports (higher `seq`) replace the figures;
+  equal-sequence replays never recover cleared headroom. See `docs/RESTORE.md`.
 
 **Worst-case overshoot.**
 
@@ -1457,8 +1464,14 @@ tests.
      start pins the `administrators` policy (required, passkey only, grace 0), and the admin
      API refuses any change to it (`409 pinned_policy`). The cross-org matrix runs
      multi-tenant with staff in org A. The HTTP tests cover the customer credential guards.
-     Remaining: the cross-org audit by actor, the holder's export page and deletion banner, the staff seat
-     and pool fields (P2, S3) and the `org:` MFA scope (P5).
+     Completion: `/api/admin/audit-by-actor?actor=` is staff-admin-only, with bounded
+     pagination, org IDs, redacted details and a platform read audit. Selected-org seats
+     and pool fields (P2, S3) use `/api/admin/org/limits`; the same picker exposes the
+     `org:<orgID>` MFA policy through `/api/admin/org/enrollment-policies` (P5).
+     The holder's export-only page includes the scheduled deletion date and a directory
+     JSON download; `/api/admin/org/export` provides the same scoped export for staff.
+     App content remains an export from each app. Restore reconciliation is specified in
+     `docs/RESTORE.md`; release startup remains gated.
 6. **Entitlements.**
    - Seat enforcement on every seat-adding path (member add, admin create, re-enable),
      `over_limit`, `org_apps` from the platform API, and quotas in `/api/suite/orgs`.

@@ -334,3 +334,23 @@ refuse a known `sub` arriving with another `org_id`; take the org only from a ve
 a signed webhook or a suite answer, never a URL, form or header; stop serving an
 organisation whose status is not `active`, and drop its data only at `deleted`; enforce
 your own quotas from this list. Client: `ky-primitives/suitedir` `Orgs`.
+
+### Org cache reset after a KyIdentity restore
+
+A restored multi-tenant directory returns `restore_generation` from `/api/suite/orgs`.
+Replace the complete org cache from an unfiltered, fully paginated listing, disabling
+access to absent orgs. Include `restore_generation=<value>` with every subsequent
+`since` or `cursor` request (including pages of that replacement). An incremental request
+with an absent or different value returns `409 org_resync_required` and the current
+`restore_generation`; restart the replacement. An unchanged install that has never been
+restored keeps its existing response. Reset the erased-subject cursor and reconcile
+external billing/erasure records too. See [RESTORE.md](RESTORE.md#multi-tenant-restore-reconcile-organisations-before-reopening).
+
+Platform org reads also expose `restore_generation` after a restore. Billing must
+include it in the body of every subsequent resume; a missing/old value is
+`409 restore_reconciliation_required`. Re-read and reconcile before confirming.
+
+The platform org read/list also exposes `used_bytes` (the sum of last reports) and
+`storage_usage`, keyed by OAuth client ID, each with `used_bytes`, `seq`,
+`ceiling_bytes` and `reported_at` (Unix seconds). Missing reports are absent, never
+inferred as zero or current usage. These figures are reported usage, not a live scan.

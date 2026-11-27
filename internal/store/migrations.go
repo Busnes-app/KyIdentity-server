@@ -39,6 +39,7 @@ var migrations = []migration{
 	{version: 17, name: "org_storage", up: migrateOrgStorage, pgUp: migrateOrgStoragePostgres},
 	{version: 18, name: "keyring", up: migrateKeyring, pgUp: migrateKeyringPostgres},
 	{version: 19, name: "keyring_xwing", up: migrateKeyringXwing, pgUp: migrateKeyringXwingPostgres},
+	{version: 20, name: "org_enrollment_restore", up: migrateOrgEnrollment, pgUp: migrateOrgEnrollmentPostgres},
 }
 
 // migratePairingProofKey adds the sealed pairing proof key; tokens issued before it have

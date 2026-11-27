@@ -68,6 +68,7 @@ type RestoreReport struct {
 	// runbook asks the operator to review them for rotation.
 	HeldConnectors int
 	Connectors     []string
+	HeldOrgs       int `json:",omitempty"`
 }
 
 func (s *Store) migrateRestoreHold() error {
@@ -99,7 +100,12 @@ func (s *Store) ApplyRestoredState(now time.Time, audit *AuditEvent) (RestoreRep
 // records audit after it.
 func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEvent) (RestoreReport, error) {
 	report := RestoreReport{}
-	err := func() error {
+	var err error
+	report.HeldOrgs, err = holdRestoredOrgsTx(tx, now, audit)
+	if err != nil {
+		return report, err
+	}
+	err = func() error {
 		// Restored HR jobs and credentials require deliberate review.
 		if _, err := tx.Exec(`UPDATE hr_connections SET held=TRUE`); err != nil {
 			return err
@@ -233,6 +239,9 @@ func (s *Store) applyRestoredStateTx(tx *sql.Tx, now time.Time, audit *AuditEven
 				if err := json.Unmarshal([]byte(audit.DetailsJSON), &details); err != nil {
 					return err
 				}
+			}
+			if report.HeldOrgs > 0 {
+				details["customerOrgsHeld"] = report.HeldOrgs
 			}
 			details["credentialsInvalidated"] = report.Credentials
 			details["queuedDeliveriesClosed"] = report.QueuedDeliveries

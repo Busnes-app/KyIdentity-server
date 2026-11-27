@@ -169,7 +169,7 @@ export const App: React.FC = () => {
         )}
 
         {canAdminister(currentUser.access) && (
-          <div hidden={!activeTab.startsWith('admin-')}><OrgPicker onReady={org => { setGroupUser(null); setStaffOrgState(org); }} /></div>
+          <div hidden={!activeTab.startsWith('admin-')}><OrgPicker canEdit={currentUser.access?.admin} onReady={org => { setGroupUser(null); setStaffOrgState(org); }} /></div>
         )}
         {canAdminister(currentUser.access) && staffOrg !== null && (
           <React.Fragment key={staffOrg}>

@@ -203,6 +203,21 @@ describe('isSignedOut', () => {
 });
 
 describe('staff org selection', () => {
+  it('pins an in-flight write and its CSRF retry to the original org', async () => {
+    stubFetch([csrf]);
+    await fetchCSRF(true);
+    setStaffOrg('org-a');
+    const calls = stubFetch([
+      { status: 403, body: { error: 'invalid_csrf' } },
+      { body: { csrfToken: 'refreshed' } },
+      { body: { success: true } },
+    ]);
+    const pending = apiRequest('/api/admin/org/limits', { method: 'PUT', body: '{}' });
+    setStaffOrg('org-b');
+    await pending;
+    expect(calls.filter(c => c.path === '/api/admin/org/limits').map(c => c.init.headers.get('X-Ky-Org'))).toEqual(['org-a', 'org-a']);
+  });
+
   afterEach(() => setStaffOrg(''));
 
   // Only admin calls carry the selected org; nothing else learns it, and no selection sends none.

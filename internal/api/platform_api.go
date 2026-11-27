@@ -232,6 +232,8 @@ func platformErrorFor(err error) (int, string, map[string]any) {
 		return http.StatusUnprocessableEntity, "idempotency_conflict", nil
 	case errors.Is(err, store.ErrBillingRefConflict):
 		return http.StatusConflict, "billing_ref_conflict", nil
+	case errors.Is(err, store.ErrRestoreReconciliation):
+		return http.StatusConflict, "restore_reconciliation_required", nil
 	case errors.Is(err, store.ErrOrgState):
 		return http.StatusConflict, "org_state", nil
 	case errors.Is(err, store.ErrOrgErased):
@@ -363,9 +365,12 @@ func (h *PlatformHandler) suspendOrg(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PlatformHandler) resumeOrg(w http.ResponseWriter, r *http.Request) {
-	var req revisionBody
+	var req struct {
+		Revision          int64  `json:"revision"`
+		RestoreGeneration string `json:"restore_generation,omitempty"`
+	}
 	h.write(w, r, &req, func(tx *sql.Tx, now time.Time) (int, any, error) {
-		o, err := h.store.Platform().ResumeOrg(tx, now, h.caller(r), r.PathValue("id"), req.Revision)
+		o, err := h.store.Platform().ResumeOrg(tx, now, h.caller(r), r.PathValue("id"), req.Revision, req.RestoreGeneration)
 		return http.StatusOK, o, err
 	})
 }

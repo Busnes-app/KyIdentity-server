@@ -284,7 +284,20 @@ func (h *SuiteHandler) Orgs(w http.ResponseWriter, r *http.Request, caller *stor
 		suiteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
+	generation, err := h.store.Platform().OrgRestoreGeneration()
+	if err != nil {
+		suiteJSON(w, 500, map[string]string{"error": "internal_error"})
+		return
+	}
+	// A restored directory requires replacing caches, including orgs missing from it.
+	if generation != "" && (after > 0 || afterID != "") && q.Get("restore_generation") != generation {
+		suiteJSON(w, 409, map[string]string{"error": "org_resync_required", "restore_generation": generation})
+		return
+	}
 	body := map[string]any{"orgs": orgs}
+	if generation != "" {
+		body["restore_generation"] = generation
+	}
 	if len(orgs) == limit {
 		last := orgs[len(orgs)-1]
 		body["next"] = strconv.FormatInt(last.Revision, 10) + "." + last.ID

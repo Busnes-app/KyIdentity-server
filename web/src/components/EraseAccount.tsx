@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import { apiJson, apiRequest, errorMessage, isRecord, isStepUpRequired } from '../api';
+import { ApiError, apiJson, apiRequest, errorMessage, isRecord, isStepUpRequired } from '../api';
 import { parseLauncher } from '../parsers';
 import { Application, User } from '../types';
 import { Modal } from './Modal';
@@ -171,8 +171,26 @@ export const ExportOnly: React.FC<{ onLogout: () => void }> = ({ onLogout }) => 
           <div className="section-title-wrap"><h2>Export your data</h2></div>
           <button className="secondary-btn sm" onClick={onLogout}><span>Sign out</span></button>
         </div>
+        <HolderOrgExport />
         <ExportLinks apps={apps} retry={retry} />
       </div></div>
     </>
   );
 };
+
+export function parseOrgExportStatus(v: unknown): number {
+  if (!isRecord(v) || typeof v.deleteAfter !== 'number' || !Number.isSafeInteger(v.deleteAfter) || v.deleteAfter <= 0) throw new Error('Export deadline is malformed');
+  return v.deleteAfter;
+}
+export function HolderExportLink({ deadline }: { deadline: number }) {
+  return <div className="alert-box" role="status"><div><p>Your organisation is scheduled for permanent deletion on {new Date(deadline * 1000).toLocaleString()}. As account holder, you can download the organisation’s directory, memberships, assignments and audit log. App content is exported from each app separately.</p><a className="secondary-btn" href="/api/user/org-export" download="organisation.json">Download organisation directory (JSON)</a></div></div>;
+}
+function HolderOrgExport() {
+  const [state, setState] = useState<number | 'loading' | 'hidden' | 'failed'>('loading');
+  const load = () => { setState('loading'); apiJson('/api/user/org-export/status', parseOrgExportStatus).then(setState).catch(e => setState(e instanceof ApiError && e.status === 404 ? 'hidden' : 'failed')); };
+  useEffect(load, []);
+  if (state === 'hidden') return null;
+  if (state === 'loading') return <p role="status">Checking organisation export…</p>;
+  if (state === 'failed') return <div className="alert-box error" role="alert">Could not check the organisation export. <button className="secondary-btn" onClick={load}>Try again</button></div>;
+  return <HolderExportLink deadline={state} />;
+}

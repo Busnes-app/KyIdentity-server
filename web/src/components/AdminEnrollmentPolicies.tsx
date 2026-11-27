@@ -8,9 +8,10 @@ import { isCancelled, useStepUp } from './StepUpPrompt';
 
 const factorLabel = (m: string) => m === 'webauthn' ? 'Passkey' : m === 'push' ? 'Push' : m.toUpperCase();
 
-export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup; onBack?: () => void}) {
- const scopeLabel=(scope:string)=>scope==='organization'?'Everyone':scope==='administrators'?'Administrators':group?.name ?? 'Group';
- const listPath='/api/admin/enrollment-policies'+(group?'?'+new URLSearchParams({groupId:group.id}):'');
+export function AdminEnrollmentPolicies({group,onBack,org=false}: {group?: DirectoryGroup; onBack?: () => void; org?: boolean}) {
+ const scopeLabel=(scope:string)=>scope.startsWith('org:')?'This organisation':scope==='organization'?'Everyone':scope==='administrators'?'Administrators':group?.name ?? 'Group';
+ const policyPath=org?'/api/admin/org/enrollment-policies':'/api/admin/enrollment-policies';
+ const listPath=policyPath+(group?'?'+new URLSearchParams({groupId:group.id}):'');
  const [policies,setPolicies]=useState<EnrollmentPolicy[]>([]);
  const [draft,setDraft]=useState<EnrollmentPolicy|null>(null);
  const [preview,setPreview]=useState<EnrollmentPreview|null>(null);
@@ -20,7 +21,7 @@ export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup;
  const reload=async()=>{try{setPolicies(await apiJson(listPath,parseEnrollmentPolicies));}catch(err){setError(errorMessage(err,'Could not load policies'));}};
  const [lockedBootloader,setLockedBootloader]=useState<boolean|null>(null);
  useEffect(()=>{void reload();},[]);
- useEffect(()=>{if(group)return;apiJson('/api/admin/attestation/settings',parseAttestationSettings).then(s=>setLockedBootloader(s.requireLockedBootloader)).catch(err=>setError(errorMessage(err,'Could not load device sign-on setting')));},[group]);
+ useEffect(()=>{if(group||org)return;apiJson('/api/admin/attestation/settings',parseAttestationSettings).then(s=>setLockedBootloader(s.requireLockedBootloader)).catch(err=>setError(errorMessage(err,'Could not load device sign-on setting')));},[group,org]);
  const saveBootloader=async(value:boolean)=>{
   setBusy(true);setError(null);
   try{const path='/api/admin/attestation/settings';const stepUpToken=await requestGrant(value?'Require a locked bootloader for MFA-grade device sign-on.':'Stop requiring a locked bootloader for MFA-grade device sign-on.',`PUT ${path}`);
@@ -30,12 +31,12 @@ export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup;
  const change=(p:EnrollmentPolicy)=>{setDraft(p);setPreview(null);setError(null);};
  const inspect=async(event:React.FormEvent)=>{
   event.preventDefault();if(!draft)return;setBusy(true);setError(null);
-  try{setPreview(await apiJson('/api/admin/enrollment-policies/preview',parseEnrollmentPreview,{method:'POST',body:JSON.stringify(draft)}));}
+  try{setPreview(await apiJson(`${policyPath}/preview`,parseEnrollmentPreview,{method:'POST',body:JSON.stringify(draft)}));}
   catch(err){setError(errorMessage(err,'Could not preview policy'));}finally{setBusy(false);}
  };
  const apply=async()=>{
   if(!draft||!preview?.canActivate)return;setBusy(true);setError(null);
-  try{const path='/api/admin/enrollment-policies';const stepUpToken=await requestGrant(`Apply ${scopeLabel(draft.scope)} MFA policy. Outstanding OAuth sign-ins and registered tokens will be revoked. Existing deadlines are never extended.`,`PUT ${path}`);
+  try{const path=policyPath;const stepUpToken=await requestGrant(`Apply ${scopeLabel(draft.scope)} MFA policy. Outstanding OAuth sign-ins and registered tokens will be revoked. Existing deadlines are never extended.`,`PUT ${path}`);
    await apiRequest(path,{method:'PUT',stepUpToken,body:JSON.stringify(draft)});setDraft(null);setPreview(null);await reload();
   }catch(err){if(!isCancelled(err))setError(errorMessage(err,'Could not apply policy; reload before retrying.'));}finally{setBusy(false);}
  };
@@ -56,12 +57,12 @@ export function AdminEnrollmentPolicies({group,onBack}: {group?: DirectoryGroup;
     <button type="button" className="primary-btn" disabled={busy||!preview.canActivate} onClick={apply}>Apply policy</button>
    </div>}
   </div></form>}
-  {!group&&<div className="settings-section"><div className="modal-body"><h2>Device sign-on</h2>
+  {!group&&!org&&<div className="settings-section"><div className="modal-body"><h2>Device sign-on</h2>
    <div className="form-group"><label><input type="checkbox" checked={lockedBootloader??false} disabled={busy||lockedBootloader===null} onChange={e=>void saveBootloader(e.target.checked)}/> Require a locked bootloader for MFA-grade device sign-on</label></div>
    <p>Off: the bootloader state is recorded but not enforced. On: new pairings and the daily sweep refuse MFA grade for unlocked bootloaders.</p>
   </div></div>}
-  {!group&&<AdminSessionSettings/>}
-  {!group&&<AdminOfficeNetworks/>}
+  {!group&&!org&&<AdminSessionSettings/>}
+  {!group&&!org&&<AdminOfficeNetworks/>}
   {stepUpPrompt}
  </div>;
 }
