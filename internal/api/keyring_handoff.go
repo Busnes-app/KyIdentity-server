@@ -59,7 +59,7 @@ func (h *OAuthHandler) loadKeyringHandoff(r *http.Request) (*keyringHandoffConte
 		return nil, http.StatusNotFound, "Keyring handoff expired or not found"
 	}
 	keyringPK := q.Get("keyring_pk")
-	if len(q["keyring_pk"]) != 1 || !keyringPoint(keyringPK) {
+	if len(q["keyring_pk"]) != 1 || !keyringHandoffKey(keyringPK) {
 		return nil, http.StatusNotFound, "Keyring handoff expired or not found"
 	}
 	clientID, redirectURI := q.Get("client_id"), q.Get("redirect_uri")
@@ -156,6 +156,7 @@ func (h *OAuthHandler) KeyringHandoffDetails(w http.ResponseWriter, r *http.Requ
 		"redirect_uri":    ctx.redirectURI,
 		"state":           ctx.state,
 		"keyring_pk":      ctx.keyringPK,
+		"nonce":           ctx.query.Get("nonce"),
 		"keyring_version": st.Version,
 		"wrappers":        wrappers,
 		"app_key":         appKey,

@@ -16,8 +16,7 @@ configuration and custodian cards. Retain the original data volume and Compose
 network/image/build choices. Do not replace any key or regenerate enrollment
 records merely because an endpoint no longer connects.
 
-The root primitives module is pinned to merged source `bae5c14dba4c`
-(`v0.10.2-0.20261026050236-bae5c14dba4c`). The old `v0.10.0` tag predates its
+The root primitives module is pinned to `v0.11.0`. The old `v0.10.0` tag predates its
 TOTP floor. This revision also includes capsule tar-budget and Shamir sampling
 repairs; the container, key and share formats remain the same. Existing row
 secrets remain sealed to their original purpose/identity. Verify backup and

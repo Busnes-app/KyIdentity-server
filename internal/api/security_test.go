@@ -466,6 +466,17 @@ func TestSensitiveRoutesAreNoStoreAndCSPForbidsInlineScript(t *testing.T) {
 }
 
 // Fonts and styles ship with the binary; nothing third-party may restyle the sign-in page.
+func TestKeyringCSPAllowsWasmButNotJavaScriptEval(t *testing.T) {
+	srv, _, _, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/keyring-handoff", nil))
+	csp := rec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("keyring page CSP=%q", csp)
+	}
+}
+
 func TestCSPServesStylesAndFontsFromSelfOnly(t *testing.T) {
 	srv, _, _, _, _, cleanup := setupTestServer(t)
 	defer cleanup()

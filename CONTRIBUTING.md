@@ -68,13 +68,13 @@ new checkout):
 docker compose up -d
 ```
 
-To work on the code outside the container you need the Go version required by `go.mod` (currently 1.26.9+) and Node 26, as used by the Dockerfile and CI.
+To work on the code outside the container you need the Go version required by `go.mod` (currently 1.27.4+) and Node 26, as used by the Dockerfile and CI.
 
 ```bash
 # backend
 go test ./...
 
-# frontend
+# frontend (also needs Go to build the pinned PQ WASM helper)
 cd web && npm ci && npm test
 ```
 

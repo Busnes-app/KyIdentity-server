@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Busnes-app/ky-primitives/xwing"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
@@ -45,14 +46,31 @@ func testHandoffQuery(clientID, redirectURI, pk string) (url.Values, string) {
 }
 
 func TestKeyringHandoffFullFlow(t *testing.T) {
+	t.Run("legacy-p256", func(t *testing.T) { testKeyringHandoffFullFlow(t, testHandoffPoint(t)) })
+	t.Run("xwing", func(t *testing.T) {
+		key, err := xwing.Generate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		pk := base64.RawURLEncoding.EncodeToString(key.Public().Bytes())
+		if len(pk) != 1622 {
+			t.Fatal("incorrect X-Wing query size")
+		}
+		testKeyringHandoffFullFlow(t, pk)
+	})
+}
+
+func testKeyringHandoffFullFlow(t *testing.T, pk string) {
 	srv, db, _, _, engine, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	u := newUser(t, db, "user")
 	newClient(t, db, "kypost", []string{"https://mail.example/cb"}, []string{"openid"})
-	pk := testHandoffPoint(t)
 	q, verifier := testHandoffQuery("kypost", "https://mail.example/cb", pk)
 
+	if len("https://identity.example.test/oauth/authorize?"+q.Encode()) >= 2048 {
+		t.Fatal("authorize URL exceeds fixture budget")
+	}
 	browser := interactionBrowser(t, srv)
 
 	// 1. Unauthenticated /oauth/authorize with keyring_pk starts a login interaction.
@@ -113,6 +131,7 @@ func TestKeyringHandoffFullFlow(t *testing.T) {
 		RedirectURI    string `json:"redirect_uri"`
 		State          string `json:"state"`
 		KeyringPK      string `json:"keyring_pk"`
+		Nonce          string `json:"nonce"`
 		KeyringVersion string `json:"keyring_version"`
 		Wrappers       []any  `json:"wrappers"`
 		AppKey         any    `json:"app_key"`
@@ -122,7 +141,7 @@ func TestKeyringHandoffFullFlow(t *testing.T) {
 	}
 	if details.UserID != u.ID || details.OrgID == "" || details.ClientID != "kypost" ||
 		details.RedirectURI != "https://mail.example/cb" || details.State != "handoff-state" ||
-		details.KeyringPK != pk || details.Issuer == "" || details.Wrappers == nil || details.AppKey != nil {
+		details.KeyringPK != pk || details.Nonce != "handoff-nonce" || details.Issuer == "" || details.Wrappers == nil || details.AppKey != nil {
 		t.Fatalf("unexpected details: %+v", details)
 	}
 

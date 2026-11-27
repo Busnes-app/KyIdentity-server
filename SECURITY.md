@@ -238,7 +238,7 @@ Not encrypted: account metadata (usernames, names, email addresses, roles, group
 
 Every response carries:
 
-- **Content-Security-Policy:** `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';` HTTPS images are allowed for custom launcher icons. The logout confirmation page widens `form-action` to the registered post-logout origin.
+- **Content-Security-Policy:** `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';` HTTPS images are allowed for custom launcher icons. The logout confirmation page widens `form-action` to the registered post-logout origin.
 - **X-Content-Type-Options:** `nosniff`
 - **X-Frame-Options:** `DENY`
 - **Referrer-Policy:** `strict-origin-when-cross-origin`

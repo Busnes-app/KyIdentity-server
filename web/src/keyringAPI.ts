@@ -1,5 +1,6 @@
+import { xwingMarker, xwingPacketBytes, xwingPublicKeyBytes } from './pqCrypto';
 import { apiJson, apiRequest, isRecord } from './api';
-import { buildHandoffErrorURL, decodeKeyringBytes, isKeyringID } from './keyringCrypto';
+import { buildHandoffErrorURL, decodeKeyringBytes, handoffKeyLength, isKeyringID } from './keyringCrypto';
 import type { RingContext } from './keyringCrypto';
 
 const base = '/api/user/keyring';
@@ -15,6 +16,7 @@ export type KeyringHandoffDetails = RingContext & {
   redirect_uri: string;
   state: string;
   keyring_pk: string;
+  nonce: string;
   wrappers: WrapperInfo[];
   app_key: KeyringAppKey | null;
 };
@@ -108,7 +110,9 @@ export function loadHandoff(id: string) {
     const app_name = field(value, 'app_name');
     const redirect_uri = field(value, 'redirect_uri');
     const state = field(value, 'state');
-    const keyring_pk = encoded(value, 'keyring_pk', 65);
+    const keyring_pk = field(value, 'keyring_pk');
+    handoffKeyLength(keyring_pk);
+    const nonce = field(value, 'nonce');
     if (!issuer || !org_id || !user_id || !client_id || !redirect_uri ||
         (keyring_version !== '' && !isKeyringID(keyring_version)) ||
         !isRecord(value) || !Array.isArray(value.wrappers) || value.wrappers.length > 17) {
@@ -136,6 +140,7 @@ export function loadHandoff(id: string) {
       redirect_uri,
       state,
       keyring_pk,
+      nonce,
       wrappers: value.wrappers.map(wrapperInfo),
       app_key,
     };
@@ -191,7 +196,7 @@ export function restartURL(target: { redirect_uri: string; state: string }): str
   }
 }
 
-export function saveAppKey(client: string, payload: KeyringAppKey, stepUpToken?: string) {
+export function saveAppKey(client: string, payload: KeyringAppKey & Pick<RingContext, 'keyring_version'>, stepUpToken?: string) {
   return apiRequest(ringPaths.app(client), {
     method: 'PUT',
     stepUpToken,
@@ -201,7 +206,7 @@ export function saveAppKey(client: string, payload: KeyringAppKey, stepUpToken?:
 
 export function readTransfer(id: string) {
   return apiJson(ringPaths.transfer(id), value => ({
-    recipient_key: encoded(value, 'recipient_key', 65),
+    recipient_key: encoded(value, 'recipient_key', xwingPublicKeyBytes),
     request_mac: encoded(value, 'request_mac', 32),
     user_agent: field(value, 'user_agent'),
     ip_address: field(value, 'ip_address'),
@@ -211,8 +216,12 @@ export function readTransfer(id: string) {
 
 export function claimTransfer(id: string) {
   return apiJson(ringPaths.transfer(id) + '/claim', value => ({
-    sender_key: encoded(value, 'sender_key', 65),
-    sealed: encoded(value, 'sealed', 60),
+    sender_key: (() => {
+      const marker = field(value, 'sender_key');
+      if (marker !== xwingMarker) throw new Error('Unsupported transfer format. Reload both browsers.');
+      return marker;
+    })(),
+    sealed: encoded(value, 'sealed', xwingPacketBytes),
   }), { method: 'POST' });
 }
 

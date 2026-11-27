@@ -108,7 +108,7 @@ func TestKeyringAtomicWritesAndIsolation(t *testing.T) {
 		t.Fatalf("prior kit wrapper still served: %v", err)
 	}
 
-	req := KeyringTransferRequest{RecipientKey: strings.Repeat("A", 87), RequestMAC: strings.Repeat("B", 43)}
+	req := KeyringTransferRequest{RecipientKey: strings.Repeat("A", 1622), RequestMAC: strings.Repeat("B", 43)}
 	if _, err := o.RequestKeyringTransfer(p, version, uuid.NewString(), req, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -133,8 +133,8 @@ func TestKeyringTransferSingleClaimExpiryRevocationAndRestore(t *testing.T) {
 	if err := o.InitializeKeyring(sender, version, device, recovery, keyringTestGrant(t, s, sender, "initialize"), nil); err != nil {
 		t.Fatal(err)
 	}
-	req := KeyringTransferRequest{RecipientKey: strings.Repeat("A", 87), RequestMAC: strings.Repeat("B", 43)}
-	reply := KeyringTransferResponse{SenderKey: strings.Repeat("C", 87), Sealed: device.Sealed}
+	req := KeyringTransferRequest{RecipientKey: strings.Repeat("A", 1622), RequestMAC: strings.Repeat("B", 43)}
+	reply := KeyringTransferResponse{SenderKey: "xwing:1", Sealed: strings.Repeat("C", 1559)}
 	request := func() string {
 		t.Helper()
 		id := uuid.NewString()

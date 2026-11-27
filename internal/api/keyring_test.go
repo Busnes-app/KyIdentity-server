@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/ecdh"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -11,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/xwing"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 	"github.com/google/uuid"
@@ -81,19 +80,39 @@ func TestKeyringHTTPAccountAndAppBoundaries(t *testing.T) {
 
 	transfer := keyringPath + "/transfers"
 	requestID := uuid.NewString()
-	point, err := ecdh.P256().GenerateKey(rand.Reader)
+	point, err := xwing.Generate()
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := map[string]string{"keyring_version": ring, "id": requestID, "recipient_key": encoded('z', 65), "request_mac": encoded('m', 32)}
 	call(400, "POST", transfer, token, "", req)
-	req["recipient_key"] = base64.RawURLEncoding.EncodeToString(point.PublicKey().Bytes())
+	req["recipient_key"] = base64.RawURLEncoding.EncodeToString(point.Public().Bytes())
 	call(200, "POST", transfer, token, "", req)
 	call(404, "GET", transfer+"/"+requestID, token, "", nil)
 	second := newSession(t, f.store, f.user, time.Now().UTC().Add(time.Hour))
 	call(200, "GET", transfer+"/"+requestID, second, "", nil)
 	call(404, "POST", transfer+"/"+requestID+"/claim", second, "", nil)
-	call(204, "DELETE", transfer+"/"+requestID, token, "", nil)
+	// A trusted second session approves an X-Wing packet, claimed exactly once.
+	packet, err := xwing.Seal(point.Public(), []byte("keyring-http-test/2"), nil, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalPath := transfer + "/" + requestID + "/approve"
+	approval := map[string]string{"device_id": device, "sender_key": keyringXwingMarker, "sealed": base64.RawURLEncoding.EncodeToString(packet)}
+	approvalGrant := "xwing-approval-grant"
+	secondSession, err := f.store.GetSessionByTokenHash(crypto.HashSHA256(second), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.CreateStepUpToken(&store.StepUpToken{ID: uuid.NewString(), UserID: f.user.ID, SessionID: secondSession.ID, TokenHash: crypto.HashSHA256(approvalGrant), Operation: "PUT " + approvalPath, ExpiresAt: time.Now().UTC().Add(time.Minute)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	call(204, "PUT", approvalPath, second, approvalGrant, approval, [2]string{"X-Ky-Keyring-Device", capability})
+	claimed := call(200, "POST", transfer+"/"+requestID+"/claim", token, "", nil)
+	if !strings.Contains(claimed, approval["sealed"]) {
+		t.Fatal("claimed wrong packet")
+	}
+	call(404, "POST", transfer+"/"+requestID+"/claim", token, "", nil)
 
 	clients := []string{"keyring-app-a", "keyring-app-b"}
 	appID := func(client string) string {

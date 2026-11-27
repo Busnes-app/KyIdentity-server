@@ -10,3 +10,6 @@ web/node_modules/
 .env
 **/.env.*
 !**/.env.example
+
+.claude/
+web/.pq/

@@ -150,7 +150,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keyringPK := q.Get("keyring_pk")
-	if keyringPK != "" && !keyringPoint(keyringPK) {
+	if keyringPK != "" && !keyringHandoffKey(keyringPK) {
 		redirectError(w, r, redirectURI, state, "invalid_request", "Invalid keyring_pk parameter")
 		return
 	}
