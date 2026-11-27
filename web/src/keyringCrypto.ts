@@ -1,3 +1,5 @@
+import { newXwingPair, openXwing, sealXwing, xwingMarker, xwingPacketBytes, xwingPublicKeyBytes } from './pqCrypto';
+
 export type RingContext = {
   issuer: string;
   org_id: string;
@@ -112,7 +114,7 @@ type TransferResponse = { sender_key: string; sealed: string };
 export type PendingTransfer = {
   id: string;
   secret: Uint8Array<ArrayBuffer>;
-  privateKey: CryptoKey;
+  privateKey: Uint8Array<ArrayBuffer>;
   request: TransferRequest;
 };
 
@@ -142,38 +144,61 @@ export function isKeyringID(text: unknown): text is string {
 
 export function parseTransferCode(code: string) {
   const [prefix, id, secret, ...extra] = code.trim().split('.');
-  if (prefix !== 'KYT1' || !isKeyringID(id) || !secret || extra.length) throw new Error('Enter the full KYT1 approval code.');
+  if (prefix !== 'KYT2' || !isKeyringID(id) || !secret || extra.length) throw new Error('Enter the full KYT2 approval code. Reload both browsers to upgrade an older code.');
   return { id, secret: decodeKeyringBytes(secret, 32) };
 }
 
 export async function newTransfer(context: RingContext): Promise<PendingTransfer> {
   const id = crypto.randomUUID();
   const secret = newKeyringSecret();
-  const { point, privateKey } = await transferPair();
-  const mac = await crypto.subtle.sign('HMAC', await transferMAC(secret), aad(context, 'transfer', id, point));
+  const { point, privateKey } = await newHandoffPair();
+  const mac = await crypto.subtle.sign('HMAC', await transferMAC(secret), aad(context, 'transfer-xwing/2', id, point));
   return { id, secret, privateKey, request: { recipient_key: point, request_mac: encodeKeyringBytes(new Uint8Array(mac)) } };
 }
 
 export function transferCode(pending: PendingTransfer) {
-  return ['KYT1', pending.id, encodeKeyringBytes(pending.secret)].join('.');
+  return ['KYT2', pending.id, encodeKeyringBytes(pending.secret)].join('.');
+}
+
+// The approval secret is part of HPKE info, never sent to the relay. Even disclosure
+// of the KEM shared secret cannot reproduce the HPKE schedule without this secret.
+function transferInfo(context: RingContext, id: string, recipient: string, secret: Uint8Array) {
+  const publicAAD = aad(context, 'transfer-xwing/2', id, recipient);
+  const label = utf8.encode('kyidentity/keyring-transfer/2\0');
+  const info = new Uint8Array(label.length + publicAAD.length + 1 + secret.length);
+  info.set(label);
+  info.set(publicAAD, label.length);
+  info.set(secret, label.length + publicAAD.length + 1);
+  return { info, publicAAD };
 }
 
 export async function approveTransfer(context: RingContext, code: ReturnType<typeof parseTransferCode>, request: TransferRequest,
   root: Uint8Array<ArrayBuffer>): Promise<TransferResponse> {
+  const recipient = decodeKeyringBytes(request.recipient_key, xwingPublicKeyBytes);
   const valid = await crypto.subtle.verify('HMAC', await transferMAC(code.secret), decodeKeyringBytes(request.request_mac, 32),
-    aad(context, 'transfer', code.id, request.recipient_key));
+    aad(context, 'transfer-xwing/2', code.id, request.recipient_key));
   if (!valid) throw new Error('This approval code does not match the requesting device.');
-  const sender = await transferPair();
-  const material = await transferMaterial(sender.privateKey, request.recipient_key);
-  return {
-    sender_key: sender.point,
-    sealed: await seal(material, root, aad(context, 'transfer', code.id, request.recipient_key, sender.point), code.secret),
-  };
+  const { info, publicAAD } = transferInfo(context, code.id, request.recipient_key, code.secret);
+  try {
+    return { sender_key: xwingMarker, sealed: encodeKeyringBytes(await sealXwing(recipient, info, publicAAD, root)) };
+  } finally {
+    info.fill(0);
+  }
 }
 
 export async function openTransfer(context: RingContext, pending: PendingTransfer, response: TransferResponse) {
-  const material = await transferMaterial(pending.privateKey, response.sender_key);
-  return open(material, response.sealed, aad(context, 'transfer', pending.id, pending.request.recipient_key, response.sender_key), pending.secret);
+  if (response.sender_key !== xwingMarker) throw new Error('Unsupported transfer format. Reload both browsers.');
+  const { info, publicAAD } = transferInfo(context, pending.id, pending.request.recipient_key, pending.secret);
+  try {
+    return await openXwing(pending.privateKey, info, publicAAD, decodeKeyringBytes(response.sealed, xwingPacketBytes));
+  } finally {
+    info.fill(0);
+  }
+}
+
+export function wipeTransfer(pending: PendingTransfer | null | undefined) {
+  pending?.secret.fill(0);
+  pending?.privateKey.fill(0);
 }
 
 export type HandoffBinding = {
@@ -183,6 +208,7 @@ export type HandoffBinding = {
   code: string;
   redirect_uri: string;
   recipient_key: string;
+  nonce: string;
 };
 
 export type HandoffPayload = {
@@ -190,9 +216,40 @@ export type HandoffPayload = {
   sealed: string;
 };
 
-export const newHandoffPair = transferPair;
+// New recipients always request PQ; only an explicitly supplied 65-byte P-256
+// recipient selects the unchanged legacy format. Never retry PQ as classical.
+export async function newHandoffPair() {
+  const pair = await newXwingPair();
+  return { point: encodeKeyringBytes(pair.publicKey), privateKey: pair.privateKey };
+}
+
+export function handoffKeyLength(key: string): 65 | 1216 {
+  const length = key.length === 87 ? 65 : xwingPublicKeyBytes;
+  decodeKeyringBytes(key, length);
+  return length;
+}
+
+function handoffAAD(binding: HandoffBinding) {
+  if (typeof binding.nonce !== 'string') throw new Error('Missing handoff nonce binding.');
+  return aad(binding.context, 'handoff-xwing/2', binding.client, binding.version,
+    binding.code, binding.redirect_uri, binding.recipient_key, binding.nonce);
+}
+
+function handoffInfo(publicAAD: Uint8Array) {
+  const label = utf8.encode('kyidentity/keyring-handoff/2\0');
+  const info = new Uint8Array(label.length + publicAAD.length);
+  info.set(label);
+  info.set(publicAAD, label.length);
+  return info;
+}
 
 export async function sealHandoffKey(binding: HandoffBinding, appKey: Uint8Array<ArrayBuffer>): Promise<HandoffPayload> {
+  if (handoffKeyLength(binding.recipient_key) === xwingPublicKeyBytes) {
+    const publicAAD = handoffAAD(binding);
+    const sealed = await sealXwing(decodeKeyringBytes(binding.recipient_key, xwingPublicKeyBytes),
+      handoffInfo(publicAAD), publicAAD, appKey);
+    return { sender_key: xwingMarker, sealed: encodeKeyringBytes(sealed) };
+  }
   const sender = await transferPair();
   const material = await transferMaterial(sender.privateKey, binding.recipient_key);
   const info = aad(binding.context, 'handoff', binding.client, binding.version,
@@ -200,7 +257,15 @@ export async function sealHandoffKey(binding: HandoffBinding, appKey: Uint8Array
   return { sender_key: sender.point, sealed: await seal(material, appKey, info) };
 }
 
-export async function openHandoffKey(binding: HandoffBinding, recipientPrivateKey: CryptoKey, response: HandoffPayload) {
+export async function openHandoffKey(binding: HandoffBinding, recipientPrivateKey: CryptoKey | Uint8Array<ArrayBuffer>, response: HandoffPayload) {
+  if (handoffKeyLength(binding.recipient_key) === xwingPublicKeyBytes) {
+    if (!(recipientPrivateKey instanceof Uint8Array) || response.sender_key !== xwingMarker) {
+      throw new Error('Invalid X-Wing handoff.');
+    }
+    const publicAAD = handoffAAD(binding);
+    return openXwing(recipientPrivateKey, handoffInfo(publicAAD), publicAAD, decodeKeyringBytes(response.sealed, xwingPacketBytes));
+  }
+  if (recipientPrivateKey instanceof Uint8Array || response.sender_key === xwingMarker) throw new Error('Invalid legacy handoff.');
   const material = await transferMaterial(recipientPrivateKey, response.sender_key);
   const info = aad(binding.context, 'handoff', binding.client, binding.version,
     binding.code, binding.redirect_uri, binding.recipient_key, response.sender_key);

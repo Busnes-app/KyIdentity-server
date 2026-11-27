@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Busnes-app/ky-primitives/xwing"
 	"github.com/Busnes-app/kyidentity-server/internal/audit"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
@@ -138,6 +139,24 @@ func keyringPoint(v string) bool {
 	b := keyringBase64(v, 65, 65)
 	_, err := ecdh.P256().NewPublicKey(b)
 	return err == nil
+}
+
+// Length selects an explicit suite; a failed X-Wing parse never falls back.
+func keyringXwingKey(v string) bool {
+	b := keyringBase64(v, xwing.PublicKeyBytes, xwing.PublicKeyBytes)
+	_, err := xwing.ParsePublicKey(b)
+	return err == nil
+}
+
+func keyringHandoffKey(v string) bool {
+	return keyringPoint(v) || keyringXwingKey(v)
+}
+
+const keyringXwingMarker = "xwing:1"
+
+func keyringXwingPacket(v string) bool {
+	b := keyringBase64(v, xwing.Overhead+32, xwing.Overhead+32)
+	return b != nil && b[0] == xwing.Version
 }
 
 func keyringDeviceHash(r *http.Request) string {
@@ -332,7 +351,7 @@ func (h keyringHandler) requestTransfer(w http.ResponseWriter, r *http.Request, 
 	if !keyringJSON(w, r, &body) {
 		return
 	}
-	if !keyringID(body.Version) || !keyringID(body.ID) || !keyringPoint(body.RecipientKey) || keyringBase64(body.RequestMAC, 32, 32) == nil {
+	if !keyringID(body.Version) || !keyringID(body.ID) || !keyringXwingKey(body.RecipientKey) || keyringBase64(body.RequestMAC, 32, 32) == nil {
 		keyringInvalid(w)
 		return
 	}
@@ -357,7 +376,7 @@ func (h keyringHandler) approveTransfer(w http.ResponseWriter, r *http.Request, 
 	if !keyringJSON(w, r, &body) {
 		return
 	}
-	if !keyringID(body.DeviceID) || !keyringPoint(body.SenderKey) || keyringBase64(body.Sealed, 60, 60) == nil {
+	if !keyringID(body.DeviceID) || body.SenderKey != keyringXwingMarker || !keyringXwingPacket(body.Sealed) {
 		keyringInvalid(w)
 		return
 	}

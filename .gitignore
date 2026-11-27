@@ -39,3 +39,7 @@ web/node_modules/
 
 # Generated mdBook manual
 /docs/book/
+
+# Build-time post-quantum browser assets
+web/.pq/
+*.wasm

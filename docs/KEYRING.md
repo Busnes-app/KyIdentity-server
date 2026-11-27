@@ -1,4 +1,4 @@
-# Suite keyring, wire version 1
+# Suite keyring wire formats
 
 KyIdentity stores encrypted key envelopes and authorizes access to them. A browser
 generates the 32-byte Suite Root Key (SRK), device secrets and the Suite Recovery
@@ -26,7 +26,7 @@ and immutable `user_id`. These fields come from authentication and configuration
 Setup echoes the organization and subject to bind the request to the account
 that started setup.
 
-Every envelope is `nonce[12] || AES-256-GCM ciphertext[32] || tag[16]`.
+Every durable wrapper and app envelope is `nonce[12] || AES-256-GCM ciphertext[32] || tag[16]`.
 Generate a fresh nonce with the client CSPRNG for each seal. The AEAD additional
 data is the UTF-8 encoding of the compact JSON array below (ECMAScript
 `JSON.stringify`, no extra whitespace). HKDF means HKDF-SHA-256.
@@ -57,24 +57,34 @@ data is the UTF-8 encoding of the compact JSON array below (ECMAScript
 
 ## Approve a new device
 
-Both browsers must have independent live sessions for the same account. The
-recipient generates an ephemeral P-256 key pair, a random request UUID and a
-256-bit random approval secret. Its public key is an uncompressed SEC1 point.
-Define the transcript prefix as
-`["ky-keyring/1","transfer",issuer,org_id,user_id,keyring_version,transfer_id,recipient_key]`.
-Send the point and HMAC-SHA-256 of the UTF-8 compact JSON prefix keyed by the
-approval secret. Convey the code `KYT1.<transfer_id>.<approval_secret>` over
-an independent trusted channel to the existing trusted browser. The code and
-private keys stay off the server.
+Both browsers must have independent live sessions for the same account. New transfers
+use **KYT2**, HPKE base X-Wing (KEM `0x647A`, HKDF-SHA256, AES-256-GCM) from
+`ky-primitives/xwing`, compiled through `cmd/pqwasm`. There is no classical fallback
+for a KYT2 transfer. Reload both browsers after upgrading. Migration 19 drops the
+five-minute pending/approved P-256 transfers and replaces only that temporary table;
+existing SRK wrappers, app envelopes, device capabilities and Emergency Kits stay valid.
 
-The trusted browser fetches the public request and verifies the MAC against the
-received code before it generates its own ephemeral P-256 key pair. Append the
-sender's public point to the prefix to obtain the transfer AAD. Both browsers
-derive the AES key by HKDF over the 32-byte ECDH result, with the approval
-secret as salt and the transfer AAD as info. The sender seals the SRK. The
-recipient claims the response once, validates and opens it, and registers its
-own locally wrapped SRK. A lost claim response, page reload or expiry requires
-a fresh transfer. Cancel from the requesting browser before leaving it.
+The recipient generates an ephemeral X-Wing pair (32-byte private seed, 1216-byte
+public key), a random request UUID and a 256-bit random approval secret. Define `T`
+as the UTF-8 compact JSON array:
+`["ky-keyring/1","transfer-xwing/2",issuer,org_id,user_id,keyring_version,transfer_id,recipient_key]`.
+Send the canonical base64url public key and `HMAC-SHA256(approval_secret, T)`.
+Convey `KYT2.<transfer_id>.<approval_secret>` over an independent trusted channel.
+Neither the secret nor the private seed goes to the server.
+
+The trusted browser verifies the MAC before sealing the 32-byte SRK to that public
+key. HPKE info is `UTF8("kyidentity/keyring-transfer/2") || 0x00 || T || 0x00 || approval_secret`
+(the final secret is **32 raw bytes**); HPKE AAD is `T`. Including the secret in the
+HPKE key schedule retains the out-of-band protection even if the KEM secret were
+exposed. The issuer, tenant, subject, ring and transfer ID prevent cross-context replay.
+The response is `{sender_key: "xwing:1", sealed: base64url(packet)}`; `sender_key`
+is a format marker, not a key. `packet` is the shared helper's versioned format:
+`0x01 || enc[1120] || ciphertext[32] || tag[16]` (1169 bytes, 1559 base64url characters).
+The requester validates the marker, consumes the response once, opens it, and
+registers its locally wrapped SRK. Cancel, expiry, lost claim, reload or failed
+opening requires a fresh transfer. Ephemeral seeds and approval secrets stay in
+memory and are wiped on completion/cancel/unmount; Go/browser memory reclamation
+cannot promise erasure of every copy.
 
 ## HTTP
 
@@ -123,10 +133,16 @@ subkey during authorization code sign-in without exposing the Suite Root Key
 to the app or plaintext keys to the server.
 
 1. Before redirecting the browser to `GET /oauth/authorize`, the app generates
-   an ephemeral, non-extractable P-256 ECDH key pair in memory or IndexedDB,
-   encodes the 65-byte uncompressed SEC1 public point in canonical unpadded
-   base64url, and passes it as a single `keyring_pk` query parameter alongside
-   PKCE (`S256`) and `state`. `keyring_pk` with `prompt=none` returns
+   an ephemeral X-Wing key pair (32-byte seed, 1216-byte public key),
+   encodes the public key in canonical unpadded base64url (1622 characters), and passes it as a single `keyring_pk` query parameter alongside
+   PKCE (`S256`), `state` and its OIDC `nonce`. An omitted nonce binds as the empty string.
+   Retain the private seed through the callback, bound to this sign-in's state/nonce:
+   memory works for a popup flow; a top-level redirect needs RP-owned browser storage
+   such as IndexedDB with a short expiry. WASM seeds are extractable byte arrays,
+   not WebCrypto non-extractable keys. Never send the seed to a server or log it;
+   delete it after one callback or expiry.
+   Legacy RPs may still send their 65-byte P-256 SEC1 public point (87 characters).
+   The key length selects the suite; invalid X-Wing keys fail without a downgrade. `keyring_pk` with `prompt=none` returns
    `interaction_required`; duplicate or invalid values return `invalid_request`.
 2. After normal authentication, MFA enrollment, password-change and
    `effective_app_access` checks succeed, KyIdentity checks whether the account
@@ -138,18 +154,28 @@ to the app or plaintext keys to the server.
    (ten-minute TTL).
 3. On a trusted browser whose local device wrapper and active app subkey exist,
    `/keyring-handoff` unwraps the SRK and target app subkey automatically with
-   no extra click. Otherwise it offers inline unlock (passkey PRF, `KYT1`
+   no extra click. Otherwise it offers inline unlock (passkey PRF, `KYT2`
    approval from another browser, or `KYR1` Emergency Kit), first-time keyring
    setup, first-time app key provisioning, or continuing without an encryption
    key.
 4. Once the plaintext app subkey is ready, the KyIdentity page calls
    `POST /api/user/keyring/handoff/{id}/complete`, which rechecks app access
    and atomically deletes the interaction while inserting a fresh single-use
-   authorization `code`. The page generates an ephemeral P-256 sender key pair,
-   derives the 32-byte ECDH shared secret against `keyring_pk`, and seals the
-   32-byte app subkey with HKDF-SHA-256 (32 zero-byte salt) and AES-256-GCM
-   using the compact JSON AAD:
+   authorization `code`. For an X-Wing recipient, the page seals through `pqwasm` with AAD `H`:
+   `["ky-keyring/1","handoff-xwing/2",issuer,org_id,user_id,keyring_version,client_id,key_version,code,redirect_uri,recipient_key,nonce]`.
+   HPKE info is `UTF8("kyidentity/keyring-handoff/2") || 0x00 || H`. The nonce is
+   supplied from the original authorization interaction, not browser input. Output
+   uses the same 1169-byte helper packet as transfer, with `sender_key: "xwing:1"`.
+   Domain labels separate handoff from transfer; all account and authorization
+   coordinates are authenticated. No zero-salt classical KDF runs on this path.
+
+   **Only for a legacy P-256 recipient**, generate an ephemeral P-256 sender pair,
+   derive ECDH and use HKDF-SHA256 with 32 zero salt bytes, AES-256-GCM and the
+   unchanged legacy AAD:
    `["ky-keyring/1","handoff",issuer,org_id,user_id,keyring_version,client_id,key_version,code,redirect_uri,recipient_key,sender_key]`.
+   Its `sender_key` remains the sender's 65-byte SEC1 point and `sealed` remains
+   the 60-byte nonce/ciphertext/tag envelope. This compatibility path cannot be
+   selected by a failed X-Wing seal/open.
 5. The page zeroes all local key material and redirects via
    `window.location.replace` to
    `<redirect_uri>?code=<code>&state=<state>#kh=<sealed>&kh_pk=<sender_key>&kh_kv=<key_version>&kh_rv=<keyring_version>`.
@@ -157,7 +183,33 @@ to the app or plaintext keys to the server.
    sent to any HTTP server or access log. The app clears `window.location.hash`
    immediately, exchanges `code` via PKCE, confirms `issuer`, `org_id`, `sub`
    (`user_id`), `client_id` and `redirect_uri`, opens `kh` with its ephemeral
-   private key using the same AAD, and discards the ephemeral key pair.
+   private seed (or legacy private key) using the same info/AAD, and discards the ephemeral key pair.
+
+`kh_pk=xwing%3A1` explicitly identifies the new fragment format. Upgraded RPs
+must validate that marker and the helper packet version, confirm the original
+nonce and authorization coordinates after PKCE exchange, and refuse downgrade.
+Existing RPs keep their P-256 fragment byte format until their own JS upgrades.
+This repository changes no RP deployment. URL regression tests exercise a full
+OIDC authorize/login/complete/exchange flow for both key sizes, and require the
+representative authorize and callback URLs to fit 2048 characters. Longer RP
+redirect URIs, state or scopes can exceed that budget; verify the actual deployment's
+browser/proxy request-line limits (use at least 8 KiB) before rollout.
+
+## Browser build
+
+`web/build-pq.mjs` builds the **go.mod-pinned** `ky-primitives/cmd/pqwasm` with
+`-trimpath`, uses the image's exact Go 1.27.4 toolchain, and copies its matching
+`wasm_exec.js`. Keep that script toolchain in step with the Docker Go stage. `npm run dev`, `npm test`
+and `npm run build` run this first and require Go as well as Node. Docker builds
+the same helper in its pinned Go stage before Vite; CI installs that Go version
+for the web job. Vite emits content-addressed assets. WASM and `.pq/` are ignored,
+never committed; always build the frontend before building a shipping Go binary.
+The browser lazily loads same-origin runtime/WASM assets only when X-Wing is used.
+CSP allows `wasm-unsafe-eval` for compilation, with JavaScript `unsafe-eval` still
+refused. The WASM is about 4.2 MB raw / 1.2 MB gzip; configure proxy compression
+for `application/wasm`. The runtime does not use a CDN or fetch third-party code.
+Vitest executes the actual WASM against upstream vectors and committed Go/browser
+keyring packets; Go independently reconstructs and authenticates the same transcripts.
 
 If `complete` fails, the interaction is still live: the page wipes all key
 material and offers **Try again** (reloads the interaction and unlocks again)

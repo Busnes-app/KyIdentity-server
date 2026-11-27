@@ -1,3 +1,4 @@
+import { wipeTransfer } from '../keyringCrypto';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, errorMessage } from '../api';
 import {
@@ -100,7 +101,7 @@ export function Keyring({ userID, username }: { userID: string; username: string
       mounted.current = false;
       root.current?.fill(0);
       root.current = undefined;
-      pending.current?.secret.fill(0);
+      wipeTransfer(pending.current);
       pending.current = undefined;
     };
   }, [userID]);
@@ -218,7 +219,7 @@ export function Keyring({ userID, username }: { userID: string; username: string
   }
 
   function clearTransfer() {
-    pending.current?.secret.fill(0);
+    wipeTransfer(pending.current);
     pending.current = undefined;
     setCode('');
   }
@@ -228,13 +229,13 @@ export function Keyring({ userID, username }: { userID: string; username: string
     try {
       await writeRing(ringPaths.transfers, 'POST', { keyring_version: context.keyring_version, id: draft.id, ...draft.request });
       if (!mounted.current) {
-        draft.secret.fill(0);
+        wipeTransfer(draft);
         return;
       }
       pending.current = draft;
       setCode(transferCode(draft));
     } catch (err) {
-      draft.secret.fill(0);
+      wipeTransfer(draft);
       throw err;
     }
   }

@@ -8,8 +8,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prebuild": "node src/ky-ui/check-vendor.mjs",
-    "pretest": "node src/ky-ui/check-vendor.mjs"
+    "prebuild": "node src/ky-ui/check-vendor.mjs && node build-pq.mjs",
+    "pretest": "node src/ky-ui/check-vendor.mjs && node build-pq.mjs",
+    "predev": "node build-pq.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.77.0",

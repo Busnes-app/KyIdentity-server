@@ -1,12 +1,24 @@
 # Multi-stage build for KyIdentity Server
 
+# Compile the browser PQ helper from the same pinned module and Go toolchain.
+FROM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS pq-builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+RUN mkdir -p web/.pq && GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -trimpath -o web/.pq/pq.wasm github.com/Busnes-app/ky-primitives/cmd/pqwasm \
+    && cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/.pq/wasm_exec.js \
+    && cp "$(go list -m -f '{{.Dir}}' github.com/Busnes-app/ky-primitives)/xwing/testdata/vectors.json" web/.pq/vectors.json
+
 # Stage 1: Build React Frontend
 FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS frontend-builder
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-RUN npm run build
+# TypeScript checks the cross-language fixture imported by the frontend tests too.
+COPY internal/api/testdata/keyring_xwing.json /app/internal/api/testdata/keyring_xwing.json
+COPY --from=pq-builder /app/web/.pq ./.pq
+RUN node src/ky-ui/check-vendor.mjs && npx tsc -b && npx vite build
 
 # Stage 2: Build Go Binary with Embedded Frontend
 FROM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS backend-builder

@@ -1,3 +1,4 @@
+import { wipeTransfer } from '../keyringCrypto';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, errorMessage } from '../api';
 import {
@@ -94,7 +95,7 @@ export function KeyringHandoff({ user }: { user: User }) {
     setupRootRef.current = undefined;
     setupRecoveryRef.current?.fill(0);
     setupRecoveryRef.current = undefined;
-    transferRef.current?.secret.fill(0);
+    wipeTransfer(transferRef.current);
   };
 
   useEffect(() => () => { clearSecrets(); }, []);
@@ -114,6 +115,7 @@ export function KeyringHandoff({ user }: { user: User }) {
           code: done.code,
           redirect_uri: done.redirect_uri,
           recipient_key: current.keyring_pk,
+          nonce: current.nonce,
         }, subkey);
         return buildHandoffRedirectURL(done.redirect_uri, done.code, done.state, {
           ...sealed,
@@ -239,7 +241,7 @@ export function KeyringHandoff({ user }: { user: User }) {
       const created = await createKeyringDevice(context, root);
       try {
         const token = await stepUp.requestGrant(`Trust this browser for ${user.username}'s suite keyring`, `POST ${ringPaths.wrappers}`);
-        await writeRing(ringPaths.wrappers, 'POST', created.wrapper, token);
+        await writeRing(ringPaths.wrappers, 'POST', { keyring_version: context.keyring_version, wrapper: created.wrapper }, token);
       } catch (err) {
         await forgetKeyringDevice(created.device.id).catch(() => {});
         if (!isCancelled(err)) throw err;
@@ -304,12 +306,12 @@ export function KeyringHandoff({ user }: { user: User }) {
       const context = ringContextFrom(details);
       const next = await newTransfer(context);
       try {
-        await writeRing(ringPaths.transfers, 'POST', { id: next.id, ...next.request });
+        await writeRing(ringPaths.transfers, 'POST', { keyring_version: context.keyring_version, id: next.id, ...next.request });
       } catch (err) {
-        next.secret.fill(0);
+        wipeTransfer(next);
         throw err;
       }
-      pendingTransfer?.secret.fill(0);
+      wipeTransfer(pendingTransfer);
       setPendingTransfer(next);
     });
   };
@@ -320,9 +322,13 @@ export function KeyringHandoff({ user }: { user: User }) {
     void run(async () => {
       const context = ringContextFrom(details);
       const response = await claimTransfer(active.id);
-      const root = await openTransfer(context, active, response);
-      active.secret.fill(0);
-      setPendingTransfer(null);
+      let root: Uint8Array<ArrayBuffer>;
+      try {
+        root = await openTransfer(context, active, response);
+      } finally {
+        wipeTransfer(active);
+        setPendingTransfer(null);
+      }
       await handleUnlockedRoot(details, root);
     });
   };
@@ -332,7 +338,7 @@ export function KeyringHandoff({ user }: { user: User }) {
     const active = pendingTransfer;
     void run(async () => {
       await writeRing(ringPaths.transfer(active.id), 'DELETE').catch(() => {});
-      active.secret.fill(0);
+      wipeTransfer(active);
       setPendingTransfer(null);
     });
   };
@@ -412,7 +418,7 @@ export function KeyringHandoff({ user }: { user: User }) {
           `Create an encryption key for ${details.app_name}`,
           `PUT ${ringPaths.app(details.client_id)}`,
         );
-        await saveAppKey(details.client_id, { key_version: nextVersion, sealed: wrapped.sealed }, token);
+        await saveAppKey(details.client_id, { keyring_version: context.keyring_version, key_version: nextVersion, sealed: wrapped.sealed }, token);
       } catch (err) {
         wrapped.subkey.fill(0);
         throw err;
