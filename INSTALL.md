@@ -43,6 +43,8 @@ chmod 600 .env
 
 Set `KYIDENTITY_ISSUER_URL` in `.env` to the exact browser-facing origin, such as
 `https://identity.example.com`. For a same-host trial, `http://localhost:5867` is accepted.
+OIDC sign-in and keyring handoff over loopback HTTP require a browser that accepts
+`Secure` cookies on that origin. Use HTTPS if the browser requires it.
 Set `KYIDENTITY_BIND=127.0.0.1` for a proxy on the host. For HTTPS, set
 `TRUSTED_PROXY_CIDRS` to the proxy’s exact peer IP/CIDR. Startup refuses
 wider-than-private trust with `X-Forwarded-For` or `Forwarded`; a tunnel using broad

@@ -5,12 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/kyidentity-server/internal/config"
 	"github.com/Busnes-app/kyidentity-server/internal/crypto"
 	"github.com/Busnes-app/kyidentity-server/internal/store"
 )
@@ -39,6 +41,83 @@ func interactionBrowser(t *testing.T, srv *Server) func(string, string, any) *ht
 			cookies[c.Name] = c.Value
 		}
 		return r
+	}
+}
+
+func TestAuthorizationBrowserCookieTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name, origin, backend string
+		forwarded             bool
+	}{
+		{"direct TLS", "https://identity.example.test", "https://identity.example.test", false},
+		{"proxy TLS", "https://identity.example.test", "http://identity.example.test", true},
+		{"proxy TLS without scheme header", "https://identity.example.test", "http://identity.example.test", false},
+		{"localhost HTTP", "http://localhost:5867", "http://localhost:5867", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, db, _, _, _, cleanup := setupTestServerWith(t, func(c *config.Config) {
+				c.IssuerURL = tc.origin
+				c.Origin = tc.origin
+				c.TrustedProxyCIDRs = []string{"192.0.2.7/32"}
+			})
+			defer cleanup()
+			newClient(t, db, "app", []string{"https://app.example/cb"}, []string{"openid"})
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			request := func(path string, cookies []*http.Cookie) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, tc.backend+path, nil)
+				if tc.forwarded {
+					req.RemoteAddr = "192.0.2.7:1234"
+					req.Header.Set("X-Forwarded-Proto", "https")
+				}
+				for _, c := range cookies {
+					req.AddCookie(c)
+				}
+				w := httptest.NewRecorder()
+				srv.httpServer.Handler.ServeHTTP(w, req)
+				return w
+			}
+
+			q, _ := testHandoffQuery("app", "https://app.example/cb", "")
+			path := "/oauth/authorize?" + q.Encode()
+			w := request(path, nil)
+			res := w.Result()
+			location, err := res.Location()
+			if err != nil || res.StatusCode != http.StatusFound || location.Path != "/login" || location.Query().Get("interaction") == "" {
+				t.Fatalf("expected a login interaction, got status %d", res.StatusCode)
+			}
+			var binding *http.Cookie
+			for _, c := range res.Cookies() {
+				if c.Name == authorizationBrowserCookie {
+					binding = c
+				}
+			}
+			if binding == nil || !binding.Secure || !binding.HttpOnly || binding.SameSite != http.SameSiteLaxMode || binding.Path != "/" || binding.Domain != "" {
+				t.Fatal("expected a host-only Secure, HttpOnly, SameSite=Lax binding cookie")
+			}
+
+			// Go 1.27's cookiejar treats localhost and loopback IPs as secure origins.
+			// The client sees the public scheme even when a proxy forwards plain HTTP.
+			publicURL, _ := url.Parse(tc.origin + path)
+			jar.SetCookies(publicURL, []*http.Cookie{binding})
+			detailsPath := "/api/auth/authorization/" + location.Query().Get("interaction")
+			publicURL.Path, publicURL.RawQuery = detailsPath, ""
+			if got := request(detailsPath, nil).Code; got != http.StatusBadRequest {
+				t.Fatalf("interaction without the binding cookie = %d, want 400", got)
+			}
+			if got := request(detailsPath, jar.Cookies(publicURL)).Code; got != http.StatusOK {
+				t.Fatalf("interaction with the binding cookie = %d, want 200", got)
+			}
+			if publicURL.Scheme == "https" {
+				publicURL.Scheme = "http"
+				if len(jar.Cookies(publicURL)) != 0 {
+					t.Fatal("client sent the binding cookie over public HTTP")
+				}
+			}
+		})
 	}
 }
 
