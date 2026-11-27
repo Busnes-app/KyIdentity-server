@@ -20,7 +20,8 @@ type AuditFilter struct {
 	Actor, Target, TargetType, Action, Outcome string
 	From, To                                   *time.Time
 	Limit, Offset                              int
-	// OmitStaffReadDetails keeps the listing's own read events out of its pages.
+	// OmitStaffReadDetails excludes the listing's own staff.audit_read events from
+	// both pages and totals so offset pagination remains stable while reads stay audited.
 	OmitStaffReadDetails string
 }
 
