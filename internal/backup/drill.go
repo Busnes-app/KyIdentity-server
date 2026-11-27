@@ -262,6 +262,34 @@ func proveRestoreIsUsable(ctx context.Context, scratchDir string, recipe map[str
 			fail("Token Signing", fmt.Sprintf("Token signed by the restored key did not verify: %v", err))
 			return
 		}
+		if mldsaPath, _ := recipe["mldsa_key_file"].(string); mldsaPath != "" {
+			fullMLDSA := filepath.Join(scratchDir, mldsaPath)
+			if fi, err := os.Stat(fullMLDSA); err != nil || fi.Size() == 0 {
+				fail("Token Signing", fmt.Sprintf("Restored ML-DSA-65 signing key %s is missing or empty", mldsaPath))
+				return
+			}
+			kmPQ, err := crypto.LoadOrCreateSigningKeys(full, fullMLDSA)
+			if err != nil {
+				fail("Token Signing", fmt.Sprintf("Restored ML-DSA-65 signing key will not load: %v", err))
+				return
+			}
+			pqToken, err := kmPQ.SignJWTWithAlg(crypto.AlgMLDSA65, "JWT", map[string]any{
+				"iss":       "kyidentity-restore-drill",
+				"sub":       "drill",
+				"exp":       time.Now().Add(time.Minute).Unix(),
+				"token_use": "restore_drill",
+			})
+			if err != nil {
+				fail("Token Signing", fmt.Sprintf("Restored ML-DSA-65 key could not sign a token: %v", err))
+				return
+			}
+			if _, err := kmPQ.VerifyJWT(pqToken, "kyidentity-restore-drill", "restore_drill"); err != nil {
+				fail("Token Signing", fmt.Sprintf("Token signed by the restored ML-DSA-65 key did not verify: %v", err))
+				return
+			}
+			pass("Token Signing", "Restored RSA and ML-DSA-65 keys signed and verified JWTs; issued tokens survive a restore")
+			return
+		}
 		pass("Token Signing", "Restored RSA key signed and verified a JWT; issued tokens survive a restore")
 	}
 }

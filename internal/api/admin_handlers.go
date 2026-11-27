@@ -530,6 +530,9 @@ type CreateClientRequest struct {
 	// BackchannelLogoutURI receives signed logout tokens; it is an outbound target, so it
 	// must pass the same public-HTTPS guard as provisioning callbacks.
 	BackchannelLogoutURI string `json:"backchannelLogoutUri"`
+	// IDTokenSignedResponseAlg selects the JWS signing algorithm for tokens issued to this
+	// client: "" or "RS256" (default, for third-party OIDC RPs) or "ML-DSA-65" (for PQ Ky RPs).
+	IDTokenSignedResponseAlg string `json:"idTokenSignedResponseAlg"`
 }
 
 // suiteClientIDs are the KySecurity services, every one of which is a server-side backend
@@ -629,6 +632,11 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	signingAlg, err := crypto.NormalizeSigningAlg(req.IDTokenSignedResponseAlg)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	redirectURIsJSON, _ := json.Marshal(req.RedirectURIs)
 	scopesJSON, _ := json.Marshal(req.AllowedScopes)
 
@@ -638,22 +646,24 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 	}
 
 	client := &store.OAuthClient{
-		ID:                clientID,
-		ClientName:        req.ClientName,
-		ClientType:        req.ClientType,
-		ClientSecretHash:  secretHash,
-		RedirectURIsJSON:  string(redirectURIsJSON),
-		AllowedScopesJSON: string(scopesJSON),
-		LaunchURL:         strings.TrimSpace(req.LaunchURL),
-		Enabled:           true,
+		ID:                       clientID,
+		ClientName:               req.ClientName,
+		ClientType:               req.ClientType,
+		ClientSecretHash:         secretHash,
+		RedirectURIsJSON:         string(redirectURIsJSON),
+		AllowedScopesJSON:        string(scopesJSON),
+		LaunchURL:                strings.TrimSpace(req.LaunchURL),
+		IDTokenSignedResponseAlg: signingAlg,
+		Enabled:                  true,
 
 		PostLogoutRedirectURIsJSON: postLogoutJSON,
 		BackchannelLogoutURI:       req.BackchannelLogoutURI,
 	}
 
 	created := h.audit.Prepare("admin.oauth_client_created", admin.ID, admin.Username, client.ID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"clientName": client.ClientName,
-		"clientType": client.ClientType,
+		"clientName":               client.ClientName,
+		"clientType":               client.ClientType,
+		"idTokenSignedResponseAlg": client.IDTokenSignedResponseAlg,
 	})
 	if err := h.store.CreateOAuthClient(client, created.Row); err != nil {
 		log.Printf("client %s creation failed: %v", strings.NewReplacer("\n", "", "\r", "").Replace(client.ID), err)
@@ -672,13 +682,14 @@ func (h *AdminHandler) CreateOAuthClient(w http.ResponseWriter, r *http.Request)
 }
 
 type UpdateClientRequest struct {
-	ClientName    *string   `json:"clientName,omitempty"`
-	ClientType    *string   `json:"clientType,omitempty"`
-	RedirectURIs  *[]string `json:"redirectUris,omitempty"`
-	AllowedScopes *[]string `json:"allowedScopes,omitempty"`
-	LaunchURL     *string   `json:"launchUrl,omitempty"`
-	Enabled       *bool     `json:"enabled,omitempty"`
-	RotateSecret  bool      `json:"rotateSecret,omitempty"`
+	ClientName               *string   `json:"clientName,omitempty"`
+	ClientType               *string   `json:"clientType,omitempty"`
+	RedirectURIs             *[]string `json:"redirectUris,omitempty"`
+	AllowedScopes            *[]string `json:"allowedScopes,omitempty"`
+	LaunchURL                *string   `json:"launchUrl,omitempty"`
+	IDTokenSignedResponseAlg *string   `json:"idTokenSignedResponseAlg,omitempty"`
+	Enabled                  *bool     `json:"enabled,omitempty"`
+	RotateSecret             bool      `json:"rotateSecret,omitempty"`
 
 	PostLogoutRedirectURIs *[]string `json:"postLogoutRedirectUris,omitempty"`
 	BackchannelLogoutURI   *string   `json:"backchannelLogoutUri,omitempty"`
@@ -720,6 +731,14 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		client.LaunchURL = strings.TrimSpace(*req.LaunchURL)
+	}
+	if req.IDTokenSignedResponseAlg != nil {
+		alg, err := crypto.NormalizeSigningAlg(*req.IDTokenSignedResponseAlg)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		client.IDTokenSignedResponseAlg = alg
 	}
 	if req.Enabled != nil {
 		client.Enabled = *req.Enabled
@@ -843,12 +862,13 @@ func (h *AdminHandler) UpdateOAuthClient(w http.ResponseWriter, r *http.Request)
 		(wasConfidential && client.ClientType != "confidential")
 
 	updated := h.audit.Prepare("admin.oauth_client_updated", admin.ID, admin.Username, client.ID, "client", h.middleware.ClientIP(r), r.UserAgent(), "success", map[string]any{
-		"clientType":     client.ClientType,
-		"secretRotated":  rotate,
-		"redirectsSet":   req.RedirectURIs != nil,
-		"scopesSet":      req.AllowedScopes != nil,
-		"enabledChanged": req.Enabled != nil,
-		"tokensRevoked":  revokeTokens,
+		"clientType":               client.ClientType,
+		"idTokenSignedResponseAlg": client.IDTokenSignedResponseAlg,
+		"secretRotated":            rotate,
+		"redirectsSet":             req.RedirectURIs != nil,
+		"scopesSet":                req.AllowedScopes != nil,
+		"enabledChanged":           req.Enabled != nil,
+		"tokensRevoked":            revokeTokens,
 	})
 	if err := h.store.UpdateOAuthClientWithAudit(client, revokeTokens, updated.Row); err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)

@@ -40,6 +40,23 @@ var migrations = []migration{
 	{version: 18, name: "keyring", up: migrateKeyring, pgUp: migrateKeyringPostgres},
 	{version: 19, name: "keyring_xwing", up: migrateKeyringXwing, pgUp: migrateKeyringXwingPostgres},
 	{version: 20, name: "org_enrollment_restore", up: migrateOrgEnrollment, pgUp: migrateOrgEnrollmentPostgres},
+	{version: 21, name: "oauth_client_signing_alg", up: migrateOAuthClientSigningAlg, pgUp: migrateOAuthClientSigningAlgPostgres},
+}
+
+// migrateOAuthClientSigningAlg records the per-client JWS signing algorithm preference
+// ("" / "RS256" for third parties, "ML-DSA-65" for post-quantum Ky relying parties).
+func migrateOAuthClientSigningAlg(tx *sql.Tx) error {
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info('oauth_clients') WHERE name = 'id_token_signed_response_alg'`).Scan(&n); err != nil || n == 1 {
+		return err
+	}
+	_, err := tx.Exec(`ALTER TABLE oauth_clients ADD COLUMN id_token_signed_response_alg TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+func migrateOAuthClientSigningAlgPostgres(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE oauth_clients ADD COLUMN IF NOT EXISTS id_token_signed_response_alg TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 // migratePairingProofKey adds the sealed pairing proof key; tokens issued before it have

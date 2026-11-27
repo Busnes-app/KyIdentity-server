@@ -52,6 +52,9 @@ const DefaultAppName = "KySignOn"
 // VAPIDKeyFile is the UnifiedPush VAPID private key, under the data directory.
 const VAPIDKeyFile = "push-vapid-private.key"
 
+// MLDSAKeyFile is the post-quantum ML-DSA-65 OIDC signing key, placed next to RSAKeyPath by default.
+const MLDSAKeyFile = "jwt_mldsa65.key"
+
 // DefaultBackupKeep is how many sealed capsules a local backup directory retains.
 const DefaultBackupKeep = 7
 
@@ -72,6 +75,7 @@ type Config struct {
 	SecretKey     []byte
 	EncryptionKey []byte
 	RSAKeyPath    string
+	MLDSAKeyPath  string
 	// VAPIDKeyPath is the UnifiedPush VAPID private key. VAPIDKeyMounted is set when the
 	// operator named the path (a mounted Secret) rather than leaving it in the data directory.
 	VAPIDKeyPath    string
@@ -196,16 +200,25 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	rsaKeyPath := getEnv("KYIDENTITY_RSA_KEY_PATH", filepath.Join(dataDir, "jwt_rs256.key"))
+	mldsaKeyPath := strings.TrimSpace(os.Getenv("KYIDENTITY_MLDSA_KEY_PATH"))
+	mldsaKeyMounted := mldsaKeyPath != ""
+	if !mldsaKeyMounted {
+		mldsaKeyPath = filepath.Join(filepath.Dir(rsaKeyPath), MLDSAKeyFile)
+	}
 	vapidKeyPath := strings.TrimSpace(os.Getenv("KYIDENTITY_VAPID_KEY_PATH"))
 	vapidKeyMounted := vapidKeyPath != ""
 	if !vapidKeyMounted {
 		vapidKeyPath = filepath.Join(dataDir, VAPIDKeyFile)
 	}
 	if replicated {
-		for _, k := range []struct{ name, path string }{
+		required := []struct{ name, path string }{
 			{"KYIDENTITY_RSA_KEY_PATH", rsaKeyPath},
 			{"KYIDENTITY_VAPID_KEY_PATH", vapidKeyPath},
-		} {
+		}
+		if mldsaKeyMounted {
+			required = append(required, struct{ name, path string }{"KYIDENTITY_MLDSA_KEY_PATH", mldsaKeyPath})
+		}
+		for _, k := range required {
 			if _, err := os.Stat(k.path); err != nil {
 				return nil, fmt.Errorf("KYIDENTITY_REPLICATED is set and the key at %s is unreadable (%v); every replica must load the same key, so none is generated: mount it and set %s", k.path, err, k.name)
 			}
@@ -385,6 +398,7 @@ func Load() (*Config, error) {
 		SecretKey:                  secretKey,
 		EncryptionKey:              encKey,
 		RSAKeyPath:                 rsaKeyPath,
+		MLDSAKeyPath:               mldsaKeyPath,
 		VAPIDKeyPath:               vapidKeyPath,
 		VAPIDKeyMounted:            vapidKeyMounted,
 		Replicated:                 replicated,

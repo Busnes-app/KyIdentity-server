@@ -113,7 +113,7 @@ func (e *Engine) GetOIDCConfiguration() OIDCConfiguration {
 		JwksURI:                           e.issuerURL + "/.well-known/jwks.json",
 		ResponseTypesSupported:            []string{"code"},
 		SubjectTypesSupported:             []string{"public"},
-		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
+		IDTokenSigningAlgValuesSupported:  e.keyManager.SupportedSigningAlgs(),
 		ScopesSupported:                   []string{"openid", "profile", "email"},
 		TokenEndpointAuthMethods:          []string{"client_secret_post", "client_secret_basic", "none"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
@@ -687,7 +687,11 @@ func (e *Engine) tokenResponse(user *store.User, clientID, sessionID, scope stri
 	if exportOnly {
 		access["export_only"] = true
 	}
-	accessToken, err := e.keyManager.SignJWT(access)
+	alg, err := e.clientSigningAlg(clientID)
+	if err != nil {
+		return nil, err
+	}
+	accessToken, err := e.keyManager.SignJWTWithAlg(alg, "JWT", access)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign access token: %w", err)
 	}
@@ -716,7 +720,7 @@ func (e *Engine) tokenResponse(user *store.User, clientID, sessionID, scope stri
 		if nonce != "" {
 			claims["nonce"] = nonce
 		}
-		idToken, err = e.keyManager.SignJWT(claims)
+		idToken, err = e.keyManager.SignJWTWithAlg(alg, "JWT", claims)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign ID token: %w", err)
 		}
@@ -729,6 +733,21 @@ func (e *Engine) tokenResponse(user *store.User, clientID, sessionID, scope stri
 		IDToken:     idToken,
 		Scope:       scope,
 	}, nil
+}
+
+// clientSigningAlg returns the JWS algorithm configured for clientID (RS256 when unset).
+func (e *Engine) clientSigningAlg(clientID string) (string, error) {
+	if clientID == "" || e.store == nil {
+		return crypto.AlgRS256, nil
+	}
+	client, err := e.store.GetOAuthClientByID(clientID)
+	if err != nil {
+		return "", fmt.Errorf("failed to load client signing algorithm: %w", err)
+	}
+	if client == nil || client.IDTokenSignedResponseAlg == "" {
+		return crypto.AlgRS256, nil
+	}
+	return crypto.NormalizeSigningAlg(client.IDTokenSignedResponseAlg)
 }
 
 // hasScope reports whether scope contains the exact space-delimited value. A substring

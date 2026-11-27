@@ -23,6 +23,7 @@ import (
 const (
 	dbRelPath        = "data/kyidentity.db"
 	keyRelPath       = "data/jwt_rs256.key"
+	mldsaKeyRelPath  = "data/" + config.MLDSAKeyFile
 	encKeyRelPath    = "data/encryption.key"
 	secretKeyRelPath = "data/secret.key"
 	recoveryPubPath  = "data/recovery.pub"
@@ -40,7 +41,13 @@ type Snapshotter interface {
 // Members lists what a capsule from this instance carries, in the order CollectSealable
 // packs it, so the admin screen can say what is being backed up without sealing anything.
 func Members(cfg *config.Config) []string {
-	m := []string{dbRelPath, keyRelPath, encKeyRelPath, secretKeyRelPath}
+	m := []string{dbRelPath, keyRelPath}
+	if cfg.MLDSAKeyPath != "" {
+		if _, err := os.Stat(cfg.MLDSAKeyPath); err == nil {
+			m = append(m, mldsaKeyRelPath)
+		}
+	}
+	m = append(m, encKeyRelPath, secretKeyRelPath)
 	if _, err := os.Stat(RecoveryKeyPath(cfg.DataDir)); err == nil {
 		m = append(m, recoveryPubPath)
 	}
@@ -195,6 +202,21 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 	}
 	files = append(files, recoveryclient.File{Path: keyRelPath, Data: keyBytes, Mode: 0600})
 
+	// The ML-DSA-65 signing key, so restored deployments keep issuing and verifying PQ tokens
+	// under the same kid. Absent on pre-PQC capsules and RSA-only replicated deployments.
+	hasMLDSAKey := false
+	if cfg.MLDSAKeyPath != "" {
+		if mldsaBytes, err := os.ReadFile(cfg.MLDSAKeyPath); err == nil {
+			if len(mldsaBytes) == 0 {
+				return nil, fmt.Errorf("ML-DSA-65 signing key %s is empty", cfg.MLDSAKeyPath)
+			}
+			files = append(files, recoveryclient.File{Path: mldsaKeyRelPath, Data: mldsaBytes, Mode: 0600})
+			hasMLDSAKey = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("failed to read ML-DSA-65 signing key %s: %w", cfg.MLDSAKeyPath, err)
+		}
+	}
+
 	// The deployment key material. The database ships every TOTP secret and paired-system
 	// token encrypted under the encryption key, so a capsule without it restores a directory
 	// whose MFA state is permanently unreadable. The secret key: without it every session
@@ -295,6 +317,37 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 		log.Printf("[BACKUP] WARNING: the backup payload is %d MiB, over 80%% of the %d MiB a capsule can hold; backups, exports and drills fail once it is full.",
 			total>>20, capsule.MaxExpandedBytes>>20)
 	}
+	recipe := map[string]any{
+		"check_sqlite_integrity": true,
+		"sqlite_paths":           []string{dbRelPath},
+		"required_files":         reqFiles,
+		// The drill asserts these tables exist and the admin directory is non-empty.
+		// PRAGMA integrity_check only proves the file is not corrupt. A restore that
+		// can authenticate but has lost policy, group membership, app linkage or the
+		// remote identity mappings is not a restore of this directory.
+		"required_tables": []string{
+			"users", "oauth_clients", "mfa_methods", "paired_systems",
+			"enrollment_policies", "directory_groups", "group_memberships",
+			"app_registry", "app_user_assignments", "app_group_assignments", "app_roles",
+			"admin_delegations", "access_requests",
+			"scim_connectors", "scim_user_links", "sync_resource_state", "sync_reconcile_jobs",
+			"hr_connections", "hr_workers",
+			"audit_events", "alerts", "system_settings",
+		},
+		"require_any_admin": true,
+		// Proving the restored bytes are also usable: the encrypted columns still read
+		// and the service could issue a token.
+		"encryption_key_file":     encKeyRelPath,
+		"secret_key_file":         secretKeyRelPath,
+		"rsa_key_file":            keyRelPath,
+		"prove_secret_decryption": true,
+		"prove_token_signing":     true,
+		"expected_env":            []string{"KYIDENTITY_PORT", "KYIDENTITY_ISSUER_URL"},
+		"expected_ports":          []int{portNum},
+	}
+	if hasMLDSAKey {
+		recipe["mldsa_key_file"] = mldsaKeyRelPath
+	}
 	return &recoveryclient.Payload{
 		ServiceName: cfg.AppName,
 		AppVersion:  appVersion,
@@ -303,33 +356,6 @@ func CollectSealable(cfg *config.Config, snap Snapshotter, appVersion string) (*
 			"ports": []int{portNum},
 			"env":   []string{"KYIDENTITY_PORT", "KYIDENTITY_ISSUER_URL"},
 		},
-		VerificationRecipe: map[string]any{
-			"check_sqlite_integrity": true,
-			"sqlite_paths":           []string{dbRelPath},
-			"required_files":         reqFiles,
-			// The drill asserts these tables exist and the admin directory is non-empty.
-			// PRAGMA integrity_check only proves the file is not corrupt. A restore that
-			// can authenticate but has lost policy, group membership, app linkage or the
-			// remote identity mappings is not a restore of this directory.
-			"required_tables": []string{
-				"users", "oauth_clients", "mfa_methods", "paired_systems",
-				"enrollment_policies", "directory_groups", "group_memberships",
-				"app_registry", "app_user_assignments", "app_group_assignments", "app_roles",
-				"admin_delegations", "access_requests",
-				"scim_connectors", "scim_user_links", "sync_resource_state", "sync_reconcile_jobs",
-				"hr_connections", "hr_workers",
-				"audit_events", "alerts", "system_settings",
-			},
-			"require_any_admin": true,
-			// Proving the restored bytes are also usable: the encrypted columns still read
-			// and the service could issue a token.
-			"encryption_key_file":     encKeyRelPath,
-			"secret_key_file":         secretKeyRelPath,
-			"rsa_key_file":            keyRelPath,
-			"prove_secret_decryption": true,
-			"prove_token_signing":     true,
-			"expected_env":            []string{"KYIDENTITY_PORT", "KYIDENTITY_ISSUER_URL"},
-			"expected_ports":          []int{portNum},
-		},
+		VerificationRecipe: recipe,
 	}, nil
 }

@@ -135,6 +135,7 @@ func TestAdminCreateOAuthClientValidation(t *testing.T) {
 		{"fragment launch url", `{"clientName":"A","redirectUris":["https://app.example/cb"],"launchUrl":"https://app.example/#x"}`, "invalid_request", "fragment"},
 		{"bad post-logout", `{"clientName":"A","redirectUris":["https://app.example/cb"],"postLogoutRedirectUris":["ftp://app.example/bye"]}`, "invalid_request", "post-logout"},
 		{"unknown scope", `{"clientName":"A","redirectUris":["https://app.example/cb"],"allowedScopes":["admin"]}`, "unknown_scope", "openid"},
+		{"unsupported signing alg", `{"clientName":"A","redirectUris":["https://app.example/cb"],"idTokenSignedResponseAlg":"HS256"}`, "invalid_request", "ML-DSA-65"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := covRefused(t, adminRequest(t, srv, "POST", "/api/admin/clients", admin, tc.body), 400, tc.code)
@@ -163,7 +164,7 @@ func TestAdminCreateOAuthClientValidation(t *testing.T) {
 
 	// Loopback http is allowed for development; an omitted id is generated; the secret
 	// is shown once and the response is not cacheable.
-	rr := adminRequest(t, srv, "POST", "/api/admin/clients", admin, `{"clientName":"Dev","redirectUris":["http://127.0.0.1:8080/cb"],"postLogoutRedirectUris":["", "https://dev.example/bye"]}`)
+	rr := adminRequest(t, srv, "POST", "/api/admin/clients", admin, `{"clientName":"Dev","redirectUris":["http://127.0.0.1:8080/cb"],"postLogoutRedirectUris":["", "https://dev.example/bye"],"idTokenSignedResponseAlg":"ML-DSA-65"}`)
 	var resp struct {
 		ClientSecret string            `json:"clientSecret"`
 		Client       store.OAuthClient `json:"client"`
@@ -171,7 +172,7 @@ func TestAdminCreateOAuthClientValidation(t *testing.T) {
 	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &resp) != nil || len(resp.Client.ID) != 36 || resp.ClientSecret == "" || rr.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("generated client: %d %s", rr.Code, rr.Body.String())
 	}
-	if stored, _ := db.GetOAuthClientByID(resp.Client.ID); stored == nil || stored.PostLogoutRedirectURIsJSON != `["https://dev.example/bye"]` {
+	if stored, _ := db.GetOAuthClientByID(resp.Client.ID); stored == nil || stored.PostLogoutRedirectURIsJSON != `["https://dev.example/bye"]` || stored.IDTokenSignedResponseAlg != "ML-DSA-65" {
 		t.Fatalf("stored client: %+v", stored)
 	}
 }
@@ -194,23 +195,24 @@ func TestAdminUpdateOAuthClientValidationAndRevocation(t *testing.T) {
 		{"bad post-logout", `{"postLogoutRedirectUris":["https://x.example/#f"]}`, "invalid_request"},
 		{"unknown scope", `{"allowedScopes":["openid","offline_admin"]}`, "unknown_scope"},
 		{"bogus type", `{"clientType":"trusted"}`, "invalid_request"},
+		{"bogus signing alg", `{"idTokenSignedResponseAlg":"none"}`, "invalid_request"},
 		{"rotate public secret", `{"rotateSecret":true}`, "invalid_request"},
 		{"rename then bad scope", `{"clientName":"Renamed","allowedScopes":["root"]}`, "unknown_scope"},
 	} {
 		t.Run(tc.name, func(t *testing.T) { covRefused(t, adminRequest(t, srv, "PUT", path, admin, tc.body), 400, tc.code) })
 	}
-	if c, _ := db.GetOAuthClientByID("notes"); c.ClientName != "notes" || c.RedirectURIsJSON != `["https://notes.example/cb"]` || c.AllowedScopesJSON != `["openid"]` || c.ClientType != "public" || !c.Enabled {
+	if c, _ := db.GetOAuthClientByID("notes"); c.ClientName != "notes" || c.RedirectURIsJSON != `["https://notes.example/cb"]` || c.AllowedScopesJSON != `["openid"]` || c.ClientType != "public" || !c.Enabled || c.IDTokenSignedResponseAlg != "" {
 		t.Fatalf("a refused edit changed the client: %+v", c)
 	}
 
 	// Valid edits land; disabling the client revokes what was issued under it.
 	jti := issueToken(t, db, newUser(t, db, "user").ID, "notes")
-	rr := adminRequest(t, srv, "PUT", path, admin, `{"launchUrl":" https://notes.example/ ","redirectUris":["https://notes.example/cb2"],"allowedScopes":["openid","email"],"enabled":false}`)
+	rr := adminRequest(t, srv, "PUT", path, admin, `{"launchUrl":" https://notes.example/ ","redirectUris":["https://notes.example/cb2"],"allowedScopes":["openid","email"],"idTokenSignedResponseAlg":"ML-DSA-65","enabled":false}`)
 	if rr.Code != http.StatusOK || rr.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("edit: %d %s", rr.Code, rr.Body.String())
 	}
 	c, _ := db.GetOAuthClientByID("notes")
-	if c.LaunchURL != "https://notes.example/" || c.RedirectURIsJSON != `["https://notes.example/cb2"]` || c.AllowedScopesJSON != `["openid","email"]` || c.Enabled {
+	if c.LaunchURL != "https://notes.example/" || c.RedirectURIsJSON != `["https://notes.example/cb2"]` || c.AllowedScopesJSON != `["openid","email"]` || c.IDTokenSignedResponseAlg != "ML-DSA-65" || c.Enabled {
 		t.Fatalf("edit not applied: %+v", c)
 	}
 	assertRevoked(t, db, jti, true, "disabling the client")
