@@ -198,10 +198,15 @@ a steward is registered:
 - A record that keeps the generation (`add`) must keep `steward` unchanged.
 - The server can check that the wrap is present and names the right fingerprint. It
   cannot check that the wrap opens (vault spec, Residual risks, `:378`, "honest-client only").
-- With no steward registered, `steward` must be absent.
+- With no active steward (none ever registered, or the newest statement is a verified
+  `retire`), a record that makes a new generation must have `steward` absent, because the old
+  wrap would not open the new generation anyway. A record that keeps the generation (`add`)
+  keeps `steward` unchanged, retired wrap included, so retirement never blocks adding a
+  member. The `steward` change may also clear `state.steward`, which a manager's client does
+  on its next open after a retire.
 
-**Back-fill.** A new change, `steward`, which a manager signs, sets or replaces
-`state.steward` and keeps the generation. A manager's client sends it when it opens a vault
+**Back-fill.** A new change, `steward`, which a manager signs, sets, replaces or (after a
+verified `retire`) clears `state.steward` and keeps the generation. A manager's client sends it when it opens a vault
 whose head has no steward wrap, or one for an older steward fingerprint. A vault whose only
 managers never open it stays without a wrap. KyDrive's admin screen lists such vaults by ID
 and head only, never by name, as the vault spec says (`:325-327`).
@@ -250,16 +255,24 @@ the handover of decision 3, with no server-side handover.
 The threat (vault spec `:342-355`): a server hands out a steward key it controls, and
 receives every vault key wrapped to it. Here either KyIdentity or KyDrive could try.
 
-- **Two sources at first sight.** At first sight a client fetches the chain from KyDrive
-  (`/api/vault/steward`) and from KyIdentity (`/api/key-steward`), and pins only when both
-  match. Changing the key then means changing both servers. On an Enterprise install both
-  belong to the same customer, so this helps against one compromised server, not against
-  the customer's own admin. That is intended: the admin holds the steward.
-- **Optional managed pin.** The desktop app reads an optional `steward_fingerprint` from its
-  managed configuration (MDM or a config file the IT team deploys). When it is set, a
-  client refuses any other steward from the first contact on. This closes first-contact
-  substitution for organisations that use it. Enterprise customers usually manage their
-  devices. The app's config format is unproven here.
+- **First trust is never taken from a server.** KyDrive copies its chain from KyIdentity, so
+  the two servers agreeing proves nothing: a compromised KyIdentity makes both serve the same
+  attacker-made steward. A client pins a steward fingerprint only from a source independent
+  of both servers:
+  - **Managed pin:** `steward_fingerprint` in the app's managed configuration (MDM or a
+    config file the IT team deploys). The client refuses any other steward from first
+    contact on. The app's config format is unproven here.
+  - **Out-of-band check:** without a managed pin, the client shows the served fingerprint and
+    wraps nothing to it until the user confirms it against the one the steward holder gives
+    them directly (scanning the QR code from the holder's desktop app, or comparing the
+    words). The holder's app shows it when it makes the key.
+
+  Until a fingerprint is pinned, the client cannot meet the server's steward-wrap rule, so it
+  creates and rotates no vaults and says why. The two servers still have to agree with the
+  pin: a mismatch on either is shown as a warning and nothing is wrapped. On an Enterprise
+  install both servers and the steward belong to the same customer, so this protects against
+  a compromised server, not against the customer's own admin. That is intended: the admin
+  holds the steward.
 - **Pinned for good.** After first sight a client accepts a new steward only through a
   `rotate` signed by the pinned key. A new `register` that is not chained to it, which is
   what a lost-key replacement looks like, is shown as a loud warning. The client wraps
