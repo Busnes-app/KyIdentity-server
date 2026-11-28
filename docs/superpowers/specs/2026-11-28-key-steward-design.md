@@ -344,6 +344,12 @@ does not design it. See open question 5.
    the admin list of vaults without a wrap. This builds on S1/S2 and the recovery key
    (lichenford's build order, item 4).
 3. **Desktop (willowbank's area):** key generation and export, wrapping, back-fill, the
-   access flow, pinning from two sources, and the managed pin.
+   access flow, the managed pin and the out-of-band pin.
 
-Each security rule gets a test that fails without it.
+Each security rule gets a test that fails without it. Two are named here because they are easy
+to get wrong:
+- **Bootstrap:** both servers serve the same valid, self-consistent attacker-made chain. An
+  unpinned client must wrap nothing until a managed or out-of-band pin matches it.
+- **Retirement:** after a verified `retire`, an `add` that keeps the retired wrap is accepted,
+  a generation-changing record without `steward` is accepted, and one that still carries the
+  retired fingerprint is refused.
