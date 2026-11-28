@@ -6,6 +6,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,11 +41,62 @@ const MaxPasswordLength = 1024
 var ErrBusy = errors.New("password hashing is at capacity")
 
 // argonSlots caps concurrent Argon2id calls, so a login flood costs at most
-// cap*Memory instead of an OOM kill.
+// cap*Memory instead of an OOM kill. The cap fits the cgroup memory limit.
 var (
-	argonSlots = make(chan struct{}, 8)
-	argonWait  = 3 * time.Second
+	memoryLimit = cgroupMemoryLimit("/sys/fs/cgroup", "/proc/self/cgroup")
+	argonSlots  = make(chan struct{}, argonSlotsFor(memoryLimit))
+	argonWait   = 3 * time.Second
 )
+
+const (
+	maxArgonSlots = 8
+	// argonReserve is left for the rest of the process: requests, database, GC slack.
+	argonReserve = 192 << 20
+)
+
+// argonSlotsFor fits DefaultParams.Memory-sized hashes into limit bytes minus
+// argonReserve: at least one, at most maxArgonSlots. A limit of 0 means none.
+func argonSlotsFor(limit int64) int {
+	if limit <= 0 {
+		return maxArgonSlots
+	}
+	n := (limit - argonReserve) / (int64(DefaultParams.Memory) << 10)
+	return int(min(max(n, 1), maxArgonSlots))
+}
+
+// cgroupMemoryLimit returns the tightest cgroup v2 memory.max from this process's
+// cgroup up to root, or 0 when there is none ("max", cgroup v1, not Linux).
+func cgroupMemoryLimit(root, procCgroup string) int64 {
+	b, err := os.ReadFile(procCgroup)
+	if err != nil {
+		return 0
+	}
+	var path string
+	for line := range strings.Lines(string(b)) {
+		if p, ok := strings.CutPrefix(strings.TrimSpace(line), "0::"); ok {
+			path = p
+		}
+	}
+	if path == "" {
+		return 0
+	}
+	// A cgroup namespace can show a path outside its mount ("/../.."); only the
+	// mount root is then ours to read.
+	if path == "/.." || strings.HasPrefix(path, "/../") {
+		path = "/"
+	}
+	var limit int64
+	for dir := filepath.Join(root, path); ; dir = filepath.Dir(dir) {
+		if b, err := os.ReadFile(filepath.Join(dir, "memory.max")); err == nil {
+			if n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil && n > 0 && (limit == 0 || n < limit) {
+				limit = n
+			}
+		}
+		if len(dir) <= len(root) {
+			return limit
+		}
+	}
+}
 
 func idKey(password, salt []byte, iterations, memory uint32, threads uint8, keyLen uint32) ([]byte, error) {
 	wait := time.NewTimer(argonWait)
@@ -120,6 +175,11 @@ func HashPassword(password string) (string, error) {
 var dummyHash string
 
 func init() {
+	// Freed hashes are garbage until the GC runs; without a soft limit the heap can
+	// double past the cgroup limit before it does. GOMEMLIMIT, when set, wins.
+	if memoryLimit > 0 && os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(memoryLimit / 10 * 9)
+	}
 	h, err := HashPassword("kyidentity-timing-equaliser-not-a-real-password")
 	if err != nil {
 		panic("failed to build dummy password hash: " + err.Error())

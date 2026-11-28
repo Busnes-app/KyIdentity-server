@@ -4,6 +4,8 @@
 
 ### Changes
 
+- **Password hashing fits the container's memory limit.** A sign-in wave got KyIdentity OOM-killed in a 512 MiB pod: eight Argon2id hashes at 64 MiB each are the whole limit. The number of hashes at once now comes from the cgroup memory limit minus 192 MiB (five at 512 MiB, eight from 704 MiB or with no limit), and Go's soft memory limit is set to 90% of it unless `GOMEMLIMIT` is set. Excess sign-ins still wait up to three seconds, then get `503` with `Retry-After`. The Argon2id parameters are unchanged. Without a memory limit nothing changes.
+
 - **Staff choose the organisation they work in, and sign in with a passkey (tenancy, step 5; multi-tenant only).** The admin pages start in the staff organisation and gain a finder: an organisation's ID, its billing reference or a member's exact email. Every admin call then names that organisation (`X-Ky-Org`), checked against the database only after the caller is proven staff; a directory page without one answers `400 org_required`. Each staff read is recorded in that organisation's audit log, and each search as one platform audit row. Every multi-tenant start pins the administrators MFA policy to required, passkey only, no grace, and the admin API refuses to change it. A single-tenant install is unchanged: no finder, and the header is ignored.
 
 - **A new multi-tenant database records multi-tenant (tenancy; test builds only).** The first open of a new database with `KYIDENTITY_TENANCY=multi` now records that mode, so a `kye2e` build starts on a fresh PostgreSQL database instead of refusing it as single-tenant. A database that already exists keeps its recorded mode: a single-tenant install still refuses `multi`. Release builds still refuse `multi`.

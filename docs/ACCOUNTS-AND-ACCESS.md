@@ -67,9 +67,13 @@ Each sign-in allows five second-factor attempts. A locked, disabled, pending or 
 account gets the same `401 invalid_credentials` as a wrong password, at the same hashing
 cost, even with the right password; only the audit row says which. A locked account that
 already passed its password learns it is locked at the second factor (`429
-account_locked`). Password hashing runs at most eight
-at a time; past that, requests wait up to three seconds, then get `503` with
-`Retry-After`, which never counts as a failure.
+account_locked`). Each password hash takes 64 MiB, so
+hashing runs as many at a time as fit the container's memory limit (cgroup v2
+`memory.max`) after 192 MiB for the rest of the server: five in a 512 MiB container,
+eight (the most) from 704 MiB or with no limit. Past that, requests wait up to three
+seconds, then get `503` with `Retry-After`, which never counts as a failure. Under a
+limit the server also sets Go's soft memory limit to 90% of it, unless `GOMEMLIMIT` is
+set. Give KyIdentity at least 768 MiB in production.
 
 **Push sign-in limits.** A user has at most one pending login push; a second sign-in
 while it is live sends none (the browser falls back to the other factors) until it is
