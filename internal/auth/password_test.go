@@ -114,6 +114,12 @@ func TestArgonSlotsFitMemoryLimit(t *testing.T) {
 			t.Errorf("argonSlotsFor(%d MiB) = %d, want %d", limit>>20, got, want)
 		}
 	}
+	// A cgroup namespace path outside the mount still reads the mount root's limit.
+	write(filepath.Join(root, "memory.max"), "805306368\n")
+	write(proc, "0::/../../kubepods.slice/other.scope\n")
+	if got := cgroupMemoryLimit(root, proc); got != 768<<20 {
+		t.Errorf("namespace-escaping path: limit = %d, want the mount root's 768 MiB", got)
+	}
 	if got := cgroupMemoryLimit(root, filepath.Join(root, "missing")); got != 0 {
 		t.Errorf("no /proc/self/cgroup: limit = %d, want 0", got)
 	}

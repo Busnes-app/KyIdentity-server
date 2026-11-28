@@ -80,6 +80,11 @@ func cgroupMemoryLimit(root, procCgroup string) int64 {
 	if path == "" {
 		return 0
 	}
+	// A cgroup namespace can show a path outside its mount ("/../.."); only the
+	// mount root is then ours to read.
+	if path == "/.." || strings.HasPrefix(path, "/../") {
+		path = "/"
+	}
 	var limit int64
 	for dir := filepath.Join(root, path); ; dir = filepath.Dir(dir) {
 		if b, err := os.ReadFile(filepath.Join(dir, "memory.max")); err == nil {
